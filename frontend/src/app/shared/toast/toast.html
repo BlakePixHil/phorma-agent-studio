@@ -1,0 +1,33 @@
+<div class="phorma-toast-region" role="region" aria-live="polite" aria-label="Notifications">
+  @for (t of entries(); track t.id) {
+    <div
+      class="phorma-toast"
+      [class.phorma-toast--success]="t.severity === 'success'"
+      [class.phorma-toast--warning]="t.severity === 'warning'"
+      [class.phorma-toast--error]="t.severity === 'error'"
+      role="alert"
+    >
+      <i
+        class="pi phorma-toast__icon"
+        [class.pi-check-circle]="t.severity === 'success'"
+        [class.pi-exclamation-triangle]="t.severity === 'warning'"
+        [class.pi-times-circle]="t.severity === 'error'"
+        aria-hidden="true"
+      ></i>
+      <div class="phorma-toast__body">
+        <p class="phorma-toast__summary">{{ t.summary }}</p>
+        @if (t.detail) {
+          <p class="phorma-toast__detail">{{ t.detail }}</p>
+        }
+      </div>
+      <button
+        type="button"
+        class="phorma-toast__close"
+        (click)="toast.dismiss(t.id)"
+        aria-label="Dismiss notification"
+      >
+        <i class="ti ti-x" aria-hidden="true"></i>
+      </button>
+    </div>
+  }
+</div>

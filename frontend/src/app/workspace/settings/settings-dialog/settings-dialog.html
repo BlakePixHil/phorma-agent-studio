@@ -1,0 +1,76 @@
+<p-dialog
+  header="Settings"
+  [visible]="dialog.visible()"
+  (visibleChange)="$event ? dialog.open() : dialog.close()"
+  [modal]="true"
+  [draggable]="false"
+  [resizable]="false"
+  [style]="{ width: 'min(34rem, 92vw)' }"
+  [dismissableMask]="true"
+>
+  <div class="phorma-settings">
+    <p class="phorma-settings__note">
+      <i class="ti" [class.ti-shield-lock]="isDesktop" [class.ti-alert-triangle]="!isDesktop" aria-hidden="true"></i>
+      {{ storageLabel() }}
+    </p>
+
+    <section class="phorma-settings__section">
+      <h3 class="phorma-settings__heading">Provider API keys</h3>
+      @for (provider of keyedProviders; track provider.id) {
+        <div class="phorma-settings__row">
+          <span class="phorma-settings__provider">
+            {{ provider.label }}
+            @if (settings.keyConfigured()[provider.id]) {
+              <i class="ti ti-circle-check phorma-settings__ok" title="Key configured" aria-hidden="true"></i>
+            }
+          </span>
+          <input
+            type="password"
+            class="phorma-settings__input"
+            [placeholder]="settings.keyConfigured()[provider.id] ? '••••••••  (stored)' : 'Paste API key'"
+            [value]="drafts()[provider.id] ?? ''"
+            (input)="onDraftInput(provider.id, $event)"
+            (keydown.enter)="saveKey(provider.id)"
+            autocomplete="off"
+          />
+          <button
+            type="button"
+            class="phorma-settings__btn"
+            [disabled]="drafts()[provider.id] === undefined"
+            (click)="saveKey(provider.id)"
+          >
+            Save
+          </button>
+          @if (settings.keyConfigured()[provider.id]) {
+            <button
+              type="button"
+              class="phorma-settings__btn phorma-settings__btn--danger"
+              (click)="clearKey(provider.id)"
+              title="Remove stored key"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          }
+        </div>
+      }
+    </section>
+
+    <section class="phorma-settings__section">
+      <h3 class="phorma-settings__heading">Ollama (local, keyless)</h3>
+      <div class="phorma-settings__row">
+        <span class="phorma-settings__provider">Server URL</span>
+        <input
+          type="text"
+          class="phorma-settings__input"
+          [value]="settings.ollamaBaseUrl()"
+          (input)="onOllamaUrlInput($event)"
+          placeholder="http://localhost:11434"
+        />
+      </div>
+      <p class="phorma-settings__hint">
+        Run local models for free debugging — install Ollama and pull a model
+        (e.g. <code>ollama pull llama3.2</code>).
+      </p>
+    </section>
+  </div>
+</p-dialog>

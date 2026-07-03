@@ -1,0 +1,272 @@
+@if (node(); as selected) {
+  <div class="phorma-props">
+    <header class="phorma-props__head">
+      <i class="{{ selected.icon }}" aria-hidden="true"></i>
+      <span class="phorma-props__kind">{{ kindLabel() }}</span>
+    </header>
+
+    <section class="phorma-props__section">
+      <label class="phorma-props__label" for="prop-name">Name</label>
+      <input
+        id="prop-name"
+        type="text"
+        class="phorma-props__input"
+        [value]="selected.name"
+        (input)="onNameInput($event)"
+      />
+
+      <label class="phorma-props__label phorma-props__label--gap" for="prop-desc">Description</label>
+      <textarea
+        id="prop-desc"
+        class="phorma-props__textarea"
+        rows="2"
+        [value]="selected.description ?? ''"
+        (input)="onDescriptionInput($event)"
+      ></textarea>
+    </section>
+
+    <!-- Schedule trigger -->
+    @if (scheduleData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-cron">Cron expression</label>
+        <input
+          id="prop-cron"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.cron"
+          (input)="patchData({ cron: inputValue($event) })"
+          placeholder="0 9 * * 1-5"
+        />
+        <p class="phorma-props__hint">Runs in the cloud deployment. Minute, hour, day, month, weekday.</p>
+      </section>
+    }
+
+    <!-- Webhook trigger -->
+    @if (webhookData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-path">Path hint</label>
+        <input
+          id="prop-path"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.path ?? ''"
+          (input)="patchData({ path: inputValue($event) })"
+          placeholder="/hooks/intake"
+        />
+        <p class="phorma-props__hint">The deployed workflow exposes an HTTP trigger endpoint.</p>
+      </section>
+    }
+
+    <!-- HTTP tool -->
+    @if (httpData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Request</label>
+        <div class="phorma-props__row">
+          <p-select
+            class="phorma-props__method"
+            [options]="httpMethods"
+            [ngModel]="data.method"
+            (ngModelChange)="patchData({ method: $event })"
+            size="small"
+            appendTo="body"
+          />
+          <input
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.url"
+            (input)="patchData({ url: inputValue($event) })"
+            placeholder="https://api.example.com/search"
+            aria-label="Request URL"
+          />
+        </div>
+        <label class="phorma-props__label phorma-props__label--gap" for="prop-body">Body template</label>
+        <textarea
+          id="prop-body"
+          class="phorma-props__textarea phorma-props__input--mono"
+          rows="4"
+          [value]="data.bodyTemplate ?? ''"
+          (input)="patchData({ bodyTemplate: inputValue($event) })"
+          placeholder="JSON body — use the input placeholder to interpolate the agent's call"
+        ></textarea>
+      </section>
+    }
+
+    <!-- MCP tool -->
+    @if (mcpData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">MCP server</label>
+        <p-select
+          [options]="mcpTransports"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.transport"
+          (ngModelChange)="patchData({ transport: $event })"
+          size="small"
+          appendTo="body"
+        />
+        @if (data.transport === 'stdio') {
+          <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
+          <input
+            id="prop-cmd"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.command ?? ''"
+            (input)="patchData({ command: inputValue($event) })"
+            placeholder="npx -y @modelcontextprotocol/server-filesystem"
+          />
+
+          <label class="phorma-props__label phorma-props__label--gap">Arguments</label>
+          <ul class="phorma-props__ports">
+            @for (arg of data.args ?? []; track $index) {
+              <li>
+                <input
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="arg"
+                  (input)="onArgInput($index, $event)"
+                  [attr.aria-label]="'Argument ' + ($index + 1)"
+                />
+                <button
+                  type="button"
+                  class="phorma-props__icon-btn"
+                  (click)="removeArg($index)"
+                  title="Remove argument"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </button>
+              </li>
+            } @empty {
+              <p class="phorma-props__hint">No arguments.</p>
+            }
+          </ul>
+          <button type="button" class="phorma-props__add-btn" (click)="addArg()">
+            <i class="ti ti-plus" aria-hidden="true"></i> Add argument
+          </button>
+
+          @if (mcpPreset(); as preset) {
+            <label class="phorma-props__label phorma-props__label--gap">Credentials</label>
+            <p class="phorma-props__hint">
+              Secrets are stored in your OS keychain (desktop) or localStorage (browser) —
+              never in the workflow file.
+            </p>
+            <ul class="phorma-props__ports">
+              @for (field of preset.envSchema; track field.name) {
+                <li>
+                  <span class="phorma-props__provider">
+                    {{ field.label }}
+                    @if (secretConfigured(field.name)) {
+                      <i class="ti ti-circle-check phorma-props__ok" title="Configured" aria-hidden="true"></i>
+                    }
+                  </span>
+                  <input
+                    [type]="field.secret ? 'password' : 'text'"
+                    class="phorma-props__input"
+                    [placeholder]="secretConfigured(field.name) ? '••••••••  (stored)' : (field.placeholder ?? '')"
+                    [value]="mcpSecretDrafts()[field.name] || ''"
+                    (input)="onSecretInput(field.name, $event)"
+                    (keydown.enter)="saveSecret(field.name)"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    class="phorma-props__btn"
+                    [disabled]="mcpSecretDrafts()[field.name] === undefined"
+                    (click)="saveSecret(field.name)"
+                  >
+                    Save
+                  </button>
+                  @if (secretConfigured(field.name)) {
+                    <button
+                      type="button"
+                      class="phorma-props__icon-btn"
+                      (click)="clearSecret(field.name)"
+                      title="Remove stored value"
+                    >
+                      <i class="ti ti-trash" aria-hidden="true"></i>
+                    </button>
+                  }
+                </li>
+                @if (field.description) {
+                  <p class="phorma-props__hint">{{ field.description }}</p>
+                }
+              }
+            </ul>
+          }
+        } @else {
+          <label class="phorma-props__label phorma-props__label--gap" for="prop-url">Server URL</label>
+          <input
+            id="prop-url"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.url ?? ''"
+            (input)="patchData({ url: inputValue($event) })"
+            placeholder="https://mcp.example.com/sse"
+          />
+        }
+      </section>
+    }
+
+    <!-- Approval gate -->
+    @if (approvalData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-approval">Message to approver (markdown)</label>
+        <textarea
+          id="prop-approval"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.message ?? ''"
+          (input)="patchData({ message: inputValue($event) })"
+          placeholder="Please review the draft before it is published."
+        ></textarea>
+      </section>
+    }
+
+    <!-- Branch ports (router routes / parallel branches / aggregator inputs) -->
+    @if (editableOutPorts(); as branch) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">
+          {{ selected.kind === 'router' ? 'Routes' : selected.kind === 'aggregator' ? 'Inputs' : 'Branches' }}
+        </label>
+        <ul class="phorma-props__ports">
+          @for (port of branch.ports; track port.id) {
+            <li>
+              <input
+                type="text"
+                class="phorma-props__input"
+                [value]="port.name"
+                (input)="renamePort(selected, port.id, $event)"
+                [attr.aria-label]="'Rename ' + port.name"
+              />
+              <button
+                type="button"
+                class="phorma-props__icon-btn"
+                (click)="removePort(selected, port.id)"
+                [disabled]="branch.ports.length <= 2"
+                title="Remove"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </li>
+          }
+        </ul>
+        <button
+          type="button"
+          class="phorma-props__add"
+          (click)="addBranchPort(selected, branch.role)"
+        >
+          <i class="ti ti-plus" aria-hidden="true"></i> Add
+        </button>
+      </section>
+    }
+  </div>
+} @else if (multiSelection()) {
+  <div class="phorma-props__placeholder">
+    <i class="ti ti-stack-2" aria-hidden="true"></i>
+    <p>Multiple nodes selected.</p>
+  </div>
+} @else {
+  <div class="phorma-props__placeholder">
+    <i class="ti ti-adjustments" aria-hidden="true"></i>
+    <p>Select a node to edit its properties.</p>
+  </div>
+}

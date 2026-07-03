@@ -1,0 +1,114 @@
+<!-- Glass + layout now live on :host in toolbar.scss. -->
+<ng-container>
+  <!-- Brand mark -->
+  <div class="flex items-center pl-1">
+    <img src="logo.svg" alt="Phorma Agent Studio logo" class="h-5 w-5" />
+  </div>
+
+  <!--
+    autoDisplay=false  → root items open on click, not bare hover.
+    The #item template adds:
+      • a chevron-right on nested items that have sub-items (submenu arrow)
+      • a shortcut badge on the right
+  -->
+  <p-menubar [model]="menuItems()" [autoDisplay]="false" class="phorma-menubar flex-1">
+    <ng-template #item let-item let-root="root">
+      <span class="items-center gap-2 px-2 py-1 w-full"
+            [class]="root ? 'block' : 'flex'">
+        @if (item.icon) {
+          <i [class]="item.icon" class="text-xs opacity-80 shrink-0"></i>
+        }
+        <span class="flex-1">{{ item.label }}</span>
+        @if (item.shortcut) {
+          <span class="ml-2 text-[10px] tracking-wide opacity-40">{{ item.shortcut }}</span>
+        }
+        @if (item.items) {
+          <i
+            class="ml-auto shrink-0 text-[10px] opacity-50"
+            [class]="root ? '' : 'ti ti-chevron-right'"
+          ></i>
+        }
+      </span>
+    </ng-template>
+  </p-menubar>
+
+  <!-- Center run controls (Run / Pause / Step / Stop — engine lands Phase 3) -->
+  <div class="phorma-run-controls flex items-center gap-1">
+    <p-button
+      styleClass="phorma-run-button"
+      [text]="true"
+      [severity]="running() ? 'danger' : 'secondary'"
+      size="small"
+      [icon]="running() ? 'ti ti-player-stop' : 'ti ti-player-play'"
+      [pTooltip]="running() ? 'Stop (Shift+F5)' : 'Run (F5)'"
+      tooltipPosition="bottom"
+      (onClick)="toggleRun()"
+    />
+    <p-button
+      styleClass="phorma-run-button"
+      [text]="true"
+      severity="secondary"
+      size="small"
+      [icon]="paused() ? 'ti ti-player-play' : 'ti ti-player-pause'"
+      [pTooltip]="paused() ? 'Resume (F6)' : 'Pause (F6)'"
+      tooltipPosition="bottom"
+      [disabled]="!running()"
+      (onClick)="pauseRun()"
+    />
+    <p-button
+      styleClass="phorma-run-button"
+      [text]="true"
+      severity="secondary"
+      size="small"
+      icon="ti ti-player-skip-forward"
+      pTooltip="Step (F10)"
+      tooltipPosition="bottom"
+      [disabled]="!paused()"
+      (onClick)="stepRun()"
+    />
+  </div>
+
+  <!-- Right-side window controls -->
+  <div class="flex items-center gap-1">
+    <p-button
+      [text]="true"
+      severity="secondary"
+      size="small"
+      [icon]="cloud.connected() ? 'ti ti-cloud-check' : 'ti ti-cloud'"
+      [class.phorma-cloud-live]="cloud.connected()"
+      [pTooltip]="cloud.connected() ? 'Cloud monitor connected' : 'Cloud deploy & monitor'"
+      tooltipPosition="bottom"
+      (onClick)="openCloud()"
+    />
+    <span class="phorma-toolbar-divider"></span>
+    <p-button
+      [text]="true"
+      severity="secondary"
+      size="small"
+      icon="ti ti-magnet"
+      [class.opacity-50]="!canvasState.gridSnap()"
+      [pTooltip]="gridSnapTooltip()"
+      tooltipPosition="bottom"
+      (onClick)="toggleGridSnap()"
+    />
+    <span class="phorma-toolbar-divider"></span>
+    <p-button
+      [text]="true"
+      severity="secondary"
+      size="small"
+      [icon]="themeIcon()"
+      pTooltip="Toggle theme"
+      tooltipPosition="bottom"
+      (onClick)="theme.toggle()"
+    />
+    <p-button
+      [text]="true"
+      severity="secondary"
+      size="small"
+      icon="ti ti-settings"
+      pTooltip="Settings"
+      tooltipPosition="bottom"
+      (onClick)="openSettings()"
+    />
+  </div>
+</ng-container>

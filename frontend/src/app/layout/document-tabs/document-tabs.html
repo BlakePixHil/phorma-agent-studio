@@ -1,0 +1,62 @@
+<div class="phorma-doc-tabs" role="tablist" aria-label="Open workflows">
+  <!-- Reorderable workflow tabs. -->
+  <div
+    class="phorma-doc-tabs__list"
+    cdkDropList
+    cdkDropListOrientation="horizontal"
+    (cdkDropListDropped)="onDrop($event)"
+  >
+    @for (doc of documents(); track doc.docId) {
+      <div
+        cdkDrag
+        role="tab"
+        class="phorma-doc-tab"
+        [class.phorma-doc-tab--active]="activeDocId() === doc.docId"
+        [attr.aria-selected]="activeDocId() === doc.docId"
+        (click)="openDocument(doc)"
+        (auxclick)="onAuxClick($event, doc)"
+      >
+        <i class="ti ti-topology-star-3 phorma-doc-tab__icon" aria-hidden="true"></i>
+        <span class="phorma-doc-tab__label">{{ doc.name }}</span>
+
+        <!-- Trailing affordance: the unsaved dot shows by default; hovering
+             the tab swaps it for the close button (VS Code style). For clean
+             tabs the close button is always available on hover. -->
+        <span class="phorma-doc-tab__trailing">
+          @if (doc.dirty) {
+            <span
+              class="phorma-doc-tab__dirty"
+              aria-label="Unsaved changes"
+              title="Unsaved changes"
+            ></span>
+          }
+          <button
+            type="button"
+            class="phorma-doc-tab__close"
+            aria-label="Close tab"
+            title="Close"
+            (click)="closeDocument($event, doc)"
+          >
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </span>
+
+        <div class="phorma-doc-tab__preview" *cdkDragPreview>
+          <i class="ti ti-topology-star-3 phorma-doc-tab__icon" aria-hidden="true"></i>
+          <span class="phorma-doc-tab__label">{{ doc.name }}</span>
+        </div>
+      </div>
+    }
+  </div>
+
+  <!-- New workflow -->
+  <button
+    type="button"
+    class="phorma-doc-tab phorma-doc-tab--pinned"
+    aria-label="New workflow"
+    title="New workflow (Ctrl+N)"
+    (click)="newWorkflow()"
+  >
+    <i class="ti ti-plus phorma-doc-tab__icon" aria-hidden="true"></i>
+  </button>
+</div>

@@ -1,0 +1,10 @@
+{
+  "name": "@phorma/engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phorma Agent Studio run engine — executes workflow specs and emits RunEvents. Pure TypeScript: runs in the desktop app (local debug) and in the Cloudflare worker (deployed).",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false
+}

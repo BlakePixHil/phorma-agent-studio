@@ -1,0 +1,15 @@
+{
+  "name": "phorma-agent-studio-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phorma Agent Studio Tauri 2.0 desktop shell.",
+  "scripts": {
+    "tauri": "node tauri.mjs",
+    "dev": "node tauri.mjs dev",
+    "build": "node tauri.mjs build",
+    "icons": "tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

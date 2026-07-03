@@ -1,0 +1,104 @@
+<div class="phorma-runs">
+  <!-- Task input + run controls -->
+  <section class="phorma-runs__section">
+    <label class="phorma-runs__label" for="run-input">
+      Task
+      @if (cloud.connected()) {
+        <span class="phorma-runs__cloud-badge" title="Runs target the deployed cloud instance">
+          <i class="ti ti-cloud" aria-hidden="true"></i> cloud
+        </span>
+      }
+    </label>
+    <textarea
+      id="run-input"
+      class="phorma-runs__input"
+      rows="3"
+      placeholder="What should this workflow do?"
+      [value]="runController.runInput()"
+      (input)="onInput($event)"
+      [disabled]="runController.running()"
+    ></textarea>
+    <div class="phorma-runs__controls">
+      @if (!runController.running()) {
+        <button type="button" class="phorma-runs__run" (click)="run()">
+          <i class="ti ti-player-play" aria-hidden="true"></i> Run
+        </button>
+      } @else {
+        <button type="button" class="phorma-runs__btn" (click)="runController.pauseOrResume()">
+          <i class="ti" [class.ti-player-pause]="!runController.paused()" [class.ti-player-play]="runController.paused()" aria-hidden="true"></i>
+          {{ runController.paused() ? 'Resume' : 'Pause' }}
+        </button>
+        <button
+          type="button"
+          class="phorma-runs__btn"
+          [disabled]="!runController.paused()"
+          (click)="runController.step()"
+        >
+          <i class="ti ti-player-skip-forward" aria-hidden="true"></i> Step
+        </button>
+        <button type="button" class="phorma-runs__btn phorma-runs__btn--danger" (click)="stop()">
+          <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+        </button>
+      }
+      <span class="phorma-runs__phase">{{ terminal.phase() }}</span>
+    </div>
+  </section>
+
+  <!-- Pending approvals -->
+  @for (approval of runController.pendingApprovals(); track approval.nodeId) {
+    <section class="phorma-runs__approval">
+      <header>
+        <i class="ti ti-user-check" aria-hidden="true"></i>
+        <strong>{{ approval.nodeName }}</strong>
+      </header>
+      <p class="phorma-runs__approval-message">{{ approval.message }}</p>
+      @if (approval.payload) {
+        <pre class="phorma-runs__payload selectable">{{ approval.payload }}</pre>
+      }
+      <div class="phorma-runs__approval-actions">
+        <button
+          type="button"
+          class="phorma-runs__btn phorma-runs__btn--approve"
+          (click)="runController.resolveApproval(approval.nodeId, true)"
+        >
+          <i class="ti ti-thumb-up" aria-hidden="true"></i> Approve
+        </button>
+        <button
+          type="button"
+          class="phorma-runs__btn phorma-runs__btn--danger"
+          (click)="runController.resolveApproval(approval.nodeId, false)"
+        >
+          <i class="ti ti-thumb-down" aria-hidden="true"></i> Reject
+        </button>
+      </div>
+    </section>
+  }
+
+  <!-- Trace timeline -->
+  <section class="phorma-runs__section phorma-runs__section--grow">
+    <label class="phorma-runs__label">Trace</label>
+    @if (runController.trace().length > 0) {
+      <ol class="phorma-runs__trace">
+        @for (entry of runController.trace(); track entry.id) {
+          <li class="phorma-runs__entry phorma-runs__entry--{{ entry.tone }}">
+            <button
+              type="button"
+              class="phorma-runs__entry-row"
+              [class.phorma-runs__entry-row--expandable]="!!entry.detail"
+              (click)="entry.detail && toggleExpanded(entry.id)"
+            >
+              <i class="{{ entry.icon }}" aria-hidden="true"></i>
+              <span class="phorma-runs__entry-label">{{ entry.label }}</span>
+              <time class="phorma-runs__entry-time">{{ entry.at | date: 'HH:mm:ss' }}</time>
+            </button>
+            @if (entry.detail && expanded().has(entry.id)) {
+              <pre class="phorma-runs__payload selectable">{{ entry.detail }}</pre>
+            }
+          </li>
+        }
+      </ol>
+    } @else {
+      <p class="phorma-runs__empty">No run yet. Enter a task and press Run.</p>
+    }
+  </section>
+</div>

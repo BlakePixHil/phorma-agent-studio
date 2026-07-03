@@ -1,0 +1,48 @@
+@if (active(); as dialog) {
+  <div class="phorma-confirm" role="presentation" (click)="confirmDialog.cancel()">
+    <section
+      class="phorma-confirm__card"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-label]="dialog.title"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-confirm__header">
+        <span class="phorma-confirm__icon" [class.phorma-confirm__icon--danger]="dialog.tone === 'danger'">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        </span>
+        <div>
+          <h2>{{ dialog.title }}</h2>
+          <p>{{ dialog.message }}</p>
+        </div>
+      </header>
+
+      <footer class="phorma-confirm__actions">
+        <p-button
+          styleClass="phorma-confirm__btn"
+          [text]="true"
+          severity="secondary"
+          size="small"
+          [label]="dialog.cancelLabel"
+          (onClick)="confirmDialog.cancel()"
+        />
+        @if (dialog.alternateLabel) {
+          <p-button
+            styleClass="phorma-confirm__btn"
+            [outlined]="true"
+            size="small"
+            [label]="dialog.alternateLabel"
+            (onClick)="confirmDialog.alternate()"
+          />
+        }
+        <p-button
+          styleClass="phorma-confirm__btn"
+          size="small"
+          [severity]="dialog.tone === 'danger' ? 'danger' : undefined"
+          [label]="dialog.confirmLabel"
+          (onClick)="confirmDialog.accept()"
+        />
+      </footer>
+    </section>
+  </div>
+}

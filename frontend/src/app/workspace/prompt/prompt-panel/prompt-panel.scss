@@ -1,0 +1,269 @@
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.phorma-prompt {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0.65rem 0.75rem 0.8rem;
+  gap: 0.75rem;
+  overflow-y: auto;
+}
+
+.phorma-prompt__head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+
+  > i {
+    font-size: 0.95rem;
+    color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-prompt__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-prompt__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-prompt__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+
+  &--grow {
+    flex: 1;
+    min-height: 12rem;
+  }
+}
+
+.phorma-prompt__label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+
+  &--gap {
+    margin-top: 0.5rem;
+  }
+}
+
+.phorma-prompt__editor {
+  flex: 1;
+  min-height: 10rem;
+  resize: vertical;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.55;
+
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-prompt__preview {
+  flex: 1;
+  min-height: 10rem;
+  overflow-y: auto;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  font-size: 0.78rem;
+  line-height: 1.55;
+
+  ::ng-deep {
+    h1, h2, h3 {
+      margin: 0.6em 0 0.3em;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    h1 { font-size: 1rem; }
+    h2 { font-size: 0.9rem; }
+    h3 { font-size: 0.82rem; }
+    p, ul, ol { margin: 0.35em 0; }
+    ul, ol { padding-left: 1.2em; }
+    code {
+      padding: 0.08em 0.3em;
+      border-radius: 0.3em;
+      background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+      font-size: 0.92em;
+    }
+    pre {
+      padding: 0.5em 0.65em;
+      border-radius: 0.5em;
+      background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+      overflow-x: auto;
+    }
+    blockquote {
+      margin: 0.4em 0;
+      padding-left: 0.7em;
+      border-left: 3px solid var(--phorma-card-border);
+      color: var(--p-text-muted-color);
+    }
+  }
+}
+
+.phorma-prompt__hint {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--p-text-muted-color);
+
+  code {
+    padding: 0.05em 0.3em;
+    border-radius: 0.3em;
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+}
+
+.phorma-prompt__model-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: stretch;
+
+  .phorma-prompt__provider {
+    flex-shrink: 0;
+    width: 9.5rem;
+  }
+}
+
+.phorma-prompt__model {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.75rem;
+
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-prompt__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.phorma-prompt__chip {
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  }
+
+  &--active {
+    color: var(--p-primary-color, #818cf8);
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  }
+}
+
+.phorma-prompt__temp {
+  width: 6rem;
+  padding: 0.32rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.75rem;
+
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-prompt__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+    font-size: 0.72rem;
+    font-weight: 600;
+
+    i {
+      font-size: 0.8rem;
+      color: var(--p-text-muted-color);
+    }
+  }
+}
+
+.phorma-prompt__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 0.5rem;
+  color: var(--p-text-muted-color);
+
+  i {
+    font-size: 1.6rem;
+    opacity: 0.6;
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.75rem;
+  }
+}

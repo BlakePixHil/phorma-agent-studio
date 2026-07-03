@@ -1,0 +1,32 @@
+// Phorma Agent Studio — cloud runtime configuration.
+//
+// Deploys to YOUR Cloudflare account:
+//   1. npx wrangler login
+//   2. Set provider secrets (once):  npx wrangler secret put ANTHROPIC_API_KEY
+//      (repeat for OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY as needed)
+//   3. Protect the endpoints (recommended):  npx wrangler secret put PHORMA_TOKEN
+//   4. npx wrangler deploy   (or use Deploy in the studio's Cloud dialog)
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "phorma-agent-studio-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "WorkflowAgent",
+        "class_name": "WorkflowAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["WorkflowAgent"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

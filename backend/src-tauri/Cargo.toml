@@ -1,0 +1,41 @@
+[package]
+name = "phorma-agent-studio"
+version = "0.1.0"
+description = "Phorma Agent Studio — a visual canvas for designing, debugging, and deploying multi-agent AI workflows."
+authors = ["Phorma"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+[lib]
+name = "phorma_agent_studio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Streaming LLM proxy: HTTP from Rust so provider keys never enter the webview
+# and browser CORS rules never apply.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "macros"] }
+# Provider API keys live in the OS keychain (Windows Credential Manager /
+# macOS Keychain / Secret Service).
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

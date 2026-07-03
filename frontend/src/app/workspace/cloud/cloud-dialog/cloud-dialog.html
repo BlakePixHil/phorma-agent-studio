@@ -1,0 +1,111 @@
+<p-dialog
+  header="Cloud"
+  [visible]="dialog.visible()"
+  (visibleChange)="$event ? dialog.open() : dialog.close()"
+  [modal]="true"
+  [draggable]="false"
+  [resizable]="false"
+  [style]="{ width: 'min(36rem, 92vw)' }"
+  [dismissableMask]="true"
+>
+  <div class="phorma-cloud">
+    <p class="phorma-cloud__note">
+      <i class="ti ti-cloud" aria-hidden="true"></i>
+      Deploys to <strong>your</strong> Cloudflare account. One-time setup:
+      <code>npx wrangler login</code>, then set provider secrets with
+      <code>npx wrangler secret put ANTHROPIC_API_KEY</code> (and a
+      <code>PHORMA_TOKEN</code> to protect the endpoints).
+    </p>
+
+    <!-- 1 · Deploy the worker -->
+    <section class="phorma-cloud__section">
+      <h3 class="phorma-cloud__heading">1 · Deploy the worker</h3>
+      <div class="phorma-cloud__row">
+        <input
+          type="text"
+          class="phorma-cloud__input"
+          placeholder="Path to the repo's cloud/ folder"
+          [value]="cloud.cloudFolder()"
+          (input)="onFolderInput($event)"
+        />
+        @if (isDesktop) {
+          <button type="button" class="phorma-cloud__btn" (click)="cloud.pickCloudFolder()">
+            <i class="ti ti-folder-open" aria-hidden="true"></i>
+          </button>
+        }
+        <button
+          type="button"
+          class="phorma-cloud__btn phorma-cloud__btn--primary"
+          [disabled]="cloud.deploying() || !isDesktop"
+          (click)="cloud.deploy()"
+          [title]="isDesktop ? 'Runs npx wrangler deploy (output streams to the console)' : 'Desktop app only'"
+        >
+          @if (cloud.deploying()) {
+            <i class="ti ti-loader-2 phorma-cloud__spin" aria-hidden="true"></i> Deploying…
+          } @else {
+            <i class="ti ti-cloud-up" aria-hidden="true"></i> Deploy
+          }
+        </button>
+      </div>
+    </section>
+
+    <!-- 2 · Point the studio at it -->
+    <section class="phorma-cloud__section">
+      <h3 class="phorma-cloud__heading">2 · Worker URL &amp; token</h3>
+      <div class="phorma-cloud__row">
+        <input
+          type="text"
+          class="phorma-cloud__input"
+          placeholder="https://phorma-agent-studio-cloud.you.workers.dev"
+          [value]="cloud.workerUrl()"
+          (input)="onUrlInput($event)"
+        />
+      </div>
+      <div class="phorma-cloud__row">
+        <input
+          type="password"
+          class="phorma-cloud__input"
+          placeholder="PHORMA_TOKEN (leave empty if none set)"
+          [value]="cloud.token()"
+          (input)="onTokenInput($event)"
+          autocomplete="off"
+        />
+      </div>
+    </section>
+
+    <!-- 3 · Push + monitor -->
+    <section class="phorma-cloud__section">
+      <h3 class="phorma-cloud__heading">3 · Push &amp; monitor "{{ workflow.activeName() }}"</h3>
+      <div class="phorma-cloud__row">
+        <button type="button" class="phorma-cloud__btn" (click)="cloud.pushWorkflow()">
+          <i class="ti ti-upload" aria-hidden="true"></i> Push workflow
+        </button>
+        @if (!cloud.connected()) {
+          <button
+            type="button"
+            class="phorma-cloud__btn phorma-cloud__btn--primary"
+            (click)="cloud.connect()"
+          >
+            <i class="ti ti-plug-connected" aria-hidden="true"></i> Connect monitor
+          </button>
+        } @else {
+          <button
+            type="button"
+            class="phorma-cloud__btn phorma-cloud__btn--danger"
+            (click)="cloud.disconnect()"
+          >
+            <i class="ti ti-plug-connected-x" aria-hidden="true"></i> Disconnect
+          </button>
+        }
+        <span class="phorma-cloud__status" [class.phorma-cloud__status--on]="cloud.connected()">
+          <i class="ti ti-point-filled" aria-hidden="true"></i>
+          {{ cloud.connection() }}
+        </span>
+      </div>
+      <p class="phorma-cloud__hint">
+        While connected, Run in the Runs panel triggers the CLOUD instance and the
+        canvas animates its events live — identical to a local run.
+      </p>
+    </section>
+  </div>
+</p-dialog>

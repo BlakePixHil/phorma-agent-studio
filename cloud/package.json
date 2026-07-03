@@ -1,0 +1,21 @@
+{
+  "name": "@phorma/cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phorma Agent Studio cloud runtime — a Cloudflare Worker hosting WorkflowAgent Durable Objects that run deployed workflows with the same engine as the studio.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit && wrangler deploy --dry-run --outdir=dist"
+  },
+  "dependencies": {
+    "agents": "^0.2.0",
+    "ai": "^6.0.219"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "typescript": "^5.8.0",
+    "wrangler": "^4.0.0"
+  }
+}

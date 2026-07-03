@@ -1,0 +1,117 @@
+@if (agent(); as node) {
+  <div class="phorma-prompt">
+    <header class="phorma-prompt__head">
+      <i class="{{ node.icon }}" aria-hidden="true"></i>
+      <span class="phorma-prompt__name">{{ node.name }}</span>
+      <button
+        type="button"
+        class="phorma-prompt__toggle"
+        (click)="togglePreview()"
+        [title]="previewing() ? 'Edit markdown' : 'Preview markdown'"
+      >
+        <i class="ti" [class.ti-eye]="!previewing()" [class.ti-pencil]="previewing()" aria-hidden="true"></i>
+        {{ previewing() ? 'Edit' : 'Preview' }}
+      </button>
+    </header>
+
+    <!-- Markdown system prompt -->
+    <section class="phorma-prompt__section phorma-prompt__section--grow">
+      <label class="phorma-prompt__label" for="prompt-editor">System prompt (markdown)</label>
+      @if (previewing()) {
+        <div class="phorma-prompt__preview selectable" [innerHTML]="previewHtml()"></div>
+      } @else {
+        <textarea
+          id="prompt-editor"
+          class="phorma-prompt__editor"
+          spellcheck="false"
+          [value]="node.data.prompt"
+          (input)="onPromptInput($event)"
+          placeholder="# Role&#10;&#10;You are…&#10;&#10;# Task&#10;&#10;{{ '{{input}}' }}"
+        ></textarea>
+      }
+      <p class="phorma-prompt__hint">
+        <code>{{ '{{input}}' }}</code> interpolates the incoming task.
+      </p>
+    </section>
+
+    <!-- Model configuration -->
+    <section class="phorma-prompt__section">
+      <label class="phorma-prompt__label">Model</label>
+      <div class="phorma-prompt__model-row">
+        <p-select
+          class="phorma-prompt__provider"
+          [options]="providers"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="node.data.provider"
+          (ngModelChange)="onProviderChange($event)"
+          size="small"
+          appendTo="body"
+        />
+        <input
+          type="text"
+          class="phorma-prompt__model"
+          [value]="node.data.model"
+          (input)="onModelInput($event)"
+          placeholder="model id"
+          aria-label="Model id"
+        />
+      </div>
+      <div class="phorma-prompt__chips">
+        @for (model of modelSuggestions(); track model) {
+          <button
+            type="button"
+            class="phorma-prompt__chip"
+            [class.phorma-prompt__chip--active]="model === node.data.model"
+            (click)="onModelPick(model)"
+          >
+            {{ model }}
+          </button>
+        }
+      </div>
+      <label class="phorma-prompt__label phorma-prompt__label--gap" for="prompt-temp">
+        Temperature
+      </label>
+      <input
+        id="prompt-temp"
+        type="number"
+        class="phorma-prompt__temp"
+        min="0"
+        max="2"
+        step="0.1"
+        [value]="node.data.temperature ?? ''"
+        (input)="onTemperatureInput($event)"
+      />
+    </section>
+
+    <!-- Capabilities summary -->
+    <section class="phorma-prompt__section">
+      <label class="phorma-prompt__label">Tools</label>
+      @if (attachedTools().length > 0) {
+        <ul class="phorma-prompt__list">
+          @for (tool of attachedTools(); track tool.id) {
+            <li><i class="{{ tool.icon }}" aria-hidden="true"></i>{{ tool.name }}</li>
+          }
+        </ul>
+      } @else {
+        <p class="phorma-prompt__hint">No tools attached. Wire the Tools port to a tool node.</p>
+      }
+
+      <label class="phorma-prompt__label phorma-prompt__label--gap">Hands off to</label>
+      @if (handoffTargets().length > 0) {
+        <ul class="phorma-prompt__list">
+          @for (target of handoffTargets(); track target.id) {
+            <li><i class="{{ target.icon }}" aria-hidden="true"></i>{{ target.name }}</li>
+          }
+        </ul>
+      } @else {
+        <p class="phorma-prompt__hint">No handoffs. Wire the Result port onward.</p>
+      }
+    </section>
+  </div>
+} @else {
+  <div class="phorma-prompt__placeholder">
+    <i class="ti ti-message-2" aria-hidden="true"></i>
+    <p>Select an agent to edit its prompt.</p>
+  </div>
+}

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" class="app-dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>Phorma Agent Studio</title>
+    <base href="/" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <!-- Nunito — primary UI font (loaded early so first paint uses it). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Native desktop behaviour: disable the default browser context menu.
+      // (Tauri also disables it in release, but this guarantees it everywhere,
+      //  including `ng serve` previews and dev builds.)
+      window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      // Disable ctrl+wheel page zoom so the canvas owns zooming.
+      window.addEventListener(
+        'wheel',
+        (e) => {
+          if (e.ctrlKey) e.preventDefault();
+        },
+        { passive: false }
+      );
+
+      // Block browser zoom keyboard shortcuts (Ctrl +/-/0) at the document level.
+      window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) {
+          e.preventDefault();
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <app-root></app-root>
+  </body>
+</html>

@@ -1,0 +1,219 @@
+:host {
+  display: contents;
+}
+
+.phorma-terminal-dock {
+  position: absolute;
+  // Sit flush on top of the status bar footer (~21px tall).
+  bottom: 21px;
+  z-index: 35;
+  min-width: 280px;
+  overflow: visible;
+  // Animate left/right (sidebar collapse follows) AND height so the dock
+  // slides open/closed like the side panels. The height transition is
+  // suppressed while dragging via `--resizing` so the resize handle stays
+  // perfectly responsive (a live height transition lags behind the pointer).
+  transition:
+    left 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    right 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    height 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.phorma-terminal-dock--resizing {
+  transition: none;
+}
+
+.phorma-terminal-dock--collapsed {
+  pointer-events: none;
+
+  // Re-enable the resize/collapse strip so the terminal can be reopened.
+  .phorma-terminal-resize {
+    pointer-events: auto;
+  }
+}
+
+.phorma-terminal-panel {
+  position: relative;
+  z-index: 35;
+  height: 100%;
+  min-height: 140px;
+  overflow: hidden;
+  // Liquid glass — opaque-ish dark surface, lighter blur, no top highlight.
+  background: var(--phorma-glass-bg, rgba(18, 19, 24, 0.82));
+  backdrop-filter: blur(12px) saturate(1.25);
+  border: 1px solid var(--phorma-border);
+  border-bottom: 0;
+  border-radius: 0;
+  // Isolate paint/layout so resizing doesn't reflow the rest of the app.
+  contain: layout paint;
+}
+
+.phorma-terminal-dock--resizing .phorma-terminal-panel {
+  // Drop the expensive blur live-recomposite while dragging.
+  backdrop-filter: none;
+}
+
+:host-context(:root:not(.app-dark)) .phorma-terminal-panel {
+  background: rgba(242, 243, 245, 0.85);
+}
+
+.phorma-terminal-resize {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  pointer-events: auto;
+  background: transparent;
+  transition: background 150ms ease;
+  z-index: 36;
+}
+
+.phorma-terminal-resize::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+}
+
+.phorma-terminal-resize:hover,
+.phorma-terminal-resize:active {
+  background: rgba(255, 255, 255, 0.06);
+
+  .phorma-terminal-collapse {
+    opacity: 1;
+  }
+}
+
+.phorma-terminal-collapse {
+  position: absolute;
+  left: 50%;
+  top: -13px;
+  transform: translateX(-50%);
+  display: flex;
+  width: 32px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px 4px 0 0;
+  background: var(--phorma-glass-bg, rgba(30, 30, 30, 0.7));
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  font-size: 9px;
+  padding: 0;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 150ms, color 150ms;
+  z-index: 37;
+}
+
+// Keep the toggle visible while collapsed (it's the only way back).
+.phorma-terminal-dock--collapsed .phorma-terminal-collapse {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.phorma-terminal-collapse:hover {
+  color: var(--p-text-color);
+}
+
+.phorma-terminal-header {
+  min-height: 38px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+}
+
+.phorma-terminal-tabstrip {
+  min-height: 38px;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.phorma-terminal-tab {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  min-height: 38px;
+  white-space: nowrap;
+  user-select: none;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--p-text-color);
+  }
+
+  &--active {
+    border-bottom-color: var(--p-primary-color);
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-terminal-body {
+  height: 100%;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+.phorma-terminal-output {
+  display: block;
+  min-height: 100%;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--p-text-color);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 12px;
+}
+
+:host-context(:root:not(.app-dark)) .phorma-terminal-output {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.phorma-terminal-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &[data-level='success'] .phorma-terminal-message {
+    color: var(--p-green-400, #4ade80);
+  }
+
+  &[data-level='warning'] .phorma-terminal-message {
+    color: var(--p-yellow-400, #facc15);
+  }
+
+  &[data-level='error'] .phorma-terminal-message {
+    color: var(--p-red-400, #f87171);
+  }
+}
+
+.phorma-terminal-time {
+  flex: 0 0 auto;
+  color: var(--p-text-muted-color);
+  opacity: 0.6;
+  user-select: none;
+}
+
+.phorma-terminal-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.phorma-terminal-empty {
+  padding: 10px 12px;
+  color: var(--p-text-muted-color);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  opacity: 0.6;
+}

@@ -1,0 +1,280 @@
+/**
+ * Workflow domain model — the heart of Phorma Agent Studio.
+ *
+ * A Workflow is a graph of agents, triggers, tools, and flow nodes joined by
+ * connections. It is the document the canvas renders, the engine executes,
+ * and the `.phorma.json` file persists. Keep this file free of Angular and
+ * Tauri imports: the same shapes are consumed by the run engine (`engine/`)
+ * and the cloud worker (`cloud/`).
+ */
+
+// ── Geometry ─────────────────────────────────────────────────────────────────
+
+export interface GraphPosition {
+  x: number;
+  y: number;
+}
+
+// ── Node taxonomy ────────────────────────────────────────────────────────────
+
+/** Visual/semantic grouping used for palette sections and canvas accents. */
+export type NodeCategory = 'agent' | 'trigger' | 'tool' | 'flow';
+
+/** Every node kind the canvas and engine understand. */
+export type WorkflowNodeKind =
+  | 'agent'
+  | 'manual-trigger'
+  | 'schedule-trigger'
+  | 'webhook-trigger'
+  | 'http-tool'
+  | 'web-search-tool'
+  | 'mcp-tool'
+  | 'router'
+  | 'parallel'
+  | 'aggregator'
+  | 'approval-gate';
+
+/** Category accent colors (hex) shared by the canvas renderer and minimap. */
+export const NODE_CATEGORY_COLORS: Record<NodeCategory, string> = {
+  agent: '#818cf8', // indigo — the stars of the show
+  trigger: '#34d399', // emerald — entry points
+  tool: '#fbbf24', // amber — capabilities
+  flow: '#38bdf8', // sky — control flow
+};
+
+// ── Ports ────────────────────────────────────────────────────────────────────
+
+/**
+ * What a port does:
+ * - `message-in`  — receives the task/conversation (left edge).
+ * - `message-out` — emits the task onward via a handoff (right edge).
+ * - `tools`       — capability port; agents expose one, tool nodes accept via
+ *                   theirs. Tool links are declarations ("this agent may call
+ *                   this tool"), not sequential flow.
+ */
+export type PortRole = 'message-in' | 'message-out' | 'tools';
+
+export interface WorkflowPort {
+  /** Stable base id. Connector ids add `-in` / `-out` suffixes. */
+  id: string;
+  /** Display label. For router out-ports this is the route label. */
+  name: string;
+  role: PortRole;
+}
+
+// ── Node data (kind-specific configuration) ──────────────────────────────────
+
+/** Model providers supported in v1 (bring-your-own-key; Ollama is keyless). */
+export type ModelProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
+
+export const MODEL_PROVIDERS: { id: ModelProviderId; label: string }[] = [
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'gemini', label: 'Google Gemini' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'ollama', label: 'Ollama (local)' },
+];
+
+export interface AgentNodeData {
+  /** System prompt. ALWAYS markdown — edited as markdown, rendered sanitized. */
+  prompt: string;
+  provider: ModelProviderId;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface ScheduleTriggerData {
+  /** Cron expression evaluated by the deployed cloud runtime. */
+  cron: string;
+}
+
+export interface WebhookTriggerData {
+  /** Optional path hint for the deployed HTTP trigger endpoint. */
+  path?: string;
+}
+
+export interface HttpToolData {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  url: string;
+  headers?: Record<string, string>;
+  /** Markdown/JSON body template; `{{input}}` interpolates the agent's call. */
+  bodyTemplate?: string;
+}
+
+export interface WebSearchToolData {
+  maxResults?: number;
+}
+
+export interface McpToolData {
+  /** `stdio` spawns a local process (desktop); `sse` connects over HTTP. */
+  transport: 'stdio' | 'sse';
+  command?: string;
+  args?: string[];
+  url?: string;
+  /** Names of secret env vars to inject (values live in the OS keychain). */
+  envKeys?: string[];
+  /** Preset that seeded this node, if any (enables preset-aware UI). */
+  presetId?: string;
+}
+
+export interface RouterNodeData {
+  /** Extra routing guidance appended to the routing prompt. Markdown. */
+  instructions?: string;
+}
+
+export interface ApprovalGateData {
+  /** Message shown to the human approver. Markdown. */
+  message?: string;
+}
+
+/**
+ * Union of all kind-specific node configuration. Narrow via `node.kind`
+ * (e.g. `isAgentNode(node)`); nodes without configuration carry `{}`.
+ */
+export type WorkflowNodeData =
+  | AgentNodeData
+  | ScheduleTriggerData
+  | WebhookTriggerData
+  | HttpToolData
+  | WebSearchToolData
+  | McpToolData
+  | RouterNodeData
+  | ApprovalGateData
+  | Record<string, never>;
+
+// ── Nodes, connections, graph ────────────────────────────────────────────────
+
+export interface WorkflowNode {
+  id: string;
+  name: string;
+  kind: WorkflowNodeKind;
+  category: NodeCategory;
+  /** Tabler icon class (`ti ti-*`). PrimeIcons are not used in Agent Studio. */
+  icon: string;
+  position: GraphPosition;
+  ports: WorkflowPort[];
+  /** Kind-specific configuration edited by the Prompt/Properties panels. */
+  data: WorkflowNodeData;
+  /** Short human-readable description shown in the properties panel. */
+  description?: string;
+}
+
+/**
+ * Edge semantics:
+ * - `handoff`   — control flow: when the source finishes/decides, the task
+ *                 passes to the target. Rendered solid; pulses during runs.
+ * - `tool-link` — capability: the source agent may call the target tool.
+ *                 Rendered dashed; not sequential flow.
+ */
+export type WorkflowEdgeKind = 'handoff' | 'tool-link';
+
+export interface WorkflowConnection {
+  id: string;
+  /** Source connector id — a port base id with the `-out` suffix. */
+  outputId: string;
+  /** Target connector id — a port base id with the `-in` suffix. */
+  inputId: string;
+  kind: WorkflowEdgeKind;
+  /** Optional edge label (e.g. a router branch condition). */
+  label?: string;
+}
+
+export interface WorkflowGraph {
+  nodes: WorkflowNode[];
+  connections: WorkflowConnection[];
+}
+
+// ── The workflow document ────────────────────────────────────────────────────
+
+export const WORKFLOW_SPEC_VERSION = 1;
+
+/** File extension for exported workflow documents. */
+export const WORKFLOW_FILE_EXTENSION = 'phorma.json';
+
+/**
+ * The portable workflow document — persisted to IndexedDB, exported as
+ * `.phorma.json`, and shipped to the cloud runtime on deploy.
+ */
+export interface WorkflowSpec {
+  version: number;
+  id: string;
+  name: string;
+  description?: string;
+  graph: WorkflowGraph;
+  /** ISO timestamp of the last save. */
+  savedAt: string;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+export function emptyGraph(): WorkflowGraph {
+  return { nodes: [], connections: [] };
+}
+
+export function isAgentNode(node: WorkflowNode): node is WorkflowNode & { data: AgentNodeData } {
+  return node.kind === 'agent';
+}
+
+/** Strips the `-in` / `-out` connector suffix, returning the port base id. */
+export function portBaseId(connectorId: string): string {
+  return connectorId.replace(/-(in|out)$/, '');
+}
+
+/**
+ * Resolves a connector id back to the owning node and port. Returns
+ * `undefined` when no matching port exists (e.g. after a node deletion).
+ */
+export function findNodeForConnector(
+  graph: WorkflowGraph,
+  connectorId: string,
+): { node: WorkflowNode; port: WorkflowPort } | undefined {
+  const baseId = portBaseId(connectorId);
+  for (const node of graph.nodes) {
+    const match = node.ports.find(port => port.id === baseId);
+    if (match) return { node, port: match };
+  }
+  return undefined;
+}
+
+/**
+ * Lookup index mapping every port base id to its role and owning node id.
+ * Lets the canvas classify all connections in one O(n) pass.
+ */
+export interface PortIndex {
+  readonly roles: ReadonlyMap<string, PortRole>;
+  readonly nodeIds: ReadonlyMap<string, string>;
+}
+
+export function buildPortIndex(graph: WorkflowGraph): PortIndex {
+  const roles = new Map<string, PortRole>();
+  const nodeIds = new Map<string, string>();
+  for (const node of graph.nodes) {
+    for (const port of node.ports) {
+      roles.set(port.id, port.role);
+      nodeIds.set(port.id, node.id);
+    }
+  }
+  return { roles, nodeIds };
+}
+
+/**
+ * Derives the edge kind for a new connection: touching a `tools` port on
+ * either side makes it a capability tool-link; otherwise it's a handoff.
+ */
+export function edgeKindForPorts(source: PortRole, target: PortRole): WorkflowEdgeKind {
+  return source === 'tools' || target === 'tools' ? 'tool-link' : 'handoff';
+}
+
+/**
+ * Validates that a connection between two port roles makes sense:
+ * - handoffs run message-out → message-in;
+ * - tool links join a `tools` port and a tool node's `tools` port.
+ * Anything else (message-in → message-in, tools → message-in, ...) is invalid.
+ */
+export function canConnectPorts(source: PortRole, target: PortRole): boolean {
+  if (source === 'tools' || target === 'tools') {
+    return source === 'tools' && target === 'tools';
+  }
+  return source === 'message-out' && target === 'message-in';
+}

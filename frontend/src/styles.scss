@@ -1,0 +1,507 @@
+/* ============================================================================
+   Phorma Agent Studio — global styles
+   - Tailwind CSS v4 + liquidglass-tailwind plugin
+   - PrimeNG (Aura) theme tokens
+   - Tabler Icons (the ONLY icon set — PrimeIcons is removed)
+   - Native desktop resets (no selection, no scrollbars, no context menu chrome)
+   ============================================================================ */
+
+/* Tailwind v4 + plugins (processed by @tailwindcss/postcss). */
+@import 'tailwindcss';
+@plugin 'liquidglass-tailwind';
+@plugin 'tailwindcss-primeui';
+
+/* Tabler Icons font — 5000+ MIT-licensed icons. The single icon set for the
+   whole app; class pattern is `ti ti-<name>`. */
+@import '@tabler/icons-webfont/dist/tabler-icons.css';
+
+/* Tell Tailwind that dark mode is driven by the `.app-dark` class (matches the
+   PrimeNG darkModeSelector configured in app.config.ts). */
+@custom-variant dark (&:where(.app-dark, .app-dark *));
+
+/* ----------------------------------------------------------------------------
+   Design tokens — premium monochrome palette
+   ---------------------------------------------------------------------------- */
+:root {
+  /* Light theme canvas + chrome */
+  --phorma-canvas-bg:    #f2f3f5;
+  /* Glass panels — low opacity so the canvas bleeds through */
+  --phorma-chrome-bg:    rgba(242, 243, 245, 0.55);
+  --phorma-border:       rgba(255, 255, 255, 0.55);
+  /* Dot grid */
+  --phorma-dot-color:    rgba(80, 85, 100, 0.28);
+  /* Canvas cursor spotlight — very dim white wash, no colour */
+  --phorma-spotlight-color: rgba(255, 255, 255, 0.03);
+  /* Spotlight card */
+  --phorma-card-bg:      rgba(255, 255, 255, 0.65);
+  --phorma-card-border:  rgba(0, 0, 0, 0.07);
+  --phorma-card-border-glow: rgba(255, 255, 255, 0.75);
+  --phorma-card-fill-glow:   rgba(255, 255, 255, 0.06);
+  /* Flow nodes */
+  --phorma-node-bg:             #ffffff;
+  --phorma-node-header-bg:      #f7f8fa;
+  --phorma-node-border:         rgba(0, 0, 0, 0.10);
+  --phorma-node-border-active:  rgba(0, 0, 0, 0.28);
+  --phorma-node-divider:        rgba(0, 0, 0, 0.07);
+  --phorma-node-shadow:         0 2px 8px rgba(0,0,0,0.08);
+  --phorma-node-shadow-active:  0 4px 20px rgba(0,0,0,0.14);
+  --phorma-node-icon-bg:        rgba(0, 0, 0, 0.05);
+  --phorma-node-badge-bg:       rgba(0, 0, 0, 0.06);
+  --phorma-node-badge-color:    rgba(0, 0, 0, 0.45);
+  --phorma-node-row-hover:      rgba(0, 0, 0, 0.03);
+  --phorma-code-default:        rgba(80, 85, 100, 0.82);
+  --phorma-code-string:         #16825d;
+  --phorma-code-boolean:        #7952b3;
+  --phorma-code-number:         #b35f00;
+  --phorma-code-nullish:        #6f42c1;
+  --phorma-code-function:       #8250df;
+  --phorma-code-object:         #57606a;
+  --phorma-code-type:           #0550ae;
+  --phorma-connector-bg:        rgba(0, 0, 0, 0.15);
+  --phorma-connector-border:    rgba(0, 0, 0, 0.22);
+  --phorma-connector-hover:     var(--p-primary-color, #67708a);
+  --phorma-connector-active:    var(--p-primary-color, #67708a);
+  /* Connection wire */
+  --phorma-wire-color:          rgba(100, 105, 120, 0.5);
+  --phorma-wire-hover-color:    var(--p-primary-color, #67708a);  /* Glass surface (drag preview, collapse button) */
+  --phorma-glass-bg:            rgba(242, 243, 245, 0.85);
+  /* Soft elevation shadow for floating chrome (terminal dock, sidebars).
+     Light theme keeps this very subtle so it doesn't read as a dark band. */
+  --phorma-panel-shadow:        0 -2px 10px rgba(15, 23, 42, 0.06);
+  /* ── Semantic accent tokens ────────────────────────────────────────────
+     Fixed semantic colours that should NOT follow the configurable primary
+     palette. Blue = selection / active-tab highlight; green = success / save. */
+  --phorma-accent-blue:         #3b82f6;
+  --phorma-accent-blue-soft:    rgba(59, 130, 246, 0.16);
+  --phorma-accent-blue-ring:    rgba(59, 130, 246, 0.45);
+  --phorma-accent-green:        #22c55e;
+  --phorma-accent-green-hover:  #16a34a;
+  --phorma-accent-green-contrast: #ffffff;
+  /* Amber = warning, Red = error — used by toasts and validation surfaces. */
+  --phorma-accent-amber:        #f59e0b;
+  --phorma-accent-amber-soft:   rgba(245, 158, 11, 0.16);
+  --phorma-accent-red:          #ef4444;
+  --phorma-accent-red-soft:     rgba(239, 68, 68, 0.16);
+  color-scheme: light;
+}
+
+:root.app-dark {
+  /* Dark theme — Cursor-like deep charcoal */
+  --phorma-canvas-bg:    #0d0e11;
+  /* Glass panels — low opacity so the canvas bleeds through */
+  --phorma-chrome-bg:    rgba(14, 15, 18, 0.45);
+  --phorma-border:       rgba(255, 255, 255, 0.08);
+  /* Dot grid */
+  --phorma-dot-color:    rgba(180, 185, 210, 0.22);
+  /* Canvas cursor spotlight — very dim white, no colour tint */
+  --phorma-spotlight-color: rgba(255, 255, 255, 0.025);
+  /* Spotlight card */
+  --phorma-card-bg:      #111114;
+  --phorma-card-border:  rgba(255, 255, 255, 0.05);
+  --phorma-card-border-glow: rgba(255, 255, 255, 0.70);
+  --phorma-card-fill-glow:   rgba(255, 255, 255, 0.08);
+  /* Flow nodes */
+  --phorma-node-bg:             #18191e;
+  --phorma-node-header-bg:      #1e1f25;
+  --phorma-node-border:         rgba(255, 255, 255, 0.07);
+  --phorma-node-border-active:  rgba(255, 255, 255, 0.22);
+  --phorma-node-divider:        rgba(255, 255, 255, 0.05);
+  --phorma-node-shadow:         0 2px 12px rgba(0,0,0,0.5);
+  --phorma-node-shadow-active:  0 4px 24px rgba(0,0,0,0.7);
+  --phorma-node-icon-bg:        rgba(255, 255, 255, 0.06);
+  --phorma-node-badge-bg:       rgba(255, 255, 255, 0.06);
+  --phorma-node-badge-color:    rgba(255, 255, 255, 0.40);
+  --phorma-node-row-hover:      rgba(255, 255, 255, 0.03);
+  --phorma-code-default:        rgba(180, 185, 210, 0.74);
+  --phorma-code-string:         #89d185;
+  --phorma-code-boolean:        #c586c0;
+  --phorma-code-number:         #f0a45d;
+  --phorma-code-nullish:        #c586c0;
+  --phorma-code-function:       #dcdcaa;
+  --phorma-code-object:         #9cdcfe;
+  --phorma-code-type:           #4ec9b0;
+  --phorma-connector-bg:        rgba(255, 255, 255, 0.12);
+  --phorma-connector-border:    rgba(255, 255, 255, 0.18);
+  --phorma-connector-hover:     var(--p-primary-color, #878fa3);
+  --phorma-connector-active:    var(--p-primary-color, #878fa3);
+  /* Connection wire */
+  --phorma-wire-color:          rgba(180, 185, 210, 0.25);
+  --phorma-wire-hover-color:    var(--p-primary-color, #878fa3);
+  /* Glass surface (drag preview, collapse button) */
+  --phorma-glass-bg:            rgba(18, 19, 24, 0.88);
+  /* Soft elevation shadow for floating chrome — deeper in dark mode. */
+  --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.35);
+  /* ── Semantic accent tokens ────────────────────────────────────────────
+     Fixed semantic colours that should NOT follow the configurable primary
+     palette. Blue = selection / active-tab highlight; green = success / save.
+     Slightly brighter in dark mode for contrast. */
+  --phorma-accent-blue:         #60a5fa;
+  --phorma-accent-blue-soft:    rgba(96, 165, 250, 0.18);
+  --phorma-accent-blue-ring:    rgba(96, 165, 250, 0.50);
+  --phorma-accent-green:        #4ade80;
+  --phorma-accent-green-hover:  #22c55e;
+  --phorma-accent-green-contrast: #052e16;
+  /* Amber = warning, Red = error — brighter in dark mode for contrast. */
+  --phorma-accent-amber:        #fbbf24;
+  --phorma-accent-amber-soft:   rgba(251, 191, 36, 0.18);
+  --phorma-accent-red:          #f87171;
+  --phorma-accent-red-soft:     rgba(248, 113, 113, 0.18);
+  color-scheme: dark;
+}
+
+/* ----------------------------------------------------------------------------
+   Native desktop resets — kill all "web app" behaviours
+   ---------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden; /* No window-level scrolling — the app owns the viewport. */
+  background: var(--phorma-canvas-bg);
+  color: var(--p-text-color, #e6e6e6);
+  font-family:
+    'Nunito', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  /* Nunito reads slightly larger than Inter at the same size — tighten the
+     letter-spacing so dense UI chrome (toolbar, sidebars) doesn't feel loose. */
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Disable text selection everywhere by default (native-app feel). */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Re-enable selection only where the user genuinely needs it. */
+input,
+textarea,
+[contenteditable='true'],
+.selectable,
+.selectable * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+/* Icons and buttons inside selectable areas: never copyable, proper cursor. */
+.selectable i,
+.selectable .ti,
+.selectable button,
+.selectable [role='button'] {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  cursor: pointer;
+}
+
+/* Icons not inside a button: default cursor, not text. */
+.selectable i:not(button i) {
+  cursor: default;
+}
+
+/* Remove the blue focus glow on mouse, keep a subtle ring for keyboard a11y. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--p-primary-color, #67708a);
+  outline-offset: 1px;
+}
+
+/* No default drag of images/links. */
+img,
+a {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* ----------------------------------------------------------------------------
+   Scrollbars — hidden entirely on the window, minimal inside scroll regions
+   ---------------------------------------------------------------------------- */
+
+/* Completely hide the window scrollbar. */
+html,
+body {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
+
+/* Sleek, minimal scrollbars for interior scroll areas (sidebars, menus). */
+.overflow-y-auto,
+.overflow-auto,
+.overflow-x-auto,
+.p-scroller,
+.p-overlay {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 145, 160, 0.35) transparent;
+}
+.overflow-y-auto::-webkit-scrollbar,
+.overflow-auto::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar,
+.p-scroller::-webkit-scrollbar,
+.p-overlay::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb,
+.overflow-auto::-webkit-scrollbar-thumb,
+.overflow-x-auto::-webkit-scrollbar-thumb,
+.p-scroller::-webkit-scrollbar-thumb,
+.p-overlay::-webkit-scrollbar-thumb {
+  background: rgba(140, 145, 160, 0.3);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb:hover,
+.overflow-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 145, 160, 0.5);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ----------------------------------------------------------------------------
+   Chrome surfaces — liquid glass panels floating over the canvas
+   ---------------------------------------------------------------------------- */
+
+/*
+ * Base glass surface shared by toolbar, sidebars, and status bar.
+ *
+ * Key principles from the liquid glass skill:
+ *   - Low-opacity background so canvas content bleeds through.
+ *   - Strong backdrop-blur + saturate to create the frosted-glass material.
+ *   - 1px border using the brighter edge of the glass for the specular rim.
+ *   - ::after specular shine: a diagonal linear-gradient highlight that
+ *     makes the surface read as glass rather than just transparent.
+ */
+/*
+ * Glass surface mixin applied to sidebars and status bar.
+ *
+ * Toolbar glass lives in toolbar.scss :host (component owns its positioning).
+ * Sidebars: class on <aside> inside sidebar.html — global CSS reaches it fine.
+ * Status bar: class on <footer> in app.html — plain element, no encapsulation.
+ */
+.phorma-sidebar,
+/*
+ * .phorma-sidebar — <aside> inside sidebar.html, has h-full/w-60 so
+ *   position:relative is safe and ::after is clipped by overflow:hidden.
+ *
+ * .phorma-statusbar — <footer> in app.html with Tailwind `absolute bottom-0`.
+ *   Must NOT set position here or it will override Tailwind's `absolute`.
+ *   overflow:hidden is safe because the element is sized by h-6 + Tailwind.
+ */
+.phorma-sidebar,
+.phorma-statusbar {
+  overflow: hidden;
+  background: var(--phorma-chrome-bg);
+  backdrop-filter: blur(20px) saturate(200%) brightness(1.04);
+  -webkit-backdrop-filter: blur(20px) saturate(200%) brightness(1.04);
+  border-color: var(--phorma-border);
+}
+
+/* sidebar needs position:relative for its ::after to anchor correctly */
+.phorma-sidebar {
+  position: relative;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+}
+
+/*
+ * Specular shimmer is applied ONLY to the left sidebar. The right panel,
+ * terminal, and status bar deliberately omit it so the chrome reads as a
+ * consistent set of plain frosted-glass surfaces (only the left "primary"
+ * panel gets the glossy highlight).
+ */
+.phorma-sidebar--left::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    transparent 45%,
+    transparent 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+}
+
+/* statusbar MUST NOT set position — Tailwind's `absolute` must win.
+   No specular shine — same reasoning as the Properties right panel. */
+.phorma-statusbar {
+  border-top: 1px solid var(--phorma-border);
+
+  &::after {
+    display: none;
+  }
+}
+
+/* App root fills the window. */
+app-root {
+  display: block;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ----------------------------------------------------------------------------
+   Type option styling (kind-specific selects)
+   ---------------------------------------------------------------------------- */
+
+.phorma-type-option {
+  font-family: Consolas, 'Cascadia Code', monospace;
+  font-size: 0.75rem;
+  text-transform: lowercase;
+  color: var(--phorma-code-default, var(--p-text-color));
+}
+
+.phorma-type-option--string { color: var(--phorma-code-string); }
+.phorma-type-option--boolean { color: var(--phorma-code-boolean); }
+.phorma-type-option--number { color: var(--phorma-code-number); }
+.phorma-type-option--object { color: var(--phorma-code-object); }
+.phorma-type-option--type { color: var(--phorma-code-type); }
+.phorma-type-option--default { color: var(--phorma-code-default, var(--p-text-muted-color)); }
+
+/* ----------------------------------------------------------------------------
+   Spotlight card — Windows-style border-glow that follows the cursor
+   ---------------------------------------------------------------------------- */
+
+/**
+ * Spotlight card — faithful port of the Windows Security card hover effect.
+ *
+ * Two pseudo-elements, both driven by --mouse-x / --mouse-y (set per-element
+ * by SpotlightCardDirective, running outside Angular's zone):
+ *
+ *   ::before — BORDER GLOW
+ *     A radial-gradient painted over a 1 px inset area, then clipped to only
+ *     the border ring via the mask-composite / mask-exclude trick. Gives the
+ *     bright white border that follows the cursor.
+ *
+ *   ::after — INNER FILL GLOW
+ *     A softer, dimmer radial-gradient filling the card surface. Adds depth
+ *     without washing out the content.
+ *
+ * Both fade in on hover via `opacity` so there is a smooth 0 → 1 transition.
+ * Colors are intentionally dim white — no blue/purple — for the charcoal look.
+ */
+.spotlight-card {
+  position: relative;
+  overflow: hidden;
+
+  /* Per-element cursor position — initialised to centre, updated by directive */
+  --mouse-x: 50%;
+  --mouse-y: 50%;
+  --glow-opacity: 0;
+
+  border-radius: 12px;
+  background: var(--phorma-card-bg);
+  border: 1px solid var(--phorma-card-border);
+
+  /* ── BORDER GLOW ────────────────────────────────────────────────────────── */
+  /* padding:1px makes the gradient fill the 1px border band.               */
+  /* The xor mask excludes the content-box, leaving only the border strip.  */
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+
+    background: radial-gradient(
+      500px circle at var(--mouse-x) var(--mouse-y),
+      var(--phorma-card-border-glow),
+      transparent 40%
+    );
+
+    /* Clip to border only — the canonical mask-composite trick */
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+
+    opacity: var(--glow-opacity);
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* ── INNER FILL GLOW ────────────────────────────────────────────────────── */
+  /* Dimmer, larger gradient — fills the card surface with a soft white wash. */
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+
+    background: radial-gradient(
+      500px circle at var(--mouse-x) var(--mouse-y),
+      var(--phorma-card-fill-glow),
+      transparent 40%
+    );
+
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  &:hover::after {
+    opacity: 1;
+  }
+
+  /* Content sits on top of both glow layers */
+  > * {
+    position: relative;
+    z-index: 3;
+  }
+}
+
+/* Accessibility — respect user motion / transparency preferences
+   ---------------------------------------------------------------------------- */
+@media (prefers-reduced-transparency: reduce) {
+  .phorma-toolbar,
+  .phorma-statusbar,
+  .phorma-sidebar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    /* Fall back to a solid near-opaque surface */
+    background: color-mix(in srgb, var(--phorma-canvas-bg) 95%, transparent);
+
+    &::after {
+      display: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

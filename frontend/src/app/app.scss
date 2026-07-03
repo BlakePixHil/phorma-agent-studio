@@ -1,0 +1,25 @@
+// Sync status message in the footer status bar.
+// Fades in when a sync completes, fades out after 4s (cleared by the
+// BuilderService timer). The transition makes the change visible between saves.
+.phorma-sync-status {
+  animation: phorma-sync-fade 4s ease forwards;
+}
+
+@keyframes phorma-sync-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}

@@ -1,0 +1,31 @@
+<div class="phorma-workflows">
+  @if (workflow.library().length > 0) {
+    <ul class="phorma-workflows__list">
+      @for (spec of workflow.library(); track spec.id) {
+        <li>
+          <button type="button" class="phorma-workflows__item" (click)="open(spec)">
+            <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+            <span class="phorma-workflows__meta">
+              <span class="phorma-workflows__name">{{ spec.name }}</span>
+              <span class="phorma-workflows__date">{{ spec.savedAt | date: 'MMM d, h:mm a' }}</span>
+            </span>
+            <button
+              type="button"
+              class="phorma-workflows__delete"
+              aria-label="Delete workflow"
+              title="Delete"
+              (click)="remove($event, spec)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          </button>
+        </li>
+      }
+    </ul>
+  } @else {
+    <div class="phorma-workflows__placeholder">
+      <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+      <p>No saved workflows yet.<br />Save one with Ctrl+S.</p>
+    </div>
+  }
+</div>

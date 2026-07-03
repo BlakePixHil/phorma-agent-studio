@@ -1,0 +1,85 @@
+<section
+  class="phorma-terminal-dock"
+  [class.phorma-terminal-dock--collapsed]="terminal.collapsed()"
+  [class.phorma-terminal-dock--resizing]="resizing()"
+  [style.left.px]="leftOffset()"
+  [style.right.px]="rightOffset()"
+  [style.height.px]="dockHeight()"
+>
+  <div class="phorma-terminal-resize" (pointerdown)="onResizeStart($event)">
+    <button
+      class="phorma-terminal-collapse"
+      [pTooltip]="terminal.collapsed() ? 'Open terminal' : 'Collapse terminal'"
+      tooltipPosition="top"
+      (click)="terminal.toggle()"
+    >
+      <i [class]="terminal.collapsed() ? 'ti ti-chevron-up' : 'ti ti-chevron-down'"></i>
+    </button>
+  </div>
+
+  @if (!terminal.collapsed()) {
+    <div class="phorma-terminal-panel flex h-full min-h-0 flex-col">
+      <div class="phorma-terminal-header flex items-center gap-2 pr-2">
+        <div class="phorma-terminal-tabstrip flex min-w-0 flex-1 items-stretch overflow-x-auto">
+          @for (channel of terminal.channels(); track channel.id) {
+            <button
+              type="button"
+              class="phorma-terminal-tab flex items-center gap-1.5 px-3 text-xs"
+              [class.phorma-terminal-tab--active]="activeValue() === channel.id"
+              (click)="setActive(channel.id)"
+            >
+              <i [class]="channel.icon"></i>
+              <span>{{ channel.label }}</span>
+              @if (channel.id === 'problems' && terminal.errorCount() > 0) {
+                <span class="rounded-full bg-red-500/20 px-1.5 text-[10px] text-red-300">
+                  {{ terminal.errorCount() }}
+                </span>
+              }
+            </button>
+          }
+        </div>
+        <span class="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--p-text-muted-color)]">
+          {{ statusLabel() }}
+        </span>
+        <p-button
+          [text]="true"
+          severity="secondary"
+          size="small"
+          [icon]="copied() ? 'ti ti-check' : 'ti ti-copy'"
+          [pTooltip]="copied() ? 'Copied!' : 'Copy output'"
+          tooltipPosition="top"
+          [disabled]="entries().length === 0"
+          (onClick)="copyActive()"
+        />
+        <p-button
+          [text]="true"
+          severity="secondary"
+          size="small"
+          icon="ti ti-trash"
+          pTooltip="Clear current tab"
+          tooltipPosition="top"
+          (onClick)="terminal.clear()"
+        />
+      </div>
+
+      <div
+        #terminalBody
+        class="phorma-terminal-body min-h-0 flex-1 overflow-auto"
+        (mouseenter)="scrollToBottom()"
+      >
+        @if (entries().length > 0) {
+          <div class="phorma-terminal-output selectable">
+            @for (entry of entries(); track entry.id) {
+              <div class="phorma-terminal-line" [attr.data-level]="entry.level">
+                <span class="phorma-terminal-time">{{ formatTime(entry.timestamp) }}</span>
+                <span class="phorma-terminal-message">{{ entry.message }}</span>
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="phorma-terminal-empty">No output yet.</div>
+        }
+      </div>
+    </div>
+  }
+</section>

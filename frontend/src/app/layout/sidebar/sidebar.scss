@@ -1,0 +1,220 @@
+// ── Host positioning ─────────────────────────────────────────────────────
+:host {
+  display: block;
+  position: absolute;
+  top: 44px;  // below toolbar (h-11 = 44px)
+  bottom: 0;  // extends to the viewport bottom; the footer (z-30) sits on top
+  z-index: 10;
+}
+
+:host(.left-sidebar) {
+  left: 0;
+}
+
+:host(.right-sidebar) {
+  right: 0;
+}
+
+// ── Main panel surface ───────────────────────────────────────────────────
+// NOTE: the dividing line is rendered ONCE, by the resize handle's hairline
+// (`.phorma-resize-handle--left/--right::after`). The panel itself must NOT
+// carry its own border or we get a doubled-up line next to the drag handle.
+.phorma-sidebar {
+  overflow: hidden;
+  transition: width 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  contain: layout paint;
+  border: 0;
+
+  &--resizing {
+    transition: none;
+  }
+}
+
+// ── Tab strip ────────────────────────────────────────────────────────────
+.phorma-tabstrip {
+  min-height: 36px;
+  scrollbar-width: none;
+  overflow-y: hidden;
+  touch-action: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+.phorma-tab {
+  color: var(--p-text-muted-color);
+  border-radius: 6px;
+  user-select: none;
+
+  &--active {
+    color: var(--p-text-color);
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  &:not(.phorma-tab--active):hover {
+    color: var(--p-text-color);
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+// CDK drag placeholder (ghost slot while dragging)
+.phorma-tab-placeholder {
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  color: transparent;
+  flex: 0 0 auto;
+  opacity: 1;
+  overflow: hidden;
+  pointer-events: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  > * {
+    visibility: hidden;
+  }
+}
+
+.phorma-tab-placeholder-spacer {
+  width: 14px;
+}
+
+// CDK drag preview card
+:host ::ng-deep .phorma-drag-preview {
+  background: var(--phorma-glass-bg, rgba(30, 30, 30, 0.85));
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--p-text-color);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.cdk-drag-animating {
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+// ── Pane content ─────────────────────────────────────────────────────────
+.phorma-pane {
+  display: block;
+  padding: 8px;
+
+  &--hidden {
+    display: none;
+  }
+}
+
+.phorma-pane-scroll {
+  padding-bottom: calc(20px);
+}
+
+// ── Resize / collapse handle ─────────────────────────────────────────────
+// Absolutely positioned over the panel's inner edge so the panel itself fills
+// the full host width (no transparent gap of canvas between content and the
+// divider line). 6px hit area straddling the seam, centred on the hairline.
+.phorma-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 150ms ease;
+  z-index: 11;
+
+  &:hover,
+  &:active {
+    background: rgba(127, 127, 127, 0.12);
+
+    .phorma-collapse-btn {
+      opacity: 1;
+    }
+  }
+
+  // Sit on the inner edge of each side, hairline centred in the hit area.
+  &--left {
+    right: -3px;
+  }
+
+  &--right {
+    left: -3px;
+  }
+
+  // Thin visible divider hairline (the single dividing line).
+  &--left::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    left: 50%;
+    width: 1px;
+    background: var(--phorma-border);
+  }
+
+  &--right::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    left: 50%;
+    width: 1px;
+    background: var(--phorma-border);
+  }
+}
+
+// Pull-tab collapse button — protrudes onto the canvas, flush against the
+// panel edge (mirrors the terminal's pull-tab: same 32x16 footprint, just
+// rotated to the vertical edge).
+.phorma-collapse-btn {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--phorma-border);
+  background: var(--phorma-glass-bg, rgba(30, 30, 30, 0.7));
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 150ms, color 150ms;
+  z-index: 12;
+
+  &:hover {
+    color: var(--p-text-color);
+  }
+}
+
+// Left panel: tab sticks out to the RIGHT of the divider (onto the canvas).
+.phorma-resize-handle--left .phorma-collapse-btn {
+  left: 50%;
+  transform: translateY(-50%);
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+}
+
+// Right panel: tab sticks out to the LEFT of the divider (onto the canvas).
+.phorma-resize-handle--right .phorma-collapse-btn {
+  right: 50%;
+  transform: translateY(-50%);
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+// Keep the toggle visible while collapsed — it's the only way to re-open.
+:host(.left-sidebar) .phorma-sidebar--collapsed ~ .phorma-resize-handle .phorma-collapse-btn,
+:host(.right-sidebar) .phorma-sidebar--collapsed ~ .phorma-resize-handle .phorma-collapse-btn,
+.phorma-sidebar--collapsed + .phorma-resize-handle .phorma-collapse-btn {
+  opacity: 1;
+}

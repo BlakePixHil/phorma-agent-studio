@@ -1,0 +1,176 @@
+:host {
+  // Positioned by app.html (top below toolbar; left/right offset by the
+  // adjacent sidebar widths so it never overlaps the panels).
+  position: absolute;
+  display: block;
+  height: 36px;
+  z-index: 20; // above sidebars (z-10), below the toolbar (z-50)
+  pointer-events: none; // let empty regions pass clicks to the canvas
+}
+
+.phorma-doc-tabs {
+  pointer-events: auto;
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  height: 100%;
+  padding: 0 0.35rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+
+  background: var(--phorma-chrome-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--phorma-border);
+
+  &::-webkit-scrollbar {
+    height: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--p-text-color) 18%, transparent);
+  }
+}
+
+.phorma-doc-tabs__list {
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.phorma-doc-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 14rem;
+  padding: 0 0.55rem 0 0.7rem;
+  margin: 0.3rem 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.14s ease, color 0.14s ease;
+
+  &:hover {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
+  }
+
+  &--active {
+    color: var(--phorma-accent-blue);
+    background: var(--phorma-accent-blue-soft);
+  }
+  &--active:hover {
+    color: var(--phorma-accent-blue);
+  }
+
+  &--pinned {
+    flex: 0 0 auto;
+  }
+}
+
+.phorma-doc-tab__icon {
+  font-size: 0.85rem;
+  flex: 0 0 auto;
+}
+
+.phorma-doc-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Trailing slot holds either the unsaved dot or the close button.
+.phorma-doc-tab__trailing {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+// VS Code-style unsaved-change indicator.
+.phorma-doc-tab__dirty {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+  transition: opacity 0.12s ease;
+}
+
+.phorma-doc-tab__close {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0.35rem;
+  // Opaque-on-hover backing so a dirty dot underneath never shows through.
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0; // hidden until the tab is hovered
+  transition: opacity 0.12s ease, background 0.12s ease;
+
+  i {
+    font-size: 0.72rem;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
+  }
+}
+
+// On hover, swap the dirty dot for the close button: hide the dot entirely so
+// the two never overlap, and reveal the ✕ in its place. The pinned Project Map
+// tab has no close button, so its dot must stay visible on hover.
+.phorma-doc-tab:not(.phorma-doc-tab--pinned):hover .phorma-doc-tab__dirty {
+  opacity: 0;
+}
+.phorma-doc-tab:hover .phorma-doc-tab__close {
+  opacity: 1;
+}
+
+// CDK drag visuals.
+.phorma-doc-tab.cdk-drag-preview {
+  border-radius: 0.5rem;
+  background: var(--phorma-card-bg);
+  border: 1px solid var(--phorma-card-border);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+  opacity: 0.95;
+}
+
+.phorma-doc-tab.cdk-drag-placeholder {
+  opacity: 0.35;
+}
+
+.cdk-drag-animating {
+  transition: transform 180ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.phorma-doc-tabs__list.cdk-drop-list-dragging .phorma-doc-tab:not(.cdk-drag-placeholder) {
+  transition: transform 180ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.phorma-doc-tab__preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.7rem;
+  height: 30px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}

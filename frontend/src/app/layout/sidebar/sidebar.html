@@ -1,0 +1,93 @@
+<!--
+  Outer wrapper: host-driven width + collapse transition.
+  The resize handle sits on the inner edge (right for left panel, left for right).
+-->
+<aside
+  class="phorma-sidebar flex h-full flex-col select-none"
+  [class.phorma-sidebar--left]="side() === 'left'"
+  [class.phorma-sidebar--right]="side() === 'right'"
+  [class.phorma-sidebar--collapsed]="collapsed()"
+  [class.phorma-sidebar--resizing]="resizing()"
+  [style.width.px]="collapsed() ? 0 : panelWidth()"
+>
+  <!-- ── Tab strip ──────────────────────────────────────────────────────── -->
+  @if (!collapsed()) {
+    <div
+      class="phorma-tabstrip flex items-end gap-1 border-b border-white/5 overflow-x-auto px-2 py-1"
+      cdkDropList
+      cdkDropListOrientation="horizontal"
+      [cdkDropListData]="sideTabs()"
+      (cdkDropListDropped)="onTabDrop($event)"
+    >
+      @for (tab of sideTabs(); track tab.id) {
+        <div
+          class="phorma-tab group relative flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-sm font-medium whitespace-nowrap transition-colors"
+          [class.phorma-tab--active]="tab.id === activeTabId()"
+          (click)="setActive(tab.id)"
+          cdkDrag
+          cdkDragLockAxis="x"
+          [cdkDragData]="tab"
+          [cdkDragPreviewClass]="'phorma-drag-preview'"
+        >
+          <div
+            *cdkDragPlaceholder
+            class="phorma-tab phorma-tab-placeholder flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium whitespace-nowrap"
+          >
+            <span>{{ tab.label }}</span>
+            <span class="phorma-tab-placeholder-spacer"></span>
+          </div>
+
+          <span>{{ tab.label }}</span>
+        </div>
+      }
+    </div>
+  }
+
+  <!-- ── Active pane content ────────────────────────────────────────────── -->
+  @if (!collapsed()) {
+    <div class="phorma-pane-scroll flex-1 overflow-y-auto">
+      @for (tab of sideTabs(); track tab.id) {
+        <div
+          class="phorma-pane h-full"
+          [class.phorma-pane--hidden]="tab.id !== activeTabId()"
+        >
+          @if (paneMap.get(tab.id); as pane) {
+            <ng-container [ngTemplateOutlet]="pane.templateRef" />
+          } @else {
+            <!-- Placeholder when no pane content has been projected for this tab -->
+            <div class="flex h-full flex-col items-center justify-center gap-2 text-center text-[var(--p-text-muted-color)] p-4">
+              <i [class]="tab.icon" class="text-2xl opacity-40"></i>
+              <p class="text-xs opacity-60">{{ tab.label }}</p>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+</aside>
+
+<!-- ── Resize / collapse handle ─────────────────────────────────────────── -->
+<div
+  class="phorma-resize-handle"
+  [class.phorma-resize-handle--left]="side() === 'left'"
+  [class.phorma-resize-handle--right]="side() === 'right'"
+  (pointerdown)="onResizeStart($event)"
+>
+  <!-- Collapse / expand toggle in the centre of the handle -->
+  <button
+    class="phorma-collapse-btn"
+    (click)="toggleCollapse()"
+    [pTooltip]="collapsed() ? 'Expand panel' : 'Collapse panel'"
+    tooltipPosition="right"
+  >
+    <i
+      class="text-[9px]"
+      [class]="side() === 'left'
+        ? (collapsed() ? 'ti ti-chevron-right' : 'ti ti-chevron-left')
+        : (collapsed() ? 'ti ti-chevron-left' : 'ti ti-chevron-right')"
+    ></i>
+  </button>
+</div>
+
+<!-- Hidden pane templates are collected by @ContentChildren(SidePanelPane) -->
+<ng-content />

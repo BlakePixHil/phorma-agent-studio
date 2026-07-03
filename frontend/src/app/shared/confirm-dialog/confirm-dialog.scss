@@ -1,0 +1,83 @@
+:host {
+  display: contents;
+}
+
+.phorma-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  /* Toned-down backdrop: a flat dark wash with a very light blur.
+     The previous radial purple glow + heavy blur read as too "glassy". */
+  background: rgba(3, 7, 18, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.phorma-confirm__card {
+  position: relative;
+  width: min(420px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 20px;
+  /* Near-opaque surface — just enough transparency to hint at the backdrop
+     without the frosted-glass gradient stack. Uses PrimeNG surface tokens so
+     it tracks the active theme. */
+  background: var(--p-content-background, rgba(20, 22, 30, 0.92));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  color: var(--p-text-color, #f8fafc);
+}
+
+.phorma-confirm__header {
+  position: relative;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.phorma-confirm__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  background: var(--p-hover-background, rgba(255, 255, 255, 0.06));
+  color: var(--p-primary-color, #878fa3);
+}
+
+.phorma-confirm__icon--danger {
+  color: var(--p-red-400, #fca5a5);
+  background: color-mix(in srgb, var(--p-red-500, #ef4444) 14%, transparent);
+}
+
+.phorma-confirm h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.phorma-confirm p {
+  margin: 6px 0 0;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.phorma-confirm__actions {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* PrimeNG button sizing tweak — keep the dialog actions compact. */
+:host ::ng-deep .phorma-confirm__btn.p-button {
+  min-width: 84px;
+}

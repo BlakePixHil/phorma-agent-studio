@@ -1,0 +1,235 @@
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.phorma-props {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 0;
+  padding: 0.65rem 0.75rem 0.8rem;
+  overflow-y: auto;
+}
+
+.phorma-props__head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+
+  i {
+    font-size: 0.95rem;
+    color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-props__kind {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.phorma-props__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.phorma-props__label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+
+  &--gap {
+    margin-top: 0.45rem;
+  }
+}
+
+.phorma-props__input,
+.phorma-props__textarea {
+  width: 100%;
+  padding: 0.38rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.76rem;
+
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-props__textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.phorma-props__input--mono {
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.phorma-props__row {
+  display: flex;
+  gap: 0.45rem;
+
+  .phorma-props__method {
+    flex-shrink: 0;
+    width: 6.5rem;
+  }
+}
+
+.phorma-props__hint {
+  margin: 0;
+  font-size: 0.66rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-props__ports {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+}
+
+.phorma-props__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+}
+
+.phorma-props__add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-props__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 0.5rem;
+  color: var(--p-text-muted-color);
+
+  i {
+    font-size: 1.6rem;
+    opacity: 0.6;
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.75rem;
+  }
+}
+
+// ── MCP secret / args rows ─────────────────────────────────────────────────
+
+.phorma-props__provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 8.5rem;
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.phorma-props__ok {
+  color: var(--phorma-accent-green, #34d399);
+  font-size: 0.8rem;
+}
+
+.phorma-props__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.36rem 0.7rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.phorma-props__add-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+}

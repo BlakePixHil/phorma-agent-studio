@@ -1,0 +1,70 @@
+<div class="phorma-palette">
+  <div class="phorma-palette__search">
+    <i class="ti ti-search" aria-hidden="true"></i>
+    <input
+      type="search"
+      placeholder="Search nodes…"
+      [value]="query()"
+      (input)="onSearchInput($event)"
+      aria-label="Search nodes"
+    />
+  </div>
+
+  <div class="phorma-palette__scroll">
+    @for (section of sections(); track section.category) {
+      <section class="phorma-palette__section">
+        <header class="phorma-palette__heading" [style.--section-color]="section.color">
+          <span class="phorma-palette__dot" aria-hidden="true"></span>
+          {{ section.label }}
+        </header>
+
+        <div class="phorma-palette__grid">
+          @for (entry of section.entries; track entry.id) {
+            <button
+              type="button"
+              class="phorma-palette__item"
+              draggable="true"
+              (dragstart)="onDragStart($event, entry)"
+              (dragend)="onDragEnd()"
+              (click)="onItemClick(entry)"
+              [title]="entry.description + ' (click or drag to add)'"
+            >
+              <i class="phorma-palette__icon {{ entry.icon }}" aria-hidden="true"></i>
+              <span class="phorma-palette__label">{{ entry.label }}</span>
+            </button>
+          }
+        </div>
+      </section>
+    }
+
+    @if (mcpPresets().length > 0) {
+      <section class="phorma-palette__section">
+        <header class="phorma-palette__heading" style="--section-color: #fbbf24">
+          <span class="phorma-palette__dot" aria-hidden="true"></span>
+          MCP Servers
+        </header>
+
+        <div class="phorma-palette__grid">
+          @for (preset of mcpPresets(); track preset.id) {
+            <button
+              type="button"
+              class="phorma-palette__item"
+              draggable="true"
+              (dragstart)="onPresetDragStart($event, preset)"
+              (dragend)="onDragEnd()"
+              (click)="onPresetClick(preset)"
+              [title]="preset.description + ' (click or drag to add)'"
+            >
+              <i class="phorma-palette__icon {{ preset.icon }}" aria-hidden="true"></i>
+              <span class="phorma-palette__label">{{ preset.label }}</span>
+            </button>
+          }
+        </div>
+      </section>
+    }
+
+    @if (!hasResults()) {
+      <p class="phorma-palette__empty">No nodes match your search.</p>
+    }
+  </div>
+</div>

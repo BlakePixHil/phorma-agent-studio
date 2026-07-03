@@ -1,0 +1,113 @@
+<!--
+  Layout: the canvas fills the entire viewport.
+  All chrome panels (toolbar, sidebars, status bar) are absolutely positioned
+  and float OVER the canvas. This is what makes backdrop-filter actually blur
+  the canvas content that sits beneath the panels.
+-->
+<div class="phorma-shell relative h-screen w-screen overflow-hidden">
+
+  <!-- ── Canvas — fills the full window, behind everything (z-0) ── -->
+  <app-graph-canvas class="absolute inset-0 z-0" />
+
+  <!--
+    Sidebars share a single cdkDropListGroup so tabs can be dragged from one
+    sidebar's tab strip into the other. The wrapper is pointer-events-none so
+    it never intercepts canvas interaction; each sidebar positions itself.
+  -->
+  <div cdkDropListGroup class="contents pointer-events-none">
+    <!-- ── Left sidebar (z-10) ── -->
+    <app-sidebar side="left" class="left-sidebar pointer-events-auto">
+      <!--
+        Each <ng-template sidePanelPane [tabId]="'…'"> block is the content
+        for the matching registered tab. Tabs that have no template get an
+        auto-generated placeholder. Both sidebars receive every pane template
+        so tabs can be dragged between sides.
+      -->
+      <ng-template sidePanelPane tabId="agents">
+        <app-agents-palette />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="workflows">
+        <app-workflows-panel />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="prompt">
+        <app-prompt-panel />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="properties">
+        <app-properties-panel />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="runs">
+        <app-runs-panel />
+      </ng-template>
+    </app-sidebar>
+
+    <!-- ── Right sidebar (z-10) ── -->
+    <app-sidebar side="right" class="right-sidebar pointer-events-auto">
+      <ng-template sidePanelPane tabId="prompt">
+        <app-prompt-panel />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="properties">
+        <app-properties-panel />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="runs">
+        <app-runs-panel />
+      </ng-template>
+
+      <!-- These tabs may be moved here from the left -->
+      <ng-template sidePanelPane tabId="agents">
+        <app-agents-palette />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="workflows">
+        <app-workflows-panel />
+      </ng-template>
+    </app-sidebar>
+  </div>
+
+  <!-- ── Toolbar ── -->
+  <app-toolbar />
+
+  <!-- ── Document tab bar (below the toolbar, inset by panel widths) ── -->
+  <app-document-tabs
+    [style.top.px]="toolbarHeight"
+    [style.left.px]="tabBarLeft()"
+    [style.right.px]="tabBarRight()"
+  />
+
+  <!-- ── Bottom console ── -->
+  <app-bottom-terminal />
+
+  <!-- ── Shared liquid-glass confirmation overlay ── -->
+  <app-confirm-dialog />
+
+  <!-- ── Settings (provider keys / transport) ── -->
+  <app-settings-dialog />
+
+  <!-- ── Cloud (deploy / push / monitor) ── -->
+  <app-cloud-dialog />
+
+  <!-- ── Toast notifications (frosted glass, top-right) ── -->
+  <app-toast />
+
+  <!-- ── Status bar ── -->
+  <footer
+    class="phorma-statusbar absolute inset-x-0 bottom-0 z-30 flex h-6 items-center gap-3 px-3 text-[11px] text-[var(--p-text-muted-color)] select-none"
+  >
+    <span class="flex items-center gap-1">
+      <i class="ti ti-circle-filled text-[7px]" [class.text-green-500]="isDesktop"></i>
+      {{ isDesktop ? 'Desktop' : 'Browser preview' }}
+    </span>
+    <span class="opacity-50">·</span>
+    <span>{{ workflow.activeName() }}</span>
+    @if (workflow.isDirty()) {
+      <span class="opacity-70">— unsaved</span>
+    }
+    <span class="flex-1"></span>
+    <span class="capitalize">{{ terminal.phase() }}</span>
+  </footer>
+</div>
