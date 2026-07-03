@@ -55,7 +55,9 @@ export class ToolHostService implements ToolHost {
         return response;
       }
       case 'web-search-tool': {
-        const raw = await performWebSearch(argumentsJson, url => this.fetchText(url, 'GET', {}));
+        const raw = await performWebSearch(argumentsJson, (url, headers) =>
+          this.fetchText(url, 'GET', headers ?? {}),
+        );
         return raw;
       }
       case 'mcp-tool':

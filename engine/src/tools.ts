@@ -129,10 +129,16 @@ export function buildHttpToolRequest(
 }
 
 /** Fetches raw text from a URL. Hosts supply this (Rust proxy, plain fetch). */
-export type TextFetcher = (url: string) => Promise<string>;
+export type TextFetcher = (url: string, headers?: Record<string, string>) => Promise<string>;
 
 const DUCKDUCKGO_ENDPOINT = 'https://api.duckduckgo.com/';
 const WIKIPEDIA_API = 'https://en.wikipedia.org/w/api.php';
+
+/** User-Agent for outbound web-search requests. Wikipedia's API rejects
+ * requests with no User-Agent (HTTP 403 "Please set a user-agent"), and
+ * reqwest / Cloudflare Workers fetch send none by default. */
+const WEB_SEARCH_USER_AGENT = 'PhormaAgentStudio/0.1 (https://phorma.dev)';
+const WEB_SEARCH_HEADERS: Record<string, string> = { 'User-Agent': WEB_SEARCH_USER_AGENT };
 
 /**
  * Web search for agents. Tries DuckDuckGo's free Instant Answer API first
@@ -160,7 +166,7 @@ export async function performWebSearch(argumentsJson: string, fetchText: TextFet
 
 async function tryInstantAnswer(query: string, fetchText: TextFetcher): Promise<string | null> {
   const url = `${DUCKDUCKGO_ENDPOINT}?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-  const raw = await fetchText(url).catch(() => '');
+  const raw = await fetchText(url, WEB_SEARCH_HEADERS).catch(() => '');
   const parsed = safeParse(raw) as {
     AbstractText?: string;
     AbstractURL?: string;
@@ -181,8 +187,10 @@ async function tryInstantAnswer(query: string, fetchText: TextFetcher): Promise<
 }
 
 async function tryWikipediaSearch(query: string, fetchText: TextFetcher): Promise<string | null> {
-  const searchUrl = `${WIKIPEDIA_API}?action=query&list=search&format=json&srlimit=3&srsearch=${encodeURIComponent(query)}`;
-  const raw = await fetchText(searchUrl).catch(() => '');
+  // origin=* makes Wikipedia return CORS headers so browser fetch can read
+  // the response; harmless for the Rust proxy and Cloudflare Workers.
+  const searchUrl = `${WIKIPEDIA_API}?action=query&list=search&format=json&srlimit=3&srsearch=${encodeURIComponent(query)}&origin=*`;
+  const raw = await fetchText(searchUrl, WEB_SEARCH_HEADERS).catch(() => '');
   const parsed = safeParse(raw) as { query?: { search?: { title?: string; snippet?: string }[] } };
   const results = (parsed.query?.search ?? []).filter(result => result.title);
   if (results.length === 0) return null;
@@ -192,8 +200,8 @@ async function tryWikipediaSearch(query: string, fetchText: TextFetcher): Promis
   // Ground the answer with the top match's intro paragraph when available.
   const topTitle = results[0]?.title;
   if (topTitle) {
-    const extractUrl = `${WIKIPEDIA_API}?action=query&prop=extracts&exintro=1&explaintext=1&format=json&titles=${encodeURIComponent(topTitle)}`;
-    const extractRaw = await fetchText(extractUrl).catch(() => '');
+    const extractUrl = `${WIKIPEDIA_API}?action=query&prop=extracts&exintro=1&explaintext=1&format=json&titles=${encodeURIComponent(topTitle)}&origin=*`;
+    const extractRaw = await fetchText(extractUrl, WEB_SEARCH_HEADERS).catch(() => '');
     const extractParsed = safeParse(extractRaw) as {
       query?: { pages?: Record<string, { extract?: string }> };
     };

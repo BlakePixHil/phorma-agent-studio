@@ -320,7 +320,10 @@ class CloudToolHost implements ToolHost {
         return response.ok ? text : `HTTP ${response.status}: ${text}`;
       }
       case 'web-search-tool': {
-        return performWebSearch(argumentsJson, async url => (await fetch(url)).text());
+        return performWebSearch(
+          argumentsJson,
+          async (url, headers) => (await fetch(url, { headers: headers ?? {} })).text(),
+        );
       }
       case 'mcp-tool': {
         const data = node.data as { url?: string };

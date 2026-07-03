@@ -15,6 +15,7 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 ## Build / Dependencies
 
 - 2026-07-03 — All npm installs in `frontend/` must use `--legacy-peer-deps`.
+- 2026-07-03 — `EACCES` on `spawn node_modules/.bin/tauri` (or any `.bin` entry) means the wrapper script lost its execute bit (mode 644 instead of 755). Happens when `node_modules` is restored from a zip/tar or copied via a sync tool that strips modes. Fix: `chmod +x node_modules/.bin/tauri` (or reinstall). The native `cli.darwin-arm64.node` is `require()`-loaded and doesn't need +x; only the sh wrapper does.
 - 2026-07-03 — Build verify loop: `cd frontend && npx ng build` and `cd backend/src-tauri && cargo check`. Keep both green after every phase.
 - 2026-07-03 — `@angular/cdk` must stay at v20 to match Angular core.
 - 2026-07-03 — `engine/` is consumed via the `@phorma/engine` tsconfig path alias (frontend/tsconfig.json → ../engine/src/index.ts). Angular compiles it as app source; no build step. Keep engine code framework-free.
@@ -48,6 +49,7 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 - 2026-07-03 — Ollama's OpenAI-compat endpoint sends `finish_reason` without a `[DONE]` line — stream parsers must flush tool calls on BOTH signals.
 - 2026-07-03 — Engine E2E testing: a throwaway `npx -y tsx script.mts` importing `./engine/src/index.js` against local Ollama is the fastest full-loop verification (no UI needed).
 - 2026-07-03 — Web Search tool uses DuckDuckGo's free instant-answer API — topical coverage only. Swap in a keyed provider (Brave/Tavily) for production-grade search without touching the engine.
+- 2026-07-03 — Web Search was returning "No results found" for ANY query because Wikipedia's API rejects requests with no `User-Agent` header (HTTP 403 "Please set a user-agent"). `reqwest` (Rust desktop path) and Cloudflare Workers `fetch` send NO default UA. The engine's `safeParse` silently swallowed the 403 body into `{}` → 0 results. Fix: `performWebSearch` now passes `User-Agent: PhormaAgentStudio/0.1 (https://phorma.dev)` via the `TextFetcher` signature (now `(url, headers?) => ...`). Also added `origin=*` to Wikipedia URLs for browser-path CORS. Lesson: any outbound HTTP from the engine should set a UA — many APIs (Wikipedia, GitHub, etc.) reject UA-less requests, and the failure is silent because `safeParse` masks non-JSON bodies.
 
 ## Learnings
 
