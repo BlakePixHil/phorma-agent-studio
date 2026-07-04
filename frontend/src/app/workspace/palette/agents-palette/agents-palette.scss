@@ -50,6 +50,7 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 0.7rem 0.8rem;
+  container-type: inline-size;
 }
 
 .phorma-palette__section {
@@ -81,6 +82,19 @@
   gap: 0.45rem;
 }
 
+// When the scroll area is narrow (< 320px), collapse to a single column so the
+// node tiles stay readable. Constrain each tile's width and centre it so the
+// glow halo (~7px blur beyond each tile edge) always has room to render
+// without being clipped by the sidebar's overflow/containment.
+@container (max-width: 320px) {
+  .phorma-palette__grid {
+    grid-template-columns: minmax(0, 16rem);
+    justify-content: center;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+}
+
 .phorma-palette__item {
   display: flex;
   flex-direction: column;
@@ -93,20 +107,77 @@
   color: var(--p-text-color);
   font: inherit;
   cursor: grab;
+  position: relative;
+  z-index: 0;
   transition:
     background 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.15s ease;
+    border-color 0.15s ease;
+
+  // Glow halo (animated rainbow gradient) - hidden by default, fades in on hover.
+  // Rendered ON TOP of content as a ring: a mask cuts out the centre so only
+  // the outline glow shows. This avoids needing an opaque ::after backdrop
+  // (which clipped the halo) and keeps the body clean.
+  &::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    width: calc(100% + 4px);
+    height: calc(100% + 4px);
+    border-radius: inherit;
+    padding: 2px;
+    background: linear-gradient(
+      45deg,
+      #ff0000,
+      #ff7300,
+      #fffb00,
+      #48ff00,
+      #00ffd5,
+      #002bff,
+      #7a00ff,
+      #ff00c8,
+      #ff0000
+    );
+    background-size: 400%;
+    filter: blur(4px);
+    opacity: 0;
+    z-index: 1;
+    transition: opacity 0.3s ease-in-out;
+    animation: phorma-palette-glowing 20s linear infinite;
+    pointer-events: none;
+    // Cut out the centre, leaving only the ring (the padded border area).
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
 
   &:hover {
-    background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
     border-color: color-mix(in srgb, var(--p-primary-color) 45%, transparent);
-    transform: translateY(-1px);
+
+    &::before {
+      opacity: 1;
+    }
   }
 
   &:active {
     cursor: grabbing;
-    transform: translateY(0);
+  }
+}
+
+@keyframes phorma-palette-glowing {
+  0% {
+    background-position: 0 0;
+  }
+  50% {
+    background-position: 400% 0;
+  }
+  100% {
+    background-position: 0 0;
   }
 }
 

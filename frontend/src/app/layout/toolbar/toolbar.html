@@ -37,6 +37,18 @@
     <p-button
       styleClass="phorma-run-button"
       [text]="true"
+      severity="secondary"
+      size="small"
+      icon="ti ti-refresh"
+      pTooltip="Reset session"
+      tooltipPosition="bottom"
+      [disabled]="!canReset()"
+      (onClick)="resetRun()"
+    />
+    <span class="phorma-toolbar-divider"></span>
+    <p-button
+      styleClass="phorma-run-button"
+      [text]="true"
       [severity]="running() ? 'danger' : 'secondary'"
       size="small"
       [icon]="running() ? 'ti ti-player-stop' : 'ti ti-player-play'"

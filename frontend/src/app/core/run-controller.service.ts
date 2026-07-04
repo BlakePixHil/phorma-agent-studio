@@ -106,6 +106,15 @@ export class RunControllerService {
     );
   });
   readonly paused = computed(() => this.terminal.phase() === 'paused');
+  /**
+   * True when a run has finished (completed, failed, or stopped) and the
+   * session can be reset back to a pre-run state. Paused and
+   * waiting-approval are intentionally excluded — the run is still alive.
+   */
+  readonly canReset = computed(() => {
+    const phase = this.terminal.phase();
+    return phase === 'completed' || phase === 'failed' || phase === 'stopped';
+  });
 
   // ── Controls (toolbar + Runs panel) ────────────────────────────────────────
 
@@ -167,6 +176,20 @@ export class RunControllerService {
     // Unblock any pending approvals so the run can unwind.
     for (const approval of this.pendingApprovals()) approval.resolve(false);
     this.pendingApprovals.set([]);
+  }
+
+  /**
+   * Resets the run session back to a pre-run state: clears all consoles,
+   * drops node glows/rings, edge pulses, the trace timeline, thinking
+   * buffers, and pending approvals. Only valid when a run has finished —
+   * the toolbar binds it to `canReset`. Has no effect on the workflow graph,
+   * breakpoints, or run input.
+   */
+  reset(): void {
+    if (!this.canReset()) return;
+    this.resetRunState();
+    this.nodeThinking.set(new Map());
+    this.terminal.setPhase('idle');
   }
 
   /** Resolves a pending approval from the Runs panel. */
@@ -479,6 +502,7 @@ export class RunControllerService {
     this.pendingApprovals.set([]);
     this.streamedChars.set(0);
     this.streamBuffers.clear();
+    this.nodeThinking.set(new Map());
     for (const timer of this.edgeTimers.values()) clearTimeout(timer);
     this.edgeTimers.clear();
     this.terminal.clearAll();

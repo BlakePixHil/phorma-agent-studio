@@ -54,6 +54,7 @@ export class Toolbar {
   /** Whether a run is in flight (run controls swap to Stop). */
   protected readonly running = this.runController.running;
   protected readonly paused = this.runController.paused;
+  protected readonly canReset = this.runController.canReset;
 
   // ── Right-cluster icon computeds (signals keep OnPush templates in sync) ─
   protected readonly themeIcon = computed(() =>
@@ -401,6 +402,10 @@ export class Toolbar {
 
   protected stepRun(): void {
     this.runController.step();
+  }
+
+  protected resetRun(): void {
+    this.runController.reset();
   }
 
   /** Opens the provider-keys / transport settings dialog. */
