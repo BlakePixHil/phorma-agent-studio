@@ -61,6 +61,7 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 - 2026-07-04 - GOTCHA: an Angular `effect()` that calls a method which synchronously READS and WRITES the same signal (e.g. `refreshMcpSecretFlags` reading+setting `mcpSecretsConfigured` in browser mode) loops forever and CRASHES the page (renderer OOM). Wrap such calls in `untracked(() => ...)`. Hit twice in this feature (settings dialog + properties panel effects).
 - 2026-07-04 - `anyComponentStyle` budget is 8kB compiled CSS. Comments don't count; `var(--x, fallback)` fallbacks and duplicated rule blocks do. Consolidate shared BEM variants with selector lists before fighting the budget.
 - 2026-07-04 - `engine/` has no local TypeScript install: `npx tsc` there tries to fetch the bogus `tsc` npm package (interactive prompt). Use `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json` instead.
+- 2026-07-04 - macOS shortcut display: the toolbar's `onKeyDown` already accepts both Ctrl and Meta (`const ctrl = e.ctrlKey || e.metaKey`), so Cmd+key works at runtime. For display, `Toolbar.shortcut(hint)` converts `Ctrl+X` to `⌘+X` on macOS via `navigator.platform` detection; the `#item` ng-template renders `<i class="ti ti-command"></i>` + the suffix for macOS Ctrl shortcuts. Non-Ctrl shortcuts (Alt+G, Esc) pass through unchanged. The brand-mark menu (Phorma logo) is the first `p-menubar` root item with `brand: true`; the `#item` template renders the logo image for brand items.
 
 ## Learnings
 

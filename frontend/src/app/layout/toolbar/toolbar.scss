@@ -103,6 +103,18 @@
   border-radius: 4px;
 }
 
+// Brand-mark root item: looks like an icon button (no label, hover highlight).
+:host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child .phorma-brand-item {
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+:host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child.p-menubar-item-active .phorma-brand-item,
+:host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child .p-menubar-item-content:hover .phorma-brand-item {
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+}
+
 :host ::ng-deep .phorma-menubar .p-menubar-item-link {
   padding: 0.4rem 1rem;
   font-size: 0.8125rem;

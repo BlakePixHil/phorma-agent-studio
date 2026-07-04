@@ -1,26 +1,31 @@
 <!-- Glass + layout now live on :host in toolbar.scss. -->
 <ng-container>
-  <!-- Brand mark -->
-  <div class="flex items-center pl-1">
-    <img src="logo.svg" alt="Phorma Agent Studio logo" class="h-5 w-5" />
-  </div>
-
   <!--
     autoDisplay=false  → root items open on click, not bare hover.
     The #item template adds:
+      • the Phorma logo for the brand-mark root item (item.brand === true)
       • a chevron-right on nested items that have sub-items (submenu arrow)
-      • a shortcut badge on the right
+      • a shortcut badge on the right (⌘+X on macOS, Ctrl+X elsewhere)
   -->
   <p-menubar [model]="menuItems()" [autoDisplay]="false" class="phorma-menubar flex-1">
     <ng-template #item let-item let-root="root">
       <span class="items-center gap-2 px-2 py-1 w-full"
-            [class]="root ? 'block' : 'flex'">
-        @if (item.icon) {
+            [class]="root ? 'block' : 'flex'"
+            [class.phorma-brand-item]="item.brand">
+        @if (item.brand) {
+          <img src="logo.svg" alt="Phorma Agent Studio" class="h-5 w-5" />
+        } @else if (item.icon) {
           <i [class]="item.icon" class="text-xs opacity-80 shrink-0"></i>
         }
         <span class="flex-1">{{ item.label }}</span>
         @if (item.shortcut) {
-          <span class="ml-2 text-[10px] tracking-wide opacity-40">{{ item.shortcut }}</span>
+          <span class="ml-2 text-[10px] tracking-wide opacity-40 inline-flex items-center gap-0.5">
+            @if (shortcutHasCommandIcon(item.shortcut)) {
+              <i class="ti ti-command"></i>{{ shortcut(item.shortcut).slice(2) }}
+            } @else {
+              {{ shortcut(item.shortcut) }}
+            }
+          </span>
         }
         @if (item.items) {
           <i

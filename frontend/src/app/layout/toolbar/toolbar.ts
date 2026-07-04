@@ -64,6 +64,25 @@ export class Toolbar {
     this.canvasState.gridSnap() ? 'Disable grid snapping' : 'Enable grid snapping',
   );
 
+  /** Whether the user is on macOS (for Cmd vs Ctrl shortcut display). */
+  protected readonly isMac =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+
+  /**
+   * Formats a shortcut hint for display in the menubar. On macOS, `Ctrl+`
+   * becomes `⌘+` (rendered with the Tabler command icon); other modifiers
+   * (Shift, Alt) are preserved. Non-Ctrl shortcuts pass through unchanged.
+   */
+  protected shortcut(hint: string): string {
+    if (!hint.startsWith('Ctrl+')) return hint;
+    return this.isMac ? hint.replace(/^Ctrl\+/, '⌘+') : hint;
+  }
+
+  /** Whether the shortcut's macOS form should render the Tabler command icon. */
+  protected shortcutHasCommandIcon(hint: string): boolean {
+    return this.isMac && hint.startsWith('Ctrl+');
+  }
+
   // ── Keyboard shortcut bindings ──────────────────────────────────────────
 
   protected onKeyDown(e: KeyboardEvent): void {
@@ -166,10 +185,12 @@ export class Toolbar {
       e.preventDefault();
       this.terminal.toggle();
     }
-    // App > Settings — Ctrl+, (VS Code-style).
+    // Settings — Ctrl+, / Cmd+, (VS Code-style). On macOS the browser
+    // sometimes intercepts Cmd+,; the menubar item is the reliable path.
     if (ctrl && !shift && key === ',') {
       e.preventDefault();
       this.settingsDialog.open();
+      return;
     }
     if (ctrl && !shift && key === 'g') {
       e.preventDefault();
@@ -183,6 +204,22 @@ export class Toolbar {
   }
 
   protected readonly menuItems = computed<MenuItem[]>(() => [
+    {
+      // Brand-mark menu: the Phorma logo opens a small app menu.
+      // `label` is unused (the #item template renders the logo image for
+      // items with `brand: true`); it's here so PrimeNG treats it as a
+      // root item with a submenu.
+      label: '',
+      brand: true,
+      items: [
+        {
+          label: 'Settings',
+          icon: 'ti ti-settings',
+          shortcut: 'Ctrl+,',
+          command: () => this.settingsDialog.open(),
+        },
+      ],
+    },
     {
       label: 'File',
       items: [
@@ -390,17 +427,6 @@ export class Toolbar {
           icon: 'ti ti-terminal-2',
           shortcut: 'Ctrl+`',
           command: () => this.terminal.toggle(),
-        },
-      ],
-    },
-    {
-      label: 'App',
-      items: [
-        {
-          label: 'Settings',
-          icon: 'ti ti-settings',
-          shortcut: 'Ctrl+,',
-          command: () => this.settingsDialog.open(),
         },
       ],
     },
