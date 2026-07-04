@@ -146,9 +146,13 @@ fn resolve_command(command: &str) -> Result<String, String> {
 /// Connects to (or restarts) a stdio MCP server and returns its tool list as
 /// a JSON string (the `tools/list` result).
 ///
-/// `env_keys` are keychain secret names (e.g. `mcp:{server_id}:IMAP_SERVER`)
-/// whose values are resolved server-side via `llm::get_secret` and injected
-/// as environment variables — the values never cross the IPC boundary.
+/// `env_keys` are keychain secret names whose values are resolved server-side
+/// via `llm::get_secret` and injected as environment variables — the values
+/// never cross the IPC boundary. Resolution order per key: the node-scoped
+/// secret (`mcp:{server_id}:{env_key}`) wins; when absent and `preset_id` is
+/// provided, the preset-scoped application default
+/// (`mcp:preset:{preset_id}:{env_key}`, configured in Settings → Integrations)
+/// is used as a fallback.
 ///
 /// # Errors
 ///
@@ -160,6 +164,7 @@ pub fn mcp_connect(
     command: String,
     args: Vec<String>,
     env_keys: Vec<String>,
+    preset_id: Option<String>,
 ) -> Result<String, String> {
     // Drop any previous session for this id.
     mcp_disconnect(server_id.clone());
@@ -167,15 +172,21 @@ pub fn mcp_connect(
     // Resolve secret env vars from the keychain (values stay in Rust).
     let mut env: HashMap<String, String> = HashMap::new();
     for env_key in &env_keys {
-        let secret_id = format!("mcp:{server_id}:{env_key}");
-        match crate::llm::get_secret(&secret_id) {
+        let node_secret_id = format!("mcp:{server_id}:{env_key}");
+        let value = crate::llm::get_secret(&node_secret_id).or_else(|| {
+            preset_id
+                .as_ref()
+                .and_then(|preset| crate::llm::get_secret(&format!("mcp:preset:{preset}:{env_key}")))
+        });
+        match value {
             Some(value) => {
                 env.insert(env_key.clone(), value);
             }
             None => {
                 return Err(format!(
                     "Missing secret '{env_key}' for MCP node '{server_id}'. \
-                     Configure it in the node's properties."
+                     Configure it in Settings > Integrations (application default) \
+                     or override it in the node's properties."
                 ));
             }
         }

@@ -141,6 +141,12 @@ export class RunControllerService {
       input: this.runInput().trim(),
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
+      defaultModel: {
+        provider: this.settings.defaultProvider(),
+        model: this.settings.defaultModel(),
+        temperature: this.settings.defaultTemperature(),
+      },
+      maxToolRounds: this.settings.maxToolRounds(),
       tools: this.toolHost,
       emit: event => this.apply(event),
       requestApproval: (nodeId, message, payload) =>
@@ -221,7 +227,7 @@ export class RunControllerService {
     switch (event.type) {
       case 'run-started':
         this.terminal.setPhase('running');
-        this.terminal.open('run');
+        if (this.settings.autoOpenConsoleOnRun()) this.terminal.open('run');
         this.console('run', 'info', `Run started${event.input ? ` — "${event.input}"` : ''}.`);
         this.pushTrace('ti ti-player-play', 'Run started', event.input || undefined, 'info');
         // A new run dumps any prior thinking text (per the persistence rule:

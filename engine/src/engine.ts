@@ -28,6 +28,7 @@ import {
   isAgentNode,
   nodeForConnector,
   portBaseId,
+  type ModelProviderId,
   type WorkflowConnection,
   type WorkflowGraph,
   type WorkflowNode,
@@ -35,8 +36,8 @@ import {
 
 /** Safety budget: total node executions per run (cycles are allowed, runaway loops are not). */
 const MAX_NODE_EXECUTIONS = 100;
-/** Maximum model→tools→model rounds per agent execution. */
-const MAX_TOOL_ROUNDS = 8;
+/** Default maximum model→tools→model rounds per agent execution. */
+const DEFAULT_MAX_TOOL_ROUNDS = 8;
 
 export interface RunOptions {
   runId: string;
@@ -49,6 +50,14 @@ export interface RunOptions {
   emit: RunEventSink;
   /** Ollama server override, forwarded to model requests. */
   ollamaBaseUrl?: string;
+  /**
+   * Application default model. Agents without an explicit provider/model
+   * inherit this at execution time. When omitted, agents lacking a model
+   * fail with a descriptive error.
+   */
+  defaultModel?: { provider: ModelProviderId; model: string; temperature?: number };
+  /** Maximum model→tools→model rounds per agent execution (default 8). */
+  maxToolRounds?: number;
   /**
    * Host-provided tool discovery + execution (HTTP, web search, MCP).
    * When omitted, agents run without callable tools (capabilities are still
@@ -246,11 +255,24 @@ class WorkflowRun {
   private async runAgent(node: WorkflowNode, payload: string): Promise<string> {
     const data = node.data as {
       prompt: string;
-      provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
-      model: string;
+      provider?: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
+      model?: string;
       temperature?: number;
       maxTokens?: number;
     };
+
+    // Resolve the model: explicit node config wins; otherwise inherit the
+    // run's default model (the studio's application settings).
+    const fallback = this.options.defaultModel;
+    const provider: ModelProviderId | undefined = data.provider ?? fallback?.provider;
+    const model = data.provider ? data.model : (data.model ?? fallback?.model);
+    if (!provider || !model) {
+      throw new Error(
+        `Agent "${node.name}" has no model configured and no application default model is set. ` +
+          'Pick a model on the node or set a default in Settings → Models.',
+      );
+    }
+    const temperature = data.temperature ?? (data.provider ? undefined : fallback?.temperature);
 
     // Resolve callable tools from the agent's tool-link edges.
     const toolNodes = this.attachedTools(node);
@@ -264,17 +286,18 @@ class WorkflowRun {
     const messages: ChatMessage[] = [{ role: 'user', content: payload || 'Begin.' }];
     let output = '';
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
+    for (let round = 0; round < maxToolRounds; round++) {
       let roundText = '';
       const calls: ToolCall[] = [];
 
       for await (const chunk of this.options.model.stream({
-        provider: data.provider,
-        model: data.model,
+        provider,
+        model,
         system,
         messages,
         tools: resolved.map(tool => tool.definition),
-        temperature: data.temperature,
+        temperature,
         maxTokens: data.maxTokens,
         ollamaBaseUrl: this.options.ollamaBaseUrl,
       })) {

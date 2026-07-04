@@ -16,6 +16,7 @@ import { ContextMenuModule } from 'primeng/contextmenu';
 import { type MenuItem } from 'primeng/api';
 
 import { CanvasStateService } from '../../core/canvas-state.service';
+import { SettingsService } from '../../core/settings.service';
 import { WorkflowService } from '../../core/workflow.service';
 import { SelectionService } from '../../core/selection.service';
 import { ThemeService } from '../../core/theme.service';
@@ -208,6 +209,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   private readonly panels = inject(PanelRegistryService);
   private readonly terminal = inject(TerminalOutputService);
   private readonly toast = inject(ToastService);
+  private readonly settings = inject(SettingsService);
 
   @ViewChild('cv', { static: true }) private cvRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('mini') private miniRef?: ElementRef<HTMLCanvasElement>;
@@ -686,7 +688,10 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   // ── Pointer input ───────────────────────────────────────────────────────────
   private readonly onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    this.engine.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+    // 0.0015 is the baseline wheel→zoom factor; the settings multiplier
+    // (Settings → Canvas → Zoom sensitivity) scales it 0.25×–3×.
+    const factor = 0.0015 * this.settings.zoomSensitivity();
+    this.engine.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * factor));
   };
 
   private readonly onPointerDown = (e: PointerEvent): void => {

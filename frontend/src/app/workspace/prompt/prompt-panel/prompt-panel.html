@@ -43,20 +43,28 @@
           [options]="providers"
           optionLabel="label"
           optionValue="id"
-          [ngModel]="node.data.provider"
+          [ngModel]="providerValue()"
           (ngModelChange)="onProviderChange($event)"
           size="small"
           appendTo="body"
         />
-        <input
-          type="text"
-          class="phorma-prompt__model"
-          [value]="node.data.model"
-          (input)="onModelInput($event)"
-          placeholder="model id"
-          aria-label="Model id"
-        />
+        @if (!inheritsDefault()) {
+          <input
+            type="text"
+            class="phorma-prompt__model"
+            [value]="node.data.model ?? ''"
+            (input)="onModelInput($event)"
+            placeholder="model id"
+            aria-label="Model id"
+          />
+        }
       </div>
+      @if (inheritsDefault()) {
+        <p class="phorma-prompt__hint">
+          Uses the application default: <strong>{{ resolvedDefaultLabel() }}</strong> —
+          change it in App&nbsp;›&nbsp;Settings&nbsp;›&nbsp;Models.
+        </p>
+      }
       <div class="phorma-prompt__chips">
         @for (model of modelSuggestions(); track model) {
           <button

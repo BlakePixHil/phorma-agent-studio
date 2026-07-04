@@ -166,6 +166,11 @@ export class Toolbar {
       e.preventDefault();
       this.terminal.toggle();
     }
+    // App > Settings — Ctrl+, (VS Code-style).
+    if (ctrl && !shift && key === ',') {
+      e.preventDefault();
+      this.settingsDialog.open();
+    }
     if (ctrl && !shift && key === 'g') {
       e.preventDefault();
       this.canvasState.gridVisible.update(v => !v);
@@ -388,6 +393,17 @@ export class Toolbar {
         },
       ],
     },
+    {
+      label: 'App',
+      items: [
+        {
+          label: 'Settings',
+          icon: 'ti ti-settings',
+          shortcut: 'Ctrl+,',
+          command: () => this.settingsDialog.open(),
+        },
+      ],
+    },
   ]);
 
   /** Run controls — delegate to the run controller. */
@@ -406,11 +422,6 @@ export class Toolbar {
 
   protected resetRun(): void {
     this.runController.reset();
-  }
-
-  /** Opens the provider-keys / transport settings dialog. */
-  protected openSettings(): void {
-    this.settingsDialog.open();
   }
 
   /** Opens the cloud deploy/monitor dialog. */

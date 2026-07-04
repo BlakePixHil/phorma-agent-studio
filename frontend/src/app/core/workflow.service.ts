@@ -1,6 +1,7 @@
 import { computed, effect, Injectable, inject, signal } from '@angular/core';
 
 import { IndexedDbStorageService } from './indexed-db-storage.service';
+import { SettingsService } from './settings.service';
 import { buildNodeFromCatalog, findCatalogEntry } from './node-catalog';
 import { loadLayout, saveLayout } from './layout-storage';
 import { ToastService } from '../shared/toast/toast.service';
@@ -51,8 +52,12 @@ let docCounter = 0;
 @Injectable({ providedIn: 'root' })
 export class WorkflowService {
   private readonly storage = inject(IndexedDbStorageService);
+  private readonly settings = inject(SettingsService);
   private readonly toast = inject(ToastService);
   private readonly confirmDialog = inject(ConfirmDialogService);
+
+  /** Debounce handle for the autosave effect. */
+  private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly docsState = signal<OpenWorkflowDoc[]>([]);
   private readonly activeDocIdState = signal<string | null>(null);
@@ -95,6 +100,34 @@ export class WorkflowService {
         workflowIds: docs.map(doc => doc.workflowId).filter((id): id is string => id !== null),
         activeWorkflowId: activeDoc?.workflowId ?? null,
       } satisfies PersistedWorkflowTabs);
+    });
+
+    // Autosave (Settings → General): debounce-save the active document after
+    // edits. Only workflows ALREADY saved to the library autosave — unnamed
+    // drafts never trigger the naming prompt on their own.
+    effect(() => {
+      const enabled = this.settings.autosaveEnabled();
+      const doc = this.activeDoc();
+      // Track dirtiness reactively (graph edits flip `dirty`).
+      const shouldSave = enabled && !!doc && doc.workflowId !== null && doc.dirty;
+      if (this.autosaveTimer !== null) {
+        clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = null;
+      }
+      if (!shouldSave) return;
+      this.autosaveTimer = setTimeout(() => {
+        this.autosaveTimer = null;
+        // Re-check at fire time: state may have changed during the debounce.
+        const current = this.activeDoc();
+        if (
+          this.settings.autosaveEnabled() &&
+          current?.docId === doc.docId &&
+          current.workflowId !== null &&
+          current.dirty
+        ) {
+          void this.saveActive();
+        }
+      }, 2000);
     });
   }
 

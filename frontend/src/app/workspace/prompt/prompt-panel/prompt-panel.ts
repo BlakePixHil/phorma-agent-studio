@@ -6,9 +6,11 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
 import { SelectionService } from '../../../core/selection.service';
+import { SettingsService } from '../../../core/settings.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import {
   MODEL_PROVIDERS,
+  PROVIDER_MODEL_SUGGESTIONS,
   findNodeForConnector,
   isAgentNode,
   portBaseId,
@@ -17,14 +19,11 @@ import {
   type WorkflowNode,
 } from '../../../core/workflow.model';
 
-/** Suggested models per provider (users can type any model id). */
-const PROVIDER_MODEL_SUGGESTIONS: Record<ModelProviderId, string[]> = {
-  anthropic: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5'],
-  openai: ['gpt-5.2', 'gpt-5.2-mini', 'o4-mini'],
-  gemini: ['gemini-3-pro', 'gemini-3-flash'],
-  openrouter: ['anthropic/claude-sonnet-4.5', 'openai/gpt-5.2', 'meta-llama/llama-4-70b'],
-  ollama: ['llama3.2', 'qwen3', 'mistral-small'],
-};
+/**
+ * Sentinel select value meaning "inherit the application default model"
+ * (agents store no provider/model in that case).
+ */
+const DEFAULT_PROVIDER_OPTION = '__default__';
 
 /**
  * The Prompt panel (right side, default tab): the markdown prompt editor for
@@ -44,9 +43,14 @@ const PROVIDER_MODEL_SUGGESTIONS: Record<ModelProviderId, string[]> = {
 export class PromptPanel {
   private readonly selection = inject(SelectionService);
   private readonly workflow = inject(WorkflowService);
+  private readonly settings = inject(SettingsService);
   private readonly sanitizer = inject(DomSanitizer);
 
-  protected readonly providers = MODEL_PROVIDERS;
+  /** Provider options: "Application default" first, then explicit providers. */
+  protected readonly providers = [
+    { id: DEFAULT_PROVIDER_OPTION, label: 'Application default' },
+    ...MODEL_PROVIDERS,
+  ];
   protected readonly previewing = signal(false);
 
   /** The selected agent node, or null when the selection isn't an agent. */
@@ -55,10 +59,25 @@ export class PromptPanel {
     return node && isAgentNode(node) ? node : null;
   });
 
+  /** Whether the agent inherits the application default model. */
+  protected readonly inheritsDefault = computed(() => !this.agent()?.data.provider);
+
+  /** The select value for the provider dropdown (sentinel when inheriting). */
+  protected readonly providerValue = computed(
+    () => this.agent()?.data.provider ?? DEFAULT_PROVIDER_OPTION,
+  );
+
+  /** Human-readable resolved default, shown as a hint while inheriting. */
+  protected readonly resolvedDefaultLabel = computed(() => {
+    const provider = MODEL_PROVIDERS.find(p => p.id === this.settings.defaultProvider());
+    return `${provider?.label ?? this.settings.defaultProvider()} · ${this.settings.defaultModel()}`;
+  });
+
   /** Model suggestions for the agent's current provider. */
   protected readonly modelSuggestions = computed(() => {
     const agent = this.agent();
-    return agent ? PROVIDER_MODEL_SUGGESTIONS[agent.data.provider] : [];
+    if (!agent?.data.provider) return [];
+    return PROVIDER_MODEL_SUGGESTIONS[agent.data.provider];
   });
 
   /** Tools attached to this agent via tool-links. */
@@ -112,9 +131,17 @@ export class PromptPanel {
     this.workflow.updateNodeData(agent.id, { prompt });
   }
 
-  protected onProviderChange(provider: ModelProviderId): void {
+  protected onProviderChange(value: string): void {
     const agent = this.agent();
-    if (!agent || agent.data.provider === provider) return;
+    if (!agent) return;
+    if (value === DEFAULT_PROVIDER_OPTION) {
+      // Inherit the application default: clear the explicit model config.
+      if (!agent.data.provider) return;
+      this.workflow.updateNodeData(agent.id, { provider: undefined, model: undefined });
+      return;
+    }
+    const provider = value as ModelProviderId;
+    if (agent.data.provider === provider) return;
     // Switching provider resets the model to that provider's first suggestion.
     this.workflow.updateNodeData(agent.id, {
       provider,

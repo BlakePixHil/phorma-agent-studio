@@ -1,76 +1,373 @@
-<p-dialog
-  header="Settings"
-  [visible]="dialog.visible()"
-  (visibleChange)="$event ? dialog.open() : dialog.close()"
-  [modal]="true"
-  [draggable]="false"
-  [resizable]="false"
-  [style]="{ width: 'min(34rem, 92vw)' }"
-  [dismissableMask]="true"
->
-  <div class="phorma-settings">
-    <p class="phorma-settings__note">
-      <i class="ti" [class.ti-shield-lock]="isDesktop" [class.ti-alert-triangle]="!isDesktop" aria-hidden="true"></i>
-      {{ storageLabel() }}
-    </p>
+@if (dialog.visible()) {
+  <div class="phorma-settings" role="presentation" (click)="dialog.close()">
+    <section
+      class="phorma-settings__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+      (click)="$event.stopPropagation()"
+    >
+      <!-- Header -->
+      <header class="phorma-settings__header">
+        <span class="phorma-settings__icon">
+          <i class="ti ti-settings" aria-hidden="true"></i>
+        </span>
+        <div class="phorma-settings__header-text">
+          <h2>Settings</h2>
+          <p>{{ storageLabel }}</p>
+        </div>
+        <button
+          type="button"
+          class="phorma-settings__close"
+          (click)="dialog.close()"
+          aria-label="Close settings"
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </header>
 
-    <section class="phorma-settings__section">
-      <h3 class="phorma-settings__heading">Provider API keys</h3>
-      @for (provider of keyedProviders; track provider.id) {
-        <div class="phorma-settings__row">
-          <span class="phorma-settings__provider">
-            {{ provider.label }}
-            @if (settings.keyConfigured()[provider.id]) {
-              <i class="ti ti-circle-check phorma-settings__ok" title="Key configured" aria-hidden="true"></i>
-            }
-          </span>
-          <input
-            type="password"
-            class="phorma-settings__input"
-            [placeholder]="settings.keyConfigured()[provider.id] ? '••••••••  (stored)' : 'Paste API key'"
-            [value]="drafts()[provider.id] ?? ''"
-            (input)="onDraftInput(provider.id, $event)"
-            (keydown.enter)="saveKey(provider.id)"
-            autocomplete="off"
-          />
-          <button
-            type="button"
-            class="phorma-settings__btn"
-            [disabled]="drafts()[provider.id] === undefined"
-            (click)="saveKey(provider.id)"
-          >
-            Save
-          </button>
-          @if (settings.keyConfigured()[provider.id]) {
+      <div class="phorma-settings__layout">
+        <!-- Left nav -->
+        <nav class="phorma-settings__nav" aria-label="Settings pages">
+          <div class="phorma-settings__search">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input
+              type="text"
+              placeholder="Search settings"
+              [value]="searchQuery()"
+              (input)="onSearchInput($event)"
+              aria-label="Search settings"
+            />
+          </div>
+          @for (page of visiblePages(); track page.id) {
             <button
               type="button"
-              class="phorma-settings__btn phorma-settings__btn--danger"
-              (click)="clearKey(provider.id)"
-              title="Remove stored key"
+              class="phorma-settings__nav-item"
+              [class.phorma-settings__nav-item--active]="page.id === activePage()?.id"
+              (click)="selectPage(page.id)"
             >
-              <i class="ti ti-trash" aria-hidden="true"></i>
+              <i class="{{ page.icon }}" aria-hidden="true"></i>
+              {{ page.label }}
             </button>
           }
-        </div>
-      }
-    </section>
+          @if (visiblePages().length === 0) {
+            <p class="phorma-settings__nav-empty">No settings match.</p>
+          }
+        </nav>
 
-    <section class="phorma-settings__section">
-      <h3 class="phorma-settings__heading">Ollama (local, keyless)</h3>
-      <div class="phorma-settings__row">
-        <span class="phorma-settings__provider">Server URL</span>
-        <input
-          type="text"
-          class="phorma-settings__input"
-          [value]="settings.ollamaBaseUrl()"
-          (input)="onOllamaUrlInput($event)"
-          placeholder="http://localhost:11434"
-        />
+        <!-- Content -->
+        <div class="phorma-settings__content">
+          @if (activePage(); as page) {
+            <h3 class="phorma-settings__page-title">{{ page.label }}</h3>
+            @if (page.description) {
+              <p class="phorma-settings__page-lede">{{ page.description }}</p>
+            }
+
+            @for (section of page.sections; track section.id) {
+              <section class="phorma-settings__section">
+                @if (section.label) {
+                  <h4 class="phorma-settings__heading">{{ section.label }}</h4>
+                }
+                @if (section.note) {
+                  <p class="phorma-settings__note">{{ section.note }}</p>
+                }
+
+                <!-- Generic descriptor-driven settings -->
+                @for (setting of section.settings; track setting.id) {
+                  <div class="phorma-settings__setting">
+                    <div class="phorma-settings__setting-text">
+                      <label class="phorma-settings__setting-label" [attr.for]="setting.id">
+                        {{ setting.label }}
+                      </label>
+                      @if (setting.description) {
+                        <p class="phorma-settings__setting-desc">{{ setting.description }}</p>
+                      }
+                    </div>
+                    <div class="phorma-settings__setting-control">
+                      @switch (setting.control.type) {
+                        @case ('toggle') {
+                          <p-toggleswitch
+                            [inputId]="setting.id"
+                            [ngModel]="asBool(setting)"
+                            (ngModelChange)="setting.set($event)"
+                          />
+                        }
+                        @case ('select') {
+                          <p-select
+                            [inputId]="setting.id"
+                            [options]="setting.control.options"
+                            optionLabel="label"
+                            optionValue="value"
+                            [ngModel]="asString(setting)"
+                            (ngModelChange)="setting.set($event)"
+                            size="small"
+                            appendTo="body"
+                          />
+                        }
+                        @case ('number') {
+                          <span class="phorma-settings__number">
+                            <input
+                              [id]="setting.id"
+                              type="number"
+                              class="phorma-settings__input phorma-settings__input--number"
+                              [min]="setting.control.min ?? null"
+                              [max]="setting.control.max ?? null"
+                              [step]="setting.control.step ?? null"
+                              [value]="asNumber(setting)"
+                              (change)="setFromInput(setting, $event)"
+                            />
+                            @if (setting.control.suffix) {
+                              <span class="phorma-settings__suffix">{{ setting.control.suffix }}</span>
+                            }
+                          </span>
+                        }
+                        @case ('slider') {
+                          <span class="phorma-settings__slider">
+                            <p-slider
+                              [ngModel]="asNumber(setting)"
+                              (ngModelChange)="setting.set($event)"
+                              [min]="setting.control.min"
+                              [max]="setting.control.max"
+                              [step]="setting.control.step"
+                              [ariaLabel]="setting.label"
+                            />
+                            <span class="phorma-settings__slider-value">{{ asNumber(setting) }}</span>
+                          </span>
+                        }
+                        @case ('text') {
+                          <input
+                            [id]="setting.id"
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--text"
+                            [placeholder]="setting.control.placeholder ?? ''"
+                            [value]="asString(setting)"
+                            (change)="setFromInput(setting, $event)"
+                          />
+                        }
+                      }
+                    </div>
+                  </div>
+                }
+
+                <!-- Bespoke sections -->
+                @switch (section.customTemplate) {
+                  @case ('api-keys') {
+                    <p class="phorma-settings__note">
+                      <i
+                        class="ti"
+                        [class.ti-shield-lock]="isDesktop"
+                        [class.ti-alert-triangle]="!isDesktop"
+                        aria-hidden="true"
+                      ></i>
+                      {{ storageLabel }}
+                    </p>
+                    @for (provider of keyedProviders; track provider.id) {
+                      <div class="phorma-settings__row">
+                        <span class="phorma-settings__row-label">
+                          {{ provider.label }}
+                          @if (settings.keyConfigured()[provider.id]) {
+                            <i
+                              class="ti ti-circle-check phorma-settings__ok"
+                              pTooltip="Key configured"
+                              tooltipPosition="top"
+                              aria-hidden="true"
+                            ></i>
+                          }
+                        </span>
+                        <input
+                          type="password"
+                          class="phorma-settings__input"
+                          [placeholder]="settings.keyConfigured()[provider.id] ? '••••••••  (stored)' : 'Paste API key'"
+                          [value]="keyDrafts()[provider.id] ?? ''"
+                          (input)="onKeyDraftInput(provider.id, $event)"
+                          (keydown.enter)="saveKey(provider.id)"
+                          autocomplete="off"
+                          [attr.aria-label]="provider.label + ' API key'"
+                        />
+                        <p-button
+                          styleClass="phorma-settings__btn"
+                          size="small"
+                          label="Save"
+                          [disabled]="keyDrafts()[provider.id] === undefined"
+                          (onClick)="saveKey(provider.id)"
+                        />
+                        @if (settings.keyConfigured()[provider.id]) {
+                          <p-button
+                            styleClass="phorma-settings__btn phorma-settings__btn--icon"
+                            [text]="true"
+                            severity="danger"
+                            size="small"
+                            icon="ti ti-trash"
+                            pTooltip="Remove stored key"
+                            tooltipPosition="top"
+                            (onClick)="clearKey(provider.id)"
+                            ariaLabel="Remove stored key"
+                          />
+                        }
+                      </div>
+                    }
+                  }
+
+                  @case ('palette-picker') {
+                    <div class="phorma-settings__palettes">
+                      @for (palette of palettes; track palette.id) {
+                        <button
+                          type="button"
+                          class="phorma-settings__palette"
+                          [class.phorma-settings__palette--active]="palette.id === theme.palette().id"
+                          (click)="pickPalette(palette.id)"
+                          [attr.aria-pressed]="palette.id === theme.palette().id"
+                        >
+                          <span class="phorma-settings__palette-ramp">
+                            <span [style.background]="palette.ramp[300]"></span>
+                            <span [style.background]="palette.ramp[500]"></span>
+                            <span [style.background]="palette.ramp[700]"></span>
+                          </span>
+                          {{ palette.label }}
+                          @if (palette.id === theme.palette().id) {
+                            <i class="ti ti-check" aria-hidden="true"></i>
+                          }
+                        </button>
+                      }
+                    </div>
+                  }
+
+                  @case ('default-model') {
+                    <div class="phorma-settings__row">
+                      <span class="phorma-settings__row-label">Provider</span>
+                      <p-select
+                        class="phorma-settings__provider-select"
+                        [options]="providers"
+                        optionLabel="label"
+                        optionValue="id"
+                        [ngModel]="settings.defaultProvider()"
+                        (ngModelChange)="onDefaultProviderChange($event)"
+                        size="small"
+                        appendTo="body"
+                        ariaLabel="Default model provider"
+                      />
+                      <input
+                        type="text"
+                        class="phorma-settings__input phorma-settings__input--mono"
+                        [value]="settings.defaultModel()"
+                        (input)="onDefaultModelInput($event)"
+                        placeholder="model id"
+                        aria-label="Default model id"
+                      />
+                    </div>
+                    <div class="phorma-settings__chips">
+                      @for (model of defaultModelSuggestions(); track model) {
+                        <button
+                          type="button"
+                          class="phorma-settings__chip"
+                          [class.phorma-settings__chip--active]="model === settings.defaultModel()"
+                          (click)="pickDefaultModel(model)"
+                        >
+                          {{ model }}
+                        </button>
+                      }
+                    </div>
+                    <div class="phorma-settings__setting">
+                      <div class="phorma-settings__setting-text">
+                        <label class="phorma-settings__setting-label" for="default-temperature">
+                          Default temperature
+                        </label>
+                        <p class="phorma-settings__setting-desc">
+                          Sampling temperature for agents that inherit the default model.
+                        </p>
+                      </div>
+                      <div class="phorma-settings__setting-control">
+                        <input
+                          id="default-temperature"
+                          type="number"
+                          class="phorma-settings__input phorma-settings__input--number"
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          [value]="settings.defaultTemperature()"
+                          (change)="onDefaultTemperatureInput($event)"
+                        />
+                      </div>
+                    </div>
+                  }
+
+                  @case ('integrations') {
+                    <p class="phorma-settings__note">
+                      <i
+                        class="ti"
+                        [class.ti-shield-lock]="isDesktop"
+                        [class.ti-alert-triangle]="!isDesktop"
+                        aria-hidden="true"
+                      ></i>
+                      These credentials are the application defaults — every node created from
+                      the preset uses them unless overridden on the node itself.
+                    </p>
+                    @for (preset of mcpPresets; track preset.id) {
+                      <div class="phorma-settings__integration">
+                        <div class="phorma-settings__integration-head">
+                          <i class="{{ preset.icon }}" aria-hidden="true"></i>
+                          <div>
+                            <h5>{{ preset.label }}</h5>
+                            <p>{{ preset.description }}</p>
+                          </div>
+                        </div>
+                        @for (field of preset.envSchema; track field.name) {
+                          <div class="phorma-settings__row">
+                            <span class="phorma-settings__row-label">
+                              {{ field.label }}
+                              @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
+                                <i
+                                  class="ti ti-circle-check phorma-settings__ok"
+                                  pTooltip="Configured"
+                                  tooltipPosition="top"
+                                  aria-hidden="true"
+                                ></i>
+                              }
+                            </span>
+                            <input
+                              [type]="field.secret ? 'password' : 'text'"
+                              class="phorma-settings__input"
+                              [placeholder]="settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)] ? '••••••••  (stored)' : (field.placeholder ?? '')"
+                              [value]="presetDrafts()[preset.id + ':' + field.name] || ''"
+                              (input)="onPresetDraftInput(preset.id, field.name, $event)"
+                              (keydown.enter)="savePresetSecret(preset, field.name)"
+                              autocomplete="off"
+                              [attr.aria-label]="preset.label + ' ' + field.label"
+                            />
+                            <p-button
+                              styleClass="phorma-settings__btn"
+                              size="small"
+                              label="Save"
+                              [disabled]="presetDrafts()[preset.id + ':' + field.name] === undefined"
+                              (onClick)="savePresetSecret(preset, field.name)"
+                            />
+                            @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
+                              <p-button
+                                styleClass="phorma-settings__btn phorma-settings__btn--icon"
+                                [text]="true"
+                                severity="danger"
+                                size="small"
+                                icon="ti ti-trash"
+                                pTooltip="Remove stored value"
+                                tooltipPosition="top"
+                                (onClick)="clearPresetSecret(preset, field.name)"
+                                ariaLabel="Remove stored value"
+                              />
+                            }
+                          </div>
+                          @if (field.description) {
+                            <p class="phorma-settings__hint">{{ field.description }}</p>
+                          }
+                        }
+                      </div>
+                    }
+                  }
+                }
+              </section>
+            }
+          }
+        </div>
       </div>
-      <p class="phorma-settings__hint">
-        Run local models for free debugging — install Ollama and pull a model
-        (e.g. <code>ollama pull llama3.2</code>).
-      </p>
     </section>
   </div>
-</p-dialog>
+}

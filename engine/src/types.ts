@@ -26,8 +26,14 @@ export type ModelProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' |
 export interface AgentNodeData {
   /** Markdown system prompt. `{{input}}` interpolates the incoming task. */
   prompt: string;
-  provider: ModelProviderId;
-  model: string;
+  /**
+   * Model provider. When absent the agent inherits the run's default model
+   * (`RunOptions.defaultModel`), which the studio wires to its application
+   * settings and the cloud path materializes at deploy time.
+   */
+  provider?: ModelProviderId;
+  /** Model id. Absent = inherit the run default (with `provider`). */
+  model?: string;
   temperature?: number;
   maxTokens?: number;
 }

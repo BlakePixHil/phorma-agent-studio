@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 
 import { WorkflowService } from '../../../core/workflow.service';
+import { SettingsService } from '../../../core/settings.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 import type { WorkflowSpec } from '../../../core/workflow.model';
@@ -19,6 +20,7 @@ import type { WorkflowSpec } from '../../../core/workflow.model';
 })
 export class WorkflowsPanel {
   protected readonly workflow = inject(WorkflowService);
+  private readonly settings = inject(SettingsService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly toast = inject(ToastService);
 
@@ -48,13 +50,16 @@ export class WorkflowsPanel {
 
   protected async remove(event: Event, spec: WorkflowSpec): Promise<void> {
     event.stopPropagation();
-    const confirmed = await this.confirmDialog.confirm({
-      title: 'Delete workflow?',
-      message: `"${spec.name}" will be removed from your library. Open tabs keep their copy.`,
-      confirmLabel: 'Delete',
-      cancelLabel: 'Keep',
-      tone: 'danger',
-    });
+    // Confirmation is skippable via Settings → General.
+    const confirmed = this.settings.confirmWorkflowDelete()
+      ? await this.confirmDialog.confirm({
+          title: 'Delete workflow?',
+          message: `"${spec.name}" will be removed from your library. Open tabs keep their copy.`,
+          confirmLabel: 'Delete',
+          cancelLabel: 'Keep',
+          tone: 'danger',
+        })
+      : true;
     if (confirmed) void this.workflow.removeFromLibrary(spec.id);
   }
 }

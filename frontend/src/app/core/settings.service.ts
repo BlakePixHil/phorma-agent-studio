@@ -1,6 +1,6 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 
-import type { ModelProviderId } from './workflow.model';
+import { PROVIDER_MODEL_SUGGESTIONS, type ModelProviderId } from './workflow.model';
 import { TauriService } from './tauri.service';
 import { loadLayout, saveLayout } from './layout-storage';
 
@@ -8,33 +8,108 @@ const BROWSER_KEYS_STORAGE = 'phorma.provider-keys';
 const BROWSER_MCP_SECRETS_STORAGE = 'phorma.mcp-secrets';
 
 /**
- * Provider credentials + model-transport settings.
+ * Scope for MCP secrets: node-scoped values override preset-scoped
+ * application defaults (Settings → Integrations).
+ */
+export type McpSecretScope = { node: string } | { preset: string };
+
+/**
+ * Application settings + provider credentials.
  *
- * Desktop: keys live in the OS keychain via the Rust backend — they never
- * enter the webview; only a "key exists" flag comes back.
- * Browser preview: keys fall back to localStorage so web-mode debugging still
- * works. The Settings dialog labels this mode clearly.
+ * Non-sensitive settings are reactive signals persisted through
+ * `layout-storage` (localStorage). Sensitive values (API keys, MCP secrets)
+ * live in the OS keychain via the Rust backend on desktop — they never enter
+ * the webview; only "configured" flags come back. Browser preview falls back
+ * to localStorage so web-mode debugging still works; the Settings dialog
+ * labels this mode clearly.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
   private readonly tauri = inject(TauriService);
 
+  // ── Models ──────────────────────────────────────────────────────────────
+
   /** Ollama server base URL (local models need no key). */
   readonly ollamaBaseUrl = signal(loadLayout('ollamaBaseUrl', 'http://localhost:11434'));
+
+  /**
+   * Application default model. Agent nodes without an explicit provider/model
+   * inherit this at run/deploy time. Ollama is the zero-key default so a
+   * fresh install can run without provider setup.
+   */
+  readonly defaultProvider = signal<ModelProviderId>(
+    loadLayout<ModelProviderId>('defaultProvider', 'ollama'),
+  );
+  readonly defaultModel = signal(loadLayout('defaultModel', 'llama3.2'));
+
+  /** Default sampling temperature applied to inheriting agents. */
+  readonly defaultTemperature = signal(loadLayout('defaultTemperature', 0.7));
+
+  /** Resolved app default as a single object (for run options / display). */
+  readonly resolvedDefaultModel = computed(() => ({
+    provider: this.defaultProvider(),
+    model: this.defaultModel(),
+  }));
+
+  // ── Execution ───────────────────────────────────────────────────────────
+
+  /** Open the console dock automatically when a run starts. */
+  readonly autoOpenConsoleOnRun = signal(loadLayout('autoOpenConsoleOnRun', true));
+
+  /** Maximum tool-call rounds per agent turn (engine loop budget). */
+  readonly maxToolRounds = signal(loadLayout('maxToolRounds', 8));
+
+  // ── Workflows ───────────────────────────────────────────────────────────
+
+  /** Autosave named workflows shortly after each edit. */
+  readonly autosaveEnabled = signal(loadLayout('autosaveEnabled', false));
+
+  /** Ask for confirmation before deleting a workflow from the library. */
+  readonly confirmWorkflowDelete = signal(loadLayout('confirmWorkflowDelete', true));
+
+  // ── Canvas ──────────────────────────────────────────────────────────────
+
+  /** Mouse-wheel zoom sensitivity multiplier (0.25–3). */
+  readonly zoomSensitivity = signal(loadLayout('zoomSensitivity', 1));
+
+  /** Grid spacing (canvas px) used when grid snapping is enabled. */
+  readonly gridSnapSize = signal(loadLayout('gridSnapSize', 24));
+
+  // ── Credential flags ────────────────────────────────────────────────────
 
   /** provider id → whether a key is configured (for Settings UI badges). */
   readonly keyConfigured = signal<Partial<Record<ModelProviderId, boolean>>>({});
 
-  /** `'{nodeId}:{envKey}' → whether an MCP secret is configured. */
+  /**
+   * `'{nodeId}:{envKey}'` or `'preset:{presetId}:{envKey}'` → whether an MCP
+   * secret is configured.
+   */
   readonly mcpSecretsConfigured = signal<Record<string, boolean>>({});
 
   constructor() {
     void this.refreshKeyFlags();
+    // Persist the plain-value settings whenever they change.
+    effect(() => saveLayout('defaultProvider', this.defaultProvider()));
+    effect(() => saveLayout('defaultModel', this.defaultModel()));
+    effect(() => saveLayout('defaultTemperature', this.defaultTemperature()));
+    effect(() => saveLayout('autoOpenConsoleOnRun', this.autoOpenConsoleOnRun()));
+    effect(() => saveLayout('maxToolRounds', this.maxToolRounds()));
+    effect(() => saveLayout('autosaveEnabled', this.autosaveEnabled()));
+    effect(() => saveLayout('confirmWorkflowDelete', this.confirmWorkflowDelete()));
+    effect(() => saveLayout('zoomSensitivity', this.zoomSensitivity()));
+    effect(() => saveLayout('gridSnapSize', this.gridSnapSize()));
   }
 
   setOllamaBaseUrl(url: string): void {
     this.ollamaBaseUrl.set(url.trim() || 'http://localhost:11434');
     saveLayout('ollamaBaseUrl', this.ollamaBaseUrl());
+  }
+
+  /** Sets the app default provider, resetting the model to its first suggestion. */
+  setDefaultProvider(provider: ModelProviderId): void {
+    if (this.defaultProvider() === provider) return;
+    this.defaultProvider.set(provider);
+    this.defaultModel.set(PROVIDER_MODEL_SUGGESTIONS[provider][0] ?? '');
   }
 
   /** Stores (or clears, when empty) a provider API key. */
@@ -58,60 +133,99 @@ export class SettingsService {
 
   // ── MCP secrets ────────────────────────────────────────────────────────────
 
-  /** The keychain id for a node-scoped MCP env var. */
-  private mcpSecretKey(nodeId: string, envKey: string): string {
-    return `mcp:${nodeId}:${envKey}`;
+  /**
+   * The keychain id for an MCP env var. Node scope: `mcp:{nodeId}:{envKey}`;
+   * preset scope (application default): `mcp:preset:{presetId}:{envKey}`.
+   * Both pass the Rust backend's `mcp:` prefix validation. The Rust side
+   * (`mcp.rs`) resolves node scope first, then falls back to preset scope.
+   */
+  private mcpSecretKey(scope: McpSecretScope, envKey: string): string {
+    return 'node' in scope
+      ? `mcp:${scope.node}:${envKey}`
+      : `mcp:preset:${scope.preset}:${envKey}`;
   }
 
-  /** Stores (or clears, when empty) an MCP server env var in the keychain. */
-  async setMcpSecret(nodeId: string, envKey: string, value: string): Promise<void> {
+  /** The `mcpSecretsConfigured` flag key for a scope + env var. */
+  private mcpFlagKey(scope: McpSecretScope, envKey: string): string {
+    return 'node' in scope ? `${scope.node}:${envKey}` : `preset:${scope.preset}:${envKey}`;
+  }
+
+  /** Stores (or clears, when empty) an MCP env var in the keychain. */
+  async setMcpSecretScoped(scope: McpSecretScope, envKey: string, value: string): Promise<void> {
     if (this.tauri.isDesktop) {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('set_secret', { key: this.mcpSecretKey(nodeId, envKey), value });
+      await invoke('set_secret', { key: this.mcpSecretKey(scope, envKey), value });
     } else {
       const secrets = this.browserMcpSecrets();
-      if (value.trim()) secrets[this.mcpSecretKey(nodeId, envKey)] = value.trim();
-      else delete secrets[this.mcpSecretKey(nodeId, envKey)];
+      if (value.trim()) secrets[this.mcpSecretKey(scope, envKey)] = value.trim();
+      else delete secrets[this.mcpSecretKey(scope, envKey)];
       localStorage.setItem(BROWSER_MCP_SECRETS_STORAGE, JSON.stringify(secrets));
     }
-    await this.refreshMcpSecretFlags(nodeId, [envKey]);
+    await this.refreshMcpSecretFlagsScoped(scope, [envKey]);
   }
 
-  /** Clears an MCP server env var from the keychain. */
+  /** Stores (or clears, when empty) a node-scoped MCP env var. */
+  async setMcpSecret(nodeId: string, envKey: string, value: string): Promise<void> {
+    await this.setMcpSecretScoped({ node: nodeId }, envKey, value);
+  }
+
+  /** Stores (or clears) a preset-scoped (application default) MCP env var. */
+  async setPresetSecret(presetId: string, envKey: string, value: string): Promise<void> {
+    await this.setMcpSecretScoped({ preset: presetId }, envKey, value);
+  }
+
+  /** Clears a node-scoped MCP env var from the keychain. */
   async clearMcpSecret(nodeId: string, envKey: string): Promise<void> {
     await this.setMcpSecret(nodeId, envKey, '');
   }
 
   /**
-   * Refreshes the `mcpSecretsConfigured` flags for a node's env vars.
-   * Call this when the selected node changes so the properties panel shows
-   * accurate configured badges.
+   * Refreshes the `mcpSecretsConfigured` flags for a scope's env vars.
+   * Call when the selected node changes (node scope) or when the Settings
+   * Integrations page opens (preset scope) so configured badges are accurate.
    */
-  async refreshMcpSecretFlags(nodeId: string, envKeys: string[]): Promise<void> {
+  async refreshMcpSecretFlagsScoped(scope: McpSecretScope, envKeys: string[]): Promise<void> {
     const next = { ...this.mcpSecretsConfigured() };
     if (this.tauri.isDesktop) {
       const { invoke } = await import('@tauri-apps/api/core');
       for (const envKey of envKeys) {
         try {
-          next[`${nodeId}:${envKey}`] = await invoke<boolean>('has_secret', {
-            key: this.mcpSecretKey(nodeId, envKey),
+          next[this.mcpFlagKey(scope, envKey)] = await invoke<boolean>('has_secret', {
+            key: this.mcpSecretKey(scope, envKey),
           });
         } catch {
-          next[`${nodeId}:${envKey}`] = false;
+          next[this.mcpFlagKey(scope, envKey)] = false;
         }
       }
     } else {
       const secrets = this.browserMcpSecrets();
       for (const envKey of envKeys) {
-        next[`${nodeId}:${envKey}`] = !!secrets[this.mcpSecretKey(nodeId, envKey)];
+        next[this.mcpFlagKey(scope, envKey)] = !!secrets[this.mcpSecretKey(scope, envKey)];
       }
     }
     this.mcpSecretsConfigured.set(next);
   }
 
-  /** Browser-mode MCP secret lookup (desktop secrets never reach the webview). */
-  browserMcpSecret(nodeId: string, envKey: string): string | null {
-    return this.browserMcpSecrets()[this.mcpSecretKey(nodeId, envKey)] ?? null;
+  /** Refreshes node-scoped configured flags (properties panel badges). */
+  async refreshMcpSecretFlags(nodeId: string, envKeys: string[]): Promise<void> {
+    await this.refreshMcpSecretFlagsScoped({ node: nodeId }, envKeys);
+  }
+
+  /** Refreshes preset-scoped configured flags (Settings → Integrations). */
+  async refreshPresetSecretFlags(presetId: string, envKeys: string[]): Promise<void> {
+    await this.refreshMcpSecretFlagsScoped({ preset: presetId }, envKeys);
+  }
+
+  /**
+   * Browser-mode MCP secret lookup (desktop secrets never reach the webview).
+   * Node-scoped value wins; falls back to the preset-scoped app default.
+   */
+  browserMcpSecret(nodeId: string, envKey: string, presetId?: string): string | null {
+    const secrets = this.browserMcpSecrets();
+    const nodeValue = secrets[this.mcpSecretKey({ node: nodeId }, envKey)];
+    if (nodeValue) return nodeValue;
+    if (presetId) return secrets[this.mcpSecretKey({ preset: presetId }, envKey)] ?? null;
+    return null;
   }
 
   private browserMcpSecrets(): Record<string, string> {

@@ -75,11 +75,29 @@ export const MODEL_PROVIDERS: { id: ModelProviderId; label: string }[] = [
   { id: 'ollama', label: 'Ollama (local)' },
 ];
 
+/**
+ * Suggested models per provider (users can always type any model id).
+ * Shared by the Prompt panel's model picker and the Settings dialog's
+ * default-model picker.
+ */
+export const PROVIDER_MODEL_SUGGESTIONS: Record<ModelProviderId, string[]> = {
+  anthropic: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5'],
+  openai: ['gpt-5.2', 'gpt-5.2-mini', 'o4-mini'],
+  gemini: ['gemini-3-pro', 'gemini-3-flash'],
+  openrouter: ['anthropic/claude-sonnet-4.5', 'openai/gpt-5.2', 'meta-llama/llama-4-70b'],
+  ollama: ['llama3.2', 'qwen3', 'mistral-small'],
+};
+
 export interface AgentNodeData {
   /** System prompt. ALWAYS markdown — edited as markdown, rendered sanitized. */
   prompt: string;
-  provider: ModelProviderId;
-  model: string;
+  /**
+   * Model provider. When absent the agent inherits the application-level
+   * default model (Settings → Models). Resolved at run/deploy time.
+   */
+  provider?: ModelProviderId;
+  /** Model id. Absent = inherit the application default (with `provider`). */
+  model?: string;
   temperature?: number;
   maxTokens?: number;
 }

@@ -48,17 +48,12 @@ export const NODE_CATEGORY_SECTIONS: { category: NodeCategory; label: string }[]
 ];
 
 /**
- * Default model configuration for new agents. Ollama is the zero-key local
- * default so a freshly installed studio can run without any provider setup;
- * users switch providers per-agent in the Prompt panel.
+ * New agents carry no provider/model — they inherit the application default
+ * model (Settings → Models) until the user picks one explicitly in the
+ * Prompt panel. Resolution happens at run time (local) or push time (cloud).
  */
-const DEFAULT_AGENT_MODEL: Pick<AgentNodeData, 'provider' | 'model'> = {
-  provider: 'ollama',
-  model: 'llama3.2',
-};
-
 function agentData(prompt: string): AgentNodeData {
-  return { ...DEFAULT_AGENT_MODEL, prompt, temperature: 0.7 };
+  return { prompt };
 }
 
 const AGENT_PORTS: NodeCatalogEntry['ports'] = [

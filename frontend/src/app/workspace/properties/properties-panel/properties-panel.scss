@@ -233,3 +233,98 @@
     color: var(--p-text-color);
   }
 }
+
+/* ── MCP preset status + Advanced group ─────────────────────────────────── */
+.phorma-props__preset-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0.2rem 0 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 8%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 0.7rem;
+  line-height: 1.5;
+
+  i {
+    margin-top: 0.1rem;
+    font-size: 0.8rem;
+    color: var(--phorma-accent-amber, #fbbf24);
+  }
+
+  &--ok {
+    background: color-mix(in srgb, var(--phorma-accent-green, #34d399) 8%, transparent);
+
+    i {
+      color: var(--phorma-accent-green, #34d399);
+    }
+  }
+}
+
+.phorma-props__link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--p-primary-color, #818cf8);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  i {
+    font-size: 0.8rem;
+  }
+}
+
+.phorma-props__advanced-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  padding: 0.25rem 0.4rem 0.25rem 0.2rem;
+  border: none;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--p-text-color);
+  }
+
+  i {
+    font-size: 0.8rem;
+  }
+}
+
+.phorma-props__advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 2%, transparent);
+}
+
+/* Field is inheriting the application default (no node override). */
+.phorma-props__default {
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
+  opacity: 0.8;
+}

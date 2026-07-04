@@ -1,5 +1,6 @@
-import { effect, Injectable, signal } from '@angular/core';
+import { effect, inject, Injectable, signal } from '@angular/core';
 import { loadLayout, saveLayout } from './layout-storage';
+import { SettingsService } from './settings.service';
 
 export type ZoomCommand = 'in' | 'out' | 'reset' | 'fit' | null;
 
@@ -15,15 +16,14 @@ export const MINIMAP_ANCHORS: MinimapAnchor[] = [
   'top-left', 'top-right', 'bottom-left', 'bottom-right',
 ];
 
-/** Grid spacing (in canvas-space px) used when grid snapping is enabled. */
-export const GRID_SNAP_SIZE = 24;
-
 /**
  * Lightweight reactive canvas view state shared between the canvas and the
  * app shell (zoom, grid, minimap). Document state lives in WorkflowService.
+ * Grid snap spacing comes from SettingsService (Settings → Canvas).
  */
 @Injectable({ providedIn: 'root' })
 export class CanvasStateService {
+  private readonly settings = inject(SettingsService);
   /** Current zoom scale (integer %). Written by Canvas, read by App shell. */
   readonly zoomScale = signal(100);
 
@@ -80,7 +80,8 @@ export class CanvasStateService {
 
   /** Snaps a canvas-space coordinate to the nearest grid cell. */
   snap(value: number): number {
-    return Math.round(value / GRID_SNAP_SIZE) * GRID_SNAP_SIZE;
+    const size = this.settings.gridSnapSize();
+    return Math.round(value / size) * size;
   }
 
   /** Snaps a 2D position to the grid. */

@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { SelectModule } from 'primeng/select';
 
@@ -6,6 +14,7 @@ import { SelectionService } from '../../../core/selection.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import { findCatalogEntryByKind, findMcpPreset, type McpEnvField } from '../../../core/node-catalog';
 import { SettingsService } from '../../../core/settings.service';
+import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 import type {
   ApprovalGateData,
@@ -34,6 +43,7 @@ export class PropertiesPanel {
   private readonly selection = inject(SelectionService);
   private readonly workflow = inject(WorkflowService);
   private readonly settings = inject(SettingsService);
+  private readonly settingsDialog = inject(SettingsDialogService);
   private readonly toast = inject(ToastService);
 
   protected readonly httpMethods = [...HTTP_METHODS];
@@ -82,13 +92,75 @@ export class PropertiesPanel {
   /** Per-field secret input drafts, keyed by env var name. */
   protected readonly mcpSecretDrafts = signal<Record<string, string>>({});
 
-  /** Refresh configured-secret badges whenever the selected node changes. */
+  /**
+   * Whether the Advanced group (per-node credential overrides, command/args)
+   * is expanded. Collapses whenever the selection changes.
+   */
+  protected readonly advancedOpen = signal(false);
+
+  /**
+   * Refresh configured-secret badges whenever the selected node changes.
+   * `untracked` is REQUIRED: the refresh reads AND writes
+   * `mcpSecretsConfigured` synchronously in browser mode, which would
+   * otherwise loop this effect forever.
+   */
   protected readonly secretFlagsRefresher = effect(() => {
     const node = this.node();
     const data = this.mcpData();
     if (!node || !data?.envKeys?.length) return;
-    void this.settings.refreshMcpSecretFlags(node.id, data.envKeys);
+    const envKeys = data.envKeys;
+    const presetId = data.presetId;
+    untracked(() => {
+      void this.settings.refreshMcpSecretFlags(node.id, envKeys);
+      // Preset-scoped flags power the "using application defaults" status.
+      if (presetId) void this.settings.refreshPresetSecretFlags(presetId, envKeys);
+    });
   });
+
+  /** Collapse the Advanced group when the selection changes. */
+  protected readonly advancedCollapser = effect(() => {
+    this.node();
+    this.advancedOpen.set(false);
+  });
+
+  protected toggleAdvanced(): void {
+    this.advancedOpen.update(open => !open);
+  }
+
+  /** Deep-link to Settings → Integrations (application defaults). */
+  protected openIntegrationSettings(): void {
+    this.settingsDialog.open('integrations');
+  }
+
+  /**
+   * Whether every credential of the selected preset node resolves — from a
+   * node-scoped override or the preset-scoped application default.
+   */
+  protected readonly presetFullyConfigured = computed(() => {
+    const preset = this.mcpPreset();
+    const node = this.node();
+    if (!preset || !node) return false;
+    const flags = this.settings.mcpSecretsConfigured();
+    return preset.envSchema.every(
+      field =>
+        flags[`${node.id}:${field.name}`] || flags[`preset:${preset.id}:${field.name}`],
+    );
+  });
+
+  /** Whether the node overrides ANY preset credential locally. */
+  protected readonly hasNodeOverrides = computed(() => {
+    const preset = this.mcpPreset();
+    const node = this.node();
+    if (!preset || !node) return false;
+    const flags = this.settings.mcpSecretsConfigured();
+    return preset.envSchema.some(field => flags[`${node.id}:${field.name}`]);
+  });
+
+  /** Whether a preset credential is configured at the application level. */
+  protected presetDefaultConfigured(envKey: string): boolean {
+    const preset = this.mcpPreset();
+    return preset ? !!this.settings.mcpSecretsConfigured()[`preset:${preset.id}:${envKey}`] : false;
+  }
 
   /** Router/parallel/aggregator branch ports are editable lists. */
   protected readonly editableOutPorts = computed(() => {

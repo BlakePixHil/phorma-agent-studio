@@ -105,92 +105,178 @@
           appendTo="body"
         />
         @if (data.transport === 'stdio') {
-          <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
-          <input
-            id="prop-cmd"
-            type="text"
-            class="phorma-props__input phorma-props__input--mono"
-            [value]="data.command ?? ''"
-            (input)="patchData({ command: inputValue($event) })"
-            placeholder="npx -y @modelcontextprotocol/server-filesystem"
-          />
+          @if (mcpPreset(); as preset) {
+            <!-- Preset node: application defaults status + Advanced overrides -->
+            <div
+              class="phorma-props__preset-status"
+              [class.phorma-props__preset-status--ok]="presetFullyConfigured()"
+            >
+              <i
+                class="ti"
+                [class.ti-circle-check]="presetFullyConfigured()"
+                [class.ti-alert-triangle]="!presetFullyConfigured()"
+                aria-hidden="true"
+              ></i>
+              <span>
+                @if (hasNodeOverrides()) {
+                  Using node overrides — see Advanced below.
+                } @else if (presetFullyConfigured()) {
+                  Using application defaults.
+                } @else {
+                  Credentials missing — set application defaults in Settings.
+                }
+              </span>
+            </div>
+            <button type="button" class="phorma-props__link" (click)="openIntegrationSettings()">
+              <i class="ti ti-settings" aria-hidden="true"></i>
+              Configure defaults in Settings › Integrations
+            </button>
 
-          <label class="phorma-props__label phorma-props__label--gap">Arguments</label>
-          <ul class="phorma-props__ports">
-            @for (arg of data.args ?? []; track $index) {
-              <li>
+            <!-- Advanced: per-node overrides + command/args -->
+            <button
+              type="button"
+              class="phorma-props__advanced-toggle"
+              (click)="toggleAdvanced()"
+              [attr.aria-expanded]="advancedOpen()"
+            >
+              <i
+                class="ti"
+                [class.ti-chevron-right]="!advancedOpen()"
+                [class.ti-chevron-down]="advancedOpen()"
+                aria-hidden="true"
+              ></i>
+              Advanced
+            </button>
+            @if (advancedOpen()) {
+              <div class="phorma-props__advanced">
+                <label class="phorma-props__label">Credential overrides</label>
+                <p class="phorma-props__hint">
+                  Override the application defaults for this node only. Stored in your OS
+                  keychain (desktop) or localStorage (browser) — never in the workflow file.
+                </p>
+                <ul class="phorma-props__ports">
+                  @for (field of preset.envSchema; track field.name) {
+                    <li>
+                      <span class="phorma-props__provider">
+                        {{ field.label }}
+                        @if (secretConfigured(field.name)) {
+                          <i class="ti ti-circle-check phorma-props__ok" title="Overridden on this node" aria-hidden="true"></i>
+                        } @else if (presetDefaultConfigured(field.name)) {
+                          <i class="ti ti-settings-check phorma-props__default" title="Using application default" aria-hidden="true"></i>
+                        }
+                      </span>
+                      <input
+                        [type]="field.secret ? 'password' : 'text'"
+                        class="phorma-props__input"
+                        [placeholder]="secretConfigured(field.name) ? '••••••••  (override stored)' : presetDefaultConfigured(field.name) ? 'Using app default' : (field.placeholder ?? '')"
+                        [value]="mcpSecretDrafts()[field.name] || ''"
+                        (input)="onSecretInput(field.name, $event)"
+                        (keydown.enter)="saveSecret(field.name)"
+                        autocomplete="off"
+                      />
+                      <button
+                        type="button"
+                        class="phorma-props__btn"
+                        [disabled]="mcpSecretDrafts()[field.name] === undefined"
+                        (click)="saveSecret(field.name)"
+                      >
+                        Save
+                      </button>
+                      @if (secretConfigured(field.name)) {
+                        <button
+                          type="button"
+                          class="phorma-props__icon-btn"
+                          (click)="clearSecret(field.name)"
+                          title="Remove override (revert to application default)"
+                        >
+                          <i class="ti ti-trash" aria-hidden="true"></i>
+                        </button>
+                      }
+                    </li>
+                    @if (field.description) {
+                      <p class="phorma-props__hint">{{ field.description }}</p>
+                    }
+                  }
+                </ul>
+
+                <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
                 <input
+                  id="prop-cmd"
                   type="text"
                   class="phorma-props__input phorma-props__input--mono"
-                  [value]="arg"
-                  (input)="onArgInput($index, $event)"
-                  [attr.aria-label]="'Argument ' + ($index + 1)"
+                  [value]="data.command ?? ''"
+                  (input)="patchData({ command: inputValue($event) })"
+                  placeholder="npx -y @modelcontextprotocol/server-filesystem"
                 />
-                <button
-                  type="button"
-                  class="phorma-props__icon-btn"
-                  (click)="removeArg($index)"
-                  title="Remove argument"
-                >
-                  <i class="ti ti-trash" aria-hidden="true"></i>
-                </button>
-              </li>
-            } @empty {
-              <p class="phorma-props__hint">No arguments.</p>
-            }
-          </ul>
-          <button type="button" class="phorma-props__add-btn" (click)="addArg()">
-            <i class="ti ti-plus" aria-hidden="true"></i> Add argument
-          </button>
 
-          @if (mcpPreset(); as preset) {
-            <label class="phorma-props__label phorma-props__label--gap">Credentials</label>
-            <p class="phorma-props__hint">
-              Secrets are stored in your OS keychain (desktop) or localStorage (browser) —
-              never in the workflow file.
-            </p>
+                <label class="phorma-props__label phorma-props__label--gap">Arguments</label>
+                <ul class="phorma-props__ports">
+                  @for (arg of data.args ?? []; track $index) {
+                    <li>
+                      <input
+                        type="text"
+                        class="phorma-props__input phorma-props__input--mono"
+                        [value]="arg"
+                        (input)="onArgInput($index, $event)"
+                        [attr.aria-label]="'Argument ' + ($index + 1)"
+                      />
+                      <button
+                        type="button"
+                        class="phorma-props__icon-btn"
+                        (click)="removeArg($index)"
+                        title="Remove argument"
+                      >
+                        <i class="ti ti-trash" aria-hidden="true"></i>
+                      </button>
+                    </li>
+                  } @empty {
+                    <p class="phorma-props__hint">No arguments.</p>
+                  }
+                </ul>
+                <button type="button" class="phorma-props__add-btn" (click)="addArg()">
+                  <i class="ti ti-plus" aria-hidden="true"></i> Add argument
+                </button>
+              </div>
+            }
+          } @else {
+            <!-- Generic MCP node: command/args inline (no preset defaults) -->
+            <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
+            <input
+              id="prop-cmd"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="data.command ?? ''"
+              (input)="patchData({ command: inputValue($event) })"
+              placeholder="npx -y @modelcontextprotocol/server-filesystem"
+            />
+
+            <label class="phorma-props__label phorma-props__label--gap">Arguments</label>
             <ul class="phorma-props__ports">
-              @for (field of preset.envSchema; track field.name) {
+              @for (arg of data.args ?? []; track $index) {
                 <li>
-                  <span class="phorma-props__provider">
-                    {{ field.label }}
-                    @if (secretConfigured(field.name)) {
-                      <i class="ti ti-circle-check phorma-props__ok" title="Configured" aria-hidden="true"></i>
-                    }
-                  </span>
                   <input
-                    [type]="field.secret ? 'password' : 'text'"
-                    class="phorma-props__input"
-                    [placeholder]="secretConfigured(field.name) ? '••••••••  (stored)' : (field.placeholder ?? '')"
-                    [value]="mcpSecretDrafts()[field.name] || ''"
-                    (input)="onSecretInput(field.name, $event)"
-                    (keydown.enter)="saveSecret(field.name)"
-                    autocomplete="off"
+                    type="text"
+                    class="phorma-props__input phorma-props__input--mono"
+                    [value]="arg"
+                    (input)="onArgInput($index, $event)"
+                    [attr.aria-label]="'Argument ' + ($index + 1)"
                   />
                   <button
                     type="button"
-                    class="phorma-props__btn"
-                    [disabled]="mcpSecretDrafts()[field.name] === undefined"
-                    (click)="saveSecret(field.name)"
+                    class="phorma-props__icon-btn"
+                    (click)="removeArg($index)"
+                    title="Remove argument"
                   >
-                    Save
+                    <i class="ti ti-trash" aria-hidden="true"></i>
                   </button>
-                  @if (secretConfigured(field.name)) {
-                    <button
-                      type="button"
-                      class="phorma-props__icon-btn"
-                      (click)="clearSecret(field.name)"
-                      title="Remove stored value"
-                    >
-                      <i class="ti ti-trash" aria-hidden="true"></i>
-                    </button>
-                  }
                 </li>
-                @if (field.description) {
-                  <p class="phorma-props__hint">{{ field.description }}</p>
-                }
+              } @empty {
+                <p class="phorma-props__hint">No arguments.</p>
               }
             </ul>
+            <button type="button" class="phorma-props__add-btn" (click)="addArg()">
+              <i class="ti ti-plus" aria-hidden="true"></i> Add argument
+            </button>
           }
         } @else {
           <label class="phorma-props__label phorma-props__label--gap" for="prop-url">Server URL</label>

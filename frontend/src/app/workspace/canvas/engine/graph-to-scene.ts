@@ -38,11 +38,12 @@ function truncateLabel(text: string, max = 24): string {
 }
 
 /**
- * Secondary label shown on a row's right column. Agents show their model,
- * so the canvas communicates "who runs on what" at a glance.
+ * Secondary label shown on a row's right column. Agents show their model
+ * ("Default" when inheriting the application default), so the canvas
+ * communicates "who runs on what" at a glance.
  */
 function nodeSubtitle(node: WorkflowNode): string | null {
-  if (isAgentNode(node)) return truncateLabel(node.data.model, 18);
+  if (isAgentNode(node)) return truncateLabel(node.data.model ?? 'Default', 18);
   return null;
 }
 

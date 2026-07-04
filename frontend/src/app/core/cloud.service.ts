@@ -3,11 +3,13 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import type { RunEvent } from '@phorma/engine';
 
 import { RunControllerService } from './run-controller.service';
+import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { WorkflowService } from './workflow.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import { ToastService } from '../shared/toast/toast.service';
+import { isAgentNode, type WorkflowSpec } from './workflow.model';
 
 export type CloudConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -29,6 +31,7 @@ export class CloudService {
   private readonly runController = inject(RunControllerService);
   private readonly terminal = inject(TerminalOutputService);
   private readonly toast = inject(ToastService);
+  private readonly settings = inject(SettingsService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -130,9 +133,28 @@ export class CloudService {
 
   // ── Push the active workflow spec ──────────────────────────────────────────
 
+  /**
+   * Materializes the application default model into agents that inherit it.
+   * The cloud runtime has no access to the studio's settings, so inherited
+   * provider/model values are resolved into the spec at push time.
+   */
+  private materializeDefaults(spec: WorkflowSpec): WorkflowSpec {
+    const resolved = structuredClone(spec);
+    for (const node of resolved.graph.nodes) {
+      if (!isAgentNode(node)) continue;
+      if (!node.data.provider || !node.data.model) {
+        node.data.provider = this.settings.defaultProvider();
+        node.data.model = this.settings.defaultModel();
+        node.data.temperature ??= this.settings.defaultTemperature();
+      }
+    }
+    return resolved;
+  }
+
   async pushWorkflow(): Promise<void> {
-    const spec = this.workflow.exportActiveSpec();
-    if (!spec) return;
+    const rawSpec = this.workflow.exportActiveSpec();
+    if (!rawSpec) return;
+    const spec = this.materializeDefaults(rawSpec);
     const base = this.instanceUrl(spec.id);
     if (!base) {
       this.toast.warning('Set the worker URL', 'Enter your deployed worker URL first.');

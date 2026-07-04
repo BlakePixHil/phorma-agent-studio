@@ -87,6 +87,7 @@ export class ToolHostService implements ToolHost {
       args?: string[];
       url?: string;
       envKeys?: string[];
+      presetId?: string;
     };
 
     let tools: { name: string; description?: string; inputSchema?: object }[];
@@ -100,6 +101,9 @@ export class ToolHostService implements ToolHost {
         command: data.command ?? '',
         args: data.args ?? [],
         envKeys: data.envKeys ?? [],
+        // Rust falls back to preset-scoped app-default secrets when the
+        // node-scoped ones are absent (Settings > Integrations).
+        presetId: data.presetId ?? null,
       });
       tools = (JSON.parse(raw) as { tools?: typeof tools }).tools ?? [];
     } else {
