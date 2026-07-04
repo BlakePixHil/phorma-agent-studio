@@ -10,6 +10,32 @@
     />
   </div>
 
+  <div class="phorma-palette__chips">
+    @for (chip of chips; track chip.category) {
+      <button
+        type="button"
+        class="phorma-palette__chip"
+        [class.phorma-palette__chip--active]="activeCategories().has(chip.category)"
+        [style.--chip-color]="chip.color"
+        (click)="toggleCategory(chip.category)"
+      >
+        <span class="phorma-palette__chip-dot" aria-hidden="true"></span>
+        {{ chip.label }}
+      </button>
+    }
+    @if (hasActiveFilters()) {
+      <button
+        type="button"
+        class="phorma-palette__chip-clear"
+        (click)="clearFilters()"
+        title="Clear filters"
+        aria-label="Clear filters"
+      >
+        <i class="ti ti-x" aria-hidden="true"></i>
+      </button>
+    }
+  </div>
+
   <div class="phorma-palette__scroll">
     @for (section of sections(); track section.category) {
       <section class="phorma-palette__section">

@@ -45,6 +45,77 @@
   }
 }
 
+.phorma-palette__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.7rem 0.5rem;
+}
+
+.phorma-palette__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 0.66rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--chip-color, var(--p-primary-color)) 50%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &--active {
+    background: color-mix(in srgb, var(--chip-color, var(--p-primary-color)) 18%, transparent);
+    border-color: color-mix(in srgb, var(--chip-color, var(--p-primary-color)) 60%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-palette__chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--chip-color, var(--p-primary-color));
+}
+
+.phorma-palette__chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
+
+  i {
+    font-size: 0.8rem;
+    line-height: 1;
+  }
+}
+
 .phorma-palette__scroll {
   flex: 1;
   min-height: 0;

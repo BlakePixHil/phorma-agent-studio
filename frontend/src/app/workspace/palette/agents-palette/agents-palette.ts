@@ -10,7 +10,14 @@ import {
   type McpPreset,
 } from '../../../core/node-catalog';
 import { NodeDragService } from '../../../core/node-drag.service';
-import { NODE_CATEGORY_COLORS } from '../../../core/workflow.model';
+import { NODE_CATEGORY_COLORS, type NodeCategory } from '../../../core/workflow.model';
+
+/** A selectable filter chip mapped to a node category. */
+interface CategoryChip {
+  category: NodeCategory;
+  label: string;
+  color: string;
+}
 
 /**
  * The Agents palette (left panel): every node type in the catalog, grouped by
@@ -28,16 +35,47 @@ export class AgentsPalette {
 
   protected readonly query = signal('');
 
-  /** MCP presets, filtered by the search query. */
+  /** Currently selected category filters (inclusive OR). */
+  protected readonly activeCategories = signal<Set<NodeCategory>>(new Set());
+
+  /** Chips rendered above the grid; one per catalog section. */
+  protected readonly chips: CategoryChip[] = NODE_CATEGORY_SECTIONS.map(section => ({
+    category: section.category,
+    label: section.label,
+    color: NODE_CATEGORY_COLORS[section.category],
+  }));
+
+  /** Whether any category filter is currently active. */
+  protected readonly hasActiveFilters = computed(() => this.activeCategories().size > 0);
+
+  protected toggleCategory(category: NodeCategory): void {
+    const next = new Set(this.activeCategories());
+    if (next.has(category)) {
+      next.delete(category);
+    } else {
+      next.add(category);
+    }
+    this.activeCategories.set(next);
+  }
+
+  protected clearFilters(): void {
+    this.activeCategories.set(new Set());
+  }
+
+  /** MCP presets, filtered by the search query and active category filters. */
   protected readonly mcpPresets = computed(() => {
     const q = this.query().trim().toLowerCase();
-    if (q.length === 0) return MCP_PRESETS;
-    return MCP_PRESETS.filter(
-      preset =>
+    const active = this.activeCategories();
+    // MCP presets are tools; hide them when a filter is active that excludes tools.
+    if (active.size > 0 && !active.has('tool')) return [];
+    return MCP_PRESETS.filter(preset => {
+      if (q.length === 0) return true;
+      return (
         preset.label.toLowerCase().includes(q) ||
         preset.description.toLowerCase().includes(q) ||
-        preset.keywords?.some(keyword => keyword.includes(q)),
-    );
+        preset.keywords?.some(keyword => keyword.includes(q))
+      );
+    });
   });
 
   /** Whether any palette entries (catalog sections or presets) match the query. */
@@ -49,16 +87,19 @@ export class AgentsPalette {
   /** Sections with their (filtered) entries; empty sections are dropped. */
   protected readonly sections = computed(() => {
     const q = this.query().trim().toLowerCase();
+    const active = this.activeCategories();
     return NODE_CATEGORY_SECTIONS.map(section => ({
       ...section,
       color: NODE_CATEGORY_COLORS[section.category],
-      entries: NODE_CATALOG.filter(entry => entry.category === section.category).filter(
-        entry =>
-          q.length === 0 ||
-          entry.label.toLowerCase().includes(q) ||
-          entry.description.toLowerCase().includes(q) ||
-          entry.keywords?.some(keyword => keyword.includes(q)),
-      ),
+      entries: NODE_CATALOG.filter(entry => entry.category === section.category)
+        .filter(entry => (active.size === 0 || active.has(entry.category)))
+        .filter(
+          entry =>
+            q.length === 0 ||
+            entry.label.toLowerCase().includes(q) ||
+            entry.description.toLowerCase().includes(q) ||
+            entry.keywords?.some(keyword => keyword.includes(q)),
+        ),
     })).filter(section => section.entries.length > 0);
   });
 
