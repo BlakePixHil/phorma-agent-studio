@@ -335,6 +335,18 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   private dragLatest = new Map<string, GraphPosition>();
   private moved = false;
   private panning = false;
+  /** Tracks whether a pan gesture has exceeded the click-vs-drag threshold. */
+  private panMoved = false;
+  /** Screen-space pointer position at the start of a pan, for threshold test. */
+  private panStartX = 0;
+  private panStartY = 0;
+  /**
+   * Pixel distance a pointer must travel before a pan is treated as a drag
+   * rather than a click. Below this, pointer-up clears the selection (a
+   * "click away"); at or above, the selection is preserved so panning to
+   * reframe a selected node does not deselect it.
+   */
+  private static readonly PAN_CLICK_THRESHOLD_PX = 4;
   private lastX = 0;
   private lastY = 0;
 
@@ -742,13 +754,17 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // 4) Empty → shift starts a box-select, otherwise pan + deselect.
+    // 4) Empty → shift starts a box-select, otherwise pan. Deselection is
+    //    deferred to pointer-up so that a pan (drag to reframe) does NOT
+    //    clear the current selection; only a true click on empty canvas does.
     if (e.shiftKey) {
       this.boxStart = w;
       this.engine.setSelectionRect({ minX: w.x, minY: w.y, maxX: w.x, maxY: w.y });
     } else {
       this.panning = true;
-      this.selection.deselect();
+      this.panMoved = false;
+      this.panStartX = e.clientX;
+      this.panStartY = e.clientY;
       if (this.cvRef) this.cvRef.nativeElement.style.cursor = 'grabbing';
     }
   };
@@ -793,9 +809,24 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
         this.dragLatest.set(id, { x: nx, y: ny });
       }
     } else if (this.panning) {
-      this.engine.panBy(e.clientX - this.lastX, e.clientY - this.lastY);
+      const dx = e.clientX - this.lastX;
+      const dy = e.clientY - this.lastY;
+      this.engine.panBy(dx, dy);
       this.lastX = e.clientX;
       this.lastY = e.clientY;
+      // Mark as a real drag once the cumulative movement from the press
+      // point exceeds the click threshold. This is what suppresses the
+      // "click away to deselect" behaviour during a pan.
+      if (!this.panMoved) {
+        const totalDx = e.clientX - this.panStartX;
+        const totalDy = e.clientY - this.panStartY;
+        if (
+          totalDx * totalDx + totalDy * totalDy >=
+          GraphCanvas.PAN_CLICK_THRESHOLD_PX * GraphCanvas.PAN_CLICK_THRESHOLD_PX
+        ) {
+          this.panMoved = true;
+        }
+      }
     } else {
       this.updateHoverCursor(e.clientX, e.clientY);
     }
@@ -934,7 +965,13 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
     this.dragLatest.clear();
     this.moved = false;
     if (this.panning) {
+      // A pan that never exceeded the click threshold is treated as a
+      // "click away" on empty canvas → clear the selection. A real pan
+      // (drag to reframe) preserves the selection so the user can pan a
+      // selected node into view before editing its properties.
+      if (!this.panMoved) this.selection.deselect();
       this.panning = false;
+      this.panMoved = false;
       this.updateHoverCursor(e.clientX, e.clientY);
     }
   };
