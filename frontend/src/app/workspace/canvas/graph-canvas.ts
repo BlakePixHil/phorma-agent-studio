@@ -54,6 +54,7 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
       (dragover)="onDragOver($event)"
       (drop)="onDrop($event)"
       (dblclick)="onDblClick($event)"
+      (contextmenu)="onCanvasContextMenu($event)"
     ></canvas>
 
     <!-- Cursor spotlight glow (CSS-driven by --x/--y/--spotlight-opacity). -->
@@ -372,8 +373,10 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
           {
             label: this.runController.breakpoints().has(nodeId)
               ? 'Remove Breakpoint'
-              : 'Toggle Breakpoint',
-            icon: 'ti ti-point-filled',
+              : 'Add Breakpoint',
+            icon: this.runController.breakpoints().has(nodeId)
+              ? 'ti ti-target-off'
+              : 'ti ti-target',
             command: () => this.runController.toggleBreakpoint(nodeId),
           },
           {
