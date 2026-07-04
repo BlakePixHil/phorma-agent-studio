@@ -16,17 +16,51 @@ export class ConfirmDialog {
 
   constructor() {
     // Autofocus the primary (accept) button whenever a dialog becomes active.
-    // This makes Enter trigger the confirm action — the expected default for
-    // a confirmation dialog.
+    // For prompt dialogs, focus the text input instead so the user can type.
     effect(() => {
       const active = this.active();
       if (!active) return;
       // Defer past the animation frame so PrimeNG has rendered the button.
       // Two rAFs ensure the DOM is committed and focusable.
       requestAnimationFrame(() =>
-        requestAnimationFrame(() => this.focusAcceptButton()),
+        requestAnimationFrame(() => {
+          if (active.input) this.focusInput();
+          else this.focusAcceptButton();
+        }),
       );
     });
+  }
+
+  /** Live input value for the template (drives the disabled state of confirm). */
+  protected inputValue(): string {
+    return this.active()?.inputValue ?? '';
+  }
+
+  /** Whether the confirm button should be disabled for an empty required input. */
+  protected confirmDisabled(): boolean {
+    const active = this.active();
+    if (!active?.input) return false;
+    const required = active.input.required ?? true;
+    return required && active.inputValue.trim().length === 0;
+  }
+
+  /** Called from the template on every input event. */
+  protected onInput(event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.confirmDialog.setInputValue(value);
+  }
+
+  /** Enter inside the text field confirms (when allowed). */
+  protected onInputKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (!this.confirmDisabled()) this.confirmDialog.accept();
+  }
+
+  /** Focuses the text input element. */
+  private focusInput(): void {
+    const card = document.querySelector('.phorma-confirm__card');
+    card?.querySelector<HTMLInputElement>('.phorma-confirm__input')?.focus();
   }
 
   /** Focuses the accept (primary) button inside the dialog card. */
@@ -51,10 +85,11 @@ export class ConfirmDialog {
   protected onEnter(e: Event): void {
     if (!this.active()) return;
     const ke = e as KeyboardEvent;
-    // If focus is already on a button inside the dialog, let it handle Enter.
+    // If focus is already on a button or the text input inside the dialog,
+    // let it handle Enter.
     const target = ke.target as HTMLElement | null;
-    if (target?.closest('.phorma-confirm__card button')) return;
+    if (target?.closest('.phorma-confirm__card button, .phorma-confirm__input')) return;
     ke.preventDefault();
-    this.confirmDialog.accept();
+    if (!this.confirmDisabled()) this.confirmDialog.accept();
   }
 }

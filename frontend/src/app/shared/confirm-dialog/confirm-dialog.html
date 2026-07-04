@@ -17,6 +17,22 @@
         </div>
       </header>
 
+      @if (dialog.input; as input) {
+        <div class="phorma-confirm__field">
+          <input
+            type="text"
+            class="phorma-confirm__input"
+            [value]="dialog.inputValue"
+            [attr.placeholder]="input.placeholder"
+            [attr.aria-label]="input.label ?? dialog.title"
+            [attr.maxlength]="input.maxLength"
+            [required]="input.required ?? true"
+            (input)="onInput($event)"
+            (keydown)="onInputKeydown($event)"
+          />
+        </div>
+      }
+
       <footer class="phorma-confirm__actions">
         <p-button
           styleClass="phorma-confirm__btn"
@@ -38,6 +54,7 @@
         <p-button
           styleClass="phorma-confirm__btn"
           size="small"
+          [disabled]="confirmDisabled()"
           [severity]="dialog.tone === 'danger' ? 'danger' : undefined"
           [label]="dialog.confirmLabel"
           (onClick)="confirmDialog.accept()"

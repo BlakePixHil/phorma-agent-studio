@@ -4,6 +4,7 @@ import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { buildNodeFromCatalog, findCatalogEntry } from './node-catalog';
 import { loadLayout, saveLayout } from './layout-storage';
 import { ToastService } from '../shared/toast/toast.service';
+import { ConfirmDialogService } from '../shared/confirm-dialog/confirm-dialog.service';
 import {
   canConnectPorts,
   edgeKindForPorts,
@@ -51,6 +52,7 @@ let docCounter = 0;
 export class WorkflowService {
   private readonly storage = inject(IndexedDbStorageService);
   private readonly toast = inject(ToastService);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   private readonly docsState = signal<OpenWorkflowDoc[]>([]);
   private readonly activeDocIdState = signal<string | null>(null);
@@ -229,10 +231,34 @@ export class WorkflowService {
     const doc = this.activeDoc();
     if (!doc) return null;
 
+    // A brand-new draft that still carries the default name prompts the user
+    // to name it before its first save. Subsequent saves reuse the chosen
+    // name without prompting.
+    let name = doc.name;
+    if (doc.workflowId === null && (!name.trim() || name === 'Untitled Workflow')) {
+      const chosen = await this.confirmDialog.prompt(
+        {
+          title: 'Name your workflow',
+          message: 'Give this workflow a name so you can find it later.',
+          confirmLabel: 'Save',
+          cancelLabel: 'Cancel',
+        },
+        {
+          initialValue: name === 'Untitled Workflow' ? '' : name,
+          placeholder: 'Untitled Workflow',
+          label: 'Workflow name',
+          maxLength: 80,
+        },
+      );
+      if (chosen === null) return null; // user cancelled
+      name = chosen || 'Untitled Workflow';
+      this.updateDoc(doc.docId, { name });
+    }
+
     const spec: WorkflowSpec = {
       version: WORKFLOW_SPEC_VERSION,
       id: doc.workflowId ?? `wf-${Date.now().toString(36)}`,
-      name: doc.name.trim() || 'Untitled Workflow',
+      name: name.trim() || 'Untitled Workflow',
       description: doc.description.trim() || undefined,
       graph: structuredClone(doc.graph),
       savedAt: new Date().toISOString(),
@@ -274,6 +300,37 @@ export class WorkflowService {
     const doc = this.activeDoc();
     if (!doc || doc.name === name) return;
     this.updateDoc(doc.docId, { name, dirty: true });
+  }
+
+  /**
+   * Renames a saved workflow in the library. Persists the new name to storage
+   * and updates any open tab that points at the same workflow id. Returns
+   * the new name on success, or null if the user cancelled or it failed.
+   */
+  async renameInLibrary(workflowId: string, name: string): Promise<string | null> {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const spec = this.libraryState().find(item => item.id === workflowId);
+    if (!spec) return null;
+    if (spec.name === trimmed) return trimmed;
+
+    const next: WorkflowSpec = { ...spec, name: trimmed, savedAt: new Date().toISOString() };
+    try {
+      await this.storage.saveWorkflow(next);
+    } catch {
+      this.toast.error('Rename failed', 'The workflow could not be renamed.');
+      return null;
+    }
+
+    this.libraryState.update(specs =>
+      specs.map(item => (item.id === workflowId ? next : item)),
+    );
+    this.docsState.update(docs =>
+      docs.map(doc =>
+        doc.workflowId === workflowId ? { ...doc, name: trimmed } : doc,
+      ),
+    );
+    return trimmed;
   }
 
   /** Updates the active workflow's description (marks it dirty). */

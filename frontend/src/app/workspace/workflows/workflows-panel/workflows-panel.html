@@ -11,6 +11,15 @@
             </span>
             <button
               type="button"
+              class="phorma-workflows__rename"
+              aria-label="Rename workflow"
+              title="Rename"
+              (click)="rename($event, spec)"
+            >
+              <i class="ti ti-edit" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
               class="phorma-workflows__delete"
               aria-label="Delete workflow"
               title="Delete"
