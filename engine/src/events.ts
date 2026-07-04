@@ -19,6 +19,7 @@ export type RunEvent =
   | { type: 'run-started'; runId: string; input: string; at: number }
   | { type: 'node-started'; runId: string; nodeId: string; nodeName: string; at: number }
   | { type: 'node-token'; runId: string; nodeId: string; token: string }
+  | { type: 'node-thinking'; runId: string; nodeId: string; token: string }
   | { type: 'node-completed'; runId: string; nodeId: string; nodeName: string; output: string; at: number }
   | { type: 'node-failed'; runId: string; nodeId: string; nodeName: string; error: string; at: number }
   | { type: 'handoff'; runId: string; connectionId: string; fromNodeId: string; toNodeId: string; payload: string; at: number }

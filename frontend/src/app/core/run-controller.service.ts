@@ -84,6 +84,13 @@ export class RunControllerService {
   readonly runInput = signal('');
   /** Total streamed characters this run (cheap progress proxy). */
   readonly streamedChars = signal(0);
+  /**
+   * Per-node reasoning/thinking text captured during a run. Not persisted to
+   * the DB — dumped on restart or when a node is removed from the canvas.
+   * `streaming` is true while the node is still emitting thinking tokens;
+   * the canvas overlay uses it to drive the shimmer and auto-collapse.
+   */
+  readonly nodeThinking = signal<ReadonlyMap<string, { text: string; streaming: boolean }>>(new Map());
 
   /**
    * Set by CloudService while a monitor is connected: routes approval
@@ -194,6 +201,9 @@ export class RunControllerService {
         this.terminal.open('run');
         this.console('run', 'info', `Run started${event.input ? ` — "${event.input}"` : ''}.`);
         this.pushTrace('ti ti-player-play', 'Run started', event.input || undefined, 'info');
+        // A new run dumps any prior thinking text (per the persistence rule:
+        // thinking survives until node removal OR a restart).
+        this.nodeThinking.set(new Map());
         break;
 
       case 'node-started':
@@ -208,8 +218,13 @@ export class RunControllerService {
         this.appendStreaming(event.nodeId, event.token);
         break;
 
+      case 'node-thinking':
+        this.appendThinking(event.nodeId, event.token);
+        break;
+
       case 'node-completed':
         this.flushStreaming(event.nodeId);
+        this.finishThinking(event.nodeId);
         this.setNodeState(event.nodeId, 'done');
         this.agentStream.clearEditing(event.nodeId);
         this.pushTrace(
@@ -222,6 +237,7 @@ export class RunControllerService {
 
       case 'node-failed':
         this.flushStreaming(event.nodeId);
+        this.finishThinking(event.nodeId);
         this.setNodeState(event.nodeId, 'error');
         this.agentStream.clearEditing(event.nodeId);
         this.console('problems', 'error', `${event.nodeName}: ${event.error}`);
@@ -352,6 +368,37 @@ export class RunControllerService {
       this.console('agents', 'info', `${this.nodeName(nodeId)}: ${remainder}`);
     }
     this.streamBuffers.delete(nodeId);
+  }
+
+  /** Appends a reasoning/thinking token to the node's thinking buffer. */
+  private appendThinking(nodeId: string, token: string): void {
+    this.nodeThinking.update(current => {
+      const next = new Map(current);
+      const entry = next.get(nodeId) ?? { text: '', streaming: false };
+      next.set(nodeId, { text: entry.text + token, streaming: true });
+      return next;
+    });
+  }
+
+  /** Marks a node's thinking stream as finished (keeps the text for review). */
+  private finishThinking(nodeId: string): void {
+    this.nodeThinking.update(current => {
+      const entry = current.get(nodeId);
+      if (!entry) return current;
+      const next = new Map(current);
+      next.set(nodeId, { text: entry.text, streaming: false });
+      return next;
+    });
+  }
+
+  /** Drops a single node's thinking text (called when the node is removed). */
+  clearThinking(nodeId: string): void {
+    this.nodeThinking.update(current => {
+      if (!current.has(nodeId)) return current;
+      const next = new Map(current);
+      next.delete(nodeId);
+      return next;
+    });
   }
 
   private setNodeState(nodeId: string, state: RunNodeState): void {

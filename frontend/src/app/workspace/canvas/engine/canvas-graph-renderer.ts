@@ -537,6 +537,14 @@ export class CanvasGraphRenderer {
     this.dirty = true;
   }
 
+  /** World-space bounds for a node, or null when not in the scene. */
+  nodeWorldBounds(id: string): { x: number; y: number; w: number; h: number } | null {
+    const i = this.nodeIndex.get(id);
+    if (i === undefined) return null;
+    const n = this.nodes[i];
+    return { x: n.x, y: n.y, w: n.w, h: n.h };
+  }
+
   /** Smoothly pans to centre a node (by id), keeping the current zoom. */
   centerNodeSmooth(id: string, dur = 320): void {
     const cv = this.canvas;

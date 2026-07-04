@@ -28,6 +28,7 @@ import { NODE_CATALOG, NODE_CATEGORY_SECTIONS, PHORMA_NODE_MIME } from '../../co
 import { ToastService } from '../../shared/toast/toast.service';
 import { CanvasGraphRenderer, type RendererTheme } from './engine/canvas-graph-renderer';
 import { graphToScene } from './engine/graph-to-scene';
+import { ThinkingOverlay } from './thinking-overlay/thinking-overlay';
 import { canConnectPorts, findNodeForConnector } from '../../core/workflow.model';
 import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
 
@@ -45,7 +46,7 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
 @Component({
   selector: 'app-graph-canvas',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ContextMenuModule],
+  imports: [ContextMenuModule, ThinkingOverlay],
   template: `
     <canvas
       #cv
@@ -85,6 +86,23 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
         Shift-drag to box-select
       </div>
     }
+
+    <!-- Reasoning/thinking overlays: one per node that has captured thinking
+         text. Positioned in screen space every frame via transformTick so
+         they track pan/zoom. Container is pointer-events:none so empty canvas
+         areas stay draggable; each overlay re-enables pointer events. -->
+    <div class="phorma-thinking-layer" aria-hidden="false">
+      @for (item of thinkingOverlays(); track item.nodeId) {
+        <app-thinking-overlay
+          [nodeId]="item.nodeId"
+          [screenX]="item.screenX"
+          [screenY]="item.screenY"
+          [screenW]="item.screenW"
+          [text]="item.text"
+          [streaming]="item.streaming"
+        />
+      }
+    </div>
 
     <p-contextmenu [target]="cv" [model]="contextMenuItems()" />
   `,
@@ -167,6 +185,12 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
           bottom 150ms cubic-bezier(0.4, 0, 0.2, 1),
           top 150ms cubic-bezier(0.4, 0, 0.2, 1);
       }
+      .phorma-thinking-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 15;
+        pointer-events: none;
+      }
     `,
   ],
 })
@@ -188,6 +212,14 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   @ViewChild('mini') private miniRef?: ElementRef<HTMLCanvasElement>;
 
   private readonly engine = new CanvasGraphRenderer();
+
+  /**
+   * Bumped every animation frame from the renderer's `onAfterDraw` hook so the
+   * thinking overlays re-project their screen-space position from the live
+   * world transform (pan/zoom). Kept outside Angular's zone to avoid CD
+   * thrash — the overlays read it via a computed that the template consumes.
+   */
+  private readonly transformTick = signal(0);
 
   /** Minimap overlay visibility + placement (mirrors the legacy canvas). */
   protected readonly minimapVisible = computed(() => this.canvasState.minimapVisible());
@@ -241,6 +273,44 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   protected readonly hintLeft = computed(() => {
     const gap = 10;
     return this.panels.collapsedLeft() ? gap : this.panels.leftWidth() + gap;
+  });
+
+  /**
+   * Per-node thinking overlays projected into screen space. Reads the live
+   * transform (via `transformTick`) so the overlays track pan/zoom. Only nodes
+   * with non-empty thinking text are emitted — non-reasoning models render
+   * nothing.
+   */
+  protected readonly thinkingOverlays = computed(() => {
+    const thinking = this.runController.nodeThinking();
+    if (thinking.size === 0) return [];
+    // Touch the tick so this recomputes every frame the renderer paints.
+    this.transformTick();
+    const sc = this.engine.scale;
+    const ox = this.engine.offsetX;
+    const oy = this.engine.offsetY;
+    const out: {
+      nodeId: string;
+      screenX: number;
+      screenY: number;
+      screenW: number;
+      text: string;
+      streaming: boolean;
+    }[] = [];
+    for (const [nodeId, entry] of thinking) {
+      if (!entry.text) continue;
+      const bounds = this.engine.nodeWorldBounds(nodeId);
+      if (!bounds) continue;
+      out.push({
+        nodeId,
+        screenX: bounds.x * sc + ox,
+        screenY: bounds.y * sc + oy + bounds.h * sc + 6,
+        screenW: bounds.w * sc,
+        text: entry.text,
+        streaming: entry.streaming,
+      });
+    }
+    return out;
   });
 
   /** Minimap backing-store device-pixel size, kept in sync with its CSS box. */
@@ -425,7 +495,15 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
     this.engine.setGridVisible(this.canvasState.gridVisible());
     this.engine.onScaleChange = s =>
       this.zone.run(() => this.canvasState.zoomScale.set(Math.round(s * 100)));
-    this.engine.onAfterDraw = () => this.drawMinimap();
+    this.engine.onAfterDraw = () => {
+      this.drawMinimap();
+      // Bump the thinking-overlay transform tick so they re-project from the
+      // live pan/zoom. Only run inside Angular's zone when there are overlays
+      // to reposition (avoids CD thrash on every idle frame).
+      if (this.runController.nodeThinking().size > 0) {
+        this.zone.run(() => this.transformTick.update(v => v + 1));
+      }
+    };
     this.engine.attach(cv);
 
     this.rebuildScene(this.graph());
@@ -1015,6 +1093,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
 
   private removeNode(nodeId: string): void {
     this.workflow.removeNode(nodeId);
+    this.runController.clearThinking(nodeId);
   }
 
   private deleteSelection(): void {

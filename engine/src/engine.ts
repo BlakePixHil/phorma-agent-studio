@@ -282,6 +282,11 @@ class WorkflowRun {
         if (chunk.type === 'text') {
           roundText += chunk.text;
           this.emit({ type: 'node-token', runId: this.options.runId, nodeId: node.id, token: chunk.text });
+        } else if (chunk.type === 'thinking') {
+          // Reasoning tokens are surfaced for the thinking overlay but never
+          // accumulated into `roundText`/`output` — they must not leak into
+          // handoffs or the final answer.
+          this.emit({ type: 'node-thinking', runId: this.options.runId, nodeId: node.id, token: chunk.text });
         } else if (chunk.type === 'tool-call') {
           calls.push(chunk.call);
         }

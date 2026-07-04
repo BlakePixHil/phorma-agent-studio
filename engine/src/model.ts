@@ -58,6 +58,7 @@ export interface ModelRequest {
 /** One parsed frame of a model stream. */
 export type ModelChunk =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
   | { type: 'tool-call'; call: ToolCall }
   | { type: 'done' };
 
@@ -147,6 +148,8 @@ class OpenAiStreamParser implements StreamParser {
       choices?: {
         delta?: {
           content?: string | null;
+          reasoning?: string | null;
+          reasoning_content?: string | null;
           tool_calls?: {
             index?: number;
             id?: string;
@@ -168,6 +171,15 @@ class OpenAiStreamParser implements StreamParser {
 
     if (choice.delta?.content) {
       chunks.push({ type: 'text', text: choice.delta.content });
+    }
+    // Reasoning/thinking tokens (OpenRouter, DeepSeek, o1-style models).
+    // Carried separately so the engine can route them to a thinking channel
+    // without polluting the answer text or handoff payload.
+    if (choice.delta?.reasoning) {
+      chunks.push({ type: 'thinking', text: choice.delta.reasoning });
+    }
+    if (choice.delta?.reasoning_content) {
+      chunks.push({ type: 'thinking', text: choice.delta.reasoning_content });
     }
     for (const fragment of choice.delta?.tool_calls ?? []) {
       const index = fragment.index ?? 0;
@@ -270,7 +282,7 @@ class AnthropicStreamParser implements StreamParser {
       type?: string;
       index?: number;
       content_block?: { type?: string; id?: string; name?: string };
-      delta?: { type?: string; text?: string; partial_json?: string };
+      delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
     };
     try {
       parsed = JSON.parse(line.slice(5).trim());
@@ -291,6 +303,9 @@ class AnthropicStreamParser implements StreamParser {
       case 'content_block_delta':
         if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
           return [{ type: 'text', text: parsed.delta.text }];
+        }
+        if (parsed.delta?.type === 'thinking_delta' && parsed.delta.thinking) {
+          return [{ type: 'thinking', text: parsed.delta.thinking }];
         }
         if (parsed.delta?.type === 'input_json_delta') {
           const block = this.blocks.get(parsed.index ?? 0);
