@@ -234,6 +234,9 @@ export class CanvasGraphRenderer {
   /** Whether the dot grid is drawn (mirrors the app's grid-visible toggle). */
   private gridVisible = true;
 
+  /** World-space grid cell size (matches the snap spacing setting). */
+  private gridSpacing = 24;
+
   /** Cursor position in WORLD coords for grid distortion; null when off-canvas. */
   private cursorWorld: { x: number; y: number } | null = null;
 
@@ -384,6 +387,14 @@ export class CanvasGraphRenderer {
 
   setGridVisible(visible: boolean): void {
     this.gridVisible = visible;
+    this.dirty = true;
+  }
+
+  /** Sets the world-space grid cell size (re-renders the dot grid). */
+  setGridSpacing(spacing: number): void {
+    const clamped = Math.min(64, Math.max(8, Math.round(spacing)));
+    if (clamped === this.gridSpacing) return;
+    this.gridSpacing = clamped;
     this.dirty = true;
   }
 
@@ -1425,7 +1436,7 @@ export class CanvasGraphRenderer {
     maxX: number,
     maxY: number,
   ): void {
-    const g = 24; // world-space cell size
+    const g = this.gridSpacing; // world-space cell size (matches snap spacing)
     const startX = Math.floor(minX / g) * g;
     const startY = Math.floor(minY / g) * g;
     // Keep dot size + distortion zone constant in SCREEN px by dividing by scale.

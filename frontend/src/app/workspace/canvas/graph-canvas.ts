@@ -478,6 +478,11 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       const visible = this.canvasState.gridVisible();
       untracked(() => this.engine.setGridVisible(visible));
     });
+    // Grid spacing: re-renders the dot grid to match the snap setting.
+    effect(() => {
+      const spacing = this.settings.gridSnapSize();
+      untracked(() => this.engine.setGridSpacing(spacing));
+    });
 
     // Toolbar / View-menu zoom commands.
     effect(() => {
