@@ -15,6 +15,9 @@ import { isAgentNode, type WorkflowSpec } from './workflow.model';
 
 export type CloudConnectionState = 'disconnected' | 'connecting' | 'connected';
 
+/** Default Phorma Cloud runtime URL (override via the hidden setting). */
+export const PHORMA_CLOUD_DEFAULT_URL = 'https://dev.phoma-labs.com';
+
 /**
  * The studio's bridge to the deployed cloud runtime.
  *
@@ -42,6 +45,28 @@ export class CloudService {
   readonly token = signal(loadLayout('cloudToken', ''));
   /** Absolute path of the repo's cloud/ folder (deploy runs wrangler there). */
   readonly cloudFolder = signal(loadLayout('cloudFolder', ''));
+  /** Phorma Cloud base URL (configurable for staging; defaults to prod). */
+  readonly phormaCloudUrl = signal(loadLayout('phormaCloudUrl', PHORMA_CLOUD_DEFAULT_URL));
+
+  /** The user's chosen deploy target (null until picked in Settings → Cloud). */
+  readonly provider = computed(() => this.settings.cloudProvider());
+
+  /** Base URL actually used for push/monitor, per the chosen provider. */
+  readonly effectiveWorkerUrl = computed(() =>
+    this.provider() === 'phorma' ? this.phormaCloudUrl() : this.workerUrl(),
+  );
+
+  /**
+   * Whether the chosen provider has enough configuration for push/monitor.
+   * Phorma Cloud needs only the built-in URL (auth is checked at request
+   * time); own-Cloudflare needs the user's worker URL.
+   */
+  readonly configured = computed(() => {
+    const provider = this.provider();
+    if (provider === 'phorma') return this.phormaCloudUrl().length > 0;
+    if (provider === 'cloudflare') return this.workerUrl().length > 0;
+    return false;
+  });
 
   readonly connection = signal<CloudConnectionState>('disconnected');
   readonly deploying = signal(false);
@@ -68,6 +93,11 @@ export class CloudService {
   setCloudFolder(path: string): void {
     this.cloudFolder.set(path.trim());
     saveLayout('cloudFolder', this.cloudFolder());
+  }
+
+  setPhormaCloudUrl(url: string): void {
+    this.phormaCloudUrl.set(url.trim().replace(/\/$/, '') || PHORMA_CLOUD_DEFAULT_URL);
+    saveLayout('phormaCloudUrl', this.phormaCloudUrl());
   }
 
   /** Picks the cloud/ folder with the native dialog (desktop only). */
@@ -131,6 +161,115 @@ export class CloudService {
     } finally {
       unlisten();
       this.deploying.set(false);
+    }
+  }
+
+  // ── Worker secrets (desktop only — wrangler secret put via Rust) ───────────
+
+  /** Secret name currently being saved (drives per-row button spinners). */
+  readonly savingSecret = signal<string | null>(null);
+
+  /**
+   * Sets a secret on the user's deployed worker via
+   * `npx wrangler secret put <NAME>`. The value travels through the Rust
+   * backend into wrangler's stdin — never through argv or the console.
+   */
+  async putWorkerSecret(name: string, value: string): Promise<void> {
+    if (!this.tauri.isDesktop) {
+      this.toast.warning('Desktop only', 'Setting secrets runs wrangler locally — use the desktop app.');
+      return;
+    }
+    const cwd = this.cloudFolder();
+    if (!cwd) {
+      this.toast.warning('Set the cloud folder', "Pick the repo's cloud/ folder first.");
+      return;
+    }
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
+      this.toast.error('Invalid secret name', name);
+      return;
+    }
+    if (!value.trim()) {
+      this.toast.warning('Empty value', 'Paste the secret value first.');
+      return;
+    }
+    if (this.savingSecret()) return;
+
+    this.savingSecret.set(name);
+    this.deployCounter += 1;
+    const requestId = `secret-${this.deployCounter}`;
+    this.terminal.open('run');
+    this.terminal.append('run', 'info', `$ npx wrangler secret put ${name}`);
+
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { listen } = await import('@tauri-apps/api/event');
+
+    const unlisten = await listen<{ requestId: string; stream: string; line: string }>(
+      'process-output-event',
+      event => {
+        if (event.payload.requestId !== requestId) return;
+        if (event.payload.stream === 'exit') return;
+        this.terminal.append(
+          'run',
+          event.payload.stream === 'stderr' ? 'warning' : 'info',
+          event.payload.line,
+        );
+      },
+    );
+
+    try {
+      const result = await invoke<{ success: boolean; exitCode: number | null }>(
+        'run_streamed_command',
+        {
+          requestId,
+          cwd,
+          program: 'npx',
+          args: ['wrangler', 'secret', 'put', name],
+          stdinData: value.trim(),
+        },
+      );
+      if (result.success) {
+        this.toast.success('Secret saved', `${name} is set on your worker.`);
+      } else {
+        this.toast.error('Secret failed', `wrangler exited with code ${result.exitCode ?? '?'}.`);
+      }
+    } catch (error) {
+      this.toast.error('Secret failed', error instanceof Error ? error.message : String(error));
+    } finally {
+      unlisten();
+      this.savingSecret.set(null);
+    }
+  }
+
+  // ── Connection test ─────────────────────────────────────────────────────────
+
+  /** Latest connection-test outcome (drives the status pill in Settings). */
+  readonly connectionTest = signal<'untested' | 'testing' | 'ok' | 'auth-failed' | 'unreachable'>(
+    'untested',
+  );
+
+  /**
+   * Probes the configured worker with `GET /status` on the `default`
+   * instance. Distinguishes auth failures from unreachable hosts so the
+   * settings pill can say something actionable.
+   */
+  async testConnection(): Promise<void> {
+    const base = this.effectiveWorkerUrl();
+    if (!base) {
+      this.toast.warning('Set the worker URL', 'Enter your deployed worker URL first.');
+      return;
+    }
+    this.connectionTest.set('testing');
+    try {
+      const response = await fetch(`${base}/agents/workflow-agent/default/status`, {
+        headers: await this.headers(),
+      });
+      if (response.status === 401 || response.status === 403) {
+        this.connectionTest.set('auth-failed');
+        return;
+      }
+      this.connectionTest.set(response.ok ? 'ok' : 'unreachable');
+    } catch {
+      this.connectionTest.set('unreachable');
     }
   }
 
@@ -263,7 +402,7 @@ export class CloudService {
 
   /** Instance URL for a workflow id: {worker}/agents/workflow-agent/{id}. */
   private instanceUrl(workflowId: string): string | null {
-    const base = this.workerUrl();
+    const base = this.effectiveWorkerUrl();
     if (!base || !workflowId) return base ? `${base}/agents/workflow-agent/default` : null;
     return `${base}/agents/workflow-agent/${encodeURIComponent(workflowId)}`;
   }
@@ -277,8 +416,8 @@ export class CloudService {
 
   /**
    * Resolves the bearer token to send to the cloud worker. Prefers a fresh
-   * Clerk session JWT when the user is signed in; falls back to the static
-   * PHORMA_TOKEN for non-Clerk deployments.
+   * Clerk session JWT when the user is signed in. Own-Cloudflare deployments
+   * may fall back to the static PHORMA_TOKEN; Phorma Cloud is Clerk-only.
    */
   private async resolveAuthToken(): Promise<string | null> {
     const clerk = await firstValueFrom(this.clerk.clerk$);
@@ -291,6 +430,7 @@ export class CloudService {
         // Token refresh failed — fall through to static token.
       }
     }
+    if (this.provider() === 'phorma') return null; // never send the static token
     return this.token() || null;
   }
 }

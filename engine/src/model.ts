@@ -55,11 +55,20 @@ export interface ModelRequest {
   ollamaBaseUrl?: string;
 }
 
+/** Normalized token/cost usage for one model stream. */
+export interface ModelUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  /** USD actually charged — present only when the provider reports it (OpenRouter). */
+  costUsd?: number;
+}
+
 /** One parsed frame of a model stream. */
 export type ModelChunk =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool-call'; call: ToolCall }
+  | { type: 'usage'; usage: ModelUsage }
   | { type: 'done' };
 
 /** A fully-built HTTP request, still carrying the API-key placeholder. */
@@ -119,12 +128,20 @@ function openAiMessages(request: ModelRequest): object[] {
 }
 
 function openAiBody(request: ModelRequest): string {
+  // Usage reporting: OpenAI + OpenRouter support stream_options.include_usage
+  // (final chunk carries token counts). OpenRouter additionally returns the
+  // actual USD cost when usage accounting is requested. Gemini's and Ollama's
+  // OpenAI-compat shims are not guaranteed to accept these fields, so they
+  // are only sent to providers known to support them.
+  const wantsUsage = request.provider === 'openai' || request.provider === 'openrouter';
   return JSON.stringify({
     model: request.model,
     stream: true,
     temperature: request.temperature,
     max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
     messages: openAiMessages(request),
+    stream_options: wantsUsage ? { include_usage: true } : undefined,
+    usage: request.provider === 'openrouter' ? { include: true } : undefined,
     tools: request.tools?.length
       ? request.tools.map(tool => ({
           type: 'function',
@@ -158,6 +175,12 @@ class OpenAiStreamParser implements StreamParser {
         };
         finish_reason?: string | null;
       }[];
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        /** OpenRouter usage accounting: USD actually charged. */
+        cost?: number;
+      } | null;
     };
     try {
       parsed = JSON.parse(payload);
@@ -166,6 +189,20 @@ class OpenAiStreamParser implements StreamParser {
     }
 
     const chunks: ModelChunk[] = [];
+
+    // Usage arrives on a final chunk (typically with an empty choices array)
+    // when stream_options.include_usage / OpenRouter usage accounting is on.
+    if (parsed.usage) {
+      chunks.push({
+        type: 'usage',
+        usage: {
+          inputTokens: parsed.usage.prompt_tokens,
+          outputTokens: parsed.usage.completion_tokens,
+          costUsd: parsed.usage.cost,
+        },
+      });
+    }
+
     const choice = parsed.choices?.[0];
     if (!choice) return chunks;
 
@@ -275,14 +312,18 @@ function anthropicMessages(request: ModelRequest): object[] {
 /** Assembles Anthropic streaming events (text deltas + tool_use blocks). */
 class AnthropicStreamParser implements StreamParser {
   private readonly blocks = new Map<number, { id: string; name: string; json: string }>();
+  private inputTokens: number | undefined;
+  private outputTokens: number | undefined;
 
   push(line: string): ModelChunk[] {
     if (!line.startsWith('data:')) return [];
     let parsed: {
       type?: string;
       index?: number;
+      message?: { usage?: { input_tokens?: number } };
       content_block?: { type?: string; id?: string; name?: string };
       delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+      usage?: { output_tokens?: number };
     };
     try {
       parsed = JSON.parse(line.slice(5).trim());
@@ -291,6 +332,16 @@ class AnthropicStreamParser implements StreamParser {
     }
 
     switch (parsed.type) {
+      case 'message_start':
+        this.inputTokens = parsed.message?.usage?.input_tokens;
+        return [];
+      case 'message_delta':
+        // Anthropic reports CUMULATIVE output tokens on each message_delta —
+        // keep the latest value rather than summing.
+        if (parsed.usage?.output_tokens !== undefined) {
+          this.outputTokens = parsed.usage.output_tokens;
+        }
+        return [];
       case 'content_block_start':
         if (parsed.content_block?.type === 'tool_use') {
           this.blocks.set(parsed.index ?? 0, {
@@ -334,7 +385,17 @@ class AnthropicStreamParser implements StreamParser {
 
   end(): ModelChunk[] {
     this.blocks.clear();
-    return [{ type: 'done' }];
+    const chunks: ModelChunk[] = [];
+    if (this.inputTokens !== undefined || this.outputTokens !== undefined) {
+      chunks.push({
+        type: 'usage',
+        usage: { inputTokens: this.inputTokens, outputTokens: this.outputTokens },
+      });
+      this.inputTokens = undefined;
+      this.outputTokens = undefined;
+    }
+    chunks.push({ type: 'done' });
+    return chunks;
   }
 }
 

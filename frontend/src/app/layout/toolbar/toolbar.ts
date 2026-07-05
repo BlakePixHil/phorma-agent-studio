@@ -16,6 +16,7 @@ import { ClipboardService } from '../../core/clipboard.service';
 import { SelectionService } from '../../core/selection.service';
 import { RunControllerService } from '../../core/run-controller.service';
 import { CloudService } from '../../core/cloud.service';
+import { SettingsService } from '../../core/settings.service';
 import { CloudDialogService } from '../../workspace/cloud/cloud-dialog.service';
 import { SettingsDialogService } from '../../workspace/settings/settings-dialog.service';
 import { ToastService } from '../../shared/toast/toast.service';
@@ -47,6 +48,7 @@ export class Toolbar {
   protected readonly clerk = inject(ClerkService);
   private readonly cloudDialog = inject(CloudDialogService);
   private readonly settingsDialog = inject(SettingsDialogService);
+  private readonly settings = inject(SettingsService);
   private readonly tauri = inject(TauriService);
   private readonly panels = inject(PanelRegistryService);
   private readonly history = inject(HistoryService);
@@ -518,8 +520,22 @@ export class Toolbar {
     this.runController.reset();
   }
 
-  /** Opens the cloud deploy/monitor dialog. */
+  /**
+   * Opens the cloud deploy/monitor dialog — unless no cloud provider has
+   * been chosen (or it's missing required config), in which case the user
+   * is routed to Settings → Cloud to pick one first.
+   */
   protected openCloud(): void {
+    const provider = this.settings.cloudProvider();
+    const needsSetup =
+      provider === null ||
+      (provider === 'cloudflare' && !this.cloud.workerUrl()) ||
+      (provider === 'phorma' && !this.isSignedIn());
+    if (needsSetup) {
+      this.toast.warning('Set up cloud deploys', 'Choose where your agents run first.');
+      this.settingsDialog.open('cloud');
+      return;
+    }
     this.cloudDialog.open();
   }
 

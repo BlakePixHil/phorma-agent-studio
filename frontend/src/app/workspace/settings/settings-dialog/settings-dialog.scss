@@ -141,7 +141,8 @@
   }
 }
 
-.phorma-settings__nav-item {
+.phorma-settings__nav-item,
+.phorma-settings__provider-tab {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -441,8 +442,10 @@
   }
 }
 
-/* ── Integrations ────────────────────────────────────────────────────────── */
-.phorma-settings__integration {
+/* ── Card containers (integrations, account, secrets share one shape) ──── */
+.phorma-settings__integration,
+.phorma-settings__account,
+.phorma-settings__secrets {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -452,16 +455,24 @@
   background: color-mix(in srgb, var(--p-text-color) 2%, transparent);
 }
 
-.phorma-settings__integration-head {
+.phorma-settings__account {
+  gap: 12px;
+}
+
+.phorma-settings__integration-head,
+.phorma-settings__account-head {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin-bottom: 4px;
 
   > i {
     margin-top: 2px;
     font-size: 18px;
     color: var(--p-primary-color);
+  }
+
+  > div {
+    flex: 1 1 auto;
   }
 
   h5 {
@@ -474,6 +485,174 @@
     margin: 2px 0 0;
     font-size: 11.5px;
     color: var(--p-text-muted-color);
+  }
+}
+
+/* ── Cloud provider ──────────────────────────────────────────────────────── */
+.phorma-settings__providers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.phorma-settings__provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 18px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--p-text-color) 2%, transparent);
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+
+  > i {
+    font-size: 28px;
+    color: var(--p-primary-color);
+  }
+
+  h5 {
+    margin: 4px 0 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--p-text-color);
+  }
+
+  p {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--p-text-muted-color);
+  }
+
+  &:hover {
+    border-color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+    transform: translateY(-1px);
+  }
+}
+
+.phorma-settings__provider-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 10px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+}
+
+/* Base styles shared with __nav-item (see selector list above). */
+.phorma-settings__provider-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.phorma-settings__tier {
+  text-transform: capitalize;
+  font-weight: 700;
+  color: var(--p-primary-color);
+}
+
+.phorma-settings__account-error {
+  color: var(--p-red-400, #f87171) !important;
+}
+
+.phorma-settings__quota {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phorma-settings__quota-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--p-text-muted-color);
+
+  span:last-child {
+    font-weight: 600;
+    font-family: var(--phorma-font-mono, monospace);
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-settings__quota-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--p-primary-color);
+    transition: width 0.3s ease;
+
+    &.phorma-settings__quota-fill--warn {
+      background: var(--p-orange-400, #fb923c);
+    }
+  }
+}
+
+.phorma-settings__row--actions {
+  align-items: center;
+  gap: 10px;
+}
+
+.phorma-settings__endpoint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--p-border-color);
+}
+
+.phorma-settings__endpoint-url {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-family: var(--phorma-font-mono, monospace);
+  color: var(--p-text-muted-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-settings__row-label--mono {
+  font-family: var(--phorma-font-mono, monospace);
+  font-size: 10.5px;
+}
+
+.phorma-settings__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pill);
+  background: color-mix(in srgb, var(--pill) 12%, transparent);
+
+  i {
+    font-size: 12px;
+  }
+
+  &--ok {
+    --pill: var(--phorma-accent-green, #34d399);
+  }
+
+  &--warn {
+    --pill: var(--p-orange-400, #fb923c);
+  }
+
+  &--err {
+    --pill: var(--p-red-400, #f87171);
   }
 }
 

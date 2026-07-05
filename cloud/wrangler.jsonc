@@ -31,5 +31,56 @@
   ],
   "observability": {
     "enabled": true
+  },
+  // ── Phorma Labs hosted deployment (multi-tenant) ─────────────────────────
+  // Deployed ONLY by Phorma:  npx wrangler deploy --env hosted
+  // Additional secrets (set with `wrangler secret put <NAME> --env hosted`):
+  //   CLERK_SECRET_KEY            — Clerk backend key (required; fail-closed)
+  //   CLERK_JWT_KEY               — Clerk instance PEM for offline JWT verify
+  //   KEY_ENC_SECRET              — base64 32-byte AES-GCM key for stored runtime keys
+  //   OPENROUTER_PROVISIONING_KEY — mints per-tenant credit-limited runtime keys
+  //   PHORMA_ADMIN_TOKEN          — guards /api/provision + /api/deactivate
+  // One-time setup:
+  //   npx wrangler d1 create phorma-cloud            (paste id below)
+  //   npx wrangler kv namespace create TENANTS       (paste id below)
+  //   npx wrangler d1 migrations apply phorma-cloud --env hosted
+  "env": {
+    "hosted": {
+      "name": "phorma-agent-studio-cloud",
+      "vars": {
+        "PHORMA_MODE": "hosted",
+        "ALLOWED_ORIGINS": "http://localhost:7322,tauri://localhost,https://tauri.localhost"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "WorkflowAgent",
+            "class_name": "WorkflowAgent"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["WorkflowAgent"]
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "phorma-cloud",
+          "database_id": "d3928de1-cd4c-46c0-ac88-2794a8810ac5"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "TENANTS",
+          "id": "1c916badb33e48a192d3684a3b15bd26"
+        }
+      ],
+      "observability": {
+        "enabled": true
+      }
+    }
   }
 }

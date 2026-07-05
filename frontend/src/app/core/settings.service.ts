@@ -8,6 +8,14 @@ const BROWSER_KEYS_STORAGE = 'phorma.provider-keys';
 const BROWSER_MCP_SECRETS_STORAGE = 'phorma.mcp-secrets';
 
 /**
+ * Where deployed workflows run:
+ *  - `'phorma'` — Phorma Cloud, the managed offering (subscription).
+ *  - `'cloudflare'` — the user's own Cloudflare account (free, technical).
+ *  - `null` — not chosen yet; deploy actions redirect to Settings → Cloud.
+ */
+export type CloudProviderChoice = 'phorma' | 'cloudflare' | null;
+
+/**
  * Scope for MCP secrets: node-scoped values override preset-scoped
  * application defaults (Settings → Integrations).
  */
@@ -75,6 +83,16 @@ export class SettingsService {
   /** Grid spacing (canvas px) used when grid snapping is enabled. */
   readonly gridSnapSize = signal(loadLayout('gridSnapSize', 24));
 
+  // ── Cloud ───────────────────────────────────────────────────────────────
+
+  /**
+   * Chosen cloud deploy target. Null until the user explicitly picks one in
+   * Settings → Cloud — deploy entry points redirect there while unset.
+   */
+  readonly cloudProvider = signal<CloudProviderChoice>(
+    loadLayout<CloudProviderChoice>('cloudProvider', null),
+  );
+
   // ── Credential flags ────────────────────────────────────────────────────
 
   /** provider id → whether a key is configured (for Settings UI badges). */
@@ -98,6 +116,7 @@ export class SettingsService {
     effect(() => saveLayout('confirmWorkflowDelete', this.confirmWorkflowDelete()));
     effect(() => saveLayout('zoomSensitivity', this.zoomSensitivity()));
     effect(() => saveLayout('gridSnapSize', this.gridSnapSize()));
+    effect(() => saveLayout('cloudProvider', this.cloudProvider()));
   }
 
   setOllamaBaseUrl(url: string): void {

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 
 import { CloudService } from '../../../core/cloud.service';
 import { RunControllerService } from '../../../core/run-controller.service';
@@ -15,7 +15,7 @@ import { TerminalOutputService } from '../../../core/terminal-output.service';
 @Component({
   selector: 'app-runs-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe],
+  imports: [CurrencyPipe, DatePipe, DecimalPipe],
   templateUrl: './runs-panel.html',
   styleUrl: './runs-panel.scss',
 })
@@ -26,6 +26,9 @@ export class RunsPanel {
 
   /** Trace entry ids the user has expanded. */
   protected readonly expanded = signal<ReadonlySet<number>>(new Set());
+
+  /** Cumulative run usage (tokens + cost when the provider reports it). */
+  protected readonly usage = this.runController.runUsage;
 
   protected onInput(event: Event): void {
     this.runController.runInput.set((event.target as HTMLTextAreaElement | null)?.value ?? '');

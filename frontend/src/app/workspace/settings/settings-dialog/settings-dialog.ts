@@ -9,6 +9,7 @@ import {
   untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { CurrencyPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { SliderModule } from 'primeng/slider';
@@ -16,6 +17,8 @@ import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { SettingsDialogService } from '../settings-dialog.service';
+import { CloudService, PHORMA_CLOUD_DEFAULT_URL } from '../../../core/cloud.service';
+import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { SettingsService } from '../../../core/settings.service';
 import {
   SettingsRegistryService,
@@ -47,7 +50,7 @@ import {
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule],
+  imports: [FormsModule, CurrencyPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })
@@ -193,6 +196,71 @@ export class SettingsDialog {
   /** Unsaved integration credential inputs, keyed `'{presetId}:{envKey}'`. */
   protected readonly presetDrafts = signal<Record<string, string>>({});
 
+  // ── Cloud provider (custom template) ────────────────────────────────────
+
+  protected readonly cloud = inject(CloudService);
+  protected readonly phormaCloud = inject(PhormaCloudService);
+
+  /** Signed-in Clerk user (null while loading / signed out). */
+  protected readonly clerkUser = this.phormaCloud.user;
+
+  protected pickCloudProvider(choice: 'phorma' | 'cloudflare'): void {
+    this.settings.cloudProvider.set(choice);
+    if (choice === 'phorma') void this.phormaCloud.refresh();
+  }
+
+  /**
+   * Resets the Phorma Cloud endpoint to the built-in default. Guards against
+   * a stale `phormaCloudUrl` persisted in localStorage from a previous
+   * default (e.g. before a custom-domain migration) silently pointing the
+   * studio at a dead URL — the account card then shows "Load failed" with
+   * no obvious cause.
+   */
+  protected resetPhormaCloudUrl(): void {
+    this.cloud.setPhormaCloudUrl(PHORMA_CLOUD_DEFAULT_URL);
+    void this.phormaCloud.refresh();
+  }
+
+  protected onWorkerUrlInput(event: Event): void {
+    this.cloud.setWorkerUrl((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onCloudTokenInput(event: Event): void {
+    this.cloud.setToken((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onCloudFolderInput(event: Event): void {
+    this.cloud.setCloudFolder((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  /** Worker secrets settable from the guided wizard (BYO Cloudflare). */
+  protected readonly workerSecretNames = [
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GEMINI_API_KEY',
+    'OPENROUTER_API_KEY',
+    'PHORMA_TOKEN',
+  ] as const;
+
+  /** Unsaved worker-secret inputs, keyed by secret name. */
+  protected readonly workerSecretDrafts = signal<Record<string, string>>({});
+
+  protected onWorkerSecretInput(name: string, event: Event): void {
+    const value = (event.target as HTMLInputElement | null)?.value ?? '';
+    this.workerSecretDrafts.update(drafts => ({ ...drafts, [name]: value }));
+  }
+
+  protected async saveWorkerSecret(name: string): Promise<void> {
+    const draft = this.workerSecretDrafts()[name];
+    if (!draft?.trim()) return;
+    await this.cloud.putWorkerSecret(name, draft);
+    this.workerSecretDrafts.update(drafts => {
+      const next = { ...drafts };
+      delete next[name];
+      return next;
+    });
+  }
+
   constructor() {
     // Refresh preset-scoped configured flags whenever the dialog opens so
     // Integrations badges are accurate. `untracked` is REQUIRED: the refresh
@@ -209,6 +277,15 @@ export class SettingsDialog {
           );
         }
       });
+    });
+
+    // Refresh the Phorma Cloud profile whenever the Cloud page is shown with
+    // the phorma provider active (quota bar stays current).
+    effect(() => {
+      if (!this.dialog.visible()) return;
+      if (this.dialog.activePageId() !== 'cloud') return;
+      if (this.settings.cloudProvider() !== 'phorma') return;
+      untracked(() => void this.phormaCloud.refresh());
     });
   }
 

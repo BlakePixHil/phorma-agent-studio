@@ -362,6 +362,283 @@
                       </div>
                     }
                   }
+
+                  @case ('cloud-provider') {
+                    @if (settings.cloudProvider() === null) {
+                      <p class="phorma-settings__note">
+                        <i class="ti ti-cloud" aria-hidden="true"></i>
+                        Choose where your agents run when you deploy them to the cloud.
+                      </p>
+                      <div class="phorma-settings__providers">
+                        <button
+                          type="button"
+                          class="phorma-settings__provider-card"
+                          (click)="pickCloudProvider('phorma')"
+                        >
+                          <i class="ti ti-sparkles" aria-hidden="true"></i>
+                          <h5>Phorma Cloud</h5>
+                          <p>
+                            Run your agents on Phorma's infrastructure. No setup required —
+                            sign in and deploy. Subscription.
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          class="phorma-settings__provider-card"
+                          (click)="pickCloudProvider('cloudflare')"
+                        >
+                          <i class="ti ti-brand-cloudflare" aria-hidden="true"></i>
+                          <h5>Your own Cloudflare</h5>
+                          <p>
+                            Deploy the runtime to your own Cloudflare account with wrangler.
+                            Free — you pay Cloudflare directly. Technical setup.
+                          </p>
+                        </button>
+                      </div>
+                    } @else {
+                      <div class="phorma-settings__provider-tabs" role="tablist">
+                        <button
+                          type="button"
+                          role="tab"
+                          class="phorma-settings__provider-tab"
+                          [class.phorma-settings__provider-tab--active]="settings.cloudProvider() === 'phorma'"
+                          [attr.aria-selected]="settings.cloudProvider() === 'phorma'"
+                          (click)="pickCloudProvider('phorma')"
+                        >
+                          <i class="ti ti-sparkles" aria-hidden="true"></i>
+                          Phorma Cloud
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          class="phorma-settings__provider-tab"
+                          [class.phorma-settings__provider-tab--active]="settings.cloudProvider() === 'cloudflare'"
+                          [attr.aria-selected]="settings.cloudProvider() === 'cloudflare'"
+                          (click)="pickCloudProvider('cloudflare')"
+                        >
+                          <i class="ti ti-brand-cloudflare" aria-hidden="true"></i>
+                          Your own Cloudflare
+                        </button>
+                      </div>
+
+                      @if (settings.cloudProvider() === 'phorma') {
+                        @if (clerkUser(); as user) {
+                          <div class="phorma-settings__account">
+                            <div class="phorma-settings__account-head">
+                              <i class="ti ti-user-circle" aria-hidden="true"></i>
+                              <div>
+                                <h5>{{ phormaCloud.email() ?? user.id }}</h5>
+                                @if (phormaCloud.profile(); as profile) {
+                                  @if (profile.provisioned && profile.status === 'active') {
+                                    <p>
+                                      <span class="phorma-settings__tier">{{ profile.tier }}</span>
+                                      plan · active
+                                    </p>
+                                  } @else if (profile.provisioned) {
+                                    <p>Subscription {{ profile.status }} — runs are paused.</p>
+                                  } @else {
+                                    <p>No subscription yet — contact Phorma Labs to activate.</p>
+                                  }
+                                } @else if (phormaCloud.loading()) {
+                                  <p>Checking your account…</p>
+                                } @else if (phormaCloud.error(); as err) {
+                                  <p class="phorma-settings__account-error">{{ err }}</p>
+                                }
+                              </div>
+                              <p-button
+                                styleClass="phorma-settings__btn"
+                                [text]="true"
+                                severity="secondary"
+                                size="small"
+                                icon="ti ti-refresh"
+                                pTooltip="Refresh account"
+                                tooltipPosition="top"
+                                [loading]="phormaCloud.loading()"
+                                (onClick)="phormaCloud.refresh()"
+                                ariaLabel="Refresh account status"
+                              />
+                              <p-button
+                                styleClass="phorma-settings__btn"
+                                [text]="true"
+                                severity="danger"
+                                size="small"
+                                label="Sign out"
+                                (onClick)="phormaCloud.signOut()"
+                              />
+                            </div>
+                            @if (phormaCloud.profile()?.quota; as quota) {
+                              <div class="phorma-settings__quota">
+                                <div class="phorma-settings__quota-row">
+                                  <span>Runs this month</span>
+                                  <span>{{ quota.runsUsed }} / {{ quota.runsLimit }}</span>
+                                </div>
+                                <div class="phorma-settings__quota-bar">
+                                  <span [style.width.%]="(phormaCloud.runsFraction() ?? 0) * 100"></span>
+                                </div>
+                                <div class="phorma-settings__quota-row">
+                                  <span>AI budget</span>
+                                  <span>
+                                    {{ quota.costUsdUsed | currency: 'USD' : 'symbol' : '1.2-2' }} /
+                                    {{ quota.costUsdLimit | currency: 'USD' : 'symbol' : '1.0-0' }}
+                                  </span>
+                                </div>
+                                <div class="phorma-settings__quota-bar">
+                                  <span
+                                    [style.width.%]="(phormaCloud.costFraction() ?? 0) * 100"
+                                    [class.phorma-settings__quota-fill--warn]="(phormaCloud.costFraction() ?? 0) > 0.85"
+                                  ></span>
+                                </div>
+                              </div>
+                            }
+                          </div>
+                        } @else {
+                          <p class="phorma-settings__note">
+                            <i class="ti ti-cloud-lock" aria-hidden="true"></i>
+                            Sign in with your Phorma account to deploy agents to
+                            Phorma Cloud. A subscription is required to run workflows.
+                          </p>
+                          <p-button
+                            styleClass="phorma-settings__btn"
+                            size="small"
+                            icon="ti ti-login-2"
+                            label="Sign in to Phorma Cloud"
+                            (onClick)="phormaCloud.signIn()"
+                          />
+                        }
+
+                        <div class="phorma-settings__endpoint">
+                          <span class="phorma-settings__endpoint-url" [pTooltip]="cloud.phormaCloudUrl()" tooltipPosition="top">
+                            {{ cloud.phormaCloudUrl() }}
+                          </span>
+                          <p-button
+                            styleClass="phorma-settings__btn"
+                            [text]="true"
+                            severity="secondary"
+                            size="small"
+                            icon="ti ti-refresh-alert"
+                            label="Reset endpoint"
+                            pTooltip="Stuck on 'Load failed'? Resets the Phorma Cloud URL to the current default and retries."
+                            tooltipPosition="top"
+                            (onClick)="resetPhormaCloudUrl()"
+                          />
+                        </div>
+                      }
+
+                      @if (settings.cloudProvider() === 'cloudflare') {
+                        <p class="phorma-settings__note">
+                          <i class="ti ti-terminal-2" aria-hidden="true"></i>
+                          One-time setup: run <code>npx wrangler login</code>, deploy the
+                          worker from the Cloud dialog, then set provider secrets with
+                          <code>npx wrangler secret put ANTHROPIC_API_KEY</code>.
+                        </p>
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">Worker URL</span>
+                          <input
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--mono"
+                            placeholder="https://phorma-agent-studio-cloud.you.workers.dev"
+                            [value]="cloud.workerUrl()"
+                            (input)="onWorkerUrlInput($event)"
+                            aria-label="Cloudflare worker URL"
+                          />
+                        </div>
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">Token</span>
+                          <input
+                            type="password"
+                            class="phorma-settings__input"
+                            placeholder="PHORMA_TOKEN secret (optional)"
+                            [value]="cloud.token()"
+                            (input)="onCloudTokenInput($event)"
+                            autocomplete="off"
+                            aria-label="Worker bearer token"
+                          />
+                        </div>
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">cloud/ folder</span>
+                          <input
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--mono"
+                            placeholder="Path to the repo's cloud/ folder (for deploys)"
+                            [value]="cloud.cloudFolder()"
+                            (input)="onCloudFolderInput($event)"
+                            aria-label="Path to the cloud folder"
+                          />
+                        </div>
+
+                        <!-- Connection test -->
+                        <div class="phorma-settings__row phorma-settings__row--actions">
+                          <p-button
+                            styleClass="phorma-settings__btn"
+                            [outlined]="true"
+                            size="small"
+                            icon="ti ti-antenna"
+                            label="Test connection"
+                            [loading]="cloud.connectionTest() === 'testing'"
+                            [disabled]="!cloud.workerUrl()"
+                            (onClick)="cloud.testConnection()"
+                          />
+                          @switch (cloud.connectionTest()) {
+                            @case ('ok') {
+                              <span class="phorma-settings__pill phorma-settings__pill--ok">
+                                <i class="ti ti-circle-check" aria-hidden="true"></i> Reachable
+                              </span>
+                            }
+                            @case ('auth-failed') {
+                              <span class="phorma-settings__pill phorma-settings__pill--warn">
+                                <i class="ti ti-lock-x" aria-hidden="true"></i> Auth failed — check the token
+                              </span>
+                            }
+                            @case ('unreachable') {
+                              <span class="phorma-settings__pill phorma-settings__pill--err">
+                                <i class="ti ti-plug-connected-x" aria-hidden="true"></i> Unreachable
+                              </span>
+                            }
+                          }
+                        </div>
+
+                        <!-- Worker secrets wizard (desktop: streams wrangler secret put) -->
+                        @if (isDesktop) {
+                          <div class="phorma-settings__secrets">
+                            <p class="phorma-settings__hint">
+                              Set provider secrets on your worker without leaving the studio.
+                              Values go straight into <code>wrangler secret put</code> — they are
+                              never stored here.
+                            </p>
+                            @for (name of workerSecretNames; track name) {
+                              <div class="phorma-settings__row">
+                                <span class="phorma-settings__row-label phorma-settings__row-label--mono">{{ name }}</span>
+                                <input
+                                  type="password"
+                                  class="phorma-settings__input"
+                                  placeholder="Paste value"
+                                  [value]="workerSecretDrafts()[name] || ''"
+                                  (input)="onWorkerSecretInput(name, $event)"
+                                  (keydown.enter)="saveWorkerSecret(name)"
+                                  autocomplete="off"
+                                  [attr.aria-label]="name + ' secret value'"
+                                />
+                                <p-button
+                                  styleClass="phorma-settings__btn"
+                                  size="small"
+                                  label="Set"
+                                  [loading]="cloud.savingSecret() === name"
+                                  [disabled]="!workerSecretDrafts()[name] || cloud.savingSecret() !== null || !cloud.cloudFolder()"
+                                  (onClick)="saveWorkerSecret(name)"
+                                />
+                              </div>
+                            }
+                            @if (!cloud.cloudFolder()) {
+                              <p class="phorma-settings__hint">
+                                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                                Set the cloud/ folder above first — wrangler runs there.
+                              </p>
+                            }
+                          </div>
+                        }
+                      }
+                    }
+                  }
                 }
               </section>
             }

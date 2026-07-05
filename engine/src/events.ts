@@ -7,6 +7,8 @@
  * Phorma its local-to-cloud visualization parity.
  */
 
+import type { ModelUsage } from './model.js';
+
 export type RunNodeState =
   | 'idle'
   | 'queued'
@@ -20,6 +22,7 @@ export type RunEvent =
   | { type: 'node-started'; runId: string; nodeId: string; nodeName: string; at: number }
   | { type: 'node-token'; runId: string; nodeId: string; token: string }
   | { type: 'node-thinking'; runId: string; nodeId: string; token: string }
+  | { type: 'node-usage'; runId: string; nodeId: string; usage: ModelUsage; at: number }
   | { type: 'node-completed'; runId: string; nodeId: string; nodeName: string; output: string; at: number }
   | { type: 'node-failed'; runId: string; nodeId: string; nodeName: string; error: string; at: number }
   | { type: 'handoff'; runId: string; connectionId: string; fromNodeId: string; toNodeId: string; payload: string; at: number }

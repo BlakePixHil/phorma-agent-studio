@@ -93,6 +93,17 @@ export class RunControllerService {
   readonly nodeThinking = signal<ReadonlyMap<string, { text: string; streaming: boolean }>>(new Map());
 
   /**
+   * Cumulative token/cost usage for the current run, summed from node-usage
+   * events (one per model round). `costUsd` is only reported by providers
+   * with usage accounting (OpenRouter) — tokens are available more broadly.
+   */
+  readonly runUsage = signal<{ inputTokens: number; outputTokens: number; costUsd: number }>({
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+  });
+
+  /**
    * Set by CloudService while a monitor is connected: routes approval
    * resolutions for REMOTE runs over the WebSocket. Local runs create their
    * own pending entries via the engine callback and ignore this.
@@ -233,6 +244,7 @@ export class RunControllerService {
         // A new run dumps any prior thinking text (per the persistence rule:
         // thinking survives until node removal OR a restart).
         this.nodeThinking.set(new Map());
+        this.runUsage.set({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
         break;
 
       case 'node-started':
@@ -249,6 +261,14 @@ export class RunControllerService {
 
       case 'node-thinking':
         this.appendThinking(event.nodeId, event.token);
+        break;
+
+      case 'node-usage':
+        this.runUsage.update(current => ({
+          inputTokens: current.inputTokens + (event.usage.inputTokens ?? 0),
+          outputTokens: current.outputTokens + (event.usage.outputTokens ?? 0),
+          costUsd: current.costUsd + (event.usage.costUsd ?? 0),
+        }));
         break;
 
       case 'node-completed':

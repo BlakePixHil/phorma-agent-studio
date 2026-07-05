@@ -53,7 +53,8 @@ export type SettingsCustomTemplate =
   | 'api-keys'
   | 'palette-picker'
   | 'default-model'
-  | 'integrations';
+  | 'integrations'
+  | 'cloud-provider';
 
 export interface SettingsSectionDef {
   id: string;
@@ -298,6 +299,23 @@ export class SettingsRegistryService {
           settings: [],
           customTemplate: 'integrations',
           keywords: ['email', 'imap', 'mcp', 'reader', 'inbox', 'credentials', 'integration'],
+        },
+      ],
+    },
+    {
+      id: 'cloud',
+      label: 'Cloud',
+      icon: 'ti ti-cloud',
+      description: 'Where your agents run when deployed.',
+      sections: [
+        {
+          id: 'cloud-provider',
+          settings: [],
+          customTemplate: 'cloud-provider',
+          keywords: [
+            'cloud', 'phorma', 'cloudflare', 'hosted', 'deploy', 'worker',
+            'wrangler', 'subscription', 'token', 'monitor',
+          ],
         },
       ],
     },

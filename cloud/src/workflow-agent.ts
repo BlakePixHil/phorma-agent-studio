@@ -21,7 +21,9 @@
  */
 
 import { Agent, type Connection, type ConnectionContext } from 'agents';
-import { verifyToken } from '@clerk/backend';
+
+import { verifyBearer, verifyRequest, isHosted, type AuthContext } from './auth';
+import { TenantStore, tierLimits, type TenantEnv, type TenantRecord } from './tenants';
 
 import {
   FetchModelClient,
@@ -41,12 +43,27 @@ import {
   type WorkflowSpec,
 } from '@phorma/engine';
 
-export interface Env {
+export interface Env extends TenantEnv {
   WorkflowAgent: DurableObjectNamespace;
-  /** Shared bearer token protecting triggers + monitoring (recommended). */
+  /**
+   * Runtime mode. 'hosted' = Phorma Labs multi-tenant deployment (fail-closed
+   * Clerk auth, tenant ownership enforcement). Unset/anything else = BYO
+   * single-tenant mode (today's behavior).
+   */
+  PHORMA_MODE?: string;
+  /** Comma-separated origins allowed for CORS in hosted mode. */
+  ALLOWED_ORIGINS?: string;
+  /** Shared bearer token protecting triggers + monitoring (BYO mode only). */
   PHORMA_TOKEN?: string;
   /** Clerk secret key — when set, the studio authenticates with Clerk session JWTs. */
   CLERK_SECRET_KEY?: string;
+  /**
+   * Clerk instance public key (PEM) for offline JWT verification — avoids a
+   * remote JWKS fetch on DO cold starts. Recommended in hosted mode.
+   */
+  CLERK_JWT_KEY?: string;
+  /** Comma-separated origins allowed as JWT azp (token replay protection). */
+  CLERK_AUTHORIZED_PARTIES?: string;
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
   GEMINI_API_KEY?: string;
@@ -55,12 +72,30 @@ export interface Env {
   OLLAMA_BASE_URL?: string;
 }
 
+/** Cumulative usage for one run (summed across node-usage events). */
+interface RunUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
 interface WorkflowAgentState {
   spec: WorkflowSpec | null;
   savedAt: string | null;
   /** Id of the most recent run (running or finished). */
   lastRunId: string | null;
+  /** Clerk userId that owns this instance (stamped on first push, hosted mode). */
+  ownerId?: string | null;
+  /** Usage of the most recently completed run. */
+  lastRunUsage?: RunUsage | null;
+  /** Month key (YYYY-MM) the running totals below apply to. */
+  usageMonth?: string | null;
+  /** Month-to-date usage across runs (quota display; ledger comes later). */
+  monthUsage?: RunUsage | null;
 }
+
+/** The identity attached to an authorized request. */
+// AuthContext now lives in ./auth (shared with the gateway + API routes).
 
 /** Control frames the studio may send over the WebSocket. */
 type ControlFrame =
@@ -76,8 +111,29 @@ const PROVIDER_ENV_KEYS: Record<ModelProviderId, keyof Env | null> = {
   ollama: null,
 };
 
+/**
+ * Hosted inference is OpenRouter-only: whatever provider a node declares is
+ * mapped to the equivalent OpenRouter model slug and billed against the
+ * tenant's provisioned (credit-limited) runtime key.
+ */
+const OPENROUTER_SLUG_PREFIX: Record<ModelProviderId, string | null> = {
+  anthropic: 'anthropic/',
+  openai: 'openai/',
+  gemini: 'google/',
+  openrouter: '', // already a full slug
+  ollama: null, // no hosted equivalent — rejected in hosted mode
+};
+
 export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
-  override initialState: WorkflowAgentState = { spec: null, savedAt: null, lastRunId: null };
+  override initialState: WorkflowAgentState = {
+    spec: null,
+    savedAt: null,
+    lastRunId: null,
+    ownerId: null,
+    lastRunUsage: null,
+    usageMonth: null,
+    monthUsage: null,
+  };
 
   private handle: RunHandle | null = null;
   private runCounter = 0;
@@ -89,9 +145,12 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   // ── HTTP ───────────────────────────────────────────────────────────────────
 
   override async onRequest(request: Request): Promise<Response> {
-    if (!(await this.authorized(request))) {
+    const auth = await this.authorized(request);
+    if (!auth) {
       return json({ error: 'Unauthorized.' }, 401);
     }
+    const denied = this.enforceOwnership(auth);
+    if (denied) return denied;
 
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, '');
@@ -103,14 +162,20 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       }
       // Re-arm the schedule-trigger cron (if any) for the new spec.
       await this.rescheduleCron(spec);
-      this.setState({ ...this.state, spec, savedAt: new Date().toISOString() });
+      this.setState({
+        ...this.state,
+        spec,
+        savedAt: new Date().toISOString(),
+        // Hosted mode: first push stamps ownership; later pushes keep it.
+        ownerId: this.state.ownerId ?? auth.userId,
+      });
       return json({ ok: true, name: spec.name });
     }
 
     if (request.method === 'POST' && path.endsWith('/trigger')) {
       const body = (await request.json().catch(() => ({}))) as { input?: string };
-      const result = this.trigger(body.input ?? '');
-      return json(result, result.ok ? 200 : 409);
+      const result = await this.trigger(body.input ?? '');
+      return json(result, result.ok ? 200 : (result.status ?? 409));
     }
 
     if (request.method === 'GET' && path.endsWith('/status')) {
@@ -120,6 +185,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         running: this.handle !== null,
         savedAt: this.state.savedAt,
         lastRunId: this.state.lastRunId,
+        lastRunUsage: this.state.lastRunUsage ?? null,
+        monthUsage: this.currentMonthUsage(),
       });
     }
 
@@ -131,7 +198,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get('token');
-    if (!(await this.verifyToken(token))) {
+    const auth = await this.verifyToken(token);
+    if (!auth || this.enforceOwnership(auth)) {
       connection.close(4001, 'Unauthorized.');
       return;
     }
@@ -160,7 +228,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         break;
       }
       case 'trigger':
-        this.trigger(frame.input ?? '');
+        void this.trigger(frame.input ?? '').then(result => {
+          // Surface quota/config rejections to connected monitors — there is
+          // no HTTP response channel for socket-initiated runs.
+          if (!result.ok && result.error) {
+            this.relay({
+              type: 'run-failed',
+              runId: 'pending',
+              error: result.error,
+              at: Date.now(),
+            });
+          }
+        });
         break;
       case 'stop':
         this.handle?.stop();
@@ -172,7 +251,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   /** Callback target for `this.schedule(cron, 'scheduledRun')`. */
   async scheduledRun(): Promise<void> {
-    this.trigger('');
+    await this.trigger('');
   }
 
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
@@ -180,39 +259,109 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     for (const schedule of this.getSchedules()) {
       await this.cancelSchedule(schedule.id);
     }
+    // Hosted mode: cap active schedules by tier so background cron runs
+    // can't burn quota 24/7.
+    let scheduleBudget = Number.POSITIVE_INFINITY;
+    if (this.hosted && this.state.ownerId) {
+      const tenant = await new TenantStore(this.env).getTenant(this.state.ownerId);
+      scheduleBudget = tierLimits(tenant?.tier ?? 'starter').schedulesPerWorkflow;
+    }
     for (const node of spec.graph.nodes) {
       if (node.kind !== 'schedule-trigger') continue;
+      if (scheduleBudget <= 0) break;
       const cron = (node.data as { cron?: string }).cron;
       if (cron?.trim()) {
         await this.schedule(cron.trim(), 'scheduledRun', undefined);
+        scheduleBudget -= 1;
       }
     }
   }
 
-  // ── Run execution ──────────────────────────────────────────────────────────
+  // ── Run execution ────────────────────────────────────────────────────────────
 
-  private trigger(input: string): { ok: boolean; runId?: string; error?: string } {
+  private async trigger(
+    input: string,
+  ): Promise<{ ok: boolean; runId?: string; error?: string; status?: number }> {
     const spec = this.state.spec;
-    if (!spec) return { ok: false, error: 'No workflow uploaded yet.' };
-    if (this.handle) return { ok: false, error: 'A run is already in progress.' };
+    if (!spec) return { ok: false, error: 'No workflow uploaded yet.', status: 409 };
+    if (this.handle) return { ok: false, error: 'A run is already in progress.', status: 409 };
+
+    // Hosted mode: resolve the tenant, gate on subscription + quota, and
+    // resolve the credit-limited OpenRouter runtime key.
+    let tenant: TenantRecord | null = null;
+    let tenantKey: string | null = null;
+    const store = new TenantStore(this.env);
+    if (this.hosted) {
+      const ownerId = this.state.ownerId;
+      if (!ownerId) return { ok: false, error: 'Workflow has no owner. Push it again.', status: 409 };
+      tenant = await store.getTenant(ownerId);
+      if (!tenant || tenant.status !== 'active') {
+        return {
+          ok: false,
+          error: 'No active Phorma Cloud subscription. Visit Settings → Cloud to subscribe.',
+          status: 402,
+        };
+      }
+      const quota = await store.getQuota(tenant.id, tenant.tier);
+      if (quota.runsUsed >= quota.limits.monthlyRuns) {
+        return {
+          ok: false,
+          error: `Monthly run limit reached (${quota.limits.monthlyRuns}). Resets next month or upgrade your plan.`,
+          status: 429,
+        };
+      }
+      if (quota.costUsdUsed >= quota.limits.monthlyCostUsd) {
+        return {
+          ok: false,
+          error: 'Monthly inference budget exhausted. Resets next month or upgrade your plan.',
+          status: 402,
+        };
+      }
+      tenantKey = await store.runtimeKey(tenant);
+      if (!tenantKey) {
+        return {
+          ok: false,
+          error: 'Your Phorma Cloud account has no runtime key yet. Contact support.',
+          status: 402,
+        };
+      }
+    }
 
     this.runCounter += 1;
     const runId = `cloudrun-${Date.now().toString(36)}-${this.runCounter}`;
     this.eventLog = [];
+    const startedAt = Date.now();
+
+    // Per-run usage accumulator — summed from node-usage events as they are
+    // relayed, persisted ONCE when the run settles (never from event replay).
+    const runUsage: RunUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+
+    // Hosted: everything runs through OpenRouter on the tenant's key.
+    // BYO: provider keys come from the worker's env secrets, as always.
+    const graph = this.hosted ? this.mapGraphToOpenRouter(spec.graph) : spec.graph;
+    if (typeof graph === 'string') return { ok: false, error: graph, status: 422 };
 
     const model = new FetchModelClient(async provider => {
+      if (this.hosted) return tenantKey;
       const envKey = PROVIDER_ENV_KEYS[provider];
       return envKey ? ((this.env[envKey] as string | undefined) ?? null) : null;
     });
 
     const handle = startRun({
       runId,
-      graph: spec.graph,
+      graph,
       input,
       model,
-      tools: new CloudToolHost(),
+      tools: new CloudToolHost({ restrictEgress: this.hosted }),
       ollamaBaseUrl: this.env.OLLAMA_BASE_URL,
-      emit: event => this.relay(event),
+      emit: event => {
+        if (event.type === 'node-usage') {
+          runUsage.inputTokens += event.usage.inputTokens ?? 0;
+          runUsage.outputTokens += event.usage.outputTokens ?? 0;
+          runUsage.costUsd += event.usage.costUsd ?? 0;
+        }
+        this.relay(event);
+      },
       requestApproval: (nodeId) =>
         new Promise<boolean>(resolve => {
           this.approvals.set(nodeId, resolve);
@@ -226,9 +375,62 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // Reject anything still waiting so promises don't dangle.
       for (const resolve of this.approvals.values()) resolve(false);
       this.approvals.clear();
+      this.recordRunUsage(runUsage);
+      // Hosted: authoritative per-run ledger row + quota rollup in D1.
+      if (this.hosted && tenant) {
+        void store
+          .recordRun({
+            tenantId: tenant.id,
+            runId,
+            workflowId: spec.id ?? 'default',
+            costUsd: runUsage.costUsd,
+            tokensIn: runUsage.inputTokens,
+            tokensOut: runUsage.outputTokens,
+            durationMs: Date.now() - startedAt,
+          })
+          .catch(() => undefined); // ledger failure must never break a run
+      }
     });
 
     return { ok: true, runId };
+  }
+
+  /**
+   * Rewrites every agent node's provider/model to the OpenRouter equivalent
+   * (hosted inference is OpenRouter-only). Returns an error string when a
+   * node cannot be mapped (Ollama).
+   */
+  private mapGraphToOpenRouter(graph: WorkflowSpec['graph']): WorkflowSpec['graph'] | string {
+    const mapped = structuredClone(graph);
+    for (const node of mapped.nodes) {
+      const data = node.data as { provider?: ModelProviderId; model?: string };
+      if (!data.provider || !data.model) continue;
+      const prefix = OPENROUTER_SLUG_PREFIX[data.provider];
+      if (prefix === null) {
+        return `Agent "${node.name}" uses ${data.provider}, which is not available on Phorma Cloud. Pick a cloud model.`;
+      }
+      if (data.provider !== 'openrouter') {
+        data.model = `${prefix}${data.model}`;
+        data.provider = 'openrouter';
+      }
+    }
+    return mapped;
+  }
+
+  /** Persists a settled run's usage into the instance's monthly rollup. */
+  private recordRunUsage(usage: RunUsage): void {
+    const month = new Date().toISOString().slice(0, 7);
+    const current = this.currentMonthUsage();
+    this.setState({
+      ...this.state,
+      lastRunUsage: usage,
+      usageMonth: month,
+      monthUsage: {
+        inputTokens: current.inputTokens + usage.inputTokens,
+        outputTokens: current.outputTokens + usage.outputTokens,
+        costUsd: current.costUsd + usage.costUsd,
+      },
+    });
   }
 
   /** Buffers + broadcasts a RunEvent to every connected monitor. */
@@ -247,48 +449,42 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  /**
-   * Verifies an Authorization header. Accepts either:
-   *   - a Clerk session JWT (Bearer <jwt>) when CLERK_SECRET_KEY is set
-   *   - the shared PHORMA_TOKEN (Bearer <token>) as a fallback for non-Clerk clients
-   *
-   * When neither secret is configured the instance is open (dev mode).
-   */
-  private async authorized(request: Request): Promise<boolean> {
-    const header = request.headers.get('Authorization') ?? '';
-    if (!header.startsWith('Bearer ')) return !this.hasAnySecret();
-    const token = header.slice('Bearer '.length).trim();
-    return this.verifyToken(token);
+  /** True when running as Phorma Labs' multi-tenant deployment. */
+  private get hosted(): boolean {
+    return isHosted(this.env);
   }
 
-  /** True when at least one auth secret is configured. */
-  private hasAnySecret(): boolean {
-    return Boolean(this.env.CLERK_SECRET_KEY || this.env.PHORMA_TOKEN);
+  /** Verifies an Authorization header (shared logic in ./auth). */
+  private authorized(request: Request): Promise<AuthContext | null> {
+    return verifyRequest(this.env, request);
+  }
+
+  /** Validates a bearer token (shared logic in ./auth). */
+  private verifyToken(token: string | null): Promise<AuthContext | null> {
+    return verifyBearer(this.env, token);
   }
 
   /**
-   * Validates a bearer token against the configured auth method. Returns true
-   * for open instances (no secrets set), otherwise requires a valid match.
+   * Hosted-mode tenant isolation: once an instance is owned, only its owner
+   * may touch it. Returns a 403 response when access must be denied, null
+   * when allowed. BYO mode never denies (single-tenant).
    */
-  private async verifyToken(token: string | null): Promise<boolean> {
-    if (!this.hasAnySecret()) return true; // open instance
-    if (!token) return false;
-
-    // Prefer Clerk session JWT verification when configured.
-    if (this.env.CLERK_SECRET_KEY) {
-      try {
-        // verifyToken resolves with the JWT payload when the token is valid
-        // and rejects (throws) when it is not. A valid payload means signed in.
-        await verifyToken(token, { secretKey: this.env.CLERK_SECRET_KEY });
-        return true;
-      } catch {
-        // Not a valid Clerk token — fall through to PHORMA_TOKEN check.
-      }
+  private enforceOwnership(auth: AuthContext): Response | null {
+    if (!this.hosted) return null;
+    const owner = this.state.ownerId;
+    if (owner && owner !== auth.userId) {
+      return json({ error: 'Forbidden: this workflow belongs to another account.' }, 403);
     }
+    return null;
+  }
 
-    // Fallback: shared static token.
-    const shared = this.env.PHORMA_TOKEN;
-    return Boolean(shared) && token === shared;
+  /** Month-to-date usage, resetting when the calendar month rolls over. */
+  private currentMonthUsage(): RunUsage {
+    const month = new Date().toISOString().slice(0, 7);
+    if (this.state.usageMonth === month && this.state.monthUsage) {
+      return this.state.monthUsage;
+    }
+    return { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   }
 }
 
@@ -304,13 +500,90 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/** Hosted egress limits for user-defined tool calls. */
+const TOOL_RESPONSE_MAX_BYTES = 256 * 1024;
+const TOOL_TIMEOUT_MS = 30_000;
+
+/**
+ * SSRF guard for hosted mode: blocks URLs that resolve to private, loopback,
+ * link-local, or metadata address space by hostname shape. (Workers cannot
+ * resolve DNS ahead of fetch, so this is a best-effort literal check — the
+ * platform additionally blocks direct RFC1918 access from Workers.)
+ */
+function assertPublicHttpUrl(raw: string): void {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Blocked tool URL (unparseable): ${raw.slice(0, 100)}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Blocked tool URL (protocol ${url.protocol}) — only http/https allowed.`);
+  }
+  const host = url.hostname.toLowerCase();
+  const blockedHosts = ['localhost', 'metadata.google.internal'];
+  if (blockedHosts.includes(host) || host.endsWith('.internal') || host.endsWith('.local')) {
+    throw new Error(`Blocked tool URL (internal host): ${host}`);
+  }
+  // Literal IPv4 checks: loopback, RFC1918, link-local/metadata, CGNAT.
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    const blocked =
+      a === 127 ||
+      a === 10 ||
+      a === 0 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127);
+    if (blocked) throw new Error(`Blocked tool URL (private address): ${host}`);
+  }
+  // IPv6 loopback/link-local/unique-local literals.
+  if (host.includes(':')) {
+    const bare = host.replace(/^\[|\]$/g, '');
+    if (bare === '::1' || bare.startsWith('fe80') || bare.startsWith('fc') || bare.startsWith('fd')) {
+      throw new Error(`Blocked tool URL (private IPv6): ${host}`);
+    }
+  }
+}
+
+/** fetch with a timeout + response size cap (hosted tool egress). */
+async function guardedFetchText(
+  url: string,
+  init: RequestInit,
+  restrict: boolean,
+): Promise<{ ok: boolean; status: number; text: string }> {
+  if (restrict) assertPublicHttpUrl(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    let text = await response.text();
+    if (restrict && text.length > TOOL_RESPONSE_MAX_BYTES) {
+      text = `${text.slice(0, TOOL_RESPONSE_MAX_BYTES)}\n[truncated: response exceeded 256KB]`;
+    }
+    return { ok: response.ok, status: response.status, text };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Tool execution in the worker: HTTP + web search via fetch (workers have no
  * CORS constraints), MCP over streamable HTTP. Stdio MCP servers are a
  * desktop capability — deployed workflows must use remote MCP URLs.
+ *
+ * With `restrictEgress` (hosted mode), user-controlled URLs are SSRF-guarded
+ * and responses are size/time capped.
  */
 class CloudToolHost implements ToolHost {
   private readonly mcpClients = new Map<string, HttpMcpClient>();
+  private readonly restrictEgress: boolean;
+
+  constructor(options?: { restrictEgress?: boolean }) {
+    this.restrictEgress = options?.restrictEgress ?? false;
+  }
 
   async listTools(node: WorkflowNode): Promise<Omit<ResolvedTool, 'nodeId'>[]> {
     switch (node.kind) {
@@ -330,6 +603,7 @@ class CloudToolHost implements ToolHost {
           );
         }
         if (!data.url) throw new Error(`MCP node "${node.name}" has no server URL.`);
+        if (this.restrictEgress) assertPublicHttpUrl(data.url);
         const tools = await this.mcpFor(node, data.url).listTools();
         const prefix = sanitizeToolName(node.name);
         return tools.map(tool => ({
@@ -351,23 +625,31 @@ class CloudToolHost implements ToolHost {
       case 'http-tool': {
         const request = buildHttpToolRequest(node, argumentsJson);
         if (!request.url) return 'Error: the HTTP tool has no URL configured.';
-        const response = await fetch(request.url, {
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-        });
-        const text = await response.text();
-        return response.ok ? text : `HTTP ${response.status}: ${text}`;
+        try {
+          const result = await guardedFetchText(
+            request.url,
+            { method: request.method, headers: request.headers, body: request.body },
+            this.restrictEgress,
+          );
+          return result.ok ? result.text : `HTTP ${result.status}: ${result.text}`;
+        } catch (error) {
+          return `Error: ${error instanceof Error ? error.message : String(error)}`;
+        }
       }
       case 'web-search-tool': {
-        return performWebSearch(
-          argumentsJson,
-          async (url, headers) => (await fetch(url, { headers: headers ?? {} })).text(),
-        );
+        return performWebSearch(argumentsJson, async (url, headers) => {
+          const result = await guardedFetchText(url, { headers: headers ?? {} }, this.restrictEgress);
+          return result.text;
+        });
       }
       case 'mcp-tool': {
         const data = node.data as { url?: string };
         if (!data.url) return `Error: MCP node "${node.name}" has no server URL.`;
+        try {
+          if (this.restrictEgress) assertPublicHttpUrl(data.url);
+        } catch (error) {
+          return `Error: ${error instanceof Error ? error.message : String(error)}`;
+        }
         return this.mcpFor(node, data.url).callTool(nativeName, argumentsJson);
       }
       default:

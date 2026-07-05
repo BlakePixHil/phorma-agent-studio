@@ -310,6 +310,15 @@ class WorkflowRun {
           // accumulated into `roundText`/`output` — they must not leak into
           // handoffs or the final answer.
           this.emit({ type: 'node-thinking', runId: this.options.runId, nodeId: node.id, token: chunk.text });
+        } else if (chunk.type === 'usage') {
+          // One usage event per model round; consumers sum rounds per node.
+          this.emit({
+            type: 'node-usage',
+            runId: this.options.runId,
+            nodeId: node.id,
+            usage: chunk.usage,
+            at: Date.now(),
+          });
         } else if (chunk.type === 'tool-call') {
           calls.push(chunk.call);
         }

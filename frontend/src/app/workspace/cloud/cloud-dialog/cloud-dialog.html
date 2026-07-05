@@ -9,95 +9,150 @@
     >
       <header class="phorma-cloud__header">
         <span class="phorma-cloud__icon">
-          <i class="ti ti-cloud" aria-hidden="true"></i>
+          <i class="ti" [class.ti-sparkles]="provider() === 'phorma'" [class.ti-cloud]="provider() !== 'phorma'" aria-hidden="true"></i>
         </span>
         <div>
-          <h2>Cloud</h2>
-          <p>Deploy to <strong>your</strong> Cloudflare account. Phorma hosts nothing.</p>
+          <h2>{{ provider() === 'phorma' ? 'Phorma Cloud' : 'Cloud' }}</h2>
+          @if (provider() === 'phorma') {
+            <p>Run your agents on Phorma's infrastructure — no setup needed.</p>
+          } @else {
+            <p>Deploy to <strong>your</strong> Cloudflare account. Phorma hosts nothing.</p>
+          }
         </div>
+        <p-button
+          styleClass="phorma-cloud__btn phorma-cloud__btn--icon"
+          [text]="true"
+          severity="secondary"
+          size="small"
+          icon="ti ti-settings"
+          pTooltip="Change cloud provider"
+          (onClick)="openCloudSettings()"
+          ariaLabel="Change cloud provider"
+        />
       </header>
 
       <div class="phorma-cloud__body">
-        <p class="phorma-cloud__note">
-          One-time setup: run <code>npx wrangler login</code>, then set provider secrets with
-          <code>npx wrangler secret put ANTHROPIC_API_KEY</code> and optionally
-          <code>npx wrangler secret put PHORMA_TOKEN</code> to protect the endpoints.
-        </p>
+        @if (provider() === 'phorma') {
+          <div class="phorma-cloud__account">
+            <i class="ti ti-user-circle" aria-hidden="true"></i>
+            <div class="phorma-cloud__account-text">
+              @if (phormaCloud.signedIn()) {
+                <strong>{{ phormaCloud.email() ?? 'Phorma account' }}</strong>
+                @if (phormaCloud.profile(); as profile) {
+                  @if (profile.provisioned && profile.status === 'active' && profile.quota) {
+                    <span>
+                      {{ profile.tier }} plan ·
+                      {{ profile.quota!.runsUsed }}/{{ profile.quota!.runsLimit }} runs ·
+                      {{ profile.quota!.costUsdUsed | currency: 'USD' : 'symbol' : '1.2-2' }} of
+                      {{ profile.quota!.costUsdLimit | currency: 'USD' : 'symbol' : '1.0-0' }} used
+                    </span>
+                  } @else if (profile.provisioned) {
+                    <span class="phorma-cloud__account-warn">
+                      Subscription {{ profile.status }} — runs are paused.
+                    </span>
+                  } @else {
+                    <span class="phorma-cloud__account-warn">
+                      No subscription yet — activate in Settings.
+                    </span>
+                  }
+                } @else if (phormaCloud.loading()) {
+                  <span>Checking your account…</span>
+                } @else if (phormaCloud.error(); as err) {
+                  <span class="phorma-cloud__account-warn">{{ err }}</span>
+                }
+              } @else {
+                <strong>Not signed in</strong>
+                <span>Sign in from Settings → Cloud to publish workflows.</span>
+              }
+            </div>
+          </div>
+        }
 
-        <!-- 1 · Deploy the worker -->
-        <section class="phorma-cloud__section">
-          <h3 class="phorma-cloud__heading">1 · Deploy the worker</h3>
-          <div class="phorma-cloud__row">
-            <input
-              type="text"
-              class="phorma-cloud__input"
-              placeholder="Path to the repo's cloud/ folder"
-              [value]="cloud.cloudFolder()"
-              (input)="onFolderInput($event)"
-            />
-            @if (isDesktop) {
-              <p-button
-                styleClass="phorma-cloud__btn phorma-cloud__btn--icon"
-                [text]="true"
-                severity="secondary"
-                size="small"
-                icon="ti ti-folder-open"
-                (onClick)="cloud.pickCloudFolder()"
-                ariaLabel="Browse for cloud folder"
+        @if (provider() === 'cloudflare') {
+          <p class="phorma-cloud__note">
+            One-time setup: run <code>npx wrangler login</code>, then set provider secrets with
+            <code>npx wrangler secret put ANTHROPIC_API_KEY</code> and optionally
+            <code>npx wrangler secret put PHORMA_TOKEN</code> to protect the endpoints.
+          </p>
+
+          <!-- 1 · Deploy the worker -->
+          <section class="phorma-cloud__section">
+            <h3 class="phorma-cloud__heading">1 · Deploy the worker</h3>
+            <div class="phorma-cloud__row">
+              <input
+                type="text"
+                class="phorma-cloud__input"
+                placeholder="Path to the repo's cloud/ folder"
+                [value]="cloud.cloudFolder()"
+                (input)="onFolderInput($event)"
               />
+              @if (isDesktop) {
+                <p-button
+                  styleClass="phorma-cloud__btn phorma-cloud__btn--icon"
+                  [text]="true"
+                  severity="secondary"
+                  size="small"
+                  icon="ti ti-folder-open"
+                  (onClick)="cloud.pickCloudFolder()"
+                  ariaLabel="Browse for cloud folder"
+                />
+              }
+              <p-button
+                styleClass="phorma-cloud__btn"
+                size="small"
+                [disabled]="cloud.deploying() || !isDesktop"
+                [loading]="cloud.deploying()"
+                [label]="cloud.deploying() ? 'Deploying' : 'Deploy'"
+                [icon]="cloud.deploying() ? 'ti ti-loader-2' : 'ti ti-cloud-up'"
+                (onClick)="cloud.deploy()"
+                [title]="isDesktop ? 'Runs npx wrangler deploy (output streams to the console)' : 'Desktop app only'"
+              />
+            </div>
+            @if (!isDesktop) {
+              <p class="phorma-cloud__hint">Deploying runs wrangler locally — use the desktop app.</p>
+            } @else {
+              <p class="phorma-cloud__hint">Runs <code>npx wrangler deploy</code> — output streams to the console.</p>
             }
-            <p-button
-              styleClass="phorma-cloud__btn"
-              size="small"
-              [disabled]="cloud.deploying() || !isDesktop"
-              [loading]="cloud.deploying()"
-              [label]="cloud.deploying() ? 'Deploying' : 'Deploy'"
-              [icon]="cloud.deploying() ? 'ti ti-loader-2' : 'ti ti-cloud-up'"
-              (onClick)="cloud.deploy()"
-              [title]="isDesktop ? 'Runs npx wrangler deploy (output streams to the console)' : 'Desktop app only'"
-            />
-          </div>
-          @if (!isDesktop) {
-            <p class="phorma-cloud__hint">Deploying runs wrangler locally — use the desktop app.</p>
-          } @else {
-            <p class="phorma-cloud__hint">Runs <code>npx wrangler deploy</code> — output streams to the console.</p>
-          }
-        </section>
+          </section>
 
-        <!-- 2 · Worker URL & token -->
-        <section class="phorma-cloud__section">
-          <h3 class="phorma-cloud__heading">2 · Worker URL &amp; token</h3>
-          <div class="phorma-cloud__row">
-            <input
-              type="text"
-              class="phorma-cloud__input"
-              placeholder="https://phorma-agent-studio-cloud.you.workers.dev"
-              [value]="cloud.workerUrl()"
-              (input)="onUrlInput($event)"
-            />
-          </div>
-          <div class="phorma-cloud__row">
-            <input
-              type="password"
-              class="phorma-cloud__input"
-              placeholder="PHORMA_TOKEN (leave empty if none set)"
-              [value]="cloud.token()"
-              (input)="onTokenInput($event)"
-              autocomplete="off"
-            />
-          </div>
-        </section>
+          <!-- 2 · Worker URL & token -->
+          <section class="phorma-cloud__section">
+            <h3 class="phorma-cloud__heading">2 · Worker URL &amp; token</h3>
+            <div class="phorma-cloud__row">
+              <input
+                type="text"
+                class="phorma-cloud__input"
+                placeholder="https://phorma-agent-studio-cloud.you.workers.dev"
+                [value]="cloud.workerUrl()"
+                (input)="onUrlInput($event)"
+              />
+            </div>
+            <div class="phorma-cloud__row">
+              <input
+                type="password"
+                class="phorma-cloud__input"
+                placeholder="PHORMA_TOKEN (leave empty if none set)"
+                [value]="cloud.token()"
+                (input)="onTokenInput($event)"
+                autocomplete="off"
+              />
+            </div>
+          </section>
+        }
 
-        <!-- 3 · Push + monitor -->
+        <!-- Push + monitor (both providers) -->
         <section class="phorma-cloud__section">
-          <h3 class="phorma-cloud__heading">3 · Push &amp; monitor "{{ workflow.activeName() }}"</h3>
+          <h3 class="phorma-cloud__heading">
+            {{ provider() === 'phorma' ? 'Publish & watch' : '3 · Push & monitor' }}
+            "{{ workflow.activeName() }}"
+          </h3>
           <div class="phorma-cloud__row">
             <p-button
               styleClass="phorma-cloud__btn"
               [outlined]="true"
               size="small"
               icon="ti ti-upload"
-              label="Push workflow"
+              [label]="provider() === 'phorma' ? 'Publish workflow' : 'Push workflow'"
               (onClick)="cloud.pushWorkflow()"
             />
             @if (!cloud.connected()) {
@@ -105,7 +160,7 @@
                 styleClass="phorma-cloud__btn"
                 size="small"
                 icon="ti ti-plug-connected"
-                label="Connect monitor"
+                [label]="provider() === 'phorma' ? 'Watch live' : 'Connect monitor'"
                 (onClick)="cloud.connect()"
               />
             } @else {
@@ -124,10 +179,17 @@
               {{ cloud.connection() }}
             </span>
           </div>
-          <p class="phorma-cloud__hint">
-            While connected, Run in the Runs panel triggers the cloud instance and the
-            canvas animates its events live — identical to a local run.
-          </p>
+          @if (provider() === 'phorma') {
+            <p class="phorma-cloud__hint">
+              While watching, Run in the Runs panel starts your agents in Phorma Cloud and
+              the canvas animates everything live — exactly like running locally.
+            </p>
+          } @else {
+            <p class="phorma-cloud__hint">
+              While connected, Run in the Runs panel triggers the cloud instance and the
+              canvas animates its events live — identical to a local run.
+            </p>
+          }
         </section>
       </div>
 

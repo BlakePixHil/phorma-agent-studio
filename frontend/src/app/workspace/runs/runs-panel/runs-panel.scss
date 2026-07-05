@@ -141,6 +141,26 @@
   color: var(--p-text-muted-color);
 }
 
+.phorma-runs__usage {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--p-text-muted-color);
+
+  i {
+    font-size: 0.75rem;
+  }
+}
+
+.phorma-runs__usage-cost {
+  margin-left: auto;
+  font-weight: 700;
+  font-family: var(--phorma-font-mono, monospace);
+  color: var(--phorma-accent-green, #34d399);
+}
+
 .phorma-runs__approval {
   display: flex;
   flex-direction: column;

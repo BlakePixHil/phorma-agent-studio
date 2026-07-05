@@ -10,7 +10,7 @@
 //! fast instead of prompting an output-only console.
 
 use std::{
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
     path::PathBuf,
     process::{Command, Stdio},
     thread,
@@ -42,6 +42,11 @@ pub struct ProcessResult {
 
 /// Runs an allow-listed program with streamed output.
 ///
+/// `stdin_data`, when provided, is written to the child's stdin and the pipe
+/// is closed — used for `wrangler secret put <NAME>`, which reads the secret
+/// value from stdin (never from argv, where it would leak into process
+/// listings).
+///
 /// # Errors
 ///
 /// Returns a user-facing error when the program is not allow-listed, the
@@ -53,6 +58,7 @@ pub async fn run_streamed_command(
     cwd: String,
     program: String,
     args: Vec<String>,
+    stdin_data: Option<String>,
 ) -> Result<ProcessResult, String> {
     if !ALLOWED_PROGRAMS.contains(&program.as_str()) {
         return Err(format!("Program '{program}' is not allowed."));
@@ -71,11 +77,20 @@ pub async fn run_streamed_command(
         // Non-interactive: CLIs fail fast instead of prompting a console that
         // can't answer (learned the hard way with ng serve in Phorma Code).
         .env("CI", "true")
-        .stdin(Stdio::null())
+        .stdin(if stdin_data.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start {resolved}: {error}"))?;
+
+    if let Some(data) = stdin_data {
+        if let Some(mut stdin) = child.stdin.take() {
+            // Write + drop closes the pipe so the CLI sees EOF.
+            stdin
+                .write_all(data.as_bytes())
+                .map_err(|error| format!("Could not write to the process: {error}"))?;
+        }
+    }
 
     let stdout = child
         .stdout
