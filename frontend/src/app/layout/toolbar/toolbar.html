@@ -118,5 +118,24 @@
       tooltipPosition="bottom"
       (onClick)="theme.toggle()"
     />
+    <span class="phorma-toolbar-divider"></span>
+    <!--
+      Clerk auth control (far right). When signed in, renders the Clerk
+      UserButton (avatar + dropdown menu). When signed out, a plain avatar
+      icon that opens Clerk's sign-in modal on click.
+    -->
+    @if (isSignedIn()) {
+      <clerk-user-button />
+    } @else {
+      <p-button
+        [text]="true"
+        severity="secondary"
+        size="small"
+        icon="ti ti-user-circle"
+        pTooltip="Sign in"
+        tooltipPosition="bottom"
+        (onClick)="openSignIn()"
+      />
+    }
   </div>
 </ng-container>

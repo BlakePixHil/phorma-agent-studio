@@ -5,6 +5,9 @@
 //   2. Set provider secrets (once):  npx wrangler secret put ANTHROPIC_API_KEY
 //      (repeat for OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY as needed)
 //   3. Protect the endpoints (recommended):  npx wrangler secret put PHORMA_TOKEN
+//      To use Clerk user auth instead, set:  npx wrangler secret put CLERK_SECRET_KEY
+//      (the studio then authenticates with Clerk session JWTs; PHORMA_TOKEN
+//      remains as a fallback for non-Clerk clients)
 //   4. npx wrangler deploy   (or use Deploy in the studio's Cloud dialog)
 {
   "$schema": "node_modules/wrangler/config-schema.json",

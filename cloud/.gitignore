@@ -2,3 +2,7 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+
+# Clerk secrets (never commit)
+.env
+.env.local

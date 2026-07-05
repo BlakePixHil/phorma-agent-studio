@@ -21,6 +21,7 @@
  */
 
 import { Agent, type Connection, type ConnectionContext } from 'agents';
+import { verifyToken } from '@clerk/backend';
 
 import {
   FetchModelClient,
@@ -44,6 +45,8 @@ export interface Env {
   WorkflowAgent: DurableObjectNamespace;
   /** Shared bearer token protecting triggers + monitoring (recommended). */
   PHORMA_TOKEN?: string;
+  /** Clerk secret key — when set, the studio authenticates with Clerk session JWTs. */
+  CLERK_SECRET_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
   GEMINI_API_KEY?: string;
@@ -86,7 +89,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   // ── HTTP ───────────────────────────────────────────────────────────────────
 
   override async onRequest(request: Request): Promise<Response> {
-    if (!this.authorized(request)) {
+    if (!(await this.authorized(request))) {
       return json({ error: 'Unauthorized.' }, 401);
     }
 
@@ -127,8 +130,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     const url = new URL(ctx.request.url);
-    const token = this.env.PHORMA_TOKEN;
-    if (token && url.searchParams.get('token') !== token) {
+    const token = url.searchParams.get('token');
+    if (!(await this.verifyToken(token))) {
       connection.close(4001, 'Unauthorized.');
       return;
     }
@@ -244,11 +247,48 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  private authorized(request: Request): boolean {
-    const token = this.env.PHORMA_TOKEN;
-    if (!token) return true; // no token configured — open instance
+  /**
+   * Verifies an Authorization header. Accepts either:
+   *   - a Clerk session JWT (Bearer <jwt>) when CLERK_SECRET_KEY is set
+   *   - the shared PHORMA_TOKEN (Bearer <token>) as a fallback for non-Clerk clients
+   *
+   * When neither secret is configured the instance is open (dev mode).
+   */
+  private async authorized(request: Request): Promise<boolean> {
     const header = request.headers.get('Authorization') ?? '';
-    return header === `Bearer ${token}`;
+    if (!header.startsWith('Bearer ')) return !this.hasAnySecret();
+    const token = header.slice('Bearer '.length).trim();
+    return this.verifyToken(token);
+  }
+
+  /** True when at least one auth secret is configured. */
+  private hasAnySecret(): boolean {
+    return Boolean(this.env.CLERK_SECRET_KEY || this.env.PHORMA_TOKEN);
+  }
+
+  /**
+   * Validates a bearer token against the configured auth method. Returns true
+   * for open instances (no secrets set), otherwise requires a valid match.
+   */
+  private async verifyToken(token: string | null): Promise<boolean> {
+    if (!this.hasAnySecret()) return true; // open instance
+    if (!token) return false;
+
+    // Prefer Clerk session JWT verification when configured.
+    if (this.env.CLERK_SECRET_KEY) {
+      try {
+        // verifyToken resolves with the JWT payload when the token is valid
+        // and rejects (throws) when it is not. A valid payload means signed in.
+        await verifyToken(token, { secretKey: this.env.CLERK_SECRET_KEY });
+        return true;
+      } catch {
+        // Not a valid Clerk token — fall through to PHORMA_TOKEN check.
+      }
+    }
+
+    // Fallback: shared static token.
+    const shared = this.env.PHORMA_TOKEN;
+    return Boolean(shared) && token === shared;
   }
 }
 

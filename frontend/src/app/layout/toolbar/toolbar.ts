@@ -1,8 +1,10 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { MenubarModule } from 'primeng/menubar';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 import type { MenuItem } from 'primeng/api';
+import { ClerkService, ClerkUserButtonComponent } from 'ngx-clerk';
 import { ThemeService } from '../../core/theme.service';
 import { CanvasStateService } from '../../core/canvas-state.service';
 import { PanelRegistryService } from '../../core/panel-registry.service';
@@ -27,7 +29,7 @@ import { ToastService } from '../../shared/toast/toast.service';
  */
 @Component({
   selector: 'app-toolbar',
-  imports: [MenubarModule, ButtonModule, TooltipModule],
+  imports: [MenubarModule, ButtonModule, TooltipModule, ClerkUserButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './toolbar.html',
   styleUrl: './toolbar.scss',
@@ -42,6 +44,7 @@ export class Toolbar {
   protected readonly terminal = inject(TerminalOutputService);
   protected readonly runController = inject(RunControllerService);
   protected readonly cloud = inject(CloudService);
+  protected readonly clerk = inject(ClerkService);
   private readonly cloudDialog = inject(CloudDialogService);
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly tauri = inject(TauriService);
@@ -50,6 +53,71 @@ export class Toolbar {
   private readonly clipboard = inject(ClipboardService);
   private readonly selection = inject(SelectionService);
   private readonly toast = inject(ToastService);
+
+  /** Current Clerk user (null until Clerk loads / when signed out). */
+  protected readonly clerkUser = toSignal(this.clerk.user$, { initialValue: null });
+  /** True once Clerk reports a signed-in user. */
+  protected readonly isSignedIn = computed(() => this.clerkUser() != null);
+
+  /** Opens Clerk's modal sign-in flow. */
+  protected openSignIn(): void {
+    this.clerk.openSignIn();
+  }
+
+  constructor() {
+    // Sync Clerk's component theme with Phorma's light/dark mode. Clerk's
+    // appearance prop accepts a `variables` map of color tokens; we map the
+    // app's surface/text/border tokens onto Clerk's so the sign-in modal,
+    // UserButton menu, etc. match the surrounding chrome.
+    effect(() => {
+      const mode = this.theme.mode();
+      this.clerk.updateAppearance(this.clerkAppearanceFor(mode));
+    });
+  }
+
+  /**
+   * Builds a Clerk `appearance` object for the given theme mode. The color
+   * values mirror Phorma's design tokens (see styles.scss) so Clerk's
+   * prebuilt components blend into the toolbar and modal overlays.
+   */
+  private clerkAppearanceFor(mode: 'light' | 'dark') {
+    const dark = mode === 'dark';
+    return {
+      variables: {
+        colorBackground: dark ? '#111114' : '#ffffff',
+        colorBackgroundHover: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+        colorInputBackground: dark ? '#18191e' : '#f7f8fa',
+        colorInputText: dark ? '#e6e6e6' : '#1a1a1a',
+        colorText: dark ? '#e6e6e6' : '#1a1a1a',
+        colorTextSecondary: dark ? 'rgba(230,230,230,0.6)' : 'rgba(26,26,26,0.6)',
+        colorBorder: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)',
+        colorPrimary: dark ? '#878fa3' : '#67708a',
+        colorPrimaryForeground: '#ffffff',
+        borderRadius: '0.5rem',
+        fontFamily:
+          'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      },
+      // Social (OAuth) buttons don't have dedicated color variables, so we
+      // style them via `elements` to keep the "Continue with Google" label
+      // readable in dark mode (default is black text on a dark button).
+      elements: dark
+        ? {
+            socialButtonsBlockButton: {
+              backgroundColor: '#18191e',
+              borderColor: 'rgba(255,255,255,0.08)',
+              color: '#e6e6e6',
+              '&:hover': {
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: '#e6e6e6',
+              },
+            },
+            socialButtonsBlockButtonText: {
+              color: '#e6e6e6',
+            },
+          }
+        : {},
+    };
+  }
 
   /** Whether a run is in flight (run controls swap to Stop). */
   protected readonly running = this.runController.running;

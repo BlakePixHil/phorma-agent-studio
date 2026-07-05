@@ -1,4 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { ClerkService } from 'ngx-clerk';
+import { firstValueFrom } from 'rxjs';
 
 import type { RunEvent } from '@phorma/engine';
 
@@ -32,6 +34,7 @@ export class CloudService {
   private readonly terminal = inject(TerminalOutputService);
   private readonly toast = inject(ToastService);
   private readonly settings = inject(SettingsService);
+  private readonly clerk = inject(ClerkService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -164,7 +167,7 @@ export class CloudService {
     try {
       const response = await fetch(`${base}/workflow`, {
         method: 'POST',
-        headers: this.headers(),
+        headers: await this.headers(),
         body: JSON.stringify(spec),
       });
       if (!response.ok) {
@@ -179,7 +182,7 @@ export class CloudService {
 
   // ── Monitor (WebSocket → RunControllerService.apply) ───────────────────────
 
-  connect(): void {
+  async connect(): Promise<void> {
     const spec = this.workflow.exportActiveSpec();
     const base = this.instanceUrl(spec?.id ?? '');
     if (!spec || !base) {
@@ -189,7 +192,8 @@ export class CloudService {
     this.disconnect();
 
     const wsUrl = new URL(base.replace(/^http/, 'ws'));
-    if (this.token()) wsUrl.searchParams.set('token', this.token());
+    const authToken = await this.resolveAuthToken();
+    if (authToken) wsUrl.searchParams.set('token', authToken);
 
     this.connection.set('connecting');
     const socket = new WebSocket(wsUrl);
@@ -264,9 +268,29 @@ export class CloudService {
     return `${base}/agents/workflow-agent/${encodeURIComponent(workflowId)}`;
   }
 
-  private headers(): Record<string, string> {
+  private async headers(): Promise<Record<string, string>> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.token()) headers['Authorization'] = `Bearer ${this.token()}`;
+    const token = await this.resolveAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
+  }
+
+  /**
+   * Resolves the bearer token to send to the cloud worker. Prefers a fresh
+   * Clerk session JWT when the user is signed in; falls back to the static
+   * PHORMA_TOKEN for non-Clerk deployments.
+   */
+  private async resolveAuthToken(): Promise<string | null> {
+    const clerk = await firstValueFrom(this.clerk.clerk$);
+    const session = await firstValueFrom(this.clerk.session$);
+    if (clerk && session) {
+      try {
+        const jwt = await session.getToken();
+        if (jwt) return jwt;
+      } catch {
+        // Token refresh failed — fall through to static token.
+      }
+    }
+    return this.token() || null;
   }
 }

@@ -10,6 +10,7 @@
     "check": "tsc --noEmit && wrangler deploy --dry-run --outdir=dist"
   },
   "dependencies": {
+    "@clerk/backend": "^3.10.0",
     "agents": "^0.2.0",
     "ai": "^6.0.219"
   },
