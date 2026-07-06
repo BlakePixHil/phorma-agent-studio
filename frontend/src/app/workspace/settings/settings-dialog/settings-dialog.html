@@ -46,7 +46,11 @@
               [class.phorma-settings__nav-item--active]="page.id === activePage()?.id"
               (click)="selectPage(page.id)"
             >
-              <i class="{{ page.icon }}" aria-hidden="true"></i>
+              @if (page.icon === 'app:phorma-cloud') {
+                <app-phorma-cloud-icon />
+              } @else {
+                <i class="{{ page.icon }}" aria-hidden="true"></i>
+              }
               {{ page.label }}
             </button>
           }
@@ -375,7 +379,7 @@
                           class="phorma-settings__provider-card"
                           (click)="pickCloudProvider('phorma')"
                         >
-                          <i class="ti ti-sparkles" aria-hidden="true"></i>
+                          <app-phorma-cloud-icon />
                           <h5>Phorma Cloud</h5>
                           <p>
                             Run your agents on Phorma's infrastructure. No setup required —
@@ -405,7 +409,7 @@
                           [attr.aria-selected]="settings.cloudProvider() === 'phorma'"
                           (click)="pickCloudProvider('phorma')"
                         >
-                          <i class="ti ti-sparkles" aria-hidden="true"></i>
+                          <app-phorma-cloud-icon />
                           Phorma Cloud
                         </button>
                         <button

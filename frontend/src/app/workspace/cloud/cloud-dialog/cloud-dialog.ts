@@ -3,6 +3,7 @@ import { CurrencyPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
+import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { CloudDialogService } from '../cloud-dialog.service';
 import { CloudService } from '../../../core/cloud.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
@@ -26,7 +27,7 @@ import { WorkflowService } from '../../../core/workflow.service';
 @Component({
   selector: 'app-cloud-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, ButtonModule, TooltipModule],
+  imports: [CurrencyPipe, ButtonModule, TooltipModule, PhormaCloudIcon],
   templateUrl: './cloud-dialog.html',
   styleUrl: './cloud-dialog.scss',
 })

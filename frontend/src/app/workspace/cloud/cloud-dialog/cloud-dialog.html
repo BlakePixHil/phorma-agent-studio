@@ -9,7 +9,11 @@
     >
       <header class="phorma-cloud__header">
         <span class="phorma-cloud__icon">
-          <i class="ti" [class.ti-sparkles]="provider() === 'phorma'" [class.ti-cloud]="provider() !== 'phorma'" aria-hidden="true"></i>
+          @if (provider() === 'phorma') {
+            <app-phorma-cloud-icon />
+          } @else {
+            <i class="ti ti-cloud" aria-hidden="true"></i>
+          }
         </span>
         <div>
           <h2>{{ provider() === 'phorma' ? 'Phorma Cloud' : 'Cloud' }}</h2>

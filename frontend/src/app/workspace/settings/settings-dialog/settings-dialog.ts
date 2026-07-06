@@ -30,6 +30,7 @@ import { ThemeService } from '../../../core/theme.service';
 import { THEME_PALETTES, type ThemePalette, type ThemePaletteId } from '../../../core/theme-palettes';
 import { MCP_PRESETS, type McpPreset } from '../../../core/node-catalog';
 import { ToastService } from '../../../shared/toast/toast.service';
+import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import {
   MODEL_PROVIDERS,
   PROVIDER_MODEL_SUGGESTIONS,
@@ -50,7 +51,7 @@ import {
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, CurrencyPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule],
+  imports: [FormsModule, CurrencyPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })
