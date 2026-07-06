@@ -100,6 +100,16 @@ export class ThemeService {
       if (stored && THEME_PALETTES[stored]) {
         return THEME_PALETTES[stored];
       }
+      // Migrate retired palette ids to their replacements.
+      const storedStr = stored as string;
+      if (storedStr === 'indigo' || storedStr === 'blue') {
+        localStorage.setItem(PALETTE_KEY, 'azure');
+        return THEME_PALETTES['azure'];
+      }
+      if (storedStr === 'slate') {
+        localStorage.setItem(PALETTE_KEY, 'iris');
+        return THEME_PALETTES['iris'];
+      }
     } catch {
       // Ignore storage errors.
     }

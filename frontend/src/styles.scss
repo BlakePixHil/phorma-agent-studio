@@ -505,3 +505,143 @@ app-root {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ----------------------------------------------------------------------------
+   Button gradient highlight — Kumo/Cloudflare-style emphasis sheen
+   ---------------------------------------------------------------------------- */
+
+/*
+ * Filled PrimeNG buttons get a subtle top-to-bottom gradient overlay that
+ * reads as a soft specular highlight. The effect mirrors the "emphasis" look
+ * used by Kumo UI (Cloudflare) and Clerk:
+ *
+ *   - A ::before pseudo-element is inset 0, offset down 1px so the button's
+ *     top 1px rim shows the solid base colour (creates a crisp top edge).
+ *   - background-color: inherit picks up the button's computed background
+ *     (which PrimeNG swaps for hover/active variants), so the sheen
+ *     automatically tracks every state and severity without per-variant
+ *     overrides.
+ *   - A semi-transparent white linear-gradient is layered on top via
+ *     background-image, giving the surface a gentle convex sheen.
+ *   - On hover the button's background lightens (PrimeNG's hover token) and
+ *     the gradient flattens, so the highlight subtly shifts rather than
+ *     disappearing.
+ *   - Content (icon, label) is lifted above the overlay with z-index.
+ *
+ * Only filled severity buttons receive the sheen — text, outlined, link, and
+ * plain variants are skipped so they keep their flat transparent look.
+ */
+
+.p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-plain) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* Offset down 1px so the top rim stays the solid base colour. */
+    transform: translateY(1px);
+    border-radius: inherit;
+    /* Inherit the button's background colour (tracks hover/active/severity),
+       then overlay a soft white-to-transparent gradient for the sheen. */
+    background-color: inherit;
+    background-image: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.15),
+      rgba(255, 255, 255, 0)
+    );
+    pointer-events: none;
+    z-index: 0;
+    transition: background-color 0.2s ease;
+  }
+
+  /* Force white text on filled coloured buttons — the sheen reads best over
+     a saturated background with high-contrast white content. */
+  color: #fff;
+
+  /* Lift icon + label above the sheen overlay. */
+  .p-button-icon,
+  .p-button-label,
+  .p-button-loading-icon,
+  .p-badge {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Dark-mode button severity override — keep light-mode colours in both themes
+   ---------------------------------------------------------------------------- */
+
+/*
+ * PrimeNG's Aura dark theme lightens every severity button (400/300/200 ramp
+ * with dark text) so they "pop" on dark surfaces. The user finds this
+ * inconsistent — the light-mode 500/600/700 ramp with white text should be
+ * the defacto appearance in both themes. These overrides pin the dark-mode
+ * CSS variables back to the light-mode values for every filled severity.
+ */
+.app-dark {
+  --p-button-primary-background: var(--p-primary-500);
+  --p-button-primary-hover-background: var(--p-primary-600);
+  --p-button-primary-active-background: var(--p-primary-700);
+  --p-button-primary-border-color: var(--p-primary-500);
+  --p-button-primary-hover-border-color: var(--p-primary-600);
+  --p-button-primary-active-border-color: var(--p-primary-700);
+  --p-button-primary-color: #ffffff;
+  --p-button-primary-hover-color: #ffffff;
+  --p-button-primary-active-color: #ffffff;
+
+  --p-button-success-background: var(--p-green-500);
+  --p-button-success-hover-background: var(--p-green-600);
+  --p-button-success-active-background: var(--p-green-700);
+  --p-button-success-border-color: var(--p-green-500);
+  --p-button-success-hover-border-color: var(--p-green-600);
+  --p-button-success-active-border-color: var(--p-green-700);
+  --p-button-success-color: #ffffff;
+  --p-button-success-hover-color: #ffffff;
+  --p-button-success-active-color: #ffffff;
+
+  --p-button-danger-background: var(--p-red-500);
+  --p-button-danger-hover-background: var(--p-red-600);
+  --p-button-danger-active-background: var(--p-red-700);
+  --p-button-danger-border-color: var(--p-red-500);
+  --p-button-danger-hover-border-color: var(--p-red-600);
+  --p-button-danger-active-border-color: var(--p-red-700);
+  --p-button-danger-color: #ffffff;
+  --p-button-danger-hover-color: #ffffff;
+  --p-button-danger-active-color: #ffffff;
+
+  --p-button-info-background: var(--p-sky-500);
+  --p-button-info-hover-background: var(--p-sky-600);
+  --p-button-info-active-background: var(--p-sky-700);
+  --p-button-info-border-color: var(--p-sky-500);
+  --p-button-info-hover-border-color: var(--p-sky-600);
+  --p-button-info-active-border-color: var(--p-sky-700);
+  --p-button-info-color: #ffffff;
+  --p-button-info-hover-color: #ffffff;
+  --p-button-info-active-color: #ffffff;
+
+  --p-button-warn-background: var(--p-orange-500);
+  --p-button-warn-hover-background: var(--p-orange-600);
+  --p-button-warn-active-background: var(--p-orange-700);
+  --p-button-warn-border-color: var(--p-orange-500);
+  --p-button-warn-hover-border-color: var(--p-orange-600);
+  --p-button-warn-active-border-color: var(--p-orange-700);
+  --p-button-warn-color: #ffffff;
+  --p-button-warn-hover-color: #ffffff;
+  --p-button-warn-active-color: #ffffff;
+
+  --p-button-help-background: var(--p-purple-500);
+  --p-button-help-hover-background: var(--p-purple-600);
+  --p-button-help-active-background: var(--p-purple-700);
+  --p-button-help-border-color: var(--p-purple-500);
+  --p-button-help-hover-border-color: var(--p-purple-600);
+  --p-button-help-active-border-color: var(--p-purple-700);
+  --p-button-help-color: #ffffff;
+  --p-button-help-hover-color: #ffffff;
+  --p-button-help-active-color: #ffffff;
+}
+
+

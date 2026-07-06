@@ -20,9 +20,13 @@
     ></textarea>
     <div class="phorma-runs__controls">
       @if (!runController.running()) {
-        <button type="button" class="phorma-runs__run" (click)="run()">
-          <i class="ti ti-player-play" aria-hidden="true"></i> Run
-        </button>
+        <p-button
+          severity="success"
+          size="small"
+          icon="ti ti-player-play"
+          label="Run"
+          (onClick)="run()"
+        />
       } @else {
         <button type="button" class="phorma-runs__btn" (click)="runController.pauseOrResume()">
           <i class="ti" [class.ti-player-pause]="!runController.paused()" [class.ti-player-play]="runController.paused()" aria-hidden="true"></i>

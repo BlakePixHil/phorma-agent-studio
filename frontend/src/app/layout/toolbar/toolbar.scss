@@ -145,3 +145,28 @@
   background: var(--phorma-border);
   -webkit-app-region: no-drag;
 }
+
+// Clerk UserButton trigger (avatar) — make it clearly clickable.
+:host ::ng-deep clerk-user-button {
+  -webkit-app-region: no-drag;
+
+  .cl-user-button-trigger,
+  [class*='cl-user-button-trigger'] {
+    cursor: pointer;
+  }
+}
+
+// Clerk UserButton popover action buttons (Manage account / Sign out).
+// In dark mode Clerk ships black text on a dark card; force readable colors.
+:host ::ng-deep clerk-user-button {
+  .cl-user-button-popover-action-button,
+  [class*='cl-user-button-popover-action-button'] {
+    color: var(--p-text-color);
+
+    &:hover,
+    &:focus {
+      color: var(--p-text-color);
+      background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    }
+  }
+}

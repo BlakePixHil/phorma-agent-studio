@@ -73,25 +73,6 @@
   gap: 0.4rem;
 }
 
-.phorma-runs__run {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.42rem 0.9rem;
-  border-radius: 0.55rem;
-  border: 0;
-  background: var(--phorma-accent-green, #34d399);
-  color: var(--phorma-accent-green-contrast, #052e1b);
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: filter 0.15s ease;
-
-  &:hover {
-    filter: brightness(1.08);
-  }
-}
-
 .phorma-runs__btn {
   display: inline-flex;
   align-items: center;

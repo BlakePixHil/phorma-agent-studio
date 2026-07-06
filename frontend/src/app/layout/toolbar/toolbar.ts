@@ -102,6 +102,9 @@ export class Toolbar {
       // Social (OAuth) buttons don't have dedicated color variables, so we
       // style them via `elements` to keep the "Continue with Google" label
       // readable in dark mode (default is black text on a dark button).
+      // The UserButton popover action buttons (Manage account / Sign out)
+      // also default to black text on a dark card, so we force readable
+      // colors via the `userButtonPopoverActionButton` element keys.
       elements: dark
         ? {
             socialButtonsBlockButton: {
@@ -114,6 +117,16 @@ export class Toolbar {
               },
             },
             socialButtonsBlockButtonText: {
+              color: '#e6e6e6',
+            },
+            userButtonPopoverActionButton: {
+              color: '#e6e6e6',
+              '&:hover': {
+                color: '#e6e6e6',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+              },
+            },
+            userButtonPopoverActionButtonIcon: {
               color: '#e6e6e6',
             },
           }

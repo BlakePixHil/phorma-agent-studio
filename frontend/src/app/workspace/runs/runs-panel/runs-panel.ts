@@ -4,6 +4,7 @@ import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { CloudService } from '../../../core/cloud.service';
 import { RunControllerService } from '../../../core/run-controller.service';
 import { TerminalOutputService } from '../../../core/terminal-output.service';
+import { ButtonModule } from 'primeng/button';
 
 /**
  * The Runs panel (right side): task input, run controls, pending approvals,
@@ -15,7 +16,7 @@ import { TerminalOutputService } from '../../../core/terminal-output.service';
 @Component({
   selector: 'app-runs-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DatePipe, DecimalPipe],
+  imports: [CurrencyPipe, DatePipe, DecimalPipe, ButtonModule],
   templateUrl: './runs-panel.html',
   styleUrl: './runs-panel.scss',
 })

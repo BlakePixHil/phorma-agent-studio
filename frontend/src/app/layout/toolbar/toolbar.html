@@ -125,7 +125,7 @@
       icon that opens Clerk's sign-in modal on click.
     -->
     @if (isSignedIn()) {
-      <clerk-user-button />
+      <clerk-user-button class="flex" />
     } @else {
       <p-button
         [text]="true"
