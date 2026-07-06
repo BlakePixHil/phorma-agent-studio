@@ -246,7 +246,7 @@ export class SettingsRegistryService {
     {
       id: 'models',
       label: 'Models',
-      icon: 'app:phorma-cloud',
+      icon: 'ti ti-sparkles',
       description: 'Default model for agents and local model server.',
       sections: [
         {

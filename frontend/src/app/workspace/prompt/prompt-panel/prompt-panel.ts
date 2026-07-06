@@ -162,14 +162,4 @@ export class PromptPanel {
     if (!agent) return;
     this.workflow.updateNodeData(agent.id, { model });
   }
-
-  protected onTemperatureInput(event: Event): void {
-    const agent = this.agent();
-    if (!agent) return;
-    const raw = (event.target as HTMLInputElement | null)?.value ?? '';
-    const parsed = Number(raw);
-    this.workflow.updateNodeData(agent.id, {
-      temperature: Number.isFinite(parsed) ? Math.min(2, Math.max(0, parsed)) : undefined,
-    });
-  }
 }

@@ -154,17 +154,24 @@
 
 .phorma-prompt__model-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
   align-items: stretch;
 
   .phorma-prompt__provider {
-    flex-shrink: 0;
-    width: 9.5rem;
+    flex: 1 1 9.5rem;
+    min-width: 8rem;
+  }
+
+  // Inheriting the application default: no model input, so the provider
+  // select spans the full panel width.
+  &--inherit .phorma-prompt__provider {
+    flex-basis: 100%;
   }
 }
 
 .phorma-prompt__model {
-  flex: 1;
+  flex: 1 1 8rem;
   min-width: 0;
   padding: 0.35rem 0.55rem;
   border-radius: 0.5rem;
@@ -205,21 +212,6 @@
     color: var(--p-primary-color, #818cf8);
     border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
     background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
-  }
-}
-
-.phorma-prompt__temp {
-  width: 6rem;
-  padding: 0.32rem 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
-  font-size: 0.75rem;
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
   }
 }
 

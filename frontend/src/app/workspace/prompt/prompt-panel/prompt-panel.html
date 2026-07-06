@@ -37,7 +37,7 @@
     <!-- Model configuration -->
     <section class="phorma-prompt__section">
       <label class="phorma-prompt__label">Model</label>
-      <div class="phorma-prompt__model-row">
+      <div class="phorma-prompt__model-row" [class.phorma-prompt__model-row--inherit]="inheritsDefault()">
         <p-select
           class="phorma-prompt__provider"
           [options]="providers"
@@ -77,19 +77,6 @@
           </button>
         }
       </div>
-      <label class="phorma-prompt__label phorma-prompt__label--gap" for="prompt-temp">
-        Temperature
-      </label>
-      <input
-        id="prompt-temp"
-        type="number"
-        class="phorma-prompt__temp"
-        min="0"
-        max="2"
-        step="0.1"
-        [value]="node.data.temperature ?? ''"
-        (input)="onTemperatureInput($event)"
-      />
     </section>
 
     <!-- Capabilities summary -->

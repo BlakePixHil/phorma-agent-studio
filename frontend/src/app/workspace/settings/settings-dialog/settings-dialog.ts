@@ -183,13 +183,6 @@ export class SettingsDialog {
     this.settings.defaultModel.set(model);
   }
 
-  protected onDefaultTemperatureInput(event: Event): void {
-    const parsed = Number((event.target as HTMLInputElement | null)?.value);
-    if (Number.isFinite(parsed)) {
-      this.settings.defaultTemperature.set(Math.min(2, Math.max(0, parsed)));
-    }
-  }
-
   // ── Integrations (custom template) ──────────────────────────────────────
 
   protected readonly mcpPresets: McpPreset[] = MCP_PRESETS;

@@ -46,11 +46,7 @@
               [class.phorma-settings__nav-item--active]="page.id === activePage()?.id"
               (click)="selectPage(page.id)"
             >
-              @if (page.icon === 'app:phorma-cloud') {
-                <app-phorma-cloud-icon />
-              } @else {
-                <i class="{{ page.icon }}" aria-hidden="true"></i>
-              }
+              <i class="{{ page.icon }}" aria-hidden="true"></i>
               {{ page.label }}
             </button>
           }
@@ -281,16 +277,19 @@
                         </p>
                       </div>
                       <div class="phorma-settings__setting-control">
-                        <input
-                          id="default-temperature"
-                          type="number"
-                          class="phorma-settings__input phorma-settings__input--number"
-                          min="0"
-                          max="2"
-                          step="0.1"
-                          [value]="settings.defaultTemperature()"
-                          (change)="onDefaultTemperatureInput($event)"
-                        />
+                        <span class="phorma-settings__slider">
+                          <p-slider
+                            [ngModel]="settings.defaultTemperature()"
+                            (ngModelChange)="settings.defaultTemperature.set($event)"
+                            [min]="0"
+                            [max]="2"
+                            [step]="0.1"
+                            ariaLabel="Default temperature"
+                          />
+                          <span class="phorma-settings__slider-value">
+                            {{ settings.defaultTemperature().toFixed(1) }}
+                          </span>
+                        </span>
                       </div>
                     </div>
                   }
