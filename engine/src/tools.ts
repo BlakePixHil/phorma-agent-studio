@@ -236,7 +236,16 @@ export class HttpMcpClient {
   private sessionId: string | null = null;
   private initialized = false;
 
-  constructor(private readonly endpoint: string) {}
+  /**
+   * @param endpoint The streamable-HTTP MCP server URL.
+   * @param authHeaders Extra headers sent on every request (e.g.
+   *   `{ Authorization: 'Bearer <token>' }`). The caller resolves the token;
+   *   this class never reads secret storage so it stays framework-free.
+   */
+  constructor(
+    private readonly endpoint: string,
+    private readonly authHeaders: Record<string, string> = {},
+  ) {}
 
   async listTools(): Promise<{ name: string; description?: string; inputSchema?: object }[]> {
     await this.initialize();
@@ -292,6 +301,7 @@ export class HttpMcpClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
+      ...this.authHeaders,
     };
     if (this.sessionId) headers['Mcp-Session-Id'] = this.sessionId;
 

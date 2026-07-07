@@ -247,6 +247,30 @@ export class SettingsService {
     return null;
   }
 
+  /**
+   * Resolves the bearer token for a REMOTE (`sse`) MCP node. On desktop the
+   * value lives in the OS keychain, so we go through the narrow
+   * `get_mcp_bearer` command (which returns ONLY this one secret); in the
+   * browser it comes from the same localStorage path as other MCP secrets.
+   * Returns `null` when nothing is stored.
+   */
+  async resolveMcpBearer(nodeId: string, authKey: string, presetId?: string): Promise<string | null> {
+    if (this.tauri.isDesktop) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const token = await invoke<string | null>('get_mcp_bearer', {
+          serverId: nodeId,
+          authKey,
+          presetId: presetId ?? null,
+        });
+        return token && token.trim() ? token : null;
+      } catch {
+        return null;
+      }
+    }
+    return this.browserMcpSecret(nodeId, authKey, presetId);
+  }
+
   private browserMcpSecrets(): Record<string, string> {
     try {
       return JSON.parse(localStorage.getItem(BROWSER_MCP_SECRETS_STORAGE) ?? '{}') as Record<

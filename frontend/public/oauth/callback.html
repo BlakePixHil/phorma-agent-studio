@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connecting…</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0b0b0f;
+        color: #e5e5ee;
+        display: grid;
+        place-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+      .card {
+        text-align: center;
+        max-width: 28rem;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        opacity: 0.75;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1 id="title">Finishing sign-in…</h1>
+      <p id="message">You can close this tab and return to Phorma Agent Studio.</p>
+    </div>
+    <script>
+      // Parse the OAuth redirect params and hand them back to the opener
+      // window (the studio), which is waiting via postMessage. This page is a
+      // dependency-free static file so it loads instantly in the popup.
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var payload = {
+          type: 'phorma-oauth-callback',
+          code: params.get('code') || undefined,
+          state: params.get('state') || undefined,
+          error: params.get('error') || undefined,
+          error_description: params.get('error_description') || undefined,
+        };
+        if (payload.error) {
+          document.getElementById('title').textContent = 'Authorization failed';
+        }
+        try {
+          if (window.opener) {
+            window.opener.postMessage(payload, window.location.origin);
+          }
+        } catch (e) {
+          /* opener may be gone; the studio will time out gracefully */
+        }
+        setTimeout(function () {
+          window.close();
+        }, 500);
+      })();
+    </script>
+  </body>
+</html>

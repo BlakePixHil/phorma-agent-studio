@@ -314,6 +314,49 @@ export interface McpEnvField {
   placeholder?: string;
 }
 
+/**
+ * A user-provided command argument for an MCP preset (e.g. the allowed
+ * directory for the filesystem server). Rendered as a plain text input in the
+ * properties panel. Each field maps to one trailing positional argument
+ * appended after the preset's static `args`, in declaration order.
+ */
+export interface McpArgField {
+  /** Label shown in the properties panel. */
+  label: string;
+  /** Extra help text shown under the input. */
+  description?: string;
+  /** Input placeholder. */
+  placeholder?: string;
+  /** Default value seeded into `args` when the node is created. */
+  default?: string;
+}
+
+/**
+ * Guided-setup metadata for OAuth providers whose authorization server does
+ * NOT support dynamic client registration (RFC 7591) — the user must register
+ * an OAuth app with the provider once and paste its credentials.
+ */
+export interface McpOAuthSetup {
+  /**
+   * URL of the provider page where the user registers an OAuth app. May
+   * contain a `{callback}` placeholder which the UI substitutes with the
+   * URL-encoded redirect URI (pre-filling the form where supported).
+   */
+  registerUrlTemplate: string;
+  /** Whether the provider requires a client secret at the token endpoint. */
+  needsClientSecret?: boolean;
+  /** One-line provider-specific instruction shown in the setup UI. */
+  note?: string;
+  /**
+   * An app-provided OAuth client baked into the preset (the pattern GitHub's
+   * own MCP binary uses). When set, users get true one-click Connect — no
+   * registration step. The secret is public/non-confidential by design;
+   * PKCE binds each authorization code to its login attempt. A user-stored
+   * client (per node) still takes precedence.
+   */
+  defaultClient?: { clientId: string; clientSecret?: string };
+}
+
 /** A pre-configured MCP server users can drag-and-drop from the palette. */
 export interface McpPreset {
   /** Stable preset id (also the palette drag payload, prefixed `mcp-preset:`). */
@@ -322,12 +365,42 @@ export interface McpPreset {
   description: string;
   /** Tabler icon class (`ti ti-*`). */
   icon: string;
-  /** The executable to spawn (e.g. `uvx`, `npx`). */
-  command: string;
-  /** Arguments passed to the command. */
-  args: string[];
+  /**
+   * How the server runs. `stdio` (default) spawns a local process on desktop;
+   * `sse` connects to a remote HTTP endpoint (works in browser + cloud too).
+   */
+  transport?: 'stdio' | 'sse';
+  /** For `sse` presets: the remote MCP endpoint URL. */
+  url?: string;
+  /**
+   * For `sse` presets: the env var (in `envSchema`) whose secret value is sent
+   * as `Authorization: Bearer <value>`. Omit for unauthenticated servers.
+   */
+  authKey?: string;
+  /**
+   * How an `sse` preset authenticates: `bearer` (static token via `authKey`)
+   * or `oauth` (interactive OAuth 2.1, via the Connect button). Defaults to
+   * `bearer` when `authKey` is set, otherwise unauthenticated.
+   */
+  authMode?: 'bearer' | 'oauth';
+  /**
+   * For `oauth` presets whose provider lacks dynamic client registration:
+   * guided one-time OAuth-app setup (register link, client secret needs).
+   * Omit for providers that support RFC 7591 — no setup UI is shown.
+   */
+  oauthSetup?: McpOAuthSetup;
+  /** The executable to spawn for `stdio` presets (e.g. `uvx`, `npx`). */
+  command?: string;
+  /** Static arguments passed to the command, before any `argFields`. */
+  args?: string[];
   /** Secret env vars the server expects (values stored in the OS keychain). */
   envSchema: McpEnvField[];
+  /**
+   * User-provided trailing positional arguments (e.g. an allowed directory).
+   * Appended to `args` in order when the node is instantiated and editable
+   * from the properties panel. Not secrets.
+   */
+  argFields?: McpArgField[];
   /** Extra search terms for the palette filter. */
   keywords?: string[];
 }
@@ -339,43 +412,205 @@ export interface McpPreset {
  */
 export const MCP_PRESETS: McpPreset[] = [
   {
-    id: 'email-reader',
-    label: 'Email Reader',
-    description: 'Read, search, and download attachments from an IMAP inbox.',
+    id: 'email',
+    label: 'Email',
+    description:
+      'Read, search, send, reply, and forward email across Gmail, Outlook, Yahoo, and iCloud. Uses an app password — no OAuth setup.',
     icon: 'ti ti-mail',
-    command: 'uvx',
-    args: ['--from', 'git+https://github.com/karateboss/mcp_email_reader@main', 'mcp_email_reader'],
-    keywords: ['email', 'imap', 'inbox', 'mail', 'read'],
+    command: 'npx',
+    args: ['--yes', '@n24q02m/better-email-mcp@latest'],
+    keywords: ['email', 'imap', 'smtp', 'inbox', 'mail', 'gmail', 'outlook', 'send'],
     envSchema: [
       {
-        name: 'IMAP_SERVER',
-        label: 'IMAP server',
-        description: 'Your email provider’s IMAP host (e.g. imap.gmail.com).',
-        secret: false,
-        placeholder: 'imap.gmail.com',
-      },
-      {
-        name: 'EMAIL_ACCOUNT',
-        label: 'Email account',
-        description: 'The email address to read from.',
-        secret: false,
-        placeholder: 'you@example.com',
-      },
-      {
-        name: 'EMAIL_PASSWORD_ENC',
-        label: 'Encrypted password',
-        description: 'Your email password encrypted with the secret key below.',
+        name: 'EMAIL_CREDENTIALS',
+        label: 'Email credentials',
+        description:
+          'Format: you@example.com:app-password. The IMAP/SMTP host is auto-discovered from the address. Use comma-separated pairs for multiple accounts.',
         secret: true,
-        placeholder: '••••••••',
-      },
-      {
-        name: 'EMAIL_SECRET_KEY',
-        label: 'Secret key',
-        description: 'The key used to encrypt/decrypt the password.',
-        secret: true,
-        placeholder: '••••••••',
+        placeholder: 'you@gmail.com:app-password',
       },
     ],
+  },
+  {
+    id: 'filesystem',
+    label: 'Filesystem',
+    description: 'Read, write, and search files within an allowed directory.',
+    icon: 'ti ti-folder',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem'],
+    keywords: ['file', 'files', 'filesystem', 'directory', 'disk', 'read', 'write'],
+    envSchema: [],
+    argFields: [
+      {
+        label: 'Allowed directory',
+        description: 'The only directory the server may access. An absolute path is recommended.',
+        placeholder: '/Users/you/projects',
+      },
+    ],
+  },
+  {
+    id: 'git',
+    label: 'Git',
+    description: 'Read, search, and manipulate local Git repositories.',
+    icon: 'ti ti-git-branch',
+    command: 'uvx',
+    args: ['mcp-server-git'],
+    keywords: ['git', 'repository', 'repo', 'version control', 'commit', 'diff'],
+    envSchema: [],
+  },
+  {
+    id: 'fetch',
+    label: 'Fetch',
+    description: 'Fetch a URL and convert its contents to clean markdown for the model.',
+    icon: 'ti ti-world-www',
+    command: 'uvx',
+    args: ['mcp-server-fetch'],
+    keywords: ['fetch', 'url', 'web', 'http', 'scrape', 'markdown', 'page'],
+    envSchema: [],
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    description: 'A knowledge-graph-based persistent memory the agent can read and write.',
+    icon: 'ti ti-brain',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-memory'],
+    keywords: ['memory', 'knowledge graph', 'remember', 'persistent', 'notes'],
+    envSchema: [],
+  },
+  {
+    id: 'sequential-thinking',
+    label: 'Sequential Thinking',
+    description: 'Structured step-by-step reasoning through a sequence of revisable thoughts.',
+    icon: 'ti ti-list-numbers',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+    keywords: ['thinking', 'reasoning', 'sequential', 'plan', 'steps', 'chain of thought'],
+    envSchema: [],
+  },
+  {
+    id: 'brave-search',
+    label: 'Brave Search',
+    description: 'Web, news, image, video, and local search via the Brave Search API.',
+    icon: 'ti ti-search',
+    command: 'npx',
+    args: ['-y', '@brave/brave-search-mcp-server', '--transport', 'stdio'],
+    keywords: ['search', 'brave', 'web', 'news', 'images', 'video', 'internet'],
+    envSchema: [
+      {
+        name: 'BRAVE_API_KEY',
+        label: 'Brave API key',
+        description: 'Create one at api-dashboard.search.brave.com.',
+        secret: true,
+        placeholder: 'BSA…',
+      },
+    ],
+  },
+  {
+    id: 'postgres',
+    label: 'Postgres',
+    description:
+      'Query a PostgreSQL database, inspect schema, and get health and index-tuning insights. Read-only by default.',
+    icon: 'ti ti-database',
+    command: 'uvx',
+    // `restricted` = read-only transactions; the safe default for LLM-driven
+    // access. Users can switch to unrestricted via Advanced args.
+    args: ['postgres-mcp', '--access-mode=restricted'],
+    keywords: ['postgres', 'postgresql', 'database', 'sql', 'db', 'query'],
+    envSchema: [
+      {
+        name: 'DATABASE_URI',
+        label: 'Connection URI',
+        description: 'Full Postgres connection string. Contains your password, so it is stored as a secret.',
+        secret: true,
+        placeholder: 'postgresql://user:password@host:5432/dbname',
+      },
+    ],
+  },
+  {
+    id: 'slack',
+    label: 'Slack',
+    description:
+      'List channels, post messages, reply to threads, add reactions, and read history in a Slack workspace.',
+    icon: 'ti ti-brand-slack',
+    command: 'npx',
+    args: ['-y', '@zencoderai/slack-mcp-server'],
+    keywords: ['slack', 'chat', 'message', 'channel', 'workspace', 'notify'],
+    envSchema: [
+      {
+        name: 'SLACK_BOT_TOKEN',
+        label: 'Bot User OAuth token',
+        description: 'The xoxb- token from your Slack app’s OAuth & Permissions page.',
+        secret: true,
+        placeholder: 'xoxb-…',
+      },
+      {
+        name: 'SLACK_TEAM_ID',
+        label: 'Team ID',
+        description: 'Your workspace/team ID (starts with T).',
+        secret: false,
+        placeholder: 'T01234567',
+      },
+    ],
+  },
+  {
+    id: 'github',
+    label: 'GitHub (token)',
+    description:
+      'Manage repositories, issues, pull requests, and code via GitHub’s official remote MCP server, authenticated with a personal access token.',
+    icon: 'ti ti-brand-github',
+    transport: 'sse',
+    url: 'https://api.githubcopilot.com/mcp/',
+    authKey: 'GITHUB_TOKEN',
+    keywords: ['github', 'git', 'repo', 'issue', 'pull request', 'pr', 'code', 'pat', 'token'],
+    envSchema: [
+      {
+        name: 'GITHUB_TOKEN',
+        label: 'GitHub token',
+        description:
+          'A fine-grained personal access token (or PAT). Sent as a bearer token to the GitHub MCP server.',
+        secret: true,
+        placeholder: 'github_pat_… or ghp_…',
+      },
+    ],
+  },
+  {
+    id: 'github-oauth',
+    label: 'GitHub (OAuth)',
+    description:
+      'GitHub’s official remote MCP server, authorized by signing in with GitHub. One-time setup: register a free OAuth app on your account (guided).',
+    icon: 'ti ti-brand-github',
+    transport: 'sse',
+    url: 'https://api.githubcopilot.com/mcp/',
+    authMode: 'oauth',
+    // GitHub's OAuth authorization server supports neither dynamic client
+    // registration nor secret-less token exchange (the client secret is
+    // REQUIRED at the token endpoint even for public clients; PKCE binds the
+    // code). So users register their own OAuth app once — the register link
+    // pre-fills the form, including the callback URL.
+    oauthSetup: {
+      registerUrlTemplate:
+        'https://github.com/settings/applications/new' +
+        '?oauth_application%5Bname%5D=Phorma%20Agent%20Studio' +
+        '&oauth_application%5Burl%5D=https%3A%2F%2Fphorma.dev' +
+        '&oauth_application%5Bcallback_url%5D={callback}',
+      needsClientSecret: true,
+      note: 'GitHub requires both the Client ID and a Client secret — generate the secret on the app page after registering.',
+    },
+    keywords: ['github', 'git', 'repo', 'issue', 'pull request', 'pr', 'code', 'oauth', 'sign in'],
+    envSchema: [],
+  },
+  {
+    id: 'remote-mcp-oauth',
+    label: 'Remote MCP (OAuth)',
+    description:
+      'Connect to any OAuth-protected remote MCP server. Enter its URL, then click Connect to authorize.',
+    icon: 'ti ti-plug-connected',
+    transport: 'sse',
+    url: '',
+    authMode: 'oauth',
+    keywords: ['mcp', 'remote', 'oauth', 'custom', 'server', 'url'],
+    envSchema: [],
   },
 ];
 
@@ -419,13 +654,31 @@ function mcpPresetToCatalogEntry(presetId: string): NodeCatalogEntry | undefined
     keywords: preset.keywords,
     defaultName: preset.label,
     ports: TOOL_PORTS,
-    defaultData: () => ({
-      transport: 'stdio',
-      command: preset.command,
-      args: [...preset.args],
-      envKeys: preset.envSchema.map(field => field.name),
-      presetId: preset.id,
-    } as McpToolData),
+    defaultData: () =>
+      preset.transport === 'sse'
+        ? ({
+            transport: 'sse',
+            url: preset.url,
+            // Auth secrets (if any) are still tracked as envKeys so the
+            // properties panel + settings can collect them; authKey names the
+            // one used as the bearer token.
+            envKeys: preset.envSchema.map(field => field.name),
+            authKey: preset.authKey,
+            authMode: preset.authMode ?? (preset.authKey ? 'bearer' : undefined),
+            presetId: preset.id,
+          } as McpToolData)
+        : ({
+            transport: 'stdio',
+            command: preset.command ?? '',
+            // Static args, then one trailing positional per argField (seeded
+            // with its default, if any). Users edit these in the panel.
+            args: [
+              ...(preset.args ?? []),
+              ...(preset.argFields ?? []).map(field => field.default ?? ''),
+            ],
+            envKeys: preset.envSchema.map(field => field.name),
+            presetId: preset.id,
+          } as McpToolData),
   };
 }
 

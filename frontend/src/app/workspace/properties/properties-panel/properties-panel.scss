@@ -328,3 +328,74 @@
   font-size: 0.8rem;
   opacity: 0.8;
 }
+
+/* ── OAuth: locked preset URL + one-time setup ──────────────────────────── */
+
+/* Preset-fixed server endpoint: informative, deliberately not an input. */
+.phorma-props__locked-url {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.38rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px dashed var(--phorma-card-border);
+  color: var(--p-text-muted-color);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.7rem;
+
+  i {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+  }
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.phorma-props__oauth-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 2%, transparent);
+}
+
+.phorma-props__oauth-step {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+
+.phorma-props__oauth-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--p-primary-color, #818cf8) 18%, transparent);
+  color: var(--p-primary-color, #818cf8);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+/* Emphasized action (the Connect button). */
+.phorma-props__btn--primary {
+  border-color: color-mix(in srgb, var(--p-primary-color, #818cf8) 45%, transparent);
+  color: var(--p-primary-color, #818cf8);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 12%, transparent);
+    color: var(--p-primary-color, #818cf8);
+  }
+}

@@ -185,7 +185,14 @@ export class SettingsDialog {
 
   // ── Integrations (custom template) ──────────────────────────────────────
 
-  protected readonly mcpPresets: McpPreset[] = MCP_PRESETS;
+  /**
+   * Presets that expose configurable secrets. Presets with no `envSchema`
+   * (e.g. Filesystem, Memory) have nothing to configure here, so they're
+   * omitted to avoid empty cards.
+   */
+  protected readonly mcpPresets: McpPreset[] = MCP_PRESETS.filter(
+    preset => preset.envSchema.length > 0,
+  );
 
   /** Unsaved integration credential inputs, keyed `'{presetId}:{envKey}'`. */
   protected readonly presetDrafts = signal<Record<string, string>>({});

@@ -14,6 +14,7 @@ import { SelectionService } from '../../../core/selection.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import { findCatalogEntryByKind, findMcpPreset, type McpEnvField } from '../../../core/node-catalog';
 import { SettingsService } from '../../../core/settings.service';
+import { McpOAuthService } from '../../../core/mcp-oauth.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 import type {
@@ -45,6 +46,7 @@ export class PropertiesPanel {
   private readonly settings = inject(SettingsService);
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly toast = inject(ToastService);
+  private readonly oauth = inject(McpOAuthService);
 
   protected readonly httpMethods = [...HTTP_METHODS];
   protected readonly mcpTransports = [
@@ -87,6 +89,17 @@ export class PropertiesPanel {
   protected readonly mcpPreset = computed(() => {
     const data = this.mcpData();
     return data?.presetId ? findMcpPreset(data.presetId) ?? null : null;
+  });
+
+  /**
+   * Whether the selected node's server URL is fixed by its preset (e.g. the
+   * official GitHub server). Fixed URLs render read-only — editing them only
+   * breaks the integration. Presets with an empty url (generic “Remote MCP”)
+   * stay editable.
+   */
+  protected readonly urlLockedByPreset = computed(() => {
+    const preset = this.mcpPreset();
+    return !!(preset && preset.transport === 'sse' && preset.url);
   });
 
   /** Per-field secret input drafts, keyed by env var name. */
@@ -160,6 +173,188 @@ export class PropertiesPanel {
   protected presetDefaultConfigured(envKey: string): boolean {
     const preset = this.mcpPreset();
     return preset ? !!this.settings.mcpSecretsConfigured()[`preset:${preset.id}:${envKey}`] : false;
+  }
+
+  /**
+   * The preset's user-provided argument fields paired with their absolute
+   * index in `data.args` (static args come first). Rendered as labeled inputs
+   * so users don't have to hand-edit positional command args.
+   */
+  protected readonly mcpArgFields = computed(() => {
+    const preset = this.mcpPreset();
+    const data = this.mcpData();
+    if (!preset?.argFields?.length || !data) return null;
+    const offset = preset.args?.length ?? 0;
+    return preset.argFields.map((field, i) => ({
+      field,
+      index: offset + i,
+      value: data.args?.[offset + i] ?? '',
+    }));
+  });
+
+  /** Whether the selected remote node uses interactive OAuth. */
+  protected readonly usesOAuth = computed(() => this.mcpData()?.authMode === 'oauth');
+
+  /** OAuth connection state for the selected node (drives the Connect button). */
+  protected readonly oauthConnected = signal(false);
+  /** Whether an OAuth consent flow is currently in progress. */
+  protected readonly oauthConnecting = signal(false);
+
+  /** Refresh the OAuth connected badge whenever the selection changes. */
+  protected readonly oauthStatusRefresher = effect(() => {
+    const node = this.node();
+    const data = this.mcpData();
+    if (!node || data?.authMode !== 'oauth') {
+      this.oauthConnected.set(false);
+      return;
+    }
+    untracked(() => {
+      void this.oauth.isConnected(node.id).then(connected => this.oauthConnected.set(connected));
+    });
+  });
+
+  /** Draft OAuth client id input (for servers without dynamic registration). */
+  protected readonly oauthClientIdDraft = signal('');
+  /** Draft OAuth client secret (providers like GitHub require one). */
+  protected readonly oauthClientSecretDraft = signal('');
+  /** Whether a client id is already stored for the selected node. */
+  protected readonly oauthClientConfigured = signal(false);
+  /** Whether the one-time setup block is expanded despite being complete. */
+  protected readonly oauthSetupOpen = signal(false);
+
+  /** The redirect URI the user must register with their OAuth provider. */
+  protected readonly oauthRedirectUri = computed(() => {
+    // Recompute per selection; the value itself is host-stable.
+    this.node();
+    return this.oauth.redirectUriHint();
+  });
+
+  /** Guided setup metadata for providers without dynamic registration. */
+  protected readonly oauthSetup = computed(() => this.mcpPreset()?.oauthSetup ?? null);
+
+  /**
+   * Whether an OAuth client is available without user action — either stored
+   * on the node or shipped with the preset (`defaultClient`).
+   */
+  protected readonly oauthClientAvailable = computed(
+    () => this.oauthClientConfigured() || !!this.oauthSetup()?.defaultClient,
+  );
+
+  /**
+   * Whether the one-time setup UI should show: for providers that declare
+   * `oauthSetup`, when no client resolves yet — or expanded manually.
+   */
+  protected readonly oauthSetupVisible = computed(
+    () => !!this.oauthSetup() && (!this.oauthClientAvailable() || this.oauthSetupOpen()),
+  );
+
+  /** Refresh the stored-client-id badge when the selection changes. */
+  protected readonly oauthClientRefresher = effect(() => {
+    const node = this.node();
+    const data = this.mcpData();
+    if (!node || data?.authMode !== 'oauth') {
+      this.oauthClientConfigured.set(false);
+      return;
+    }
+    untracked(() => {
+      this.oauthClientIdDraft.set('');
+      this.oauthClientSecretDraft.set('');
+      this.oauthSetupOpen.set(false);
+      void this.oauth.hasClientCredentials(node.id).then(has => this.oauthClientConfigured.set(has));
+    });
+  });
+
+  protected onOAuthClientIdInput(event: Event): void {
+    this.oauthClientIdDraft.set(this.inputValue(event));
+  }
+
+  protected onOAuthClientSecretInput(event: Event): void {
+    this.oauthClientSecretDraft.set(this.inputValue(event));
+  }
+
+  protected toggleOAuthSetup(): void {
+    this.oauthSetupOpen.update(open => !open);
+  }
+
+  /**
+   * Opens the provider's “register an OAuth app” page with the callback URL
+   * pre-filled, so the user only has to click Register and copy credentials.
+   */
+  protected async openOAuthRegisterPage(): Promise<void> {
+    const setup = this.oauthSetup();
+    if (!setup) return;
+    const url = setup.registerUrlTemplate.replace(
+      '{callback}',
+      encodeURIComponent(this.oauthRedirectUri()),
+    );
+    await this.oauth.openExternal(url);
+  }
+
+  /** Saves the user-provided OAuth app credentials for the selected node. */
+  protected async saveOAuthClient(): Promise<void> {
+    const node = this.node();
+    if (!node) return;
+    const clientId = this.oauthClientIdDraft().trim();
+    if (!clientId) return;
+    if (this.oauthSetup()?.needsClientSecret && !this.oauthClientSecretDraft().trim()) {
+      this.toast.error('Client secret required', 'This provider requires a client secret — generate one on the OAuth app page.');
+      return;
+    }
+    try {
+      await this.oauth.setClientCredentials(node.id, clientId, this.oauthClientSecretDraft());
+      this.oauthClientConfigured.set(true);
+      this.oauthClientIdDraft.set('');
+      this.oauthClientSecretDraft.set('');
+      this.oauthSetupOpen.set(false);
+      this.toast.success('OAuth app saved', 'Now click Connect to sign in.');
+    } catch (error) {
+      this.toast.error('Could not save credentials', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Copies the redirect URI to the clipboard for pasting into the provider. */
+  protected async copyRedirectUri(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.oauthRedirectUri());
+      this.toast.success('Redirect URI copied');
+    } catch {
+      this.toast.error('Could not copy', 'Copy it manually from the field.');
+    }
+  }
+
+  /** Runs the interactive OAuth consent flow for the selected remote node. */
+  protected async connectOAuth(): Promise<void> {
+    const node = this.node();
+    const data = this.mcpData();
+    if (!node || !data?.url) return;
+    this.oauthConnecting.set(true);
+    try {
+      const defaultClient = this.oauthSetup()?.defaultClient;
+      await this.oauth.connect(node.id, data.url, {
+        fallbackClient: defaultClient
+          ? { client_id: defaultClient.clientId, client_secret: defaultClient.clientSecret }
+          : undefined,
+      });
+      this.oauthConnected.set(true);
+      this.toast.success('Connected', node.name);
+    } catch (error) {
+      this.toast.error('Could not connect', error instanceof Error ? error.message : String(error));
+    } finally {
+      this.oauthConnecting.set(false);
+    }
+  }
+
+  /** Clears the stored OAuth session for the selected node. */
+  protected async disconnectOAuth(): Promise<void> {
+    const node = this.node();
+    if (!node) return;
+    try {
+      await this.oauth.disconnect(node.id);
+      this.oauthConnected.set(false);
+      this.toast.success('Disconnected', node.name);
+    } catch (error) {
+      this.toast.error('Could not disconnect', error instanceof Error ? error.message : String(error));
+    }
   }
 
   /** Router/parallel/aggregator branch ports are editable lists. */

@@ -12,6 +12,8 @@ import {
   type WorkflowNode,
 } from '@phorma/engine';
 
+import { McpOAuthService } from './mcp-oauth.service';
+import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
 
 /**
@@ -25,6 +27,8 @@ import { TauriService } from './tauri.service';
 @Injectable({ providedIn: 'root' })
 export class ToolHostService implements ToolHost {
   private readonly tauri = inject(TauriService);
+  private readonly settings = inject(SettingsService);
+  private readonly oauth = inject(McpOAuthService);
 
   /** HTTP MCP clients, keyed by tool node id (reused across a run). */
   private readonly httpMcpClients = new Map<string, HttpMcpClient>();
@@ -99,7 +103,10 @@ export class ToolHostService implements ToolHost {
       const raw = await invoke<string>('mcp_connect', {
         serverId: node.id,
         command: data.command ?? '',
-        args: data.args ?? [],
+        // Unfilled preset argFields leave empty-string positionals behind —
+        // passing them verbatim confuses servers (e.g. filesystem treats ''
+        // as an allowed directory). Drop them.
+        args: (data.args ?? []).filter(arg => arg.trim() !== ''),
         envKeys: data.envKeys ?? [],
         // Rust falls back to preset-scoped app-default secrets when the
         // node-scoped ones are absent (Settings > Integrations).
@@ -108,7 +115,7 @@ export class ToolHostService implements ToolHost {
       tools = (JSON.parse(raw) as { tools?: typeof tools }).tools ?? [];
     } else {
       if (!data.url) throw new Error(`MCP node "${node.name}" has no server URL.`);
-      tools = await this.httpMcpFor(node, data.url).listTools();
+      tools = await (await this.httpMcpFor(node, data.url)).listTools();
     }
 
     const prefix = sanitizeToolName(node.name);
@@ -145,13 +152,34 @@ export class ToolHostService implements ToolHost {
       return parsed.isError ? `Tool error: ${text}` : text || '(empty result)';
     }
     if (!data.url) return `Error: MCP node "${node.name}" has no server URL.`;
-    return this.httpMcpFor(node, data.url).callTool(nativeName, argumentsJson);
+    return (await this.httpMcpFor(node, data.url)).callTool(nativeName, argumentsJson);
   }
 
-  private httpMcpFor(node: WorkflowNode, url: string): HttpMcpClient {
+  private async httpMcpFor(node: WorkflowNode, url: string): Promise<HttpMcpClient> {
     let client = this.httpMcpClients.get(node.id);
     if (!client) {
-      client = new HttpMcpClient(url);
+      const data = node.data as { authMode?: string; authKey?: string; presetId?: string };
+      const headers: Record<string, string> = {};
+      if (data.authMode === 'oauth') {
+        // Interactive OAuth: use the stored (auto-refreshed) access token.
+        const token = await this.oauth.validAccessToken(node.id);
+        if (!token) {
+          throw new Error(
+            `"${node.name}" is not connected. Select the node and click Connect to sign in.`,
+          );
+        }
+        headers['Authorization'] = `Bearer ${token}`;
+      } else if (data.authKey) {
+        // Static bearer / PAT.
+        const token = await this.settings.resolveMcpBearer(node.id, data.authKey, data.presetId);
+        if (!token) {
+          throw new Error(
+            `"${node.name}" has no token configured. Select the node and add its credentials, or set an application default in Settings > Integrations.`,
+          );
+        }
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      client = new HttpMcpClient(url, headers);
       this.httpMcpClients.set(node.id, client);
     }
     return client;

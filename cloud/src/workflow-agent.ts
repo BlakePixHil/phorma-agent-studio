@@ -352,7 +352,15 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       graph,
       input,
       model,
-      tools: new CloudToolHost({ restrictEgress: this.hosted }),
+      tools: new CloudToolHost({
+        restrictEgress: this.hosted,
+        // Remote MCP bearer tokens come from worker secrets named
+        // `MCP_<AUTHKEY>` (e.g. authKey `GITHUB_TOKEN` -> secret MCP_GITHUB_TOKEN).
+        resolveBearer: authKey => {
+          const value = this.env[`MCP_${authKey}` as keyof Env];
+          return typeof value === 'string' && value.trim() ? value : null;
+        },
+      }),
       ollamaBaseUrl: this.env.OLLAMA_BASE_URL,
       emit: event => {
         if (event.type === 'node-usage') {
@@ -580,9 +588,15 @@ async function guardedFetchText(
 class CloudToolHost implements ToolHost {
   private readonly mcpClients = new Map<string, HttpMcpClient>();
   private readonly restrictEgress: boolean;
+  /** Resolves a remote MCP node's bearer token from worker secrets. */
+  private readonly resolveBearer?: (authKey: string) => string | null;
 
-  constructor(options?: { restrictEgress?: boolean }) {
+  constructor(options?: {
+    restrictEgress?: boolean;
+    resolveBearer?: (authKey: string) => string | null;
+  }) {
     this.restrictEgress = options?.restrictEgress ?? false;
+    this.resolveBearer = options?.resolveBearer;
   }
 
   async listTools(node: WorkflowNode): Promise<Omit<ResolvedTool, 'nodeId'>[]> {
@@ -660,7 +674,13 @@ class CloudToolHost implements ToolHost {
   private mcpFor(node: WorkflowNode, url: string): HttpMcpClient {
     let client = this.mcpClients.get(node.id);
     if (!client) {
-      client = new HttpMcpClient(url);
+      const data = node.data as { authKey?: string };
+      const headers: Record<string, string> = {};
+      if (data.authKey && this.resolveBearer) {
+        const token = this.resolveBearer(data.authKey);
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+      client = new HttpMcpClient(url, headers);
       this.mcpClients.set(node.id, client);
     }
     return client;

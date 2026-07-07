@@ -27,6 +27,46 @@ AI agents are becoming the workhorses of modern operations, but today they are b
 2. **Debugger discipline** — pause, resume, step, breakpoints, and full run traces. Treats agent workflows with the same rigour an IDE treats code.
 3. **Local-to-cloud parity** — ONE TypeScript engine executes workflows both in-app (local debug) and inside a Cloudflare Durable Object (deployed). Same `RunEvent` stream, same visualization, zero behavioural drift.
 
+## Competitive Edge — How We Beat n8n, LangGraph & the Rest
+
+The workflow-automation space is crowded. n8n and Zapier/Make own integrations. LangGraph, CrewAI, and AutoGen own code-first agent orchestration. Phorma Agent Studio wins by refusing to pick one lane: we are **as fast and powerful as the code-first SDKs, and as simple as the no-code automators — with agents, not steps, as the atom.** Three pillars, non-negotiable. Every feature proposal must strengthen at least one and weaken none.
+
+### 1. Faster — from idea to running agent in under a minute
+
+Speed is a feature, and it is measured end-to-end: cold start, first canvas paint, first token, first deployed run.
+
+* **Zero-setup local runs.** Ollama ships as a first-class provider so a user can build and watch a real multi-agent run with **no API key, no signup, no cloud round-trip**. n8n needs a server; LangGraph needs a Python environment. We need a double-click.
+* **Instant feedback loop.** Native Canvas2D rendering (not DOM/SVG node soup) keeps 60fps with hundreds of nodes. Edits, drags, and zoom never stutter — the thing competitors get slow and janky at scale is where we stay buttery.
+* **One-click deploy, same engine.** No "rewrite your prototype for production" tax. The workflow you debugged locally is the byte-identical workflow that runs in the Durable Object. Competitors force a translation step between prototype and prod; we delete it.
+* **Sub-second run start.** Local runs begin instantly; there is no build, compile, or container spin-up between pressing Run and seeing the first node glow.
+* **Design mandate:** if a new feature adds a modal, a wizard step, or a required config before a user can *run something*, it is suspect. Defaults must be runnable.
+
+### 2. Simpler — legible to someone who has never written code
+
+Simplicity is not "fewer features"; it is **the shortest path from intent to a working, understandable workflow**, and the ability to trust what you built.
+
+* **The canvas is the documentation.** Live node states and pulsing handoff edges mean a non-engineer can *see* what the agents are doing. n8n shows you a static graph and a JSON execution log; we show you the run happening.
+* **Debugger discipline for everyone.** Pause, step, breakpoints, and full traces — the tools engineers take for granted — handed to operators. When something misbehaves, you inspect it visually, not by grepping logs.
+* **Agents, prompts, handoffs, and approvals are first-class.** In n8n an "AI agent" is a node type bolted onto an integration tool. Here it is the primitive. No impedance mismatch between what you want (agents doing work) and what the tool models (steps passing data).
+* **Markdown prompts, no YAML, no code.** Configuration a human reads and writes in plain language. The escape hatch (portable JSON, MCP) exists for power users but is never on the critical path for the common case.
+* **Design mandate:** a feature that a non-technical ops owner cannot understand from looking at the canvas has failed, no matter how powerful. Prefer visible state over hidden config.
+
+### 3. Powerful — depth that stops experts from outgrowing us
+
+Simple must not mean shallow. The ceiling has to be high enough that automation engineers never hit a wall that sends them back to code.
+
+* **MCP as the integration flywheel.** Rather than hand-maintaining hundreds of connectors like n8n, any **Model Context Protocol server** becomes a draggable Tool node instantly. The integration count grows with the entire MCP ecosystem, not with our roadmap. This is how we out-scale n8n's connector library without out-hiring them.
+* **Registry-driven node kinds.** New node types are data + strategy, not canvas rewrites — so the palette of triggers, flow-control, and tool nodes expands fast and consistently. Routers, Parallel fan-out/fan-in, Aggregators, and Approval Gates already give real control flow, not just linear chains.
+* **Real orchestration primitives.** Branching, parallelism, merging, human-in-the-loop gates, schedules, and webhooks — the control-flow vocabulary LangGraph exposes in code, exposed on the canvas. Complex agentic systems (triage → research → review → escalate) are expressible without dropping to an SDK.
+* **Bring-your-own everything.** Any model provider (Anthropic, OpenAI, Gemini, OpenRouter, Ollama), your own Cloudflare account, your own keys. No lock-in ceiling — power users own their stack end-to-end.
+* **Design mandate:** every power feature must have a legible visual representation. If capability can only be reached through raw JSON, we have failed pillar 2. Depth and simplicity are solved together or not at all.
+
+### The Wedge, in One Line
+
+> n8n can't debug agents like an IDE. LangGraph can't be used by your ops team. Phorma Agent Studio does both — build it visually in seconds, watch it run like a debugger, deploy it to your own cloud unchanged, and extend it with the entire MCP ecosystem.
+
+When you plan a feature, ask: *Does this make Phorma faster, simpler, or more powerful — without sacrificing the other two?* If the answer is no, it does not belong on the roadmap.
+
 ## Target Audience
 
 1. **Ops teams & non-technical product owners** (primary): people who know *what* the process should be — triage, research, review, escalation — and need to make agents do it without writing code.

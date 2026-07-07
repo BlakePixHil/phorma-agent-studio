@@ -40,6 +40,10 @@ static SESSIONS: Mutex<Option<HashMap<String, McpSession>>> = Mutex::new(None);
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,
+    /// Response headers (lower-cased names) so callers can read e.g.
+    /// `WWW-Authenticate` for OAuth discovery. Header values that aren't valid
+    /// UTF-8 are skipped.
+    pub headers: HashMap<String, String>,
 }
 
 /// Performs a plain HTTP request from Rust (no webview CORS, no key access).
@@ -78,6 +82,14 @@ pub async fn http_request(
         .map_err(|error| format!("Request failed: {error}"))?;
 
     let status = response.status().as_u16();
+    // Capture response headers (lower-cased) before consuming the body.
+    let mut response_headers: HashMap<String, String> = HashMap::new();
+    for (name, value) in response.headers() {
+        if let Ok(value) = value.to_str() {
+            response_headers.insert(name.as_str().to_lowercase(), value.to_owned());
+        }
+    }
+
     let text = response
         .text()
         .await
@@ -89,7 +101,11 @@ pub async fn http_request(
         text
     };
 
-    Ok(HttpResponse { status, body })
+    Ok(HttpResponse {
+        status,
+        body,
+        headers: response_headers,
+    })
 }
 
 /// Resolves a bare command name to an executable path the spawned process
@@ -282,6 +298,31 @@ pub fn mcp_disconnect(server_id: String) {
             }
         }
     }
+}
+
+/// Resolves the bearer token for a REMOTE (`sse`) MCP node so the webview's
+/// `HttpMcpClient` can send `Authorization: Bearer <token>`.
+///
+/// Unlike stdio secrets (which stay in Rust and are injected as env vars),
+/// a remote bearer token must reach the HTTP request made in the webview.
+/// This returns ONLY the single named secret — node-scoped
+/// (`mcp:{server_id}:{auth_key}`) first, then preset-scoped
+/// (`mcp:preset:{preset_id}:{auth_key}`) — and nothing else.
+///
+/// # Errors
+///
+/// Never errors; returns `None` when no matching secret is stored.
+#[tauri::command]
+pub fn get_mcp_bearer(
+    server_id: String,
+    auth_key: String,
+    preset_id: Option<String>,
+) -> Option<String> {
+    crate::llm::get_secret(&format!("mcp:{server_id}:{auth_key}")).or_else(|| {
+        preset_id
+            .as_ref()
+            .and_then(|preset| crate::llm::get_secret(&format!("mcp:preset:{preset}:{auth_key}")))
+    })
 }
 
 /// Sends one JSON-RPC request and blocks until the matching response arrives.

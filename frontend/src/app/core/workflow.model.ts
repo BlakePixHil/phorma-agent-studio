@@ -132,6 +132,19 @@ export interface McpToolData {
   url?: string;
   /** Names of secret env vars to inject (values live in the OS keychain). */
   envKeys?: string[];
+  /**
+   * For remote (`sse`) servers: the name of the secret (in `envKeys`) whose
+   * value is sent as `Authorization: Bearer <value>`. Resolved at request
+   * time from secret storage — never persisted in the workflow file.
+   */
+  authKey?: string;
+  /**
+   * How the remote server authenticates:
+   * - `bearer` (default when `authKey` is set): a static token/PAT.
+   * - `oauth`: interactive OAuth 2.1; tokens are obtained via the Connect
+   *   button and refreshed automatically. Never stored in the workflow file.
+   */
+  authMode?: 'bearer' | 'oauth';
   /** Preset that seeded this node, if any (enables preset-aware UI). */
   presetId?: string;
 }

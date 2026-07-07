@@ -8,6 +8,7 @@
 mod commands;
 mod llm;
 mod mcp;
+mod oauth;
 mod process;
 
 /// Builds and runs the Phorma Agent Studio desktop application.
@@ -39,6 +40,10 @@ pub fn run() {
             mcp::mcp_connect,
             mcp::mcp_call,
             mcp::mcp_disconnect,
+            mcp::get_mcp_bearer,
+            oauth::oauth_loopback_start,
+            oauth::oauth_loopback_wait,
+            oauth::oauth_loopback_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Phorma Agent Studio application");

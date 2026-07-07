@@ -95,42 +95,67 @@
     @if (mcpData(); as data) {
       <section class="phorma-props__section">
         <label class="phorma-props__label">MCP server</label>
-        <p-select
-          [options]="mcpTransports"
-          optionLabel="label"
-          optionValue="id"
-          [ngModel]="data.transport"
-          (ngModelChange)="patchData({ transport: $event })"
-          size="small"
-          appendTo="body"
-        />
+        @if (!mcpPreset()) {
+          <!-- Only generic MCP nodes choose a transport; presets fix it. -->
+          <p-select
+            [options]="mcpTransports"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="data.transport"
+            (ngModelChange)="patchData({ transport: $event })"
+            size="small"
+            appendTo="body"
+          />
+        }
         @if (data.transport === 'stdio') {
           @if (mcpPreset(); as preset) {
-            <!-- Preset node: application defaults status + Advanced overrides -->
-            <div
-              class="phorma-props__preset-status"
-              [class.phorma-props__preset-status--ok]="presetFullyConfigured()"
-            >
-              <i
-                class="ti"
-                [class.ti-circle-check]="presetFullyConfigured()"
-                [class.ti-alert-triangle]="!presetFullyConfigured()"
-                aria-hidden="true"
-              ></i>
-              <span>
-                @if (hasNodeOverrides()) {
-                  Using node overrides — see Advanced below.
-                } @else if (presetFullyConfigured()) {
-                  Using application defaults.
-                } @else {
-                  Credentials missing — set application defaults in Settings.
+            <!-- Preset node: credentials status + Advanced overrides. Presets
+                 without credentials (e.g. Filesystem) skip the status — there
+                 is nothing to configure. -->
+            @if (preset.envSchema.length > 0) {
+              <div
+                class="phorma-props__preset-status"
+                [class.phorma-props__preset-status--ok]="presetFullyConfigured()"
+              >
+                <i
+                  class="ti"
+                  [class.ti-circle-check]="presetFullyConfigured()"
+                  [class.ti-alert-triangle]="!presetFullyConfigured()"
+                  aria-hidden="true"
+                ></i>
+                <span>
+                  @if (hasNodeOverrides()) {
+                    Using node overrides — see Advanced below.
+                  } @else if (presetFullyConfigured()) {
+                    Using application defaults.
+                  } @else {
+                    Credentials missing — set application defaults in Settings.
+                  }
+                </span>
+              </div>
+              <button type="button" class="phorma-props__link" (click)="openIntegrationSettings()">
+                <i class="ti ti-settings" aria-hidden="true"></i>
+                Configure defaults in Settings › Integrations
+              </button>
+            }
+
+            <!-- Preset argument fields (e.g. the filesystem allowed directory) -->
+            @if (mcpArgFields(); as argFields) {
+              @for (entry of argFields; track entry.index) {
+                <label class="phorma-props__label phorma-props__label--gap">{{ entry.field.label }}</label>
+                <input
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="entry.value"
+                  (input)="onArgInput(entry.index, $event)"
+                  [placeholder]="entry.field.placeholder ?? ''"
+                  [attr.aria-label]="entry.field.label"
+                />
+                @if (entry.field.description) {
+                  <p class="phorma-props__hint">{{ entry.field.description }}</p>
                 }
-              </span>
-            </div>
-            <button type="button" class="phorma-props__link" (click)="openIntegrationSettings()">
-              <i class="ti ti-settings" aria-hidden="true"></i>
-              Configure defaults in Settings › Integrations
-            </button>
+              }
+            }
 
             <!-- Advanced: per-node overrides + command/args -->
             <button
@@ -149,6 +174,7 @@
             </button>
             @if (advancedOpen()) {
               <div class="phorma-props__advanced">
+                @if (preset.envSchema.length > 0) {
                 <label class="phorma-props__label">Credential overrides</label>
                 <p class="phorma-props__hint">
                   Override the application defaults for this node only. Stored in your OS
@@ -198,6 +224,7 @@
                     }
                   }
                 </ul>
+                }
 
                 <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
                 <input
@@ -279,15 +306,184 @@
             </button>
           }
         } @else {
-          <label class="phorma-props__label phorma-props__label--gap" for="prop-url">Server URL</label>
-          <input
-            id="prop-url"
-            type="text"
-            class="phorma-props__input phorma-props__input--mono"
-            [value]="data.url ?? ''"
-            (input)="patchData({ url: inputValue($event) })"
-            placeholder="https://mcp.example.com/sse"
-          />
+          @if (urlLockedByPreset()) {
+            <!-- Preset-fixed endpoint: shown for transparency, not editable. -->
+            <label class="phorma-props__label phorma-props__label--gap">Server</label>
+            <div class="phorma-props__locked-url" [title]="data.url">
+              <i class="ti ti-lock" aria-hidden="true"></i>
+              <span>{{ data.url }}</span>
+            </div>
+          } @else {
+            <label class="phorma-props__label phorma-props__label--gap" for="prop-url">Server URL</label>
+            <input
+              id="prop-url"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="data.url ?? ''"
+              (input)="patchData({ url: inputValue($event) })"
+              placeholder="https://mcp.example.com/sse"
+            />
+          }
+
+          <!-- Interactive OAuth: Connect / Disconnect instead of a token field -->
+          @if (usesOAuth()) {
+            <div
+              class="phorma-props__preset-status phorma-props__label--gap"
+              [class.phorma-props__preset-status--ok]="oauthConnected()"
+            >
+              <i
+                class="ti"
+                [class.ti-circle-check]="oauthConnected()"
+                [class.ti-plug-connected-x]="!oauthConnected()"
+                aria-hidden="true"
+              ></i>
+              <span>
+                @if (oauthConnected()) {
+                  Connected — this agent tool is ready to use.
+                } @else if (oauthSetup() && !oauthClientAvailable()) {
+                  One-time setup needed before you can connect.
+                } @else {
+                  Not connected — click Connect to sign in.
+                }
+              </span>
+            </div>
+
+            <!-- One-time OAuth-app setup (providers without automatic registration) -->
+            @if (oauthSetupVisible()) {
+              <div class="phorma-props__oauth-setup">
+                <p class="phorma-props__oauth-step">
+                  <span class="phorma-props__oauth-step-num">1</span>
+                  Register a (free) OAuth app on your account — the form is pre-filled:
+                </p>
+                <button type="button" class="phorma-props__btn" (click)="openOAuthRegisterPage()">
+                  <i class="ti ti-external-link" aria-hidden="true"></i>
+                  Open registration page
+                </button>
+                <p class="phorma-props__hint">
+                  Callback URL (pre-filled; copy if you need it):
+                </p>
+                <div class="phorma-props__row">
+                  <input
+                    type="text"
+                    class="phorma-props__input phorma-props__input--mono"
+                    [value]="oauthRedirectUri()"
+                    readonly
+                    aria-label="Callback URL to register"
+                  />
+                  <button type="button" class="phorma-props__icon-btn" (click)="copyRedirectUri()" title="Copy callback URL">
+                    <i class="ti ti-copy" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <p class="phorma-props__oauth-step">
+                  <span class="phorma-props__oauth-step-num">2</span>
+                  Paste the app’s credentials here:
+                </p>
+                @if (oauthSetup()?.note; as note) {
+                  <p class="phorma-props__hint">{{ note }}</p>
+                }
+                <input
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  placeholder="Client ID"
+                  [value]="oauthClientIdDraft()"
+                  (input)="onOAuthClientIdInput($event)"
+                  autocomplete="off"
+                  aria-label="OAuth client ID"
+                />
+                @if (oauthSetup()?.needsClientSecret) {
+                  <input
+                    type="password"
+                    class="phorma-props__input phorma-props__input--mono"
+                    placeholder="Client secret"
+                    [value]="oauthClientSecretDraft()"
+                    (input)="onOAuthClientSecretInput($event)"
+                    autocomplete="off"
+                    aria-label="OAuth client secret"
+                  />
+                }
+                <button
+                  type="button"
+                  class="phorma-props__btn"
+                  [disabled]="!oauthClientIdDraft().trim()"
+                  (click)="saveOAuthClient()"
+                >
+                  <i class="ti ti-device-floppy" aria-hidden="true"></i>
+                  Save app credentials
+                </button>
+              </div>
+            } @else if (oauthSetup() && oauthClientAvailable()) {
+              <button type="button" class="phorma-props__link" (click)="toggleOAuthSetup()">
+                <i class="ti ti-key" aria-hidden="true"></i>
+                {{ oauthClientConfigured() ? 'OAuth app configured — change credentials' : 'Using a custom OAuth app instead' }}
+              </button>
+            }
+
+            <div class="phorma-props__row phorma-props__label--gap">
+              <button
+                type="button"
+                class="phorma-props__btn phorma-props__btn--primary"
+                [disabled]="oauthConnecting() || !data.url || (oauthSetup() && !oauthClientAvailable())"
+                (click)="connectOAuth()"
+              >
+                <i class="ti ti-plug-connected" aria-hidden="true"></i>
+                {{ oauthConnecting() ? 'Connecting…' : oauthConnected() ? 'Reconnect' : 'Connect' }}
+              </button>
+              @if (oauthConnected()) {
+                <button
+                  type="button"
+                  class="phorma-props__icon-btn"
+                  (click)="disconnectOAuth()"
+                  title="Disconnect (clear stored tokens)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </button>
+              }
+            </div>
+          } @else if (mcpPreset(); as preset) {
+            <!-- Remote preset credentials (static bearer token + any extra secrets) -->
+            @for (field of preset.envSchema; track field.name) {
+              <label class="phorma-props__label phorma-props__label--gap">
+                {{ field.label }}
+                @if (secretConfigured(field.name)) {
+                  <i class="ti ti-circle-check phorma-props__ok" title="Stored" aria-hidden="true"></i>
+                } @else if (presetDefaultConfigured(field.name)) {
+                  <i class="ti ti-settings-check phorma-props__default" title="Using application default" aria-hidden="true"></i>
+                }
+              </label>
+              <div class="phorma-props__row">
+                <input
+                  [type]="field.secret ? 'password' : 'text'"
+                  class="phorma-props__input"
+                  [placeholder]="secretConfigured(field.name) ? '••••••••  (stored)' : presetDefaultConfigured(field.name) ? 'Using app default' : (field.placeholder ?? '')"
+                  [value]="mcpSecretDrafts()[field.name] || ''"
+                  (input)="onSecretInput(field.name, $event)"
+                  (keydown.enter)="saveSecret(field.name)"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="phorma-props__btn"
+                  [disabled]="mcpSecretDrafts()[field.name] === undefined"
+                  (click)="saveSecret(field.name)"
+                >
+                  Save
+                </button>
+                @if (secretConfigured(field.name)) {
+                  <button
+                    type="button"
+                    class="phorma-props__icon-btn"
+                    (click)="clearSecret(field.name)"
+                    title="Remove stored secret"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                }
+              </div>
+              @if (field.description) {
+                <p class="phorma-props__hint">{{ field.description }}</p>
+              }
+            }
+          }
         }
       </section>
     }
