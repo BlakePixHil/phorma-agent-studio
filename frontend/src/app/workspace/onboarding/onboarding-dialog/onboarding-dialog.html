@@ -1,0 +1,350 @@
+@if (dialog.visible()) {
+  <div class="phorma-setup" role="presentation">
+    <section
+      class="phorma-setup__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Setup wizard"
+    >
+      <!-- ── Stage progress ── -->
+      <nav class="phorma-setup__stages" aria-label="Setup progress">
+        @for (stage of stages; track stage; let i = $index) {
+          <div
+            class="phorma-setup__stage"
+            [class.phorma-setup__stage--active]="i === stageIndex()"
+            [class.phorma-setup__stage--done]="i < stageIndex()"
+          >
+            <span class="phorma-setup__stage-dot">
+              @if (i < stageIndex()) {
+                <i class="ti ti-check" aria-hidden="true"></i>
+              } @else {
+                {{ i + 1 }}
+              }
+            </span>
+            <span class="phorma-setup__stage-label">{{ stage }}</span>
+            @if (i < stages.length - 1) {
+              <span class="phorma-setup__stage-line" aria-hidden="true"></span>
+            }
+          </div>
+        }
+      </nav>
+
+      <!-- ── Header ── -->
+      <header class="phorma-setup__header">
+        <span class="phorma-setup__icon">
+          @if (step() === 'done') {
+            <i class="ti ti-circle-check" aria-hidden="true"></i>
+          } @else {
+            <i class="ti ti-sparkles" aria-hidden="true"></i>
+          }
+        </span>
+        <div>
+          <h2>{{ title() }}</h2>
+          <p>{{ subtitle() }}</p>
+        </div>
+      </header>
+
+      <!-- ── Body ── -->
+      <div class="phorma-setup__body">
+        <!-- Welcome -->
+        @if (step() === 'welcome') {
+          <p class="phorma-setup__lead">
+            Phorma Agent Studio lets you design, debug, and deploy multi-agent AI
+            workflows on a visual canvas. To run agents you need a model source -
+            free local models via Ollama, or your own provider API keys.
+          </p>
+          <div class="phorma-setup__note">
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-clock" aria-hidden="true"></i>
+              <span>Takes about two minutes</span>
+            </div>
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-adjustments" aria-hidden="true"></i>
+              <span>Everything here can be changed later in Settings</span>
+            </div>
+          </div>
+        }
+
+        <!-- Source choice -->
+        @if (step() === 'source') {
+          <div class="phorma-setup__choices">
+            <button type="button" class="phorma-setup__choice" (click)="chooseSource('ollama')">
+              <i class="ti ti-cpu-2 phorma-setup__choice-icon" aria-hidden="true"></i>
+              <span class="phorma-setup__choice-text">
+                <strong>Local models via Ollama</strong>
+                <span>Free and private - models run entirely on your machine</span>
+              </span>
+              <i class="ti ti-chevron-right phorma-setup__choice-chevron" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="phorma-setup__choice" (click)="chooseSource('api-keys')">
+              <i class="ti ti-key phorma-setup__choice-icon" aria-hidden="true"></i>
+              <span class="phorma-setup__choice-text">
+                <strong>Bring your own API keys</strong>
+                <span>Anthropic, OpenAI, Gemini, or OpenRouter</span>
+              </span>
+              <i class="ti ti-chevron-right phorma-setup__choice-chevron" aria-hidden="true"></i>
+            </button>
+          </div>
+        }
+
+        <!-- Ollama detect -->
+        @if (step() === 'ollama-detect') {
+          <div class="phorma-setup__center">
+            <i class="ti ti-loader-2 phorma-setup__spinner" aria-hidden="true"></i>
+            <p>Checking for Ollama…</p>
+          </div>
+        }
+
+        <!-- Ollama install -->
+        @if (step() === 'ollama-install') {
+          <p class="phorma-setup__lead">
+            Ollama wasn't detected on this machine. It's a free runtime that
+            downloads and runs open AI models locally.
+          </p>
+          <div class="phorma-setup__note">
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-database" aria-hidden="true"></i>
+              <span>Around 700 MB of disk space for the runtime</span>
+            </div>
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-shield-lock" aria-hidden="true"></i>
+              <span>Runs entirely on your machine - no data leaves your computer</span>
+            </div>
+          </div>
+          @if (installing()) {
+            <div class="phorma-setup__progress">
+              <i class="ti ti-loader-2 phorma-setup__spinner" aria-hidden="true"></i>
+              <span>{{ installProgress() }}</span>
+            </div>
+          }
+          @if (installError(); as err) {
+            <p class="phorma-setup__error">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              {{ err }}
+            </p>
+          }
+        }
+
+        <!-- Model pick -->
+        @if (step() === 'model-pick') {
+          @if (ollamaModels().length > 0) {
+            <p class="phorma-setup__hint">
+              You already have {{ ollamaModels().length }}
+              {{ ollamaModels().length === 1 ? 'model' : 'models' }} installed - you
+              can download another or skip ahead.
+            </p>
+          }
+          <div class="phorma-setup__models" role="radiogroup" aria-label="Model choices">
+            @for (model of models; track model.id) {
+              <button
+                type="button"
+                role="radio"
+                class="phorma-setup__model"
+                [class.phorma-setup__model--selected]="selectedModel()?.id === model.id"
+                [attr.aria-checked]="selectedModel()?.id === model.id"
+                (click)="selectModel(model)"
+              >
+                <span class="phorma-setup__model-radio" aria-hidden="true"></span>
+                <span class="phorma-setup__model-text">
+                  <span class="phorma-setup__model-name">
+                    <strong>{{ model.label }}</strong>
+                    @if (model.recommended) {
+                      <span class="phorma-setup__badge">Recommended</span>
+                    }
+                  </span>
+                  <span class="phorma-setup__model-desc">{{ model.description }}</span>
+                </span>
+                <span class="phorma-setup__model-size">{{ model.sizeGb }} GB</span>
+              </button>
+            }
+          </div>
+          @if (diskFreeGb() !== null) {
+            <p class="phorma-setup__hint">
+              <i class="ti ti-database" aria-hidden="true"></i>
+              {{ diskFreeGb()!.toFixed(1) }} GB free on disk
+            </p>
+          }
+          @if (insufficientDisk()) {
+            <p class="phorma-setup__error">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              Not enough free disk space for this model.
+            </p>
+          }
+        }
+
+        <!-- Model pull -->
+        @if (step() === 'model-pull') {
+          <p class="phorma-setup__lead">
+            Downloading <strong>{{ selectedModel()?.label }}</strong>
+            ({{ selectedModel()?.sizeGb }} GB). This may take a while depending on
+            your connection.
+          </p>
+          <div class="phorma-setup__progress">
+            @if (pulling()) {
+              <i class="ti ti-loader-2 phorma-setup__spinner" aria-hidden="true"></i>
+            } @else if (!pullError()) {
+              <i class="ti ti-circle-check phorma-setup__progress-ok" aria-hidden="true"></i>
+            }
+            <span>{{ pullProgress() }}</span>
+          </div>
+          @if (pullError(); as err) {
+            <p class="phorma-setup__error">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              {{ err }}
+            </p>
+          }
+        }
+
+        <!-- API keys -->
+        @if (step() === 'api-keys') {
+          <p class="phorma-setup__lead">
+            Add an API key for at least one provider to run agents on cloud
+            models. Keys are stored securely in your OS keychain and never leave
+            your machine except to call the provider.
+          </p>
+          <div class="phorma-setup__note">
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-shield-lock" aria-hidden="true"></i>
+              <span>Stored in the OS keychain - the app only sees a "configured" flag</span>
+            </div>
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-key" aria-hidden="true"></i>
+              <span>Anthropic, OpenAI, Gemini, and OpenRouter are supported</span>
+            </div>
+          </div>
+        }
+
+        <!-- Done -->
+        @if (step() === 'done') {
+          <div class="phorma-setup__done">
+            <i class="ti ti-confetti phorma-setup__done-icon" aria-hidden="true"></i>
+            <p class="phorma-setup__lead">
+              Your model is ready. Drag an agent node from the left sidebar onto
+              the canvas to start building your first workflow.
+            </p>
+          </div>
+        }
+      </div>
+
+      <!-- ── Footer ── -->
+      <footer class="phorma-setup__footer">
+        <div class="phorma-setup__footer-left">
+          @if (step() !== 'welcome' && step() !== 'done' && !busy()) {
+            <p-button
+              label="Back"
+              icon="ti ti-arrow-left"
+              [text]="true"
+              severity="secondary"
+              size="small"
+              (onClick)="back()"
+            />
+          }
+        </div>
+        <div class="phorma-setup__footer-right">
+          @switch (step()) {
+            @case ('welcome') {
+              <p-button
+                label="Skip setup"
+                [text]="true"
+                severity="secondary"
+                size="small"
+                (onClick)="skip()"
+              />
+              <p-button
+                label="Get started"
+                icon="ti ti-arrow-right"
+                iconPos="right"
+                size="small"
+                (onClick)="step.set('source')"
+              />
+            }
+            @case ('source') {
+              <p-button
+                label="Skip setup"
+                [text]="true"
+                severity="secondary"
+                size="small"
+                (onClick)="skip()"
+              />
+            }
+            @case ('ollama-install') {
+              @if (!installing()) {
+                <p-button
+                  label="Skip setup"
+                  [text]="true"
+                  severity="secondary"
+                  size="small"
+                  (onClick)="skip()"
+                />
+                <p-button
+                  label="Install Ollama"
+                  icon="ti ti-download"
+                  size="small"
+                  (onClick)="installOllama()"
+                />
+              }
+            }
+            @case ('model-pick') {
+              <p-button
+                label="Skip setup"
+                [text]="true"
+                severity="secondary"
+                size="small"
+                (onClick)="skip()"
+              />
+              <p-button
+                label="Download model"
+                icon="ti ti-download"
+                size="small"
+                [disabled]="!selectedModel() || insufficientDisk()"
+                (onClick)="startPull()"
+              />
+            }
+            @case ('model-pull') {
+              @if (pulling()) {
+                <p-button
+                  label="Cancel download"
+                  severity="danger"
+                  [text]="true"
+                  size="small"
+                  (onClick)="cancelPull()"
+                />
+              } @else if (pullError()) {
+                <p-button
+                  label="Try again"
+                  icon="ti ti-refresh"
+                  size="small"
+                  (onClick)="startPull()"
+                />
+              }
+            }
+            @case ('api-keys') {
+              <p-button
+                label="Skip setup"
+                [text]="true"
+                severity="secondary"
+                size="small"
+                (onClick)="skip()"
+              />
+              <p-button
+                label="Open API key settings"
+                icon="ti ti-key"
+                size="small"
+                (onClick)="openApiKeySettings()"
+              />
+            }
+            @case ('done') {
+              <p-button
+                label="Start building"
+                icon="ti ti-arrow-right"
+                iconPos="right"
+                size="small"
+                (onClick)="finish()"
+              />
+            }
+          }
+        </div>
+      </footer>
+    </section>
+  </div>
+}

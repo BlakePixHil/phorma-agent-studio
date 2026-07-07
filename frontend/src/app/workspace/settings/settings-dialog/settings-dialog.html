@@ -144,6 +144,17 @@
                             (change)="setFromInput(setting, $event)"
                           />
                         }
+                        @case ('button') {
+                          <p-button
+                            styleClass="phorma-settings__btn"
+                            size="small"
+                            severity="secondary"
+                            [outlined]="true"
+                            [label]="setting.control.label"
+                            [icon]="setting.control.icon ?? ''"
+                            (onClick)="setting.set(undefined)"
+                          />
+                        }
                       }
                     </div>
                   </div>

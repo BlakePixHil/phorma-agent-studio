@@ -45,6 +45,8 @@ import {
 
 export interface Env extends TenantEnv {
   WorkflowAgent: DurableObjectNamespace;
+  /** R2 bucket holding installer artifacts and update manifests. */
+  RELEASES?: R2Bucket;
   /**
    * Runtime mode. 'hosted' = Phorma Labs multi-tenant deployment (fail-closed
    * Clerk auth, tenant ownership enforcement). Unset/anything else = BYO

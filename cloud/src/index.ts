@@ -18,6 +18,7 @@ import { routeAgentRequest } from 'agents';
 
 import { verifyBearer, verifyRequest, isHosted } from './auth';
 import { handleApiRequest, type ApiEnv } from './api';
+import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { WorkflowAgent, type Env } from './workflow-agent';
 
 export { WorkflowAgent };
@@ -49,6 +50,10 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: cors });
     }
+
+    // Public release/download routes (no auth; backed by R2).
+    const releaseResponse = await handleReleaseRequest(request, env as ReleaseEnv, cors);
+    if (releaseResponse) return releaseResponse;
 
     // Control-plane routes (hosted mode).
     const apiResponse = await handleApiRequest(request, env as ApiEnv, cors);

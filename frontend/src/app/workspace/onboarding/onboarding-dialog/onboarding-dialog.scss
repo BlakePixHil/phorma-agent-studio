@@ -1,0 +1,473 @@
+// Setup wizard - mirrors the .phorma-cloud / .phorma-confirm dialog pattern:
+// same overlay, card surface, header pattern, and footer. Deliberately no
+// hover glow or animated borders (see agent-memory: simple border-color
+// changes only).
+
+:host {
+  display: contents;
+}
+
+/* ── Overlay + card ──────────────────────────────────────────────────────── */
+.phorma-setup {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 7, 18, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.phorma-setup__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  min-height: 420px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  padding: 20px 24px;
+  background: var(--p-content-background);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  color: var(--p-text-color);
+}
+
+/* ── Stage progress indicator ────────────────────────────────────────────── */
+.phorma-setup__stages {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--p-border-color);
+}
+
+.phorma-setup__stage {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--p-text-muted-color);
+
+  &:nth-child(3) {
+    // Middle "Setup" stage flexes so the line fills remaining width.
+    flex: 1 1 auto;
+  }
+}
+
+.phorma-setup__stage-dot {
+  display: grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid var(--p-border-color);
+  border-radius: 50%;
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 700;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+
+  i {
+    font-size: 12px;
+  }
+}
+
+.phorma-setup__stage-label {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phorma-setup__stage-line {
+  flex: 1 1 16px;
+  min-width: 16px;
+  height: 1px;
+  background: var(--p-border-color);
+}
+
+.phorma-setup__stage--active {
+  color: var(--p-text-color);
+
+  .phorma-setup__stage-dot {
+    border-color: var(--p-primary-color);
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color, #fff);
+  }
+}
+
+.phorma-setup__stage--done {
+  .phorma-setup__stage-dot {
+    border-color: var(--p-primary-color);
+    color: var(--p-primary-color);
+  }
+}
+
+/* ── Header - icon + title + lede, same pattern as cloud/confirm ─────────── */
+.phorma-setup__header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+
+  > div {
+    flex: 1 1 auto;
+  }
+}
+
+.phorma-setup__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--p-border-color);
+  border-radius: 10px;
+  background: var(--p-hover-background);
+  color: var(--p-primary-color);
+  font-size: 18px;
+}
+
+.phorma-setup h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.phorma-setup__header p {
+  margin: 6px 0 0;
+  color: var(--p-text-muted-color);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+.phorma-setup__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.phorma-setup__lead {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--p-text-color);
+}
+
+.phorma-setup__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.phorma-setup__center {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 0;
+  color: var(--p-text-muted-color);
+  font-size: 12px;
+
+  p {
+    margin: 0;
+  }
+}
+
+/* ── Info note box - mirrors .phorma-cloud__note ─────────────────────────── */
+.phorma-setup__note {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--p-border-color);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+}
+
+.phorma-setup__note-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--p-text-muted-color);
+
+  i {
+    flex: 0 0 auto;
+    color: var(--p-primary-color);
+    font-size: 15px;
+  }
+}
+
+/* ── Source choice rows ──────────────────────────────────────────────────── */
+.phorma-setup__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.phorma-setup__choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--p-primary-color);
+  }
+}
+
+.phorma-setup__choice-icon {
+  flex: 0 0 auto;
+  font-size: 20px;
+  color: var(--p-primary-color);
+}
+
+.phorma-setup__choice-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+
+  strong {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  span {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--p-text-muted-color);
+  }
+}
+
+.phorma-setup__choice-chevron {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: var(--p-text-muted-color);
+}
+
+/* ── Model list ──────────────────────────────────────────────────────────── */
+.phorma-setup__models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.phorma-setup__model {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  text-align: left;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, var(--p-border-color));
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--p-primary-color);
+  }
+
+  &--selected {
+    border-color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+
+    .phorma-setup__model-radio {
+      border-color: var(--p-primary-color);
+
+      &::after {
+        opacity: 1;
+      }
+    }
+  }
+}
+
+.phorma-setup__model-radio {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 50%;
+  transition: border-color 0.15s ease;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--p-primary-color);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+}
+
+.phorma-setup__model-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.phorma-setup__model-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    font-size: 12.5px;
+    font-weight: 700;
+  }
+}
+
+.phorma-setup__badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
+  color: var(--p-primary-color);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.phorma-setup__model-desc {
+  font-size: 11.5px;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-setup__model-size {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Progress + errors ───────────────────────────────────────────────────── */
+.phorma-setup__progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+
+  span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.phorma-setup__progress-ok {
+  color: var(--p-green-400, #4ade80);
+  font-size: 16px;
+}
+
+.phorma-setup__spinner {
+  flex: 0 0 auto;
+  animation: phorma-setup-spin 1s linear infinite;
+}
+
+.phorma-setup__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--p-orange-400, #fb923c) 10%, transparent);
+  color: var(--p-orange-400, #fb923c);
+  font-size: 11.5px;
+  line-height: 1.5;
+
+  i {
+    flex: 0 0 auto;
+  }
+}
+
+/* ── Done step ───────────────────────────────────────────────────────────── */
+.phorma-setup__done {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.phorma-setup__done-icon {
+  font-size: 40px;
+  color: var(--p-green-400, #4ade80);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.phorma-setup__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--p-border-color);
+}
+
+.phorma-setup__footer-left,
+.phorma-setup__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@keyframes phorma-setup-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

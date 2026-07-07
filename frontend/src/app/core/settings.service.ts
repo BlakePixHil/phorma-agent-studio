@@ -80,6 +80,11 @@ export class SettingsService {
   /** Mouse-wheel zoom sensitivity multiplier (0.25–3). */
   readonly zoomSensitivity = signal(loadLayout('zoomSensitivity', 1));
 
+  // ── Updates ─────────────────────────────────────────────────────────────
+
+  /** Download and stage app updates automatically in the background. */
+  readonly autoUpdate = signal(loadLayout('autoUpdate', true));
+
   /** Grid spacing (canvas px) used when grid snapping is enabled. */
   readonly gridSnapSize = signal(loadLayout('gridSnapSize', 24));
 
@@ -116,6 +121,7 @@ export class SettingsService {
     effect(() => saveLayout('confirmWorkflowDelete', this.confirmWorkflowDelete()));
     effect(() => saveLayout('zoomSensitivity', this.zoomSensitivity()));
     effect(() => saveLayout('gridSnapSize', this.gridSnapSize()));
+    effect(() => saveLayout('autoUpdate', this.autoUpdate()));
     effect(() => saveLayout('cloudProvider', this.cloudProvider()));
   }
 

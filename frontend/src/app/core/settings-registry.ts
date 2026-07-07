@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { CanvasStateService, MINIMAP_ANCHORS, type MinimapAnchor } from './canvas-state.service';
 import { SettingsService } from './settings.service';
 import { ThemeService, type ThemeMode } from './theme.service';
+import { OnboardingService } from '../workspace/onboarding/onboarding.service';
 
 /**
  * Settings registry — the single declarative source of truth for the
@@ -33,7 +34,9 @@ export type SettingControl =
   | { type: 'select'; options: SettingSelectOption[] }
   | { type: 'number'; min?: number; max?: number; step?: number; suffix?: string }
   | { type: 'slider'; min: number; max: number; step: number }
-  | { type: 'text'; placeholder?: string };
+  | { type: 'text'; placeholder?: string }
+  /** Action button; `set` is invoked on click, `get` is unused. */
+  | { type: 'button'; label: string; icon?: string };
 
 export interface SettingDef {
   /** Stable id, unique within the registry (used as control DOM id). */
@@ -86,6 +89,7 @@ export class SettingsRegistryService {
   private readonly settings = inject(SettingsService);
   private readonly theme = inject(ThemeService);
   private readonly canvas = inject(CanvasStateService);
+  private readonly onboarding = inject(OnboardingService);
 
   /** All settings pages, in nav order. */
   readonly pages: SettingsPageDef[] = [
@@ -116,6 +120,21 @@ export class SettingsRegistryService {
               control: { type: 'toggle' },
               get: () => this.settings.confirmWorkflowDelete(),
               set: value => this.settings.confirmWorkflowDelete.set(!!value),
+            },
+          ],
+        },
+        {
+          id: 'setup-wizard',
+          label: 'Setup wizard',
+          settings: [
+            {
+              id: 'run-setup-wizard',
+              label: 'Setup wizard',
+              description: 'Re-run first-time setup: install Ollama, download a local model, or configure API keys.',
+              keywords: ['onboarding', 'setup', 'wizard', 'ollama', 'install', 'model', 'download', 'first run'],
+              control: { type: 'button', label: 'Run setup wizard', icon: 'ti ti-sparkles' },
+              get: () => undefined,
+              set: () => this.onboarding.open(),
             },
           ],
         },
@@ -315,6 +334,29 @@ export class SettingsRegistryService {
           keywords: [
             'cloud', 'phorma', 'cloudflare', 'hosted', 'deploy', 'worker',
             'wrangler', 'subscription', 'token', 'monitor',
+          ],
+        },
+      ],
+    },
+    {
+      id: 'updates',
+      label: 'Updates',
+      icon: 'ti ti-refresh',
+      description: 'Automatic app updates.',
+      sections: [
+        {
+          id: 'auto-update',
+          label: 'Automatic updates',
+          settings: [
+            {
+              id: 'auto-update-toggle',
+              label: 'Download updates automatically',
+              description: 'Download and stage new versions in the background. A restart prompt appears when ready.',
+              keywords: ['update', 'auto', 'download', 'background', 'automatic'],
+              control: { type: 'toggle' },
+              get: () => this.settings.autoUpdate(),
+              set: value => this.settings.autoUpdate.set(!!value),
+            },
           ],
         },
       ],

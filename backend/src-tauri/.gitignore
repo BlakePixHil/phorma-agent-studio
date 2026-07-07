@@ -3,3 +3,6 @@
 
 # Tauri generated schemas/types
 /gen/schemas
+
+# Updater signing private key (NEVER commit; CI uses TAURI_SIGNING_PRIVATE_KEY env).
+/.tauri/updater.key

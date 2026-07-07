@@ -22,16 +22,20 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Streaming LLM proxy: HTTP from Rust so provider keys never enter the webview
 # and browser CORS rules never apply.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2", "json"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "macros"] }
 # Provider API keys live in the OS keychain (Windows Credential Manager /
 # macOS Keychain / Secret Service).
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
+# Disk-space queries for the onboarding wizard's model-download guardrail.
+sysinfo = "0.32"
 
 [lints.rust]
 unsafe_code = "forbid"

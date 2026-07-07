@@ -9,6 +9,7 @@ mod commands;
 mod llm;
 mod mcp;
 mod oauth;
+mod ollama;
 mod process;
 
 /// Builds and runs the Phorma Agent Studio desktop application.
@@ -26,6 +27,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::read_workflow_file,
             commands::write_workflow_file,
@@ -44,6 +47,11 @@ pub fn run() {
             oauth::oauth_loopback_start,
             oauth::oauth_loopback_wait,
             oauth::oauth_loopback_cancel,
+            ollama::ollama_status,
+            ollama::ollama_install,
+            ollama::ollama_pull,
+            ollama::ollama_cancel_pull,
+            ollama::disk_free,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Phorma Agent Studio application");

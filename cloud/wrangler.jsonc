@@ -32,6 +32,14 @@
   "observability": {
     "enabled": true
   },
+  // ── Release artifacts (R2) ───────────────────────────────────────────────
+  // One-time setup:  npx wrangler r2 bucket create phorma-releases
+  "r2_buckets": [
+    {
+      "binding": "RELEASES",
+      "bucket_name": "phorma-releases"
+    }
+  ],,
   // ── Phorma Labs hosted deployment (multi-tenant) ─────────────────────────
   // Deployed ONLY by Phorma:  npx wrangler deploy --env hosted
   // Additional secrets (set with `wrangler secret put <NAME> --env hosted`):
@@ -80,7 +88,13 @@
       ],
       "observability": {
         "enabled": true
-      }
+      },
+      "r2_buckets": [
+        {
+          "binding": "RELEASES",
+          "bucket_name": "phorma-releases"
+        }
+      ]
     }
   }
 }

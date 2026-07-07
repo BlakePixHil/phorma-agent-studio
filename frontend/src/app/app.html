@@ -91,6 +91,9 @@
   <!-- ── Cloud (deploy / push / monitor) ── -->
   <app-cloud-dialog />
 
+  <!-- ── First-run onboarding wizard ── -->
+  <app-onboarding-dialog />
+
   <!-- ── Toast notifications (frosted glass, top-right) ── -->
   <app-toast />
 
@@ -108,6 +111,36 @@
       <span class="opacity-70">— unsaved</span>
     }
     <span class="flex-1"></span>
+
+    @if (isDesktop && updates.badgeVisible()) {
+      <button
+        type="button"
+        class="flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-[var(--p-content-hover-background)]"
+        [title]="
+          updates.readyToRestart()
+            ? 'Restart to install update' + (updates.available()?.version ? ' v' + updates.available()!.version : '')
+            : updates.downloading()
+              ? 'Downloading update' + (updates.progress() > 0 ? ' ' + Math.round(updates.progress() * 100) + '%' : '')
+              : updates.available()
+                ? 'Update v' + updates.available()!.version + ' available - click to download'
+                : 'Update'
+        "
+        (click)="onUpdateBadgeClick()"
+      >
+        @if (updates.readyToRestart()) {
+          <i class="ti ti-refresh-alert text-green-500"></i>
+          <span>Restart to update</span>
+        } @else if (updates.downloading()) {
+          <i class="ti ti-progress text-blue-400 animate-pulse"></i>
+          <span>{{ updates.progress() > 0 ? Math.round(updates.progress() * 100) + '%' : 'Downloading' }}</span>
+        } @else {
+          <i class="ti ti-refresh-alert text-amber-400"></i>
+          <span>Update available</span>
+        }
+      </button>
+      <span class="opacity-50">·</span>
+    }
+
     <span class="capitalize">{{ terminal.phase() }}</span>
   </footer>
 </div>

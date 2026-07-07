@@ -9,6 +9,7 @@ import { GraphCanvas } from './workspace/canvas/graph-canvas';
 import { TauriService } from './core/tauri.service';
 import { WorkflowService } from './core/workflow.service';
 import { PanelRegistryService } from './core/panel-registry.service';
+import { UpdateService } from './core/update.service';
 import { BottomTerminal } from './layout/terminal/bottom-terminal';
 import { TerminalOutputService } from './core/terminal-output.service';
 import { AgentsPalette } from './workspace/palette/agents-palette/agents-palette';
@@ -18,6 +19,8 @@ import { PropertiesPanel } from './workspace/properties/properties-panel/propert
 import { RunsPanel } from './workspace/runs/runs-panel/runs-panel';
 import { SettingsDialog } from './workspace/settings/settings-dialog/settings-dialog';
 import { CloudDialog } from './workspace/cloud/cloud-dialog/cloud-dialog';
+import { OnboardingDialog } from './workspace/onboarding/onboarding-dialog/onboarding-dialog';
+import { OnboardingService } from './workspace/onboarding/onboarding.service';
 import { ConfirmDialog } from './shared/confirm-dialog/confirm-dialog';
 import { Toast } from './shared/toast/toast';
 
@@ -44,6 +47,7 @@ import { Toast } from './shared/toast/toast';
     RunsPanel,
     SettingsDialog,
     CloudDialog,
+    OnboardingDialog,
     ConfirmDialog,
     Toast,
   ],
@@ -56,11 +60,20 @@ export class App {
   protected readonly workflow = inject(WorkflowService);
   protected readonly terminal = inject(TerminalOutputService);
   private readonly panels = inject(PanelRegistryService);
+  protected readonly updates = inject(UpdateService);
+  private readonly onboarding = inject(OnboardingService);
 
   protected readonly title = signal('Phorma Agent Studio');
 
   /** True when running inside the Tauri desktop runtime. */
   protected readonly isDesktop = this.tauri.isDesktop;
+
+  constructor() {
+    // Kick off the auto-update check loop (no-op in web mode).
+    this.updates.start();
+    // Open the first-run wizard on a fresh desktop install.
+    this.onboarding.maybeAutoOpen();
+  }
 
   /** Toolbar height (px) — the tab bar sits directly below it. */
   protected readonly toolbarHeight = 44;
@@ -86,4 +99,22 @@ export class App {
       ? 0
       : this.panels.rightWidth(),
   );
+
+  /** Expose Math for the statusbar progress percentage template. */
+  protected readonly Math = Math;
+
+  /**
+   * Status-bar update badge click handler. If an update is staged, restarts
+   * to install; if one is available but not yet downloading, starts the
+   * download; otherwise re-checks the endpoint.
+   */
+  async onUpdateBadgeClick(): Promise<void> {
+    if (this.updates.readyToRestart()) {
+      await this.updates.installAndRelaunch();
+    } else if (this.updates.available() && !this.updates.downloading()) {
+      await this.updates.download();
+    } else {
+      await this.updates.check();
+    }
+  }
 }
