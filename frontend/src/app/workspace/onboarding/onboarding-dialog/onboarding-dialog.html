@@ -130,12 +130,12 @@
           @if (ollamaModels().length > 0) {
             <p class="phorma-setup__hint">
               You already have {{ ollamaModels().length }}
-              {{ ollamaModels().length === 1 ? 'model' : 'models' }} installed - you
-              can download another or skip ahead.
+              {{ ollamaModels().length === 1 ? 'model' : 'models' }} installed -
+              use one as your default, or download another.
             </p>
           }
           <div class="phorma-setup__models" role="radiogroup" aria-label="Model choices">
-            @for (model of models; track model.id) {
+            @for (model of models(); track model.id) {
               <button
                 type="button"
                 role="radio"
@@ -148,13 +148,20 @@
                 <span class="phorma-setup__model-text">
                   <span class="phorma-setup__model-name">
                     <strong>{{ model.label }}</strong>
-                    @if (model.recommended) {
+                    @if (model.installed) {
+                      <span class="phorma-setup__badge phorma-setup__badge--installed">
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        Installed
+                      </span>
+                    } @else if (model.recommended) {
                       <span class="phorma-setup__badge">Recommended</span>
                     }
                   </span>
                   <span class="phorma-setup__model-desc">{{ model.description }}</span>
                 </span>
-                <span class="phorma-setup__model-size">{{ model.sizeGb }} GB</span>
+                @if (!model.installed) {
+                  <span class="phorma-setup__model-size">{{ model.sizeGb }} GB</span>
+                }
               </button>
             }
           </div>
@@ -293,11 +300,11 @@
                 (onClick)="skip()"
               />
               <p-button
-                label="Download model"
-                icon="ti ti-download"
+                [label]="selectedModel()?.installed ? 'Use this model' : 'Download model'"
+                [icon]="selectedModel()?.installed ? 'ti ti-check' : 'ti ti-download'"
                 size="small"
                 [disabled]="!selectedModel() || insufficientDisk()"
-                (onClick)="startPull()"
+                (onClick)="confirmModel()"
               />
             }
             @case ('model-pull') {
@@ -314,7 +321,7 @@
                   label="Try again"
                   icon="ti ti-refresh"
                   size="small"
-                  (onClick)="startPull()"
+                  (onClick)="confirmModel()"
                 />
               }
             }

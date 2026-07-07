@@ -18,9 +18,20 @@ interface ModelOption {
   id: string;
   label: string;
   description: string;
-  /** Approximate download size in GB. */
+  /** Approximate download size in GB (0 for already-installed models). */
   sizeGb: number;
   recommended?: boolean;
+  /** Already present in the local Ollama - selecting it skips the download. */
+  installed?: boolean;
+}
+
+/**
+ * Normalizes an Ollama model id for comparison: lowercase and treat a
+ * missing tag as `:latest` (Ollama lists `llama3.2:3b` but also bare names).
+ */
+function normalizeModelId(id: string): string {
+  const lower = id.trim().toLowerCase();
+  return lower.includes(':') ? lower : `${lower}:latest`;
 }
 
 const CURATED_MODELS: ModelOption[] = [
@@ -94,7 +105,33 @@ export class OnboardingDialog {
   protected readonly pullError = signal<string | null>(null);
   private pullRequestId: string | null = null;
 
-  protected readonly models = CURATED_MODELS;
+  /**
+   * Picker choices: models already installed in the local Ollama come first
+   * (marked installed, selecting one skips the download entirely), followed
+   * by the curated download options not yet installed.
+   */
+  protected readonly models = computed<ModelOption[]>(() => {
+    const installed = this.ollamaModels();
+    const installedSet = new Set(installed.map(normalizeModelId));
+
+    const installedOptions: ModelOption[] = installed.map(id => {
+      const curated = CURATED_MODELS.find(m => normalizeModelId(m.id) === normalizeModelId(id));
+      return {
+        id,
+        label: curated?.label ?? id,
+        description: curated?.description ?? 'Already installed - ready to use',
+        sizeGb: 0,
+        installed: true,
+      };
+    });
+
+    const downloadOptions = CURATED_MODELS.filter(
+      m => !installedSet.has(normalizeModelId(m.id)),
+    );
+
+    return [...installedOptions, ...downloadOptions];
+  });
+
   protected readonly stages = STAGES;
 
   /** Index into `STAGES` for the progress indicator. */
@@ -236,6 +273,12 @@ export class OnboardingDialog {
       );
       this.ollamaModels.set(status.models);
       if (status.running) {
+        // Default-select the model already installed (first one), falling
+        // back to nothing so the recommended download stands out.
+        if (status.models.length > 0 && !this.selectedModel()) {
+          const first = this.models().find(m => m.installed);
+          if (first) this.selectedModel.set(first);
+        }
         this.step.set('model-pick');
         void this.checkDisk();
       } else {
@@ -303,8 +346,17 @@ export class OnboardingDialog {
     this.selectedModel.set(model);
   }
 
-  protected startPull(): void {
-    if (!this.selectedModel() || this.insufficientDisk()) return;
+  /** Confirms the picked model: installed models apply instantly, otherwise download. */
+  protected confirmModel(): void {
+    const model = this.selectedModel();
+    if (!model || this.insufficientDisk()) return;
+    if (model.installed) {
+      // Already on disk - just set it as the app-wide default.
+      this.settings.defaultProvider.set('ollama');
+      this.settings.defaultModel.set(model.id);
+      this.step.set('done');
+      return;
+    }
     this.step.set('model-pull');
     void this.pullModel();
   }

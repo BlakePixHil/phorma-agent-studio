@@ -357,6 +357,9 @@
 }
 
 .phorma-setup__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 1px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
@@ -364,6 +367,15 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
+
+  i {
+    font-size: 10px;
+  }
+
+  &--installed {
+    background: color-mix(in srgb, var(--p-green-400, #4ade80) 14%, transparent);
+    color: var(--p-green-400, #4ade80);
+  }
 }
 
 .phorma-setup__model-desc {
