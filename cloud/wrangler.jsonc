@@ -12,6 +12,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "phorma-agent-studio-cloud",
+  "account_id": "a088bd7c3fb962dfb28d003e8478dffe",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -39,7 +40,7 @@
       "binding": "RELEASES",
       "bucket_name": "phorma-releases"
     }
-  ],,
+  ],
   // ── Phorma Labs hosted deployment (multi-tenant) ─────────────────────────
   // Deployed ONLY by Phorma:  npx wrangler deploy --env hosted
   // Additional secrets (set with `wrangler secret put <NAME> --env hosted`):

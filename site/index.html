@@ -253,31 +253,31 @@
     <div class="container">
       <h2 class="platforms__title">All downloads</h2>
       <div class="platforms__grid">
-        <a class="platform-card" href="https://releases.phorma.dev/download/stable/latest/windows-x64">
+        <a class="platform-card" href="https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/download/stable/latest/windows-x64">
           <div class="platform-card__icon">🪟</div>
           <div class="platform-card__name">Windows</div>
           <div class="platform-card__detail">x64 installer (NSIS)</div>
           <div class="platform-card__download">Download →</div>
         </a>
-        <a class="platform-card" href="https://releases.phorma.dev/download/stable/latest/macos-arm64">
+        <a class="platform-card" href="https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/download/stable/latest/macos-arm64">
           <div class="platform-card__icon">🍎</div>
           <div class="platform-card__name">macOS</div>
           <div class="platform-card__detail">Apple Silicon (M1/M2/M3)</div>
           <div class="platform-card__download">Download →</div>
         </a>
-        <a class="platform-card" href="https://releases.phorma.dev/download/stable/latest/macos-intel">
+        <a class="platform-card" href="https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/download/stable/latest/macos-intel">
           <div class="platform-card__icon">🍎</div>
           <div class="platform-card__name">macOS</div>
           <div class="platform-card__detail">Intel (x64)</div>
           <div class="platform-card__download">Download →</div>
         </a>
-        <a class="platform-card" href="https://releases.phorma.dev/download/stable/latest/linux-appimage">
+        <a class="platform-card" href="https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/download/stable/latest/linux-appimage">
           <div class="platform-card__icon">🐧</div>
           <div class="platform-card__name">Linux</div>
           <div class="platform-card__detail">AppImage (x64)</div>
           <div class="platform-card__download">Download →</div>
         </a>
-        <a class="platform-card" href="https://releases.phorma.dev/download/stable/latest/linux-deb">
+        <a class="platform-card" href="https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/download/stable/latest/linux-deb">
           <div class="platform-card__icon">🐧</div>
           <div class="platform-card__name">Linux</div>
           <div class="platform-card__detail">.deb (Debian/Ubuntu x64)</div>
@@ -335,13 +335,13 @@
 
       platformEl.textContent = label;
       detailEl.textContent = detail;
-      linkEl.href = `https://releases.phorma.dev/download/stable/latest/${platform}`;
+      linkEl.href = `https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/download/stable/latest/${platform}`;
     })();
 
     // ── Fetch and render the changelog ──
     (async function () {
       try {
-        const resp = await fetch('https://releases.phorma.dev/releases.json');
+        const resp = await fetch('https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/releases.json');
         if (!resp.ok) throw new Error('Failed to load');
         const releases = await resp.json();
         const listEl = document.getElementById('changelog-list');

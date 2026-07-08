@@ -179,11 +179,13 @@ async function handleDownloadLatest(env: ReleaseEnv, platform: string): Promise<
   }
 
   const entry = manifest.platforms?.[platformKey];
-  if (!entry?.url) {
+  // Prefer the human-facing installer (e.g. .dmg) over the updater archive.
+  const url = entry?.installerUrl ?? entry?.url;
+  if (!url) {
     return json({ error: `No installer for ${platform}.` }, 404, PUBLIC_CORS);
   }
 
-  return Response.redirect(entry.url, 302);
+  return Response.redirect(url, 302);
 }
 
 /** Streams a JSON object from R2, or 404. */
