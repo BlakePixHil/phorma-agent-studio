@@ -139,11 +139,16 @@ jobs:
         run: npm install -g wrangler
 
       - name: Download release assets
-        uses: robinraju/release-downloader@v1
-        with:
-          tag: ${{ github.ref_name }}
-          fileName: '*'
-          outAssetPath: release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets \
+            --clobber
+          echo "Downloaded files:"
+          ls -la release-assets/
 
       - name: Sync to R2 and update manifests
         env:
