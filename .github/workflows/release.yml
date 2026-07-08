@@ -90,24 +90,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Windows code signing (env-gated; skipped when absent).
-          AZURE_TRUSTED_SIGNING_CLIENT_ID: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_ID }}
-          AZURE_TRUSTED_SIGNING_CLIENT_SECRET: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_SECRET }}
-          AZURE_TRUSTED_SIGNING_TENANT_ID: ${{ secrets.AZURE_TRUSTED_SIGNING_TENANT_ID }}
-          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          # macOS code signing + notarization (env-gated; skipped when absent).
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # ── OS code signing (DISABLED until certs are purchased) ─────────
+          # GOTCHA: `${{ secrets.X }}` for a missing secret yields an EMPTY
+          # STRING, and Tauri's bundler treats a defined-but-empty
+          # APPLE_CERTIFICATE as "sign with this" -> SecKeychainItemImport
+          # fails and the whole build errors. So these must stay fully
+          # commented out (not env-gated) until real values exist.
+          #
+          # Windows (Azure Trusted Signing):
+          #   AZURE_TRUSTED_SIGNING_CLIENT_ID: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_ID }}
+          #   AZURE_TRUSTED_SIGNING_CLIENT_SECRET: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_SECRET }}
+          #   AZURE_TRUSTED_SIGNING_TENANT_ID: ${{ secrets.AZURE_TRUSTED_SIGNING_TENANT_ID }}
+          #   AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          #   AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          #
+          # macOS (Developer ID + notarization):
+          #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          #   APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          #   APPLE_ID: ${{ secrets.APPLE_ID }}
+          #   APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Phorma Agent Studio ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download. The app will auto-update if already installed.'
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
 
   # ── Sync release artifacts to Cloudflare R2 ─────────────────────────────
