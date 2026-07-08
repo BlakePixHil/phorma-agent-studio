@@ -22,7 +22,6 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const tag = process.argv[2];
-const assetDir = resolve(root, process.argv[3] ?? 'release-assets');
 
 if (!tag || !tag.startsWith('v')) {
   console.error('Usage: node scripts/publish-r2.mjs <vX.Y.Z> <asset-dir>');
@@ -52,9 +51,18 @@ function r2get(key) {
 }
 
 // ── Upload all assets from the release directory ──────────────────────────
+// The release-downloader action may nest files under a tag-named subdir
+// (e.g. release-assets/v0.2.0-beta.2/). Resolve to whichever exists.
+let assetDir = resolve(root, process.argv[3] ?? 'release-assets');
 if (!existsSync(assetDir)) {
   console.error(`Asset directory not found: ${assetDir}`);
   process.exit(1);
+}
+// If the directory contains a single subdirectory (the tag name), descend.
+const entries = readdirSync(assetDir, { withFileTypes: true });
+if (entries.length === 1 && entries[0].isDirectory()) {
+  assetDir = join(assetDir, entries[0].name);
+  console.log(`Descending into subdirectory: ${assetDir}`);
 }
 
 const files = readdirSync(assetDir);
