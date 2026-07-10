@@ -36,6 +36,73 @@ export class ModelTransportService {
       providerRequiresKey(provider) ? this.settings.browserKey(provider) : null,
     );
   }
+
+  /**
+   * Lists model ids available on Amazon Bedrock's `bedrock-mantle` endpoint
+   * for a region, using the stored Bedrock API key. Desktop goes through the
+   * Rust proxy (key stays in the keychain, no CORS); browser preview fetches
+   * directly with the localStorage key (subject to CORS).
+   */
+  async listBedrockModels(region: string): Promise<string[]> {
+    const trimmed = region.trim();
+    if (!trimmed) throw new Error('Choose an AWS region first.');
+
+    if (this.tauri.isDesktop) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke<string[]>('list_bedrock_models', { region: trimmed });
+    }
+
+    const key = this.settings.browserKey('bedrock');
+    if (!key) throw new Error('No Bedrock API key configured. Add one in Settings → API Keys.');
+    const response = await fetch(`https://bedrock-mantle.${trimmed}.api.aws/v1/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Bedrock models request failed (${response.status}): ${detail.slice(0, 300)}`);
+    }
+    const body = (await response.json()) as { data?: { id?: string }[] };
+    return (body.data ?? [])
+      .map(model => model.id)
+      .filter((id): id is string => !!id)
+      .sort();
+  }
+
+  /**
+   * Lists system-defined Bedrock inference profile ids for a region (e.g.
+   * `au.anthropic.claude-opus-4-7`) via the control-plane endpoint. Desktop
+   * goes through the Rust proxy; browser preview fetches directly (CORS
+   * permitting). These are merged into the Bedrock model picker.
+   */
+  async listBedrockInferenceProfiles(region: string): Promise<string[]> {
+    const trimmed = region.trim();
+    if (!trimmed) throw new Error('Choose an AWS region first.');
+
+    if (this.tauri.isDesktop) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke<string[]>('list_bedrock_inference_profiles', { region: trimmed });
+    }
+
+    const key = this.settings.browserKey('bedrock');
+    if (!key) throw new Error('No Bedrock API key configured. Add one in Settings → API Keys.');
+    const response = await fetch(
+      `https://bedrock.${trimmed}.amazonaws.com/inference-profiles?typeEquals=SYSTEM_DEFINED&maxResults=1000`,
+      { headers: { Authorization: `Bearer ${key}` } },
+    );
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `Bedrock inference-profiles request failed (${response.status}): ${detail.slice(0, 300)}`,
+      );
+    }
+    const body = (await response.json()) as {
+      inferenceProfileSummaries?: { inferenceProfileId?: string }[];
+    };
+    return (body.inferenceProfileSummaries ?? [])
+      .map(profile => profile.inferenceProfileId)
+      .filter((id): id is string => !!id)
+      .sort();
+  }
 }
 
 let requestCounter = 0;
@@ -83,7 +150,7 @@ class TauriModelClient implements ModelClient {
     });
 
     try {
-      const parser = createStreamParser(request.provider);
+      const parser = createStreamParser(request);
       for (;;) {
         if (queue.length === 0) {
           await new Promise<void>(resolve => (wake = resolve));

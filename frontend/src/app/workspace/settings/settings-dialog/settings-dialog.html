@@ -63,7 +63,7 @@
               <p class="phorma-settings__page-lede">{{ page.description }}</p>
             }
 
-            @for (section of page.sections; track section.id) {
+            @for (section of visibleSections(page); track section.id) {
               <section class="phorma-settings__section">
                 @if (section.label) {
                   <h4 class="phorma-settings__heading">{{ section.label }}</h4>
@@ -257,27 +257,49 @@
                         appendTo="body"
                         ariaLabel="Default model provider"
                       />
-                      <input
-                        type="text"
-                        class="phorma-settings__input phorma-settings__input--mono"
-                        [value]="settings.defaultModel()"
-                        (input)="onDefaultModelInput($event)"
-                        placeholder="model id"
-                        aria-label="Default model id"
-                      />
-                    </div>
-                    <div class="phorma-settings__chips">
-                      @for (model of defaultModelSuggestions(); track model) {
-                        <button
-                          type="button"
-                          class="phorma-settings__chip"
-                          [class.phorma-settings__chip--active]="model === settings.defaultModel()"
-                          (click)="pickDefaultModel(model)"
-                        >
-                          {{ model }}
-                        </button>
+                      @if (showModelDropdown()) {
+                        <p-select
+                          class="phorma-settings__model-select"
+                          [options]="defaultModelSuggestions()"
+                          [editable]="true"
+                          [ngModel]="settings.defaultModel()"
+                          (ngModelChange)="onDefaultModelChange($event)"
+                          size="small"
+                          appendTo="body"
+                          placeholder="model id"
+                          ariaLabel="Default model id"
+                        />
+                      } @else {
+                        <input
+                          type="text"
+                          class="phorma-settings__input phorma-settings__input--mono phorma-settings__model-select"
+                          [value]="settings.defaultModel()"
+                          (input)="onDefaultModelInput($event)"
+                          placeholder="e.g. anthropic.claude-sonnet-4-6-v1"
+                          aria-label="Default model id"
+                        />
                       }
                     </div>
+                    @if (loadingBedrockModels()) {
+                      <p class="phorma-settings__note">Loading Amazon Bedrock models…</p>
+                    }
+                    @if (bedrockWarning(); as warn) {
+                      <div class="phorma-settings__inline-warning" role="status">
+                        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                        <span class="phorma-settings__inline-warning-text">
+                          Couldn’t load Amazon Bedrock models — enter a model id manually.
+                          {{ warn }}
+                        </span>
+                        <button
+                          type="button"
+                          class="phorma-settings__inline-warning-close"
+                          (click)="dismissBedrockWarning()"
+                          aria-label="Dismiss warning"
+                        >
+                          <i class="ti ti-x" aria-hidden="true"></i>
+                        </button>
+                      </div>
+                    }
                     <div class="phorma-settings__setting">
                       <div class="phorma-settings__setting-text">
                         <label class="phorma-settings__setting-label" for="default-temperature">

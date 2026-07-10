@@ -20,6 +20,12 @@ export interface TraceEntry {
   /** Expandable payload (markdown/plain text). */
   detail?: string;
   tone: 'info' | 'success' | 'warning' | 'error';
+  /**
+   * Classification used by the Runs panel to group consecutive tool activity
+   * into a single container. A tool call and its result are distinct entries
+   * but count as one logical step in the group header.
+   */
+  kind: 'tool-call' | 'tool-result' | 'event';
 }
 
 /** A pending human approval, surfaced in the Runs panel. */
@@ -152,6 +158,7 @@ export class RunControllerService {
       input: this.runInput().trim(),
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
+      bedrockRegion: this.settings.bedrockRegion(),
       defaultModel: {
         provider: this.settings.defaultProvider(),
         model: this.settings.defaultModel(),
@@ -309,7 +316,7 @@ export class RunControllerService {
         if (edge) this.pulseEdge(edge);
         if (event.toolNodeId) this.setNodeState(event.toolNodeId, 'thinking');
         this.console('tools', 'info', `${this.nodeName(event.nodeId)} → ${event.name}(${truncateArgs(event.arguments)})`);
-        this.pushTrace('ti ti-tool', `Tool call: ${event.name}`, event.arguments, 'info');
+        this.pushTrace('ti ti-tool', `Tool call: ${event.name}`, event.arguments, 'info', 'tool-call');
         break;
       }
 
@@ -321,6 +328,7 @@ export class RunControllerService {
           `Tool ${event.isError ? 'error' : 'result'}: ${event.name}`,
           event.result,
           event.isError ? 'error' : 'success',
+          'tool-result',
         );
         break;
 
@@ -479,12 +487,18 @@ export class RunControllerService {
     );
   }
 
-  private pushTrace(icon: string, label: string, detail: string | undefined, tone: TraceEntry['tone']): void {
+  private pushTrace(
+    icon: string,
+    label: string,
+    detail: string | undefined,
+    tone: TraceEntry['tone'],
+    kind: TraceEntry['kind'] = 'event',
+  ): void {
     this.traceCounter += 1;
     this.trace.update(entries => {
       const next = [
         ...entries,
-        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone },
+        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone, kind },
       ];
       return next.length > MAX_TRACE_ENTRIES ? next.slice(next.length - MAX_TRACE_ENTRIES) : next;
     });

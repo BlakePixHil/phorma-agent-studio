@@ -9,7 +9,7 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use futures_util::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 /// Keychain service name under which provider keys are stored.
@@ -20,7 +20,20 @@ const API_KEY_PLACEHOLDER: &str = "{{API_KEY}}";
 const LLM_STREAM_EVENT: &str = "llm-stream-event";
 
 /// Providers allowed to have keys stored. Guards the keyring namespace.
-const KNOWN_PROVIDERS: [&str; 5] = ["anthropic", "openai", "gemini", "openrouter", "ollama"];
+const KNOWN_PROVIDERS: [&str; 6] =
+    ["anthropic", "openai", "gemini", "openrouter", "ollama", "bedrock"];
+
+/// Max characters stored in a single keychain entry. Windows Credential
+/// Manager caps a credential blob at 2560 UTF-16 code units, so large secrets
+/// (e.g. Bedrock short-term API keys, which embed an AWS session token) are
+/// split across multiple entries and reassembled on read. Kept well under the
+/// limit to stay safe even for multi-byte characters.
+const MAX_SECRET_CHARS: usize = 1000;
+
+/// Marker stored in the primary entry when a secret is split into chunks,
+/// followed by the chunk count. The leading control character cannot appear in
+/// a real API key, token, or env value, so it can't collide with a raw secret.
+const CHUNK_MANIFEST_PREFIX: &str = "\u{1}phorma-chunks:";
 
 /// Active stream cancellation flags, keyed by request id.
 static ACTIVE_STREAMS: Mutex<Option<HashMap<String, tokio::sync::watch::Sender<bool>>>> =
@@ -62,7 +75,89 @@ fn validate_secret_key(key: &str) -> Result<(), String> {
     }
 }
 
-/// Stores a provider API key in the OS keychain.
+/// Keychain entry name of the `index`-th chunk for a base secret name.
+fn chunk_entry_name(base: &str, index: usize) -> String {
+    format!("{base}\u{1}chunk\u{1}{index}")
+}
+
+/// Removes a stored secret and every chunk entry it may have spilled into.
+fn clear_secret_value(base: &str) -> Result<(), String> {
+    // If the primary entry holds a chunk manifest, delete the referenced
+    // chunk entries first so nothing is orphaned.
+    match keyring_entry(base)?.get_password() {
+        Ok(value) => {
+            if let Some(count) = value.strip_prefix(CHUNK_MANIFEST_PREFIX) {
+                let count: usize = count.parse().unwrap_or(0);
+                for index in 0..count {
+                    match keyring_entry(&chunk_entry_name(base, index))?.delete_credential() {
+                        Ok(()) | Err(keyring::Error::NoEntry) => {}
+                        Err(error) => {
+                            return Err(format!("Could not remove a stored key chunk: {error}"));
+                        }
+                    }
+                }
+            }
+        }
+        Err(keyring::Error::NoEntry) => return Ok(()),
+        Err(error) => return Err(format!("Could not read the OS keychain: {error}")),
+    }
+    match keyring_entry(base)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!("Could not remove the stored value: {error}")),
+    }
+}
+
+/// Stores a secret, transparently splitting values that exceed the per-entry
+/// platform limit across multiple keychain entries.
+fn store_secret_value(base: &str, value: &str) -> Result<(), String> {
+    // Replace any previous value (and its chunks) before writing the new one.
+    clear_secret_value(base)?;
+
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= MAX_SECRET_CHARS {
+        return keyring_entry(base)?
+            .set_password(value)
+            .map_err(|error| format!("Could not store the key: {error}"));
+    }
+
+    let chunks: Vec<String> = chars
+        .chunks(MAX_SECRET_CHARS)
+        .map(|chunk| chunk.iter().collect())
+        .collect();
+    for (index, chunk) in chunks.iter().enumerate() {
+        keyring_entry(&chunk_entry_name(base, index))?
+            .set_password(chunk)
+            .map_err(|error| format!("Could not store the key: {error}"))?;
+    }
+    keyring_entry(base)?
+        .set_password(&format!("{CHUNK_MANIFEST_PREFIX}{}", chunks.len()))
+        .map_err(|error| format!("Could not store the key: {error}"))
+}
+
+/// Reads a secret, reassembling chunked values. `None` when nothing is stored.
+fn read_secret_value(base: &str) -> Result<Option<String>, String> {
+    let primary = match keyring_entry(base)?.get_password() {
+        Ok(value) => value,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(error) => return Err(format!("Could not read the OS keychain: {error}")),
+    };
+    let Some(count) = primary.strip_prefix(CHUNK_MANIFEST_PREFIX) else {
+        return Ok(Some(primary));
+    };
+    let count: usize = count
+        .parse()
+        .map_err(|_| "Stored key manifest is corrupt.".to_owned())?;
+    let mut assembled = String::new();
+    for index in 0..count {
+        let chunk = keyring_entry(&chunk_entry_name(base, index))?
+            .get_password()
+            .map_err(|_| "A stored key chunk is missing.".to_owned())?;
+        assembled.push_str(&chunk);
+    }
+    Ok(Some(assembled))
+}
+
+/// Stores a provider API key in the OS keychain (chunked when large).
 ///
 /// # Errors
 ///
@@ -71,17 +166,11 @@ fn validate_secret_key(key: &str) -> Result<(), String> {
 #[tauri::command]
 pub fn set_provider_key(provider: String, key: String) -> Result<(), String> {
     validate_provider(&provider)?;
-    let entry = keyring_entry(&provider)?;
-    if key.trim().is_empty() {
-        // Empty key = delete.
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => return Ok(()),
-            Err(error) => return Err(format!("Could not remove the stored key: {error}")),
-        }
+    let key = key.trim();
+    if key.is_empty() {
+        return clear_secret_value(&provider); // Empty key = delete.
     }
-    entry
-        .set_password(key.trim())
-        .map_err(|error| format!("Could not store the key: {error}"))
+    store_secret_value(&provider, key)
 }
 
 /// Whether a key is stored for the provider (the key itself never leaves Rust).
@@ -92,12 +181,126 @@ pub fn set_provider_key(provider: String, key: String) -> Result<(), String> {
 #[tauri::command]
 pub fn has_provider_key(provider: String) -> Result<bool, String> {
     validate_provider(&provider)?;
-    let entry = keyring_entry(&provider)?;
-    match entry.get_password() {
-        Ok(_) => Ok(true),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(error) => Err(format!("Could not read the OS keychain: {error}")),
+    Ok(read_secret_value(&provider)?.is_some())
+}
+
+/// One entry in the bedrock-mantle `/v1/models` (OpenAI-shaped) response.
+#[derive(Deserialize)]
+struct BedrockModel {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct BedrockModelsResponse {
+    #[serde(default)]
+    data: Vec<BedrockModel>,
+}
+
+/// Lists model ids available on the Amazon Bedrock `bedrock-mantle` endpoint
+/// for an AWS region, authenticating with the stored Bedrock API key. Powers
+/// the studio's "Fetch available models" action so users pick real, region-
+/// valid ids instead of guessing (Bedrock model ids are catalog- and region-
+/// specific). The key never leaves Rust.
+///
+/// # Errors
+///
+/// Returns a user-facing error when no key is stored, the region is empty, or
+/// the request fails.
+#[tauri::command]
+pub async fn list_bedrock_models(region: String) -> Result<Vec<String>, String> {
+    let region = region.trim();
+    if region.is_empty() {
+        return Err("Choose an AWS region first.".to_owned());
     }
+    let key = read_secret_value("bedrock")?
+        .ok_or_else(|| "No Bedrock API key configured. Add one in Settings → API Keys.".to_owned())?;
+
+    let url = format!("https://bedrock-mantle.{region}.api.aws/v1/models");
+    let response = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach Bedrock: {error}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        let trimmed: String = detail.chars().take(300).collect();
+        return Err(format!("Bedrock models request failed ({status}): {trimmed}"));
+    }
+
+    let parsed: BedrockModelsResponse = response
+        .json()
+        .await
+        .map_err(|error| format!("Could not parse the Bedrock models response: {error}"))?;
+    let mut ids: Vec<String> = parsed.data.into_iter().map(|model| model.id).collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+/// One entry in the Bedrock `ListInferenceProfiles` control-plane response.
+#[derive(Deserialize)]
+struct InferenceProfileSummary {
+    #[serde(rename = "inferenceProfileId")]
+    inference_profile_id: String,
+}
+
+#[derive(Deserialize)]
+struct ListInferenceProfilesResponse {
+    #[serde(rename = "inferenceProfileSummaries", default)]
+    inference_profile_summaries: Vec<InferenceProfileSummary>,
+}
+
+/// Lists the system-defined inference profile ids available in a region (e.g.
+/// `au.anthropic.claude-opus-4-7`), authenticating with the stored Bedrock API
+/// key. This hits the Bedrock CONTROL-PLANE endpoint (`bedrock.{region}`), not
+/// the runtime one; the API key is valid for Amazon Bedrock control-plane
+/// actions. Merged into the model picker so region-locked Claude/Nova profiles
+/// are discoverable. The key never leaves Rust.
+///
+/// # Errors
+///
+/// Returns a user-facing error when no key is stored, the region is empty, or
+/// the request fails.
+#[tauri::command]
+pub async fn list_bedrock_inference_profiles(region: String) -> Result<Vec<String>, String> {
+    let region = region.trim();
+    if region.is_empty() {
+        return Err("Choose an AWS region first.".to_owned());
+    }
+    let key = read_secret_value("bedrock")?
+        .ok_or_else(|| "No Bedrock API key configured. Add one in Settings → API Keys.".to_owned())?;
+
+    let url = format!(
+        "https://bedrock.{region}.amazonaws.com/inference-profiles?typeEquals=SYSTEM_DEFINED&maxResults=1000"
+    );
+    let response = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach Bedrock: {error}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        let trimmed: String = detail.chars().take(300).collect();
+        return Err(format!("Bedrock inference-profiles request failed ({status}): {trimmed}"));
+    }
+
+    let parsed: ListInferenceProfilesResponse = response.json().await.map_err(|error| {
+        format!("Could not parse the Bedrock inference-profiles response: {error}")
+    })?;
+    let mut ids: Vec<String> = parsed
+        .inference_profile_summaries
+        .into_iter()
+        .map(|profile| profile.inference_profile_id)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
 }
 
 /// Stores (or clears, when empty) a generic secret in the OS keychain.
@@ -113,16 +316,11 @@ pub fn has_provider_key(provider: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn set_secret(key: String, value: String) -> Result<(), String> {
     validate_secret_key(&key)?;
-    let entry = keyring_entry(&key)?;
-    if value.trim().is_empty() {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => return Ok(()),
-            Err(error) => return Err(format!("Could not remove the stored secret: {error}")),
-        }
+    let value = value.trim();
+    if value.is_empty() {
+        return clear_secret_value(&key);
     }
-    entry
-        .set_password(value.trim())
-        .map_err(|error| format!("Could not store the secret: {error}"))
+    store_secret_value(&key, value)
 }
 
 /// Whether a secret is stored for the given key (the value never leaves Rust).
@@ -133,12 +331,7 @@ pub fn set_secret(key: String, value: String) -> Result<(), String> {
 #[tauri::command]
 pub fn has_secret(key: String) -> Result<bool, String> {
     validate_secret_key(&key)?;
-    let entry = keyring_entry(&key)?;
-    match entry.get_password() {
-        Ok(_) => Ok(true),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(error) => Err(format!("Could not read the OS keychain: {error}")),
-    }
+    Ok(read_secret_value(&key)?.is_some())
 }
 
 /// Resolves a secret's value from the keychain (Rust-internal — NOT a command).
@@ -150,8 +343,7 @@ pub fn has_secret(key: String) -> Result<bool, String> {
 ///
 /// Returns `None` when the secret is absent (caller decides whether to fail).
 pub(crate) fn get_secret(key: &str) -> Option<String> {
-    let entry = keyring_entry(key).ok()?;
-    entry.get_password().ok()
+    read_secret_value(key).ok().flatten()
 }
 
 /// Starts a streaming LLM request. Response lines are emitted as
@@ -177,9 +369,8 @@ pub async fn llm_proxy_stream(
     let needs_key = url.contains(API_KEY_PLACEHOLDER)
         || headers.values().any(|value| value.contains(API_KEY_PLACEHOLDER));
     let (url, headers) = if needs_key {
-        let key = keyring_entry(&provider)?
-            .get_password()
-            .map_err(|_| format!("No API key configured for {provider}. Add one in Settings."))?;
+        let key = read_secret_value(&provider)?
+            .ok_or_else(|| format!("No API key configured for {provider}. Add one in Settings."))?;
         let substituted_url = url.replace(API_KEY_PLACEHOLDER, &key);
         let substituted_headers = headers
             .into_iter()

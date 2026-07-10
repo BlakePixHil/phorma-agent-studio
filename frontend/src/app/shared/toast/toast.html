@@ -20,14 +20,32 @@
           <p class="phorma-toast__detail">{{ t.detail }}</p>
         }
       </div>
-      <button
-        type="button"
-        class="phorma-toast__close"
-        (click)="toast.dismiss(t.id)"
-        aria-label="Dismiss notification"
-      >
-        <i class="ti ti-x" aria-hidden="true"></i>
-      </button>
+      <div class="phorma-toast__actions">
+        @if (t.severity === 'error' || t.severity === 'warning') {
+          <button
+            type="button"
+            class="phorma-toast__action"
+            (click)="copy(t)"
+            [attr.aria-label]="copiedId() === t.id ? 'Message copied' : 'Copy message'"
+            [title]="copiedId() === t.id ? 'Copied' : 'Copy message'"
+          >
+            <i
+              class="ti"
+              [class.ti-copy]="copiedId() !== t.id"
+              [class.ti-check]="copiedId() === t.id"
+              aria-hidden="true"
+            ></i>
+          </button>
+        }
+        <button
+          type="button"
+          class="phorma-toast__action"
+          (click)="toast.dismiss(t.id)"
+          aria-label="Dismiss notification"
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </div>
     </div>
   }
 </div>

@@ -1,6 +1,10 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 
-import { PROVIDER_MODEL_SUGGESTIONS, type ModelProviderId } from './workflow.model';
+import {
+  DEFAULT_BEDROCK_REGION,
+  PROVIDER_MODEL_SUGGESTIONS,
+  type ModelProviderId,
+} from './workflow.model';
 import { TauriService } from './tauri.service';
 import { loadLayout, saveLayout } from './layout-storage';
 
@@ -39,6 +43,13 @@ export class SettingsService {
 
   /** Ollama server base URL (local models need no key). */
   readonly ollamaBaseUrl = signal(loadLayout('ollamaBaseUrl', 'http://localhost:11434'));
+
+  /**
+   * Default AWS region for Amazon Bedrock. Agents may override this per node,
+   * so workflows can mix models hosted in different regions. The Bedrock API
+   * key is stored separately like every other provider credential.
+   */
+  readonly bedrockRegion = signal(loadLayout('bedrockRegion', DEFAULT_BEDROCK_REGION));
 
   /**
    * Application default model. Agent nodes without an explicit provider/model
@@ -128,6 +139,11 @@ export class SettingsService {
   setOllamaBaseUrl(url: string): void {
     this.ollamaBaseUrl.set(url.trim() || 'http://localhost:11434');
     saveLayout('ollamaBaseUrl', this.ollamaBaseUrl());
+  }
+
+  setBedrockRegion(region: string): void {
+    this.bedrockRegion.set(region.trim() || DEFAULT_BEDROCK_REGION);
+    saveLayout('bedrockRegion', this.bedrockRegion());
   }
 
   /** Sets the app default provider, resetting the model to its first suggestion. */
@@ -290,7 +306,7 @@ export class SettingsService {
 
   private async refreshKeyFlags(): Promise<void> {
     const flags: Partial<Record<ModelProviderId, boolean>> = {};
-    const providers: ModelProviderId[] = ['anthropic', 'openai', 'gemini', 'openrouter'];
+    const providers: ModelProviderId[] = ['anthropic', 'openai', 'gemini', 'openrouter', 'bedrock'];
     if (this.tauri.isDesktop) {
       const { invoke } = await import('@tauri-apps/api/core');
       for (const provider of providers) {

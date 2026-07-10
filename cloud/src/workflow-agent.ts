@@ -70,6 +70,10 @@ export interface Env extends TenantEnv {
   OPENAI_API_KEY?: string;
   GEMINI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  /** Amazon Bedrock API key (bearer token) for BYO-key runs. */
+  BEDROCK_API_KEY?: string;
+  /** Default AWS region for Amazon Bedrock agents that don't set their own. */
+  BEDROCK_REGION?: string;
   /** Remote Ollama/OpenAI-compatible server, if you host one. */
   OLLAMA_BASE_URL?: string;
 }
@@ -110,6 +114,7 @@ const PROVIDER_ENV_KEYS: Record<ModelProviderId, keyof Env | null> = {
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
+  bedrock: 'BEDROCK_API_KEY',
   ollama: null,
 };
 
@@ -123,6 +128,7 @@ const OPENROUTER_SLUG_PREFIX: Record<ModelProviderId, string | null> = {
   openai: 'openai/',
   gemini: 'google/',
   openrouter: '', // already a full slug
+  bedrock: null, // BYO-key only — hosted (OpenRouter) inference has no Bedrock path
   ollama: null, // no hosted equivalent — rejected in hosted mode
 };
 
@@ -364,6 +370,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         },
       }),
       ollamaBaseUrl: this.env.OLLAMA_BASE_URL,
+      bedrockRegion: this.env.BEDROCK_REGION,
       emit: event => {
         if (event.type === 'node-usage') {
           runUsage.inputTokens += event.usage.inputTokens ?? 0;

@@ -21,7 +21,13 @@ export interface WorkflowPort {
   role: PortRole;
 }
 
-export type ModelProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
+export type ModelProviderId =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'openrouter'
+  | 'ollama'
+  | 'bedrock';
 
 export interface AgentNodeData {
   /** Markdown system prompt. `{{input}}` interpolates the incoming task. */

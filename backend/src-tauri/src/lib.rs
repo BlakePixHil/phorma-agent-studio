@@ -34,6 +34,8 @@ pub fn run() {
             commands::write_workflow_file,
             llm::set_provider_key,
             llm::has_provider_key,
+            llm::list_bedrock_models,
+            llm::list_bedrock_inference_profiles,
             llm::set_secret,
             llm::has_secret,
             llm::llm_proxy_stream,

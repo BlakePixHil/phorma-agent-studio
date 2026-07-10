@@ -378,6 +378,53 @@
 
 .phorma-settings__provider-select {
   flex: 0 0 auto;
+  width: 190px;
+}
+
+/* Model picker fills the rest of the row width. */
+.phorma-settings__model-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Small dismissable warning shown under the model row on fetch failure. */
+.phorma-settings__inline-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 0 138px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-amber) 40%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-amber) 10%, transparent);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--p-text-color);
+
+  > i {
+    margin-top: 1px;
+    color: var(--phorma-accent-amber);
+  }
+}
+
+.phorma-settings__inline-warning-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.phorma-settings__inline-warning-close {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  line-height: 1;
+
+  &:hover {
+    color: var(--p-text-color);
+  }
 }
 
 /* ── Model chips + palette picker (shared pill styling) ──────────────────── */

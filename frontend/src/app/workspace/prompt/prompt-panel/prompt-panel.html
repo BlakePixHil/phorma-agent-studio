@@ -65,18 +65,24 @@
           change it in App&nbsp;›&nbsp;Settings&nbsp;›&nbsp;Models.
         </p>
       }
-      <div class="phorma-prompt__chips">
-        @for (model of modelSuggestions(); track model) {
-          <button
-            type="button"
-            class="phorma-prompt__chip"
-            [class.phorma-prompt__chip--active]="model === node.data.model"
-            (click)="onModelPick(model)"
-          >
-            {{ model }}
-          </button>
-        }
-      </div>
+      @if (isBedrock()) {
+        <label class="phorma-prompt__label phorma-prompt__label--gap" for="bedrock-region">
+          AWS region
+        </label>
+        <input
+          id="bedrock-region"
+          type="text"
+          class="phorma-prompt__model"
+          [value]="regionValue()"
+          (input)="onRegionInput($event)"
+          [placeholder]="defaultRegionLabel()"
+          aria-label="Amazon Bedrock AWS region"
+        />
+        <p class="phorma-prompt__hint">
+          Region hosting this model (e.g. <code>ap-southeast-2</code>). Leave blank to use the
+          application default (<strong>{{ defaultRegionLabel() }}</strong>).
+        </p>
+      }
     </section>
 
     <!-- Capabilities summary -->

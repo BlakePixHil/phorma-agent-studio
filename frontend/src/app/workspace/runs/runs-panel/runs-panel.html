@@ -10,9 +10,12 @@
       }
     </label>
     <textarea
+      pTextarea
       id="run-input"
       class="phorma-runs__input"
       rows="3"
+      [fluid]="true"
+      [autoResize]="true"
       placeholder="What should this workflow do?"
       [value]="runController.runInput()"
       (input)="onInput($event)"
@@ -92,24 +95,40 @@
   <!-- Trace timeline -->
   <section class="phorma-runs__section phorma-runs__section--grow">
     <label class="phorma-runs__label">Trace</label>
-    @if (runController.trace().length > 0) {
+    @if (traceGroups().length > 0) {
       <ol class="phorma-runs__trace">
-        @for (entry of runController.trace(); track entry.id) {
-          <li class="phorma-runs__entry phorma-runs__entry--{{ entry.tone }}">
-            <button
-              type="button"
-              class="phorma-runs__entry-row"
-              [class.phorma-runs__entry-row--expandable]="!!entry.detail"
-              (click)="entry.detail && toggleExpanded(entry.id)"
+        @for (group of traceGroups(); track group.key) {
+          @if (group.grouped && groupStepCount(group) > 1) {
+            <li
+              class="phorma-runs__group"
+              [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)"
             >
-              <i class="{{ entry.icon }}" aria-hidden="true"></i>
-              <span class="phorma-runs__entry-label">{{ entry.label }}</span>
-              <time class="phorma-runs__entry-time">{{ entry.at | date: 'HH:mm:ss' }}</time>
-            </button>
-            @if (entry.detail && expanded().has(entry.id)) {
-              <pre class="phorma-runs__payload selectable">{{ entry.detail }}</pre>
+              <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
+                <i class="ti ti-stack-2 phorma-runs__group-icon" aria-hidden="true"></i>
+                <span class="phorma-runs__group-title">Tool activity</span>
+                <span class="phorma-runs__group-count">
+                  {{ groupStepCount(group) }} {{ groupStepCount(group) === 1 ? 'call' : 'calls' }}
+                </span>
+                <i
+                  class="ti phorma-runs__group-chevron"
+                  [class.ti-chevron-down]="!isGroupCollapsed(group.key)"
+                  [class.ti-chevron-right]="isGroupCollapsed(group.key)"
+                  aria-hidden="true"
+                ></i>
+              </button>
+              @if (!isGroupCollapsed(group.key)) {
+                <ol class="phorma-runs__group-entries">
+                  @for (entry of group.entries; track entry.id) {
+                    <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
+                  }
+                </ol>
+              }
+            </li>
+          } @else {
+            @for (entry of group.entries; track entry.id) {
+              <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
             }
-          </li>
+          }
         }
       </ol>
     } @else {
@@ -117,3 +136,39 @@
     }
   </section>
 </div>
+
+<!-- A single trace entry: toggle row + expandable payload with copy button. -->
+<ng-template #entryTpl let-entry>
+  <li class="phorma-runs__entry phorma-runs__entry--{{ entry.tone }}">
+    <button
+      type="button"
+      class="phorma-runs__entry-row"
+      [class.phorma-runs__entry-row--expandable]="!!entry.detail"
+      (click)="entry.detail && toggleExpanded(entry.id)"
+    >
+      <i class="{{ entry.icon }}" aria-hidden="true"></i>
+      <span class="phorma-runs__entry-label">{{ entry.label }}</span>
+      <time class="phorma-runs__entry-time">{{ entry.at | date: 'HH:mm:ss' }}</time>
+    </button>
+    @if (entry.detail && expanded().has(entry.id)) {
+      <div class="phorma-runs__payload-wrap">
+        <button
+          type="button"
+          class="phorma-runs__copy"
+          [class.phorma-runs__copy--done]="copiedId() === entry.id"
+          [title]="copiedId() === entry.id ? 'Copied' : 'Copy'"
+          [attr.aria-label]="copiedId() === entry.id ? 'Copied' : 'Copy to clipboard'"
+          (click)="copyDetail(entry, $event)"
+        >
+          <i
+            class="ti"
+            [class.ti-copy]="copiedId() !== entry.id"
+            [class.ti-check]="copiedId() === entry.id"
+            aria-hidden="true"
+          ></i>
+        </button>
+        <pre class="phorma-runs__payload selectable">{{ entry.detail }}</pre>
+      </div>
+    }
+  </li>
+</ng-template>

@@ -53,6 +53,11 @@ export interface ModelRequest {
   maxTokens?: number;
   /** Ollama server override; defaults to http://localhost:11434. */
   ollamaBaseUrl?: string;
+  /**
+   * AWS region for Amazon Bedrock, used to build the regional endpoint URL
+   * (e.g. `ap-southeast-2`). Defaults to us-east-1.
+   */
+  bedrockRegion?: string;
 }
 
 /** Normalized token/cost usage for one model stream. */
@@ -93,10 +98,147 @@ export interface StreamParser {
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+/** Default AWS region for the Amazon Bedrock endpoint. */
+const DEFAULT_BEDROCK_REGION = 'us-east-1';
+
+/** Resolves the effective AWS region for a Bedrock request. */
+function bedrockRegionOf(request: ModelRequest): string {
+  return (request.bedrockRegion ?? DEFAULT_BEDROCK_REGION).trim() || DEFAULT_BEDROCK_REGION;
+}
+
+// ── Amazon Bedrock (Converse API) ────────────────────────────────────────────
+//
+// Bedrock is invoked through the unified `Converse` API on the bedrock-runtime
+// endpoint, authenticated with a Bedrock API key. Converse works for every
+// model family (Claude, Nova, Llama, gpt-oss, …) AND accepts cross-region /
+// geographic inference profile ids (e.g. `au.anthropic.claude-opus-4-7`) —
+// unlike the OpenAI Chat Completions endpoint (open-weight only) or the mantle
+// Messages API (doesn't serve geo inference profiles). This is non-streaming:
+// Converse returns a single JSON body. `ConverseStream` returns AWS's binary
+// event-stream, which the line-based proxy can't parse yet — a later addition.
+
+/** Maps engine messages to the Converse `messages` array. */
+function converseMessages(request: ModelRequest): object[] {
+  const wire: object[] = [];
+  for (const message of request.messages) {
+    if (message.role === 'assistant-tool-calls') {
+      const content: object[] = [];
+      if (message.text?.trim()) content.push({ text: message.text });
+      for (const call of message.calls) {
+        content.push({
+          toolUse: { toolUseId: call.id, name: call.name, input: safeParseJson(call.arguments) },
+        });
+      }
+      wire.push({ role: 'assistant', content });
+    } else if (message.role === 'tool-results') {
+      wire.push({
+        role: 'user',
+        content: message.results.map(result => ({
+          toolResult: { toolUseId: result.id, content: [{ text: result.content }] },
+        })),
+      });
+    } else {
+      wire.push({ role: message.role, content: [{ text: message.content }] });
+    }
+  }
+  return wire;
+}
+
+/** Builds the Bedrock Converse request body. */
+function converseBody(request: ModelRequest): string {
+  const inferenceConfig: Record<string, unknown> = {
+    maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+  };
+  if (request.temperature !== undefined) inferenceConfig['temperature'] = request.temperature;
+
+  const body: Record<string, unknown> = {
+    messages: converseMessages(request),
+    inferenceConfig,
+  };
+  if (request.system?.trim()) body['system'] = [{ text: request.system }];
+  if (request.tools?.length) {
+    body['toolConfig'] = {
+      tools: request.tools.map(tool => ({
+        toolSpec: {
+          name: tool.name,
+          description: tool.description,
+          inputSchema: { json: tool.parameters },
+        },
+      })),
+    };
+  }
+  return JSON.stringify(body);
+}
+
+/**
+ * Parses a non-streaming Converse response. Accumulates the JSON body across
+ * pushes (the body has no line framing) and decodes it on `end()` into text,
+ * tool-call, and usage chunks.
+ */
+class ConverseResponseParser implements StreamParser {
+  private buffer = '';
+
+  push(line: string): ModelChunk[] {
+    this.buffer += line;
+    return [];
+  }
+
+  end(): ModelChunk[] {
+    const raw = this.buffer;
+    this.buffer = '';
+    if (!raw.trim()) return [{ type: 'done' }];
+
+    let parsed: {
+      output?: {
+        message?: {
+          content?: {
+            text?: string;
+            toolUse?: { toolUseId?: string; name?: string; input?: unknown };
+          }[];
+        };
+      };
+      usage?: { inputTokens?: number; outputTokens?: number };
+    };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [{ type: 'done' }];
+    }
+
+    const chunks: ModelChunk[] = [];
+    let toolCounter = 0;
+    for (const block of parsed.output?.message?.content ?? []) {
+      if (block.text) chunks.push({ type: 'text', text: block.text });
+      if (block.toolUse) {
+        toolCounter += 1;
+        chunks.push({
+          type: 'tool-call',
+          call: {
+            id: block.toolUse.toolUseId ?? `call_${toolCounter}`,
+            name: block.toolUse.name ?? '',
+            arguments: JSON.stringify(block.toolUse.input ?? {}),
+          },
+        });
+      }
+    }
+    if (parsed.usage) {
+      chunks.push({
+        type: 'usage',
+        usage: { inputTokens: parsed.usage.inputTokens, outputTokens: parsed.usage.outputTokens },
+      });
+    }
+    chunks.push({ type: 'done' });
+    return chunks;
+  }
+}
 
 interface ProviderAdapter {
   buildRequest(request: ModelRequest): ProviderWireRequest;
-  createParser(): StreamParser;
+  /**
+   * Creates the stream parser for a response. Receives the request because
+   * some providers (Bedrock) speak different wire formats per model family.
+   */
+  createParser(request: ModelRequest): StreamParser;
   /** Whether this provider requires an API key. */
   requiresKey: boolean;
 }
@@ -399,6 +541,25 @@ class AnthropicStreamParser implements StreamParser {
   }
 }
 
+/** Builds the Anthropic Messages API request body (shared by Anthropic + Bedrock). */
+function anthropicBody(request: ModelRequest): string {
+  return JSON.stringify({
+    model: request.model,
+    stream: true,
+    temperature: request.temperature,
+    max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+    system: request.system,
+    messages: anthropicMessages(request),
+    tools: request.tools?.length
+      ? request.tools.map(tool => ({
+          name: tool.name,
+          description: tool.description,
+          input_schema: tool.parameters,
+        }))
+      : undefined,
+  });
+}
+
 const anthropicAdapter: ProviderAdapter = {
   requiresKey: true,
   buildRequest(request) {
@@ -412,24 +573,34 @@ const anthropicAdapter: ProviderAdapter = {
         // Required when calling straight from a browser context (web mode).
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({
-        model: request.model,
-        stream: true,
-        temperature: request.temperature,
-        max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-        system: request.system,
-        messages: anthropicMessages(request),
-        tools: request.tools?.length
-          ? request.tools.map(tool => ({
-              name: tool.name,
-              description: tool.description,
-              input_schema: tool.parameters,
-            }))
-          : undefined,
-      }),
+      body: anthropicBody(request),
     };
   },
   createParser: () => new AnthropicStreamParser(),
+};
+
+/**
+ * Amazon Bedrock adapter — the unified Converse API on bedrock-runtime,
+ * authenticated with a Bedrock API key. The model id (or inference profile id)
+ * goes in the URL path; it's URL-encoded so versioned ids containing `:` work.
+ */
+const bedrockAdapter: ProviderAdapter = {
+  requiresKey: true,
+  buildRequest(request): ProviderWireRequest {
+    const region = bedrockRegionOf(request);
+    return {
+      url: `https://bedrock-runtime.${region}.amazonaws.com/model/${encodeURIComponent(
+        request.model,
+      )}/converse`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_KEY_PLACEHOLDER}`,
+      },
+      body: converseBody(request),
+    };
+  },
+  createParser: () => new ConverseResponseParser(),
 };
 
 const ADAPTERS: Record<ModelProviderId, ProviderAdapter> = {
@@ -446,6 +617,7 @@ const ADAPTERS: Record<ModelProviderId, ProviderAdapter> = {
       `${(request.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '')}/v1/chat/completions`,
     false,
   ),
+  bedrock: bedrockAdapter,
 };
 
 export function providerAdapter(provider: ModelProviderId): ProviderAdapter {
@@ -460,9 +632,12 @@ export function providerRequiresKey(provider: ModelProviderId): boolean {
   return ADAPTERS[provider].requiresKey;
 }
 
-/** Creates a stateful stream parser for a provider's response lines. */
-export function createStreamParser(provider: ModelProviderId): StreamParser {
-  return ADAPTERS[provider].createParser();
+/**
+ * Creates a stateful stream parser for a request's response lines. Takes the
+ * full request because some providers (Bedrock) pick the wire format per model.
+ */
+export function createStreamParser(request: ModelRequest): StreamParser {
+  return ADAPTERS[request.provider].createParser(request);
 }
 
 /** Substitutes the API-key placeholder into a built request. */
@@ -518,7 +693,7 @@ export class FetchModelClient implements ModelClient {
       );
     }
 
-    const parser = adapter.createParser();
+    const parser = adapter.createParser(request);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffered = '';
@@ -538,6 +713,14 @@ export class FetchModelClient implements ModelClient {
             yield chunk;
           }
           newlineIndex = buffered.indexOf('\n');
+        }
+      }
+      // Flush any trailing content with no closing newline (e.g. a
+      // non-streaming JSON body like Bedrock Converse) before finalizing.
+      if (buffered.trim().length > 0) {
+        for (const chunk of parser.push(buffered)) {
+          if (chunk.type === 'done') return;
+          yield chunk;
         }
       }
       for (const chunk of parser.end()) {

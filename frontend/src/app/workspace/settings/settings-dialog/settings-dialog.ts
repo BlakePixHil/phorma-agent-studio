@@ -18,12 +18,14 @@ import { TooltipModule } from 'primeng/tooltip';
 
 import { SettingsDialogService } from '../settings-dialog.service';
 import { CloudService, PHORMA_CLOUD_DEFAULT_URL } from '../../../core/cloud.service';
+import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { SettingsService } from '../../../core/settings.service';
 import {
   SettingsRegistryService,
   type SettingDef,
   type SettingsPageDef,
+  type SettingsSectionDef,
 } from '../../../core/settings-registry';
 import { TauriService } from '../../../core/tauri.service';
 import { ThemeService } from '../../../core/theme.service';
@@ -62,6 +64,7 @@ export class SettingsDialog {
   protected readonly theme = inject(ThemeService);
   private readonly tauri = inject(TauriService);
   private readonly toast = inject(ToastService);
+  private readonly transport = inject(ModelTransportService);
 
   protected readonly isDesktop = this.tauri.isDesktop;
 
@@ -88,6 +91,11 @@ export class SettingsDialog {
 
   protected onSearchInput(event: Event): void {
     this.searchQuery.set((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  /** A page's sections minus any hidden by their `visible` predicate. */
+  protected visibleSections(page: SettingsPageDef): SettingsSectionDef[] {
+    return page.sections.filter(section => (section.visible ? section.visible() : true));
   }
 
   // ── Generic control value coercion ──────────────────────────────────────
@@ -167,20 +175,92 @@ export class SettingsDialog {
 
   protected readonly providers = MODEL_PROVIDERS;
 
-  protected readonly defaultModelSuggestions = computed(
-    () => PROVIDER_MODEL_SUGGESTIONS[this.settings.defaultProvider()] ?? [],
+  /** Bedrock model ids fetched from the mantle catalog for the current region. */
+  protected readonly bedrockModels = signal<string[]>([]);
+  /** True while auto-fetching Bedrock models for the model dropdown. */
+  protected readonly loadingBedrockModels = signal(false);
+  /** Last Bedrock fetch error (null when the last fetch succeeded). */
+  protected readonly bedrockFetchError = signal<string | null>(null);
+  /** Whether the user dismissed the current fetch-failure warning. */
+  protected readonly bedrockWarningDismissed = signal(false);
+  /** Region already fetched (or fetching), to avoid duplicate auto-fetches. */
+  private lastBedrockFetch = '';
+
+  /**
+   * Options for the default-model dropdown. Bedrock is populated from the live
+   * mantle catalog (auto-fetched); other providers fall back to static
+   * suggestions until per-provider fetching lands.
+   */
+  protected readonly defaultModelSuggestions = computed(() => {
+    const provider = this.settings.defaultProvider();
+    if (provider === 'bedrock') return this.bedrockModels();
+    return PROVIDER_MODEL_SUGGESTIONS[provider] ?? [];
+  });
+
+  /**
+   * Show the model dropdown unless a Bedrock catalog fetch failed — in that
+   * case we fall back to a free-text input so the user can still type an id.
+   */
+  protected readonly showModelDropdown = computed(
+    () => this.settings.defaultProvider() !== 'bedrock' || this.bedrockFetchError() === null,
   );
+
+  /** The inline fetch-failure warning message, or null when there's nothing to show. */
+  protected readonly bedrockWarning = computed(() =>
+    this.settings.defaultProvider() === 'bedrock' && !this.bedrockWarningDismissed()
+      ? this.bedrockFetchError()
+      : null,
+  );
+
+  protected dismissBedrockWarning(): void {
+    this.bedrockWarningDismissed.set(true);
+  }
 
   protected onDefaultProviderChange(provider: ModelProviderId): void {
     this.settings.setDefaultProvider(provider);
+  }
+
+  protected onDefaultModelChange(model: string): void {
+    this.settings.defaultModel.set((model ?? '').trim());
   }
 
   protected onDefaultModelInput(event: Event): void {
     this.settings.defaultModel.set((event.target as HTMLInputElement | null)?.value ?? '');
   }
 
-  protected pickDefaultModel(model: string): void {
-    this.settings.defaultModel.set(model);
+  /**
+   * Fetches Bedrock's model options for a region into {@link bedrockModels}:
+   * inference profiles (control plane) + the mantle `/v1/models` catalog,
+   * merged. Runs automatically (no button) whenever Bedrock is the chosen
+   * provider and the region changes. Fails silently only when BOTH sources
+   * fail — recording the message for a dismissable inline warning and letting
+   * the UI fall back to a text input.
+   */
+  private async loadBedrockModels(region: string): Promise<void> {
+    this.loadingBedrockModels.set(true);
+    this.bedrockFetchError.set(null);
+    this.bedrockWarningDismissed.set(false);
+
+    const [profiles, models] = await Promise.allSettled([
+      this.transport.listBedrockInferenceProfiles(region),
+      this.transport.listBedrockModels(region),
+    ]);
+
+    const ids = new Set<string>();
+    if (profiles.status === 'fulfilled') for (const id of profiles.value) ids.add(id);
+    if (models.status === 'fulfilled') for (const id of models.value) ids.add(id);
+
+    if (ids.size > 0) {
+      this.bedrockModels.set([...ids].sort());
+    } else {
+      // Both sources failed — surface the profile error (the one that matters
+      // most for Claude) and fall back to manual entry.
+      const reason = profiles.status === 'rejected' ? profiles.reason : (models as PromiseRejectedResult).reason;
+      this.bedrockModels.set([]);
+      this.lastBedrockFetch = ''; // allow a retry on the next change
+      this.bedrockFetchError.set(reason instanceof Error ? reason.message : String(reason));
+    }
+    this.loadingBedrockModels.set(false);
   }
 
   // ── Integrations (custom template) ──────────────────────────────────────
@@ -287,6 +367,19 @@ export class SettingsDialog {
       if (this.dialog.activePageId() !== 'cloud') return;
       if (this.settings.cloudProvider() !== 'phorma') return;
       untracked(() => void this.phormaCloud.refresh());
+    });
+
+    // Auto-fetch the Bedrock model catalog for the model dropdown whenever the
+    // dialog is open with Bedrock as the default provider. Re-runs when the
+    // region changes; the guard dedupes and `untracked` keeps the fetch's
+    // signal writes from feeding back into this effect.
+    effect(() => {
+      if (!this.dialog.visible()) return;
+      if (this.settings.defaultProvider() !== 'bedrock') return;
+      const region = this.settings.bedrockRegion();
+      if (!region || this.lastBedrockFetch === region) return;
+      this.lastBedrockFetch = region;
+      untracked(() => void this.loadBedrockModels(region));
     });
   }
 

@@ -73,12 +73,14 @@ export class PromptPanel {
     return `${provider?.label ?? this.settings.defaultProvider()} · ${this.settings.defaultModel()}`;
   });
 
-  /** Model suggestions for the agent's current provider. */
-  protected readonly modelSuggestions = computed(() => {
-    const agent = this.agent();
-    if (!agent?.data.provider) return [];
-    return PROVIDER_MODEL_SUGGESTIONS[agent.data.provider];
-  });
+  /** Whether the agent explicitly targets Amazon Bedrock (region applies). */
+  protected readonly isBedrock = computed(() => this.agent()?.data.provider === 'bedrock');
+
+  /** The agent's explicit region, or empty when inheriting the app default. */
+  protected readonly regionValue = computed(() => this.agent()?.data.region ?? '');
+
+  /** Hint shown in the region input when the agent inherits the app default. */
+  protected readonly defaultRegionLabel = computed(() => this.settings.bedrockRegion());
 
   /** Tools attached to this agent via tool-links. */
   protected readonly attachedTools = computed<WorkflowNode[]>(() => {
@@ -157,9 +159,11 @@ export class PromptPanel {
     });
   }
 
-  protected onModelPick(model: string): void {
+  protected onRegionInput(event: Event): void {
     const agent = this.agent();
     if (!agent) return;
-    this.workflow.updateNodeData(agent.id, { model });
+    // Empty = inherit the application default Bedrock region.
+    const region = (event.target as HTMLInputElement | null)?.value.trim() || undefined;
+    this.workflow.updateNodeData(agent.id, { region });
   }
 }
