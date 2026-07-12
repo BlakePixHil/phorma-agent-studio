@@ -19,6 +19,7 @@ import { PropertiesPanel } from './workspace/properties/properties-panel/propert
 import { RunsPanel } from './workspace/runs/runs-panel/runs-panel';
 import { SettingsDialog } from './workspace/settings/settings-dialog/settings-dialog';
 import { CloudDialog } from './workspace/cloud/cloud-dialog/cloud-dialog';
+import { CreditsDialog } from './workspace/cloud/credits-dialog/credits-dialog';
 import { OnboardingDialog } from './workspace/onboarding/onboarding-dialog/onboarding-dialog';
 import { OnboardingService } from './workspace/onboarding/onboarding.service';
 import { ConfirmDialog } from './shared/confirm-dialog/confirm-dialog';
@@ -47,6 +48,7 @@ import { Toast } from './shared/toast/toast';
     RunsPanel,
     SettingsDialog,
     CloudDialog,
+    CreditsDialog,
     OnboardingDialog,
     ConfirmDialog,
     Toast,

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, untracked } from '@angular/core';
-import { CurrencyPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
@@ -27,7 +27,7 @@ import { WorkflowService } from '../../../core/workflow.service';
 @Component({
   selector: 'app-cloud-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, ButtonModule, TooltipModule, PhormaCloudIcon],
+  imports: [DecimalPipe, ButtonModule, TooltipModule, PhormaCloudIcon],
   templateUrl: './cloud-dialog.html',
   styleUrl: './cloud-dialog.scss',
 })

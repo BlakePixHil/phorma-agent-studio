@@ -67,6 +67,25 @@
   line-height: 1.35;
 }
 
+.phorma-toast__cta {
+  display: inline-flex;
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--phorma-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  color: var(--p-primary-color, #818cf8);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+  pointer-events: auto;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-primary-color) 20%, transparent);
+  }
+}
+
 .phorma-toast__actions {
   flex: 0 0 auto;
   display: inline-flex;

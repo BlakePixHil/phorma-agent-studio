@@ -54,7 +54,9 @@
         <div class="phorma-runs__usage" title="Tokens used by this run (in / out)">
           <i class="ti ti-coins" aria-hidden="true"></i>
           <span>{{ u.inputTokens | number }} in · {{ u.outputTokens | number }} out</span>
-          @if (u.costUsd > 0) {
+          @if (usageCredits(); as credits) {
+            <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
+          } @else if (u.costUsd > 0) {
             <span class="phorma-runs__usage-cost">{{ u.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</span>
           }
         </div>

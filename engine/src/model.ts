@@ -274,8 +274,14 @@ function openAiBody(request: ModelRequest): string {
   // (final chunk carries token counts). OpenRouter additionally returns the
   // actual USD cost when usage accounting is requested. Gemini's and Ollama's
   // OpenAI-compat shims are not guaranteed to accept these fields, so they
-  // are only sent to providers known to support them.
-  const wantsUsage = request.provider === 'openai' || request.provider === 'openrouter';
+  // are only sent to providers known to support them. Phorma Cloud reuses the
+  // OpenRouter wire format (the proxy forwards to OpenRouter), so it gets the
+  // same usage accounting.
+  const wantsUsage =
+    request.provider === 'openai' ||
+    request.provider === 'openrouter' ||
+    request.provider === 'phorma-cloud';
+  const wantsCost = request.provider === 'openrouter' || request.provider === 'phorma-cloud';
   return JSON.stringify({
     model: request.model,
     stream: true,
@@ -283,7 +289,7 @@ function openAiBody(request: ModelRequest): string {
     max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
     messages: openAiMessages(request),
     stream_options: wantsUsage ? { include_usage: true } : undefined,
-    usage: request.provider === 'openrouter' ? { include: true } : undefined,
+    usage: wantsCost ? { include: true } : undefined,
     tools: request.tools?.length
       ? request.tools.map(tool => ({
           type: 'function',
@@ -618,6 +624,14 @@ const ADAPTERS: Record<ModelProviderId, ProviderAdapter> = {
     false,
   ),
   bedrock: bedrockAdapter,
+  // Phorma Cloud: the studio's composite ModelClient intercepts this provider
+  // and POSTs the built (OpenRouter-shaped) request to the Phorma Cloud
+  // /api/infer proxy, which injects the tenant's runtime key. The adapter
+  // itself is never called locally for a real run — it exists so the engine
+  // type contract stays exhaustive and so deployed workflows can map
+  // phorma-cloud nodes to OpenRouter. requiresKey is false because the local
+  // client never holds a key (the proxy does).
+  'phorma-cloud': openAiCompatible('https://openrouter.ai/api/v1/chat/completions', false),
 };
 
 export function providerAdapter(provider: ModelProviderId): ProviderAdapter {

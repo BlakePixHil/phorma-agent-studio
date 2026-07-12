@@ -47,8 +47,8 @@
                     <span>
                       {{ profile.tier }} plan ·
                       {{ profile.quota!.runsUsed }}/{{ profile.quota!.runsLimit }} runs ·
-                      {{ profile.quota!.costUsdUsed | currency: 'USD' : 'symbol' : '1.2-2' }} of
-                      {{ profile.quota!.costUsdLimit | currency: 'USD' : 'symbol' : '1.0-0' }} used
+                      {{ profile.quota!.creditsUsed | number }} of
+                      {{ profile.quota!.creditsLimit | number }} credits used
                     </span>
                   } @else if (profile.provisioned) {
                     <span class="phorma-cloud__account-warn">

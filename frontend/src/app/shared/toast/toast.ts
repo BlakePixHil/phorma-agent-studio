@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 
-import { ToastService, type ToastEntry } from './toast.service';
+import { ToastService, type ToastAction, type ToastEntry } from './toast.service';
 
 /**
  * Renders the stack of active toasts in the top-right corner of the viewport.
@@ -18,6 +18,12 @@ export class Toast {
 
   /** Id of the toast whose message was just copied (drives the ✓ feedback). */
   protected readonly copiedId = signal<number | null>(null);
+
+  /** Runs a toast's CTA and dismisses it (e.g. "Buy credits" → open the credits dialog). */
+  protected runAction(entry: ToastEntry, action: ToastAction): void {
+    this.toast.dismiss(entry.id);
+    action.onClick();
+  }
 
   /** Copies a toast's summary + detail to the clipboard (for sharing errors). */
   protected async copy(entry: ToastEntry): Promise<void> {

@@ -2,6 +2,12 @@ import { Injectable, signal } from '@angular/core';
 
 export type ToastSeverity = 'success' | 'warning' | 'error';
 
+/** An optional single action button rendered in the toast (e.g. "Buy credits"). */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastOptions {
   /** Short headline, e.g. "Function saved". */
   summary: string;
@@ -12,11 +18,14 @@ export interface ToastOptions {
   /** Override the auto-dismiss delay (ms). Success defaults to 3000;
    *  warning/error stay until dismissed. */
   life?: number;
+  /** Optional call-to-action button (e.g. deep-link to a fix/upsell). */
+  action?: ToastAction;
 }
 
-export interface ToastEntry extends Required<Omit<ToastOptions, 'detail'>> {
+export interface ToastEntry extends Required<Omit<ToastOptions, 'detail' | 'action'>> {
   id: number;
   detail?: string;
+  action?: ToastAction;
 }
 
 /**
@@ -44,6 +53,7 @@ export class ToastService {
       severity,
       // Success auto-dismisses; warnings/errors stay until dismissed.
       life: options.life ?? (severity === 'success' ? 3000 : 0),
+      action: options.action,
     };
     this.entriesState.update(items => [...items, entry]);
 
@@ -57,12 +67,12 @@ export class ToastService {
     this.show({ summary, detail, severity: 'success' });
   }
 
-  warning(summary: string, detail?: string): void {
-    this.show({ summary, detail, severity: 'warning' });
+  warning(summary: string, detail?: string, action?: ToastAction): void {
+    this.show({ summary, detail, severity: 'warning', action });
   }
 
-  error(summary: string, detail?: string): void {
-    this.show({ summary, detail, severity: 'error' });
+  error(summary: string, detail?: string, action?: ToastAction): void {
+    this.show({ summary, detail, severity: 'error', action });
   }
 
   dismiss(id: number): void {

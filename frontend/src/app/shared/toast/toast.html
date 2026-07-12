@@ -19,6 +19,11 @@
         @if (t.detail) {
           <p class="phorma-toast__detail">{{ t.detail }}</p>
         }
+        @if (t.action; as action) {
+          <button type="button" class="phorma-toast__cta" (click)="runAction(t, action)">
+            {{ action.label }}
+          </button>
+        }
       </div>
       <div class="phorma-toast__actions">
         @if (t.severity === 'error' || t.severity === 'warning') {

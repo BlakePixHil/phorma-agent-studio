@@ -303,6 +303,117 @@ pub async fn list_bedrock_inference_profiles(region: String) -> Result<Vec<Strin
     Ok(ids)
 }
 
+/// One entry in the OpenAI/OpenRouter `data` array (also used by Anthropic).
+#[derive(Deserialize)]
+struct ProviderModelEntry {
+    id: Option<String>,
+}
+
+/// One entry in the Google Gemini `models` array.
+#[derive(Deserialize)]
+struct GeminiModelEntry {
+    name: Option<String>,
+}
+
+/// Lists model ids available for a BYO provider (anthropic/openai/gemini/
+/// openrouter), authenticating with the stored API key. Powers the model
+/// picker's live dropdown so users pick real ids instead of guessing. The key
+/// never leaves Rust.
+///
+/// # Errors
+///
+/// Returns a user-facing error when no key is stored or the request fails.
+#[tauri::command]
+pub async fn list_provider_models(provider: String) -> Result<Vec<String>, String> {
+    let provider = provider.trim();
+    let key = read_secret_value(provider)?.ok_or_else(|| {
+        format!("No {provider} API key configured. Add one in Settings → API Keys.")
+    })?;
+
+    let client = reqwest::Client::new();
+    let (url, use_bearer, use_anthropic_version, is_gemini) = match provider {
+        "anthropic" => (
+            "https://api.anthropic.com/v1/models?limit=1000".to_owned(),
+            false,
+            true,
+            false,
+        ),
+        "openai" => ("https://api.openai.com/v1/models".to_owned(), true, false, false),
+        "openrouter" => (
+            "https://openrouter.ai/api/v1/models".to_owned(),
+            true,
+            false,
+            false,
+        ),
+        "gemini" => (
+            format!("https://generativelanguage.googleapis.com/v1beta/models?key={key}"),
+            false,
+            false,
+            true,
+        ),
+        _ => return Err(format!("Provider '{provider}' has no models endpoint.")),
+    };
+
+    let mut request = client.get(&url);
+    if use_bearer {
+        request = request.bearer_auth(&key);
+    }
+    if use_anthropic_version {
+        request = request
+            .header("x-api-key", &key)
+            .header("anthropic-version", "2023-06-01");
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach {provider}: {error}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        let trimmed: String = detail.chars().take(300).collect();
+        return Err(format!("{provider} models request failed ({status}): {trimmed}"));
+    }
+
+    let mut ids: Vec<String> = if is_gemini {
+        let parsed: GeminiModelsResponse = response
+            .json()
+            .await
+            .map_err(|error| format!("Could not parse the {provider} models response: {error}"))?;
+        parsed
+            .models
+            .into_iter()
+            .filter_map(|model| model.name)
+            // Strip the "models/" prefix Google prepends.
+            .map(|name| name.strip_prefix("models/").unwrap_or(&name).to_owned())
+            .collect()
+    } else {
+        let parsed: ProviderModelsResponse = response
+            .json()
+            .await
+            .map_err(|error| format!("Could not parse the {provider} models response: {error}"))?;
+        parsed.data.into_iter().filter_map(|model| model.id).collect()
+    };
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+/// OpenAI/OpenRouter/Anthropic models-list response shape.
+#[derive(Deserialize)]
+struct ProviderModelsResponse {
+    #[serde(default)]
+    data: Vec<ProviderModelEntry>,
+}
+
+/// Google Gemini models-list response shape.
+#[derive(Deserialize)]
+struct GeminiModelsResponse {
+    #[serde(default)]
+    models: Vec<GeminiModelEntry>,
+}
+
 /// Stores (or clears, when empty) a generic secret in the OS keychain.
 ///
 /// Used for MCP server env vars — the key must be `mcp:`-prefixed (e.g.

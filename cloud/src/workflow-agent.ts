@@ -23,7 +23,13 @@
 import { Agent, type Connection, type ConnectionContext } from 'agents';
 
 import { verifyBearer, verifyRequest, isHosted, type AuthContext } from './auth';
-import { TenantStore, tierLimits, type TenantEnv, type TenantRecord } from './tenants';
+import {
+  OPENROUTER_SLUG_PREFIX,
+  TenantStore,
+  tierLimits,
+  type TenantEnv,
+  type TenantRecord,
+} from './tenants';
 
 import {
   FetchModelClient,
@@ -116,21 +122,17 @@ const PROVIDER_ENV_KEYS: Record<ModelProviderId, keyof Env | null> = {
   openrouter: 'OPENROUTER_API_KEY',
   bedrock: 'BEDROCK_API_KEY',
   ollama: null,
+  // Phorma Cloud never resolves a key from env — the tenant runtime key is
+  // injected by the hosted inference path (DO trigger or /api/infer proxy).
+  'phorma-cloud': null,
 };
 
 /**
  * Hosted inference is OpenRouter-only: whatever provider a node declares is
  * mapped to the equivalent OpenRouter model slug and billed against the
- * tenant's provisioned (credit-limited) runtime key.
+ * tenant's provisioned (credit-limited) runtime key. `OPENROUTER_SLUG_PREFIX`
+ * is shared with the /api/infer proxy (see tenants.ts).
  */
-const OPENROUTER_SLUG_PREFIX: Record<ModelProviderId, string | null> = {
-  anthropic: 'anthropic/',
-  openai: 'openai/',
-  gemini: 'google/',
-  openrouter: '', // already a full slug
-  bedrock: null, // BYO-key only — hosted (OpenRouter) inference has no Bedrock path
-  ollama: null, // no hosted equivalent — rejected in hosted mode
-};
 
 export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   override initialState: WorkflowAgentState = {
@@ -321,7 +323,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       if (quota.costUsdUsed >= quota.limits.monthlyCostUsd) {
         return {
           ok: false,
-          error: 'Monthly inference budget exhausted. Resets next month or upgrade your plan.',
+          error: 'Monthly credits exhausted. Resets next month or upgrade your plan.',
           status: 402,
         };
       }
@@ -426,10 +428,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       if (prefix === null) {
         return `Agent "${node.name}" uses ${data.provider}, which is not available on Phorma Cloud. Pick a cloud model.`;
       }
-      if (data.provider !== 'openrouter') {
+      // openrouter + phorma-cloud already carry a full OpenRouter slug.
+      if (data.provider !== 'openrouter' && data.provider !== 'phorma-cloud') {
         data.model = `${prefix}${data.model}`;
-        data.provider = 'openrouter';
       }
+      data.provider = 'openrouter';
     }
     return mapped;
   }

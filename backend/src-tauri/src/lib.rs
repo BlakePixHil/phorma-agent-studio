@@ -36,6 +36,7 @@ pub fn run() {
             llm::has_provider_key,
             llm::list_bedrock_models,
             llm::list_bedrock_inference_profiles,
+            llm::list_provider_models,
             llm::set_secret,
             llm::has_secret,
             llm::llm_proxy_stream,

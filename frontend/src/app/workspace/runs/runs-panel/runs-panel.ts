@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 
 import { CloudService } from '../../../core/cloud.service';
+import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { RunControllerService, TraceEntry } from '../../../core/run-controller.service';
 import { TerminalOutputService } from '../../../core/terminal-output.service';
 import { ButtonModule } from 'primeng/button';
@@ -38,6 +39,7 @@ export class RunsPanel {
   protected readonly runController = inject(RunControllerService);
   protected readonly terminal = inject(TerminalOutputService);
   protected readonly cloud = inject(CloudService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   /** Trace entry ids the user has expanded. */
   protected readonly expanded = signal<ReadonlySet<number>>(new Set());
@@ -51,6 +53,18 @@ export class RunsPanel {
 
   /** Cumulative run usage (tokens + cost when the provider reports it). */
   protected readonly usage = this.runController.runUsage;
+
+  /**
+   * The run's cost expressed in abstract usage credits, shown only for runs
+   * that used Phorma Cloud (BYO runs keep the raw USD figure). Uses the
+   * tenant tier's burn rate; null when the run wasn't on Phorma Cloud or had
+   * no reported cost.
+   */
+  protected readonly usageCredits = computed(() => {
+    const u = this.usage();
+    if (!u.phormaCloud || u.costUsd <= 0) return null;
+    return Math.max(0, Math.round(u.costUsd * this.phormaCloud.creditsPerUsd()));
+  });
 
   /**
    * The trace, with consecutive tool-activity entries folded into containers.

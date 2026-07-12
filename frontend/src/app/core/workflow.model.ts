@@ -71,7 +71,10 @@ export type ModelProviderId =
   | 'gemini'
   | 'openrouter'
   | 'ollama'
-  | 'bedrock';
+  | 'bedrock'
+  // Routes inference through the Phorma Cloud proxy, billed against the
+  // tenant's subscription credits. Curated big-name models only.
+  | 'phorma-cloud';
 
 export const MODEL_PROVIDERS: { id: ModelProviderId; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
@@ -80,6 +83,7 @@ export const MODEL_PROVIDERS: { id: ModelProviderId; label: string }[] = [
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'bedrock', label: 'Amazon Bedrock' },
   { id: 'ollama', label: 'Ollama (local)' },
+  { id: 'phorma-cloud', label: 'Phorma Cloud' },
 ];
 
 /**
@@ -102,6 +106,15 @@ export const PROVIDER_MODEL_SUGGESTIONS: Record<ModelProviderId, string[]> = {
     'apac.amazon.nova-pro-v1:0',
   ],
   ollama: ['llama3.2', 'qwen3', 'mistral-small'],
+  // Phorma Cloud offers a curated set of big-name models, routed through
+  // OpenRouter on the tenant's credit-limited runtime key. These are full
+  // OpenRouter slugs and the ONLY models selectable for this provider.
+  'phorma-cloud': [
+    'openai/gpt-5.5',
+    'anthropic/claude-sonnet-5',
+    'anthropic/claude-opus-4.8',
+    'google/gemini-3.5-flash',
+  ],
 };
 
 /** Default AWS region for Amazon Bedrock when no region is configured. */

@@ -238,6 +238,27 @@
   }
 }
 
+.phorma-settings__subscribe {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--p-primary-color) 35%, transparent);
+  background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+}
+
+.phorma-settings__subscribe-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+
 /* ── Generic setting row: text left, control right ───────────────────────── */
 .phorma-settings__setting {
   display: flex;
@@ -646,6 +667,11 @@
       background: var(--p-orange-400, #fb923c);
     }
   }
+}
+
+.phorma-settings__buy-credits {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .phorma-settings__row--actions {
