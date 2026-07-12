@@ -1,10 +1,25 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 
 import { CloudService } from '../../../core/cloud.service';
-import { RunControllerService } from '../../../core/run-controller.service';
+import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { RunControllerService, TraceEntry } from '../../../core/run-controller.service';
 import { TerminalOutputService } from '../../../core/terminal-output.service';
 import { ButtonModule } from 'primeng/button';
+import { Textarea } from 'primeng/textarea';
+
+/**
+ * A run of consecutive tool-activity entries, folded into a single collapsible
+ * container. A `grouped` run holds > 1 tool entry; anything else (a lone tool
+ * call or a non-tool event) is rendered inline as a single entry.
+ */
+export interface TraceGroup {
+  /** Stable key for @for tracking. */
+  key: string;
+  /** True when this run should render as a collapsible container. */
+  grouped: boolean;
+  entries: TraceEntry[];
+}
 
 /**
  * The Runs panel (right side): task input, run controls, pending approvals,
@@ -16,7 +31,7 @@ import { ButtonModule } from 'primeng/button';
 @Component({
   selector: 'app-runs-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DatePipe, DecimalPipe, ButtonModule],
+  imports: [CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet, ButtonModule, Textarea],
   templateUrl: './runs-panel.html',
   styleUrl: './runs-panel.scss',
 })
@@ -24,12 +39,67 @@ export class RunsPanel {
   protected readonly runController = inject(RunControllerService);
   protected readonly terminal = inject(TerminalOutputService);
   protected readonly cloud = inject(CloudService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   /** Trace entry ids the user has expanded. */
   protected readonly expanded = signal<ReadonlySet<number>>(new Set());
 
+  /** Group keys the user has collapsed (groups start expanded). */
+  protected readonly collapsedGroups = signal<ReadonlySet<string>>(new Set());
+
+  /** Trace entry id whose payload was just copied (drives the green tick). */
+  protected readonly copiedId = signal<number | null>(null);
+  private copyTimer?: ReturnType<typeof setTimeout>;
+
   /** Cumulative run usage (tokens + cost when the provider reports it). */
   protected readonly usage = this.runController.runUsage;
+
+  /**
+   * The run's cost expressed in abstract usage credits, shown only for runs
+   * that used Phorma Cloud (BYO runs keep the raw USD figure). Uses the
+   * tenant tier's burn rate; null when the run wasn't on Phorma Cloud or had
+   * no reported cost.
+   */
+  protected readonly usageCredits = computed(() => {
+    const u = this.usage();
+    if (!u.phormaCloud || u.costUsd <= 0) return null;
+    return Math.max(0, Math.round(u.costUsd * this.phormaCloud.creditsPerUsd()));
+  });
+
+  /**
+   * The trace, with consecutive tool-activity entries folded into containers.
+   * A run of two or more tool entries becomes one collapsible group; single
+   * tool entries and every non-tool event render inline.
+   */
+  protected readonly traceGroups = computed<TraceGroup[]>(() => {
+    const groups: TraceGroup[] = [];
+    let bucket: TraceEntry[] | null = null;
+
+    for (const entry of this.runController.trace()) {
+      if (entry.kind === 'tool-call' || entry.kind === 'tool-result') {
+        if (!bucket) {
+          bucket = [];
+          groups.push({ key: `g${entry.id}`, grouped: true, entries: bucket });
+        }
+        bucket.push(entry);
+      } else {
+        bucket = null;
+        groups.push({ key: `e${entry.id}`, grouped: false, entries: [entry] });
+      }
+    }
+
+    return groups;
+  });
+
+  /**
+   * Logical tool-call count for a group's header. A call and its result are
+   * two entries but one step, so we count the calls (this lines up with the
+   * "max tool calls" setting). Falls back to entry count if calls are absent.
+   */
+  protected groupStepCount(group: TraceGroup): number {
+    const calls = group.entries.filter(entry => entry.kind === 'tool-call').length;
+    return calls || group.entries.length;
+  }
 
   protected onInput(event: Event): void {
     this.runController.runInput.set((event.target as HTMLTextAreaElement | null)?.value ?? '');
@@ -59,5 +129,45 @@ export class RunsPanel {
       else next.add(id);
       return next;
     });
+  }
+
+  protected isGroupCollapsed(key: string): boolean {
+    return this.collapsedGroups().has(key);
+  }
+
+  protected toggleGroup(key: string): void {
+    this.collapsedGroups.update(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  /** Copy an entry's payload to the clipboard and flash the green tick. */
+  protected async copyDetail(entry: TraceEntry, event: Event): Promise<void> {
+    event.stopPropagation();
+    if (!entry.detail) return;
+
+    try {
+      await navigator.clipboard.writeText(entry.detail);
+    } catch {
+      // Fallback for insecure contexts where the async clipboard is blocked.
+      const textarea = document.createElement('textarea');
+      textarea.value = entry.detail;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+
+    this.copiedId.set(entry.id);
+    clearTimeout(this.copyTimer);
+    this.copyTimer = setTimeout(() => this.copiedId.set(null), 1500);
   }
 }

@@ -28,7 +28,20 @@ export interface TenantEnv {
 // ── Tiers ────────────────────────────────────────────────────────────────────
 
 export interface TierLimits {
-  /** Monthly inference budget (USD) — mirrored into the OpenRouter key limit. */
+  /**
+   * Monthly usage-credit allowance shown to the user — the ONLY billing unit
+   * the UI ever displays. Deliberately a round marketing number that is
+   * decoupled from the real inference cost so the underlying spend (and our
+   * margin) stays abstract. Higher tiers include a volume bonus: a credit
+   * buys progressively more real inference as the tier climbs.
+   */
+  monthlyCredits: number;
+  /**
+   * Monthly inference budget (USD) — the real spend cap, mirrored into the
+   * OpenRouter key limit. NEVER surfaced to the user; `monthlyCredits` is the
+   * public face of this number. The per-tier ratio of credits→USD is the
+   * "burn rate" (higher tiers burn slower = the volume bonus).
+   */
   monthlyCostUsd: number;
   /** Monthly run count cap. */
   monthlyRuns: number;
@@ -38,14 +51,45 @@ export interface TierLimits {
   schedulesPerWorkflow: number;
 }
 
+// Base rate: 125 credits ≈ $1 of real inference ($0.008/credit) with NO bonus
+// (starter). Higher tiers keep round credit numbers but a larger USD budget,
+// so each credit buys more real inference — the volume bonus. The USD budget
+// is deliberately set to ~20% of price (was ~40%) to target a 75-80% gross
+// margin on the AI spend line — the only real cost, since Cloudflare infra
+// (DO duration/requests + D1 + KV) runs at a small fraction of a cent per run
+// and is not a meaningful lever. Prices (margin reference, enforced once
+// billing lands): starter $20 (80%), plus $40 (79.6%, +2% bonus), pro $60
+// (79%, +5%), team $200 (78%, +10%). Credit numbers are UNCHANGED by this —
+// only the internal budget moved, which is the point of the abstraction.
 export const TIERS: Record<string, TierLimits> = {
-  starter: { monthlyCostUsd: 8, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1 },
-  pro: { monthlyCostUsd: 25, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5 },
-  team: { monthlyCostUsd: 90, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20 },
+  starter: { monthlyCredits: 1000, monthlyCostUsd: 4, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1 },
+  plus: { monthlyCredits: 2000, monthlyCostUsd: 8.16, monthlyRuns: 1000, concurrentRuns: 2, schedulesPerWorkflow: 3 },
+  pro: { monthlyCredits: 3000, monthlyCostUsd: 12.6, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5 },
+  team: { monthlyCredits: 10000, monthlyCostUsd: 44, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20 },
 };
 
 export function tierLimits(tier: string): TierLimits {
   return TIERS[tier] ?? TIERS['starter'];
+}
+
+/**
+ * Converts a real USD inference cost into the tier's display credits. Uses the
+ * tier's own credits↔USD ratio so the volume bonus is applied automatically:
+ * `credits = round(costUsd / monthlyCostUsd * monthlyCredits)`. Result is
+ * clamped at 0. This is the ONLY function that turns dollars into the number
+ * the user sees.
+ */
+export function creditsForTier(tier: string, costUsd: number): number {
+  const limits = tierLimits(tier);
+  if (limits.monthlyCostUsd <= 0) return 0;
+  return Math.max(0, Math.round((costUsd / limits.monthlyCostUsd) * limits.monthlyCredits));
+}
+
+/** Credits earned per USD of real inference for a tier (the inverse burn rate). */
+export function creditsPerUsd(tier: string): number {
+  const limits = tierLimits(tier);
+  if (limits.monthlyCostUsd <= 0) return 0;
+  return limits.monthlyCredits / limits.monthlyCostUsd;
 }
 
 // ── Records ──────────────────────────────────────────────────────────────────
@@ -202,9 +246,19 @@ export class TenantStore {
     tokensIn: number;
     tokensOut: number;
     durationMs?: number;
+    /**
+     * Whether this bumps the monthly `runs_used` count. True for a deployed
+     * workflow execution (the "runs" quota is a per-workflow-run concept).
+     * FALSE for local-run `/api/infer` inference calls — those consume
+     * credits (cost) but must NOT inflate the run count, otherwise every
+     * agent node × tool-call round in a local debug run would each count as a
+     * "run". Defaults to true. Cost is always metered regardless.
+     */
+    countsAsRun?: boolean;
   }): Promise<void> {
     const month = currentMonth();
     const now = new Date().toISOString();
+    const runIncrement = entry.countsAsRun === false ? 0 : 1;
     await this.db.batch([
       this.db
         .prepare(
@@ -225,12 +279,12 @@ export class TenantStore {
       this.db
         .prepare(
           `INSERT INTO quotas (tenant_id, month, runs_used, cost_usd_used)
-           VALUES (?, ?, 1, ?)
+           VALUES (?, ?, ?, ?)
            ON CONFLICT(tenant_id, month) DO UPDATE SET
-             runs_used = quotas.runs_used + 1,
+             runs_used = quotas.runs_used + excluded.runs_used,
              cost_usd_used = quotas.cost_usd_used + excluded.cost_usd_used`,
         )
-        .bind(entry.tenantId, month, entry.costUsd),
+        .bind(entry.tenantId, month, runIncrement, entry.costUsd),
     ]);
     await this.env.TENANTS?.delete(`quota:${entry.tenantId}:${month}`);
   }
@@ -246,6 +300,84 @@ export class TenantStore {
       return null;
     }
   }
+}
+
+// ── Hosted inference mapping (shared by the DO + the /api/infer proxy) ───────
+
+/**
+ * Maps a node's declared provider to the OpenRouter model-slug prefix. Hosted
+ * inference is OpenRouter-only: whatever provider a node declares is rewritten
+ * to the equivalent OpenRouter slug and billed against the tenant's runtime
+ * key. `null` means the provider has no hosted equivalent (rejected).
+ *
+ * `phorma-cloud` nodes already store a full OpenRouter slug as their model id
+ * (the curated big-name set), so they map with an empty prefix.
+ */
+export const OPENROUTER_SLUG_PREFIX: Record<string, string | null> = {
+  anthropic: 'anthropic/',
+  openai: 'openai/',
+  gemini: 'google/',
+  openrouter: '', // already a full slug
+  'phorma-cloud': '', // already a full OpenRouter slug (curated)
+  bedrock: null, // BYO-key only — hosted (OpenRouter) inference has no Bedrock path
+  ollama: null, // no hosted equivalent — rejected in hosted mode
+};
+
+/**
+ * Rewrites a provider/model pair to its OpenRouter equivalent. Returns the
+ * mapped `{ provider: 'openrouter', model }` or an error string when the
+ * provider can't be hosted (Ollama/Bedrock).
+ */
+export function toOpenRouterModel(
+  provider: string,
+  model: string,
+): { provider: 'openrouter'; model: string } | string {
+  const prefix = OPENROUTER_SLUG_PREFIX[provider];
+  if (prefix === null) {
+    return `Provider "${provider}" is not available on Phorma Cloud. Pick a cloud model.`;
+  }
+  return { provider: 'openrouter', model: provider === 'openrouter' || provider === 'phorma-cloud' ? model : `${prefix}${model}` };
+}
+
+/**
+ * Pre-flight quota + subscription gate for a hosted inference call. Returns
+ * the decrypted OpenRouter runtime key on success, or a `{ status, error }`
+ * response body for the caller to return directly. Mirrors the checks in
+ * `WorkflowAgent.trigger()` so local-run proxy calls and deployed-workflow
+ * triggers share identical gating.
+ */
+export async function resolveHostedInference(
+  store: TenantStore,
+  tenantId: string,
+): Promise<{ key: string } | { status: number; error: string }> {
+  const tenant = await store.getTenant(tenantId);
+  if (!tenant || tenant.status !== 'active') {
+    return {
+      status: 402,
+      error: 'No active Phorma Cloud subscription. Visit Settings → Cloud to subscribe.',
+    };
+  }
+  const quota = await store.getQuota(tenant.id, tenant.tier);
+  if (quota.runsUsed >= quota.limits.monthlyRuns) {
+    return {
+      status: 429,
+      error: `Monthly run limit reached (${quota.limits.monthlyRuns}). Resets next month or upgrade your plan.`,
+    };
+  }
+  if (quota.costUsdUsed >= quota.limits.monthlyCostUsd) {
+    return {
+      status: 402,
+      error: 'Monthly credits exhausted. Resets next month or upgrade your plan.',
+    };
+  }
+  const key = await store.runtimeKey(tenant);
+  if (!key) {
+    return {
+      status: 402,
+      error: 'Your Phorma Cloud account has no runtime key yet. Contact support.',
+    };
+  }
+  return { key };
 }
 
 // ── OpenRouter key provisioning ──────────────────────────────────────────────

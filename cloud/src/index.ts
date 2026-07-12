@@ -43,7 +43,7 @@ function corsHeaders(env: Env, request: Request): Record<string, string> {
 const AGENT_PATH_PREFIX = '/agents/workflow-agent/';
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const cors = corsHeaders(env, request);
 
     // CORS preflight for the studio (Tauri webview / localhost dev).
@@ -56,7 +56,7 @@ export default {
     if (releaseResponse) return releaseResponse;
 
     // Control-plane routes (hosted mode).
-    const apiResponse = await handleApiRequest(request, env as ApiEnv, cors);
+    const apiResponse = await handleApiRequest(request, env as ApiEnv, cors, ctx);
     if (apiResponse) return apiResponse;
 
     // Hosted mode: authenticate at the edge and rewrite the instance name to

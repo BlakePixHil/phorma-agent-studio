@@ -9,7 +9,18 @@ import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowService } from './workflow.service';
 import { ToastService } from '../shared/toast/toast.service';
+import { CreditsDialogService } from '../workspace/cloud/credits-dialog.service';
+import { PhormaCloudService } from './phorma-cloud.service';
 import { portBaseId } from './workflow.model';
+
+/**
+ * Matches the "Monthly credits exhausted" 402 surfaced by the Phorma Cloud
+ * proxy (`resolveHostedInference` in `cloud/src/tenants.ts`), wrapped by
+ * `PhormaCloudModelClient` as `Phorma Cloud request failed (402): ...`. Used
+ * to add a "Buy credits" CTA to the run-failed toast at the exact moment a
+ * user hits the wall, rather than making them dig through Settings.
+ */
+const CREDITS_EXHAUSTED_PATTERN = /credits exhausted/i;
 
 /** One entry in the Runs panel trace timeline. */
 export interface TraceEntry {
@@ -20,6 +31,12 @@ export interface TraceEntry {
   /** Expandable payload (markdown/plain text). */
   detail?: string;
   tone: 'info' | 'success' | 'warning' | 'error';
+  /**
+   * Classification used by the Runs panel to group consecutive tool activity
+   * into a single container. A tool call and its result are distinct entries
+   * but count as one logical step in the group header.
+   */
+  kind: 'tool-call' | 'tool-result' | 'event';
 }
 
 /** A pending human approval, surfaced in the Runs panel. */
@@ -62,6 +79,8 @@ export class RunControllerService {
   private readonly agentStream = inject(AgentStreamService);
   private readonly toolHost = inject(ToolHostService);
   private readonly toast = inject(ToastService);
+  private readonly creditsDialog = inject(CreditsDialogService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -97,10 +116,11 @@ export class RunControllerService {
    * events (one per model round). `costUsd` is only reported by providers
    * with usage accounting (OpenRouter) — tokens are available more broadly.
    */
-  readonly runUsage = signal<{ inputTokens: number; outputTokens: number; costUsd: number }>({
+  readonly runUsage = signal<{ inputTokens: number; outputTokens: number; costUsd: number; phormaCloud: boolean }>({
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
+    phormaCloud: false,
   });
 
   /**
@@ -152,6 +172,7 @@ export class RunControllerService {
       input: this.runInput().trim(),
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
+      bedrockRegion: this.settings.bedrockRegion(),
       defaultModel: {
         provider: this.settings.defaultProvider(),
         model: this.settings.defaultModel(),
@@ -244,7 +265,7 @@ export class RunControllerService {
         // A new run dumps any prior thinking text (per the persistence rule:
         // thinking survives until node removal OR a restart).
         this.nodeThinking.set(new Map());
-        this.runUsage.set({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
+        this.runUsage.set({ inputTokens: 0, outputTokens: 0, costUsd: 0, phormaCloud: false });
         break;
 
       case 'node-started':
@@ -268,6 +289,9 @@ export class RunControllerService {
           inputTokens: current.inputTokens + (event.usage.inputTokens ?? 0),
           outputTokens: current.outputTokens + (event.usage.outputTokens ?? 0),
           costUsd: current.costUsd + (event.usage.costUsd ?? 0),
+          // Once any round runs on Phorma Cloud, the run's cost is shown in
+          // abstract credits rather than dollars.
+          phormaCloud: current.phormaCloud || event.provider === 'phorma-cloud',
         }));
         break;
 
@@ -309,7 +333,7 @@ export class RunControllerService {
         if (edge) this.pulseEdge(edge);
         if (event.toolNodeId) this.setNodeState(event.toolNodeId, 'thinking');
         this.console('tools', 'info', `${this.nodeName(event.nodeId)} → ${event.name}(${truncateArgs(event.arguments)})`);
-        this.pushTrace('ti ti-tool', `Tool call: ${event.name}`, event.arguments, 'info');
+        this.pushTrace('ti ti-tool', `Tool call: ${event.name}`, event.arguments, 'info', 'tool-call');
         break;
       }
 
@@ -321,6 +345,7 @@ export class RunControllerService {
           `Tool ${event.isError ? 'error' : 'result'}: ${event.name}`,
           event.result,
           event.isError ? 'error' : 'success',
+          'tool-result',
         );
         break;
 
@@ -383,6 +408,16 @@ export class RunControllerService {
         this.terminal.setPhase('failed');
         this.console('problems', 'error', event.error);
         this.pushTrace('ti ti-flag-x', 'Run failed', event.error, 'error');
+        // Catch the exact moment a Phorma Cloud tenant runs out of credits —
+        // surface a "Buy credits" CTA right on a toast instead of making them
+        // dig through Settings to find the top-up option. Other failures keep
+        // the existing console/trace-only behavior (no generic toast).
+        if (CREDITS_EXHAUSTED_PATTERN.test(event.error)) {
+          this.toast.error('Monthly credits exhausted', 'Resets next month, or top up now.', {
+            label: 'Buy credits',
+            onClick: () => this.creditsDialog.open(),
+          });
+        }
         this.finishRun();
         break;
 
@@ -479,12 +514,18 @@ export class RunControllerService {
     );
   }
 
-  private pushTrace(icon: string, label: string, detail: string | undefined, tone: TraceEntry['tone']): void {
+  private pushTrace(
+    icon: string,
+    label: string,
+    detail: string | undefined,
+    tone: TraceEntry['tone'],
+    kind: TraceEntry['kind'] = 'event',
+  ): void {
     this.traceCounter += 1;
     this.trace.update(entries => {
       const next = [
         ...entries,
-        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone },
+        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone, kind },
       ];
       return next.length > MAX_TRACE_ENTRIES ? next.slice(next.length - MAX_TRACE_ENTRIES) : next;
     });
@@ -539,5 +580,12 @@ export class RunControllerService {
     this.agentStream.clearAll();
     for (const approval of this.pendingApprovals()) approval.resolve(false);
     this.pendingApprovals.set([]);
+    // If the run spent Phorma Cloud credits, pull a fresh quota so the account
+    // chip / Settings bar reflect the new balance without waiting for the next
+    // dialog open. Backend metering settles via waitUntil, so a short delay
+    // lets the D1 ledger write land before we re-read /api/me.
+    if (this.runUsage().phormaCloud) {
+      setTimeout(() => void this.phormaCloud.refresh(), 1500);
+    }
   }
 }

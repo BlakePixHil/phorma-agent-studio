@@ -51,6 +51,11 @@ export interface RunOptions {
   /** Ollama server override, forwarded to model requests. */
   ollamaBaseUrl?: string;
   /**
+   * Default AWS region for Amazon Bedrock agents that don't specify their own
+   * region. Individual agent nodes can override this per model.
+   */
+  bedrockRegion?: string;
+  /**
    * Application default model. Agents without an explicit provider/model
    * inherit this at execution time. When omitted, agents lacking a model
    * fail with a descriptive error.
@@ -255,8 +260,10 @@ class WorkflowRun {
   private async runAgent(node: WorkflowNode, payload: string): Promise<string> {
     const data = node.data as {
       prompt: string;
-      provider?: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
+      provider?: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama' | 'bedrock';
       model?: string;
+      /** Per-node AWS region override for Amazon Bedrock agents. */
+      region?: string;
       temperature?: number;
       maxTokens?: number;
     };
@@ -300,6 +307,8 @@ class WorkflowRun {
         temperature,
         maxTokens: data.maxTokens,
         ollamaBaseUrl: this.options.ollamaBaseUrl,
+        // Per-node region wins; otherwise the run's default Bedrock region.
+        bedrockRegion: data.region ?? this.options.bedrockRegion,
       })) {
         if (this.gate.stopped) throw new RunStoppedError();
         if (chunk.type === 'text') {
@@ -316,6 +325,7 @@ class WorkflowRun {
             type: 'node-usage',
             runId: this.options.runId,
             nodeId: node.id,
+            provider,
             usage: chunk.usage,
             at: Date.now(),
           });

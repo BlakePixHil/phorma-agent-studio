@@ -21,7 +21,17 @@ export interface WorkflowPort {
   role: PortRole;
 }
 
-export type ModelProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
+export type ModelProviderId =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'openrouter'
+  | 'ollama'
+  | 'bedrock'
+  // Routes inference through the Phorma Cloud proxy (POST /api/infer),
+  // billed against the tenant's credit-limited OpenRouter key. The model id
+  // is already a full OpenRouter slug (curated big-name models only).
+  | 'phorma-cloud';
 
 export interface AgentNodeData {
   /** Markdown system prompt. `{{input}}` interpolates the incoming task. */

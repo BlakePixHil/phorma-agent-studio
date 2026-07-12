@@ -26,7 +26,7 @@
 }
 
 .phorma-runs__label {
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -49,22 +49,8 @@
 
 .phorma-runs__input {
   resize: vertical;
-  padding: 0.5rem 0.6rem;
-  border-radius: 0.6rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   line-height: 1.5;
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
-  }
-
-  &:disabled {
-    opacity: 0.6;
-  }
 }
 
 .phorma-runs__controls {
@@ -82,7 +68,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.72rem;
+  font-size: 0.77rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -115,7 +101,7 @@
 
 .phorma-runs__phase {
   margin-left: auto;
-  font-size: 0.64rem;
+  font-size: 0.69rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -127,11 +113,11 @@
   align-items: center;
   gap: 0.35rem;
   margin-top: 0.4rem;
-  font-size: 0.68rem;
+  font-size: 0.73rem;
   color: var(--p-text-muted-color);
 
   i {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
   }
 }
 
@@ -155,7 +141,7 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.78rem;
+    font-size: 0.83rem;
 
     i {
       color: var(--phorma-port-tools, #fbbf24);
@@ -165,7 +151,7 @@
 
 .phorma-runs__approval-message {
   margin: 0;
-  font-size: 0.73rem;
+  font-size: 0.78rem;
   color: var(--p-text-muted-color);
 }
 
@@ -209,7 +195,7 @@
 
   i {
     flex-shrink: 0;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     color: var(--entry-color);
   }
 
@@ -225,7 +211,7 @@
 .phorma-runs__entry-label {
   flex: 1;
   min-width: 0;
-  font-size: 0.73rem;
+  font-size: 0.78rem;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -234,18 +220,124 @@
 
 .phorma-runs__entry-time {
   flex-shrink: 0;
-  font-size: 0.62rem;
+  font-size: 0.66rem;
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
 }
 
-.phorma-runs__payload {
+/* ── Grouped tool activity ──────────────────────────────────────────────── */
+.phorma-runs__group {
+  border-radius: 0.55rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  overflow: hidden;
+}
+
+.phorma-runs__group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--p-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  }
+}
+
+.phorma-runs__group-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-runs__group-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.phorma-runs__group-count {
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  color: var(--p-text-muted-color);
+}
+
+.phorma-runs__group-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-runs__group-entries {
+  margin: 0;
+  padding: 0.1rem 0.3rem 0.3rem;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border-top: 1px solid var(--phorma-card-border);
+}
+
+/* ── Expandable payload + copy button ───────────────────────────────────── */
+.phorma-runs__payload-wrap {
+  position: relative;
   margin: 0.15rem 0 0.35rem 1.7rem;
+}
+
+.phorma-runs__copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--p-content-background, #18191e) 85%, transparent);
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+  i {
+    font-size: 0.85rem;
+  }
+
+  &:hover {
+    opacity: 1;
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+  }
+
+  &--done {
+    opacity: 1;
+    color: var(--phorma-accent-green, #34d399);
+    border-color: color-mix(in srgb, var(--phorma-accent-green, #34d399) 55%, transparent);
+  }
+}
+
+.phorma-runs__payload {
+  margin: 0;
   padding: 0.45rem 0.55rem;
+  padding-right: 2.1rem;
   border-radius: 0.5rem;
   background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.68rem;
+  font-size: 0.74rem;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -253,9 +345,14 @@
   overflow-y: auto;
 }
 
+/* The approval payload keeps the original inset since it has no copy button. */
+.phorma-runs__approval .phorma-runs__payload {
+  padding-right: 0.55rem;
+}
+
 .phorma-runs__empty {
   margin: 0.6rem 0 0;
   text-align: center;
-  font-size: 0.73rem;
+  font-size: 0.78rem;
   color: var(--p-text-muted-color);
 }

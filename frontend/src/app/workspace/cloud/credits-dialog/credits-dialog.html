@@ -1,0 +1,64 @@
+@if (dialog.visible()) {
+  <div class="phorma-credits" role="presentation" (click)="dialog.close()">
+    <section
+      class="phorma-credits__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Buy credits"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-credits__header">
+        <span class="phorma-credits__icon">
+          <i class="ti ti-coin" aria-hidden="true"></i>
+        </span>
+        <div>
+          <h2>Buy more credits</h2>
+          @if (phormaCloud.profile()?.quota; as quota) {
+            <p>
+              {{ quota.creditsUsed | number }} / {{ quota.creditsLimit | number }} credits used
+              this month. Top up to keep running without waiting for reset.
+            </p>
+          } @else {
+            <p>Top up your Phorma Cloud credits to keep running without waiting for reset.</p>
+          }
+        </div>
+      </header>
+
+      <div class="phorma-credits__body">
+        <div class="phorma-credits__packs">
+          @for (pack of packs; track pack.id) {
+            <div class="phorma-credits__pack">
+              <span class="phorma-credits__pack-label">{{ pack.label }}</span>
+              <span class="phorma-credits__pack-credits">{{ pack.credits | number }} credits</span>
+              <span class="phorma-credits__pack-price">${{ pack.priceUsd }}</span>
+              <p-button
+                styleClass="phorma-credits__btn"
+                [outlined]="true"
+                [disabled]="true"
+                size="small"
+                label="Coming soon"
+                pTooltip="Credit top-ups aren't available yet — check back soon."
+                tooltipPosition="top"
+              />
+            </div>
+          }
+        </div>
+        <p class="phorma-credits__note">
+          <i class="ti ti-info-circle" aria-hidden="true"></i>
+          Need credits every month? Upgrading your plan is the better deal for sustained usage.
+        </p>
+      </div>
+
+      <footer class="phorma-credits__actions">
+        <p-button
+          styleClass="phorma-credits__btn"
+          [text]="true"
+          severity="secondary"
+          size="small"
+          label="Close"
+          (onClick)="dialog.close()"
+        />
+      </footer>
+    </section>
+  </div>
+}

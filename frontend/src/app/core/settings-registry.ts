@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 
 import { CanvasStateService, MINIMAP_ANCHORS, type MinimapAnchor } from './canvas-state.service';
+import { BEDROCK_REGIONS } from './workflow.model';
 import { SettingsService } from './settings.service';
 import { ThemeService, type ThemeMode } from './theme.service';
 import { OnboardingService } from '../workspace/onboarding/onboarding.service';
@@ -71,6 +72,12 @@ export interface SettingsSectionDef {
   customTemplate?: SettingsCustomTemplate;
   /** Search terms for custom-template sections that carry no descriptors. */
   keywords?: string[];
+  /**
+   * Optional visibility predicate. When present and it returns false, the
+   * section is hidden (e.g. provider-specific config shown only for the
+   * chosen provider). Reads signals, so it reacts to setting changes.
+   */
+  visible?: () => boolean;
 }
 
 export interface SettingsPageDef {
@@ -279,6 +286,8 @@ export class SettingsRegistryService {
         {
           id: 'ollama',
           label: 'Ollama',
+          // Shown only when Ollama is the chosen application default provider.
+          visible: () => this.settings.defaultProvider() === 'ollama',
           settings: [
             {
               id: 'ollama-base-url',
@@ -288,6 +297,27 @@ export class SettingsRegistryService {
               control: { type: 'text', placeholder: 'http://localhost:11434' },
               get: () => this.settings.ollamaBaseUrl(),
               set: value => this.settings.setOllamaBaseUrl(String(value ?? '')),
+            },
+          ],
+        },
+        {
+          id: 'bedrock',
+          label: 'Amazon Bedrock',
+          // Shown only when Amazon Bedrock is the chosen application default.
+          visible: () => this.settings.defaultProvider() === 'bedrock',
+          settings: [
+            {
+              id: 'bedrock-region',
+              label: 'Default AWS region',
+              description:
+                'Region used for Bedrock agents that don’t set their own. Individual agents can override this, so a workflow can mix models from different regions. Set your Bedrock API key under API Keys.',
+              keywords: ['bedrock', 'aws', 'amazon', 'region', 'endpoint'],
+              control: {
+                type: 'select',
+                options: BEDROCK_REGIONS.map(region => ({ value: region, label: region })),
+              },
+              get: () => this.settings.bedrockRegion(),
+              set: value => this.settings.setBedrockRegion(String(value ?? '')),
             },
           ],
         },

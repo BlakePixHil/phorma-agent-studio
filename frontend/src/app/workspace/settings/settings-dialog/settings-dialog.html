@@ -63,7 +63,7 @@
               <p class="phorma-settings__page-lede">{{ page.description }}</p>
             }
 
-            @for (section of page.sections; track section.id) {
+            @for (section of visibleSections(page); track section.id) {
               <section class="phorma-settings__section">
                 @if (section.label) {
                   <h4 class="phorma-settings__heading">{{ section.label }}</h4>
@@ -248,7 +248,7 @@
                       <span class="phorma-settings__row-label">Provider</span>
                       <p-select
                         class="phorma-settings__provider-select"
-                        [options]="providers"
+                        [options]="providers()"
                         optionLabel="label"
                         optionValue="id"
                         [ngModel]="settings.defaultProvider()"
@@ -257,27 +257,78 @@
                         appendTo="body"
                         ariaLabel="Default model provider"
                       />
-                      <input
-                        type="text"
-                        class="phorma-settings__input phorma-settings__input--mono"
-                        [value]="settings.defaultModel()"
-                        (input)="onDefaultModelInput($event)"
-                        placeholder="model id"
-                        aria-label="Default model id"
-                      />
-                    </div>
-                    <div class="phorma-settings__chips">
-                      @for (model of defaultModelSuggestions(); track model) {
-                        <button
-                          type="button"
-                          class="phorma-settings__chip"
-                          [class.phorma-settings__chip--active]="model === settings.defaultModel()"
-                          (click)="pickDefaultModel(model)"
-                        >
-                          {{ model }}
-                        </button>
+                      @if (!needsPhormaCloudSubscription()) {
+                        @if (showModelDropdown()) {
+                          <p-select
+                            class="phorma-settings__model-select"
+                            [options]="defaultModelSuggestions()"
+                            [editable]="isPhormaCloud() ? false : true"
+                            [ngModel]="settings.defaultModel()"
+                            (ngModelChange)="onDefaultModelChange($event)"
+                            size="small"
+                            appendTo="body"
+                            placeholder="model id"
+                            ariaLabel="Default model id"
+                          />
+                        } @else {
+                          <input
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--mono phorma-settings__model-select"
+                            [value]="settings.defaultModel()"
+                            (input)="onDefaultModelInput($event)"
+                            placeholder="e.g. anthropic.claude-sonnet-4-6-v1"
+                            aria-label="Default model id"
+                          />
+                        }
                       }
                     </div>
+                    @if (needsPhormaCloudSubscription()) {
+                      <div class="phorma-settings__subscribe">
+                        <p class="phorma-settings__subscribe-title">
+                          <i class="ti ti-cloud" aria-hidden="true"></i>
+                          Subscribe to Phorma Cloud
+                        </p>
+                        <p class="phorma-settings__note">
+                          Run agents on Phorma Cloud credits — no API keys, no setup. Subscribe to
+                          pick from curated top models and have runs billed to your plan.
+                        </p>
+                        <p-button
+                          styleClass="phorma-settings__btn"
+                          size="small"
+                          label="Subscribe"
+                          (onClick)="openSubscribe()"
+                        />
+                      </div>
+                    }
+                    @if (loadingBedrockModels()) {
+                      <p class="phorma-settings__note">Loading Amazon Bedrock models…</p>
+                    }
+                    @if (loadingModels()) {
+                      <p class="phorma-settings__note">Loading models…</p>
+                    }
+                    @if (isPhormaCloud() && phormaCloud.subscribed()) {
+                      <p class="phorma-settings__note">
+                        Phorma Cloud runs on your subscription credits — no API key needed.
+                        Usage counts against your monthly credits.
+                      </p>
+                    }
+                    @if (bedrockWarning(); as warn) {
+                      <div class="phorma-settings__inline-warning" role="status">
+                        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                        <span class="phorma-settings__inline-warning-text">
+                          Couldn’t load Amazon Bedrock models — enter a model id manually.
+                          {{ warn }}
+                        </span>
+                        <button
+                          type="button"
+                          class="phorma-settings__inline-warning-close"
+                          (click)="dismissBedrockWarning()"
+                          aria-label="Dismiss warning"
+                        >
+                          <i class="ti ti-x" aria-hidden="true"></i>
+                        </button>
+                      </div>
+                    }
                     <div class="phorma-settings__setting">
                       <div class="phorma-settings__setting-text">
                         <label class="phorma-settings__setting-label" for="default-temperature">
@@ -490,18 +541,28 @@
                                   <span [style.width.%]="(phormaCloud.runsFraction() ?? 0) * 100"></span>
                                 </div>
                                 <div class="phorma-settings__quota-row">
-                                  <span>AI budget</span>
+                                  <span>Credits</span>
                                   <span>
-                                    {{ quota.costUsdUsed | currency: 'USD' : 'symbol' : '1.2-2' }} /
-                                    {{ quota.costUsdLimit | currency: 'USD' : 'symbol' : '1.0-0' }}
+                                    {{ quota.creditsUsed | number }} /
+                                    {{ quota.creditsLimit | number }}
                                   </span>
                                 </div>
                                 <div class="phorma-settings__quota-bar">
                                   <span
-                                    [style.width.%]="(phormaCloud.costFraction() ?? 0) * 100"
-                                    [class.phorma-settings__quota-fill--warn]="(phormaCloud.costFraction() ?? 0) > 0.85"
+                                    [style.width.%]="(phormaCloud.creditsFraction() ?? 0) * 100"
+                                    [class.phorma-settings__quota-fill--warn]="(phormaCloud.creditsFraction() ?? 0) > 0.85"
                                   ></span>
                                 </div>
+                                @if (phormaCloud.lowOnCredits()) {
+                                  <p-button
+                                    styleClass="phorma-settings__btn phorma-settings__buy-credits"
+                                    [outlined]="true"
+                                    size="small"
+                                    icon="ti ti-coin"
+                                    label="Buy more credits"
+                                    (onClick)="openBuyCredits()"
+                                  />
+                                }
                               </div>
                             }
                           </div>
@@ -519,23 +580,6 @@
                             (onClick)="phormaCloud.signIn()"
                           />
                         }
-
-                        <div class="phorma-settings__endpoint">
-                          <span class="phorma-settings__endpoint-url" [pTooltip]="cloud.phormaCloudUrl()" tooltipPosition="top">
-                            {{ cloud.phormaCloudUrl() }}
-                          </span>
-                          <p-button
-                            styleClass="phorma-settings__btn"
-                            [text]="true"
-                            severity="secondary"
-                            size="small"
-                            icon="ti ti-refresh-alert"
-                            label="Reset endpoint"
-                            pTooltip="Stuck on 'Load failed'? Resets the Phorma Cloud URL to the current default and retries."
-                            tooltipPosition="top"
-                            (onClick)="resetPhormaCloudUrl()"
-                          />
-                        </div>
                       }
 
                       @if (settings.cloudProvider() === 'cloudflare') {

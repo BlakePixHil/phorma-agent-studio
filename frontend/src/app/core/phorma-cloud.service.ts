@@ -1,9 +1,10 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import { CloudService } from './cloud.service';
+import { PHORMA_CLOUD_DEFAULT_URL } from './cloud.service';
+import { loadLayout } from './layout-storage';
 
 /** Profile + quota returned by the hosted control plane's `GET /api/me`. */
 export interface PhormaCloudProfile {
@@ -15,9 +16,49 @@ export interface PhormaCloudProfile {
     month: string;
     runsUsed: number;
     runsLimit: number;
+    /** Usage credits consumed this month — the only billing unit the UI shows. */
+    creditsUsed: number;
+    /** Monthly usage-credit allowance for the tier. */
+    creditsLimit: number;
+    /** Internal USD spend (analytics only — never displayed to the user). */
     costUsdUsed: number;
+    /** Internal USD budget cap (analytics only — never displayed to the user). */
     costUsdLimit: number;
   } | null;
+}
+
+/**
+ * Monthly credit allowance per tier — MUST mirror `monthlyCredits` in
+ * `cloud/src/tenants.ts` TIERS. Used only as a fallback when the deployed
+ * worker predates the credits fields in `/api/me` (returns costUsd* but no
+ * credits*); once the worker is redeployed this map is never consulted.
+ */
+const TIER_MONTHLY_CREDITS: Record<string, number> = {
+  starter: 1000,
+  plus: 2000,
+  pro: 3000,
+  team: 10000,
+};
+
+/**
+ * Backfills `creditsUsed`/`creditsLimit` on a `/api/me` payload when a stale
+ * worker omits them, deriving credits from the USD fields + the known tier
+ * allowance (`credits = costUsd / costUsdLimit * creditsLimit`). No-ops when
+ * the worker already sends credits. Keeps the UI showing real numbers instead
+ * of a bare "/" during deploy lag.
+ */
+function normalizeProfile(profile: PhormaCloudProfile): PhormaCloudProfile {
+  const quota = profile.quota;
+  if (!quota) return profile;
+  if (typeof quota.creditsLimit === 'number' && typeof quota.creditsUsed === 'number') {
+    return profile;
+  }
+  const creditsLimit = TIER_MONTHLY_CREDITS[profile.tier ?? 'starter'] ?? TIER_MONTHLY_CREDITS['starter'];
+  const creditsUsed =
+    quota.costUsdLimit > 0
+      ? Math.max(0, Math.round((quota.costUsdUsed / quota.costUsdLimit) * creditsLimit))
+      : 0;
+  return { ...profile, quota: { ...quota, creditsUsed, creditsLimit } };
 }
 
 /**
@@ -33,7 +74,6 @@ export interface PhormaCloudProfile {
 @Injectable({ providedIn: 'root' })
 export class PhormaCloudService {
   private readonly clerk = inject(ClerkService);
-  private readonly cloud = inject(CloudService);
 
   /** Current Clerk user (null until Clerk loads / when signed out). */
   readonly user = toSignal(this.clerk.user$, { initialValue: null });
@@ -62,16 +102,65 @@ export class PhormaCloudService {
     return Math.min(1, quota.runsUsed / quota.runsLimit);
   });
 
-  /** 0–1 fraction of the monthly inference budget used (null without quota). */
-  readonly costFraction = computed(() => {
+  /** 0–1 fraction of the monthly usage-credit allowance used (null without quota). */
+  readonly creditsFraction = computed(() => {
     const quota = this.profile()?.quota;
-    if (!quota || quota.costUsdLimit <= 0) return null;
-    return Math.min(1, quota.costUsdUsed / quota.costUsdLimit);
+    if (!quota || quota.creditsLimit <= 0) return null;
+    return Math.min(1, quota.creditsUsed / quota.creditsLimit);
   });
+
+  /**
+   * True when the tenant is running low on credits (>= 85% used) or has run
+   * out. Gates the "Buy more credits" upsell so it only appears when a top-up
+   * is actually relevant — not while plenty of credits remain.
+   */
+  readonly lowOnCredits = computed(() => {
+    const fraction = this.creditsFraction();
+    return fraction != null && fraction >= 0.85;
+  });
+
+  /**
+   * Credits earned per USD of real inference for the signed-in tenant's tier
+   * (the inverse burn rate), derived from the quota's credit/USD limits.
+   * Falls back to the base 250 credits/$1 (starter's no-bonus rate) when no
+   * quota is loaded. Used to render a Phorma Cloud run's cost in abstract
+   * credits.
+   */
+  readonly creditsPerUsd = computed(() => {
+    const quota = this.profile()?.quota;
+    if (!quota || quota.costUsdLimit <= 0) return 250;
+    return quota.creditsLimit / quota.costUsdLimit;
+  });
+
+  constructor() {
+    // Eagerly load the account profile as soon as Clerk reports a signed-in
+    // user, so subscription state (`subscribed()`) is known before the model
+    // picker or any gated UI reads it — not only after the Cloud settings
+    // page is opened. Clears the profile on sign-out.
+    let lastSignedIn = false;
+    effect(() => {
+      const signedIn = this.signedIn();
+      if (signedIn === lastSignedIn) return;
+      lastSignedIn = signedIn;
+      if (signedIn) void this.refresh();
+      else this.profile.set(null);
+    });
+  }
 
   /** Opens Clerk's modal sign-in flow. */
   signIn(): void {
     this.clerk.openSignIn();
+  }
+
+  /**
+   * Resolves a fresh Clerk session JWT for authenticating to the Phorma Cloud
+   * API (e.g. /api/infer). Returns null when signed out or no session token
+   * can be minted. Used by the local-run Phorma Cloud model transport.
+   */
+  async sessionToken(): Promise<string | null> {
+    if (!this.signedIn()) return null;
+    const session = await firstValueFrom(this.clerk.session$);
+    return (await session?.getToken()) ?? null;
   }
 
   /** Signs the Clerk session out and clears the cached profile. */
@@ -93,7 +182,10 @@ export class PhormaCloudService {
       this.error.set(null);
       return;
     }
-    const base = this.cloud.phormaCloudUrl();
+    // Read phormaCloudUrl directly from localStorage (not CloudService) to
+    // avoid a circular DI: RunControllerService → ModelTransportService →
+    // PhormaCloudService → CloudService → RunControllerService.
+    const base = loadLayout('phormaCloudUrl', PHORMA_CLOUD_DEFAULT_URL);
     if (!base) return;
 
     this.loading.set(true);
@@ -110,7 +202,7 @@ export class PhormaCloudService {
         const detail = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(detail?.error ?? `Phorma Cloud responded with HTTP ${response.status}.`);
       }
-      this.profile.set((await response.json()) as PhormaCloudProfile);
+      this.profile.set(normalizeProfile((await response.json()) as PhormaCloudProfile));
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : String(error));
     } finally {

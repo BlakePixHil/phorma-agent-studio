@@ -65,14 +65,25 @@ export interface WorkflowPort {
 // ── Node data (kind-specific configuration) ──────────────────────────────────
 
 /** Model providers supported in v1 (bring-your-own-key; Ollama is keyless). */
-export type ModelProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
+export type ModelProviderId =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'openrouter'
+  | 'ollama'
+  | 'bedrock'
+  // Routes inference through the Phorma Cloud proxy, billed against the
+  // tenant's subscription credits. Curated big-name models only.
+  | 'phorma-cloud';
 
 export const MODEL_PROVIDERS: { id: ModelProviderId; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'openai', label: 'OpenAI' },
   { id: 'gemini', label: 'Google Gemini' },
   { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'bedrock', label: 'Amazon Bedrock' },
   { id: 'ollama', label: 'Ollama (local)' },
+  { id: 'phorma-cloud', label: 'Phorma Cloud' },
 ];
 
 /**
@@ -85,8 +96,51 @@ export const PROVIDER_MODEL_SUGGESTIONS: Record<ModelProviderId, string[]> = {
   openai: ['gpt-5.2', 'gpt-5.2-mini', 'o4-mini'],
   gemini: ['gemini-3-pro', 'gemini-3-flash'],
   openrouter: ['anthropic/claude-sonnet-4.5', 'openai/gpt-5.2', 'meta-llama/llama-4-70b'],
+  // Bedrock is invoked via the Converse API, which takes inference-profile ids
+  // (geo/cross-region prefixes like `apac.`/`global.`). These are fallbacks
+  // shown only if live discovery fails; the picker normally lists your account's
+  // actual profiles.
+  bedrock: [
+    'global.anthropic.claude-sonnet-4-6',
+    'apac.anthropic.claude-sonnet-4-5-20250929-v1:0',
+    'apac.amazon.nova-pro-v1:0',
+  ],
   ollama: ['llama3.2', 'qwen3', 'mistral-small'],
+  // Phorma Cloud offers a curated set of big-name models, routed through
+  // OpenRouter on the tenant's credit-limited runtime key. These are full
+  // OpenRouter slugs and the ONLY models selectable for this provider.
+  'phorma-cloud': [
+    'openai/gpt-5.5',
+    'anthropic/claude-sonnet-5',
+    'anthropic/claude-opus-4.8',
+    'google/gemini-3.5-flash',
+  ],
 };
+
+/** Default AWS region for Amazon Bedrock when no region is configured. */
+export const DEFAULT_BEDROCK_REGION = 'us-east-1';
+
+/**
+ * Amazon Bedrock regions offered in the Settings dropdown. Scoped to regions
+ * that support the `bedrock-mantle` endpoint, because Claude via a Bedrock API
+ * key is only reachable there. Agents can still type any region per node, so
+ * this isn't a hard limit — it's the quick-pick set for the application default.
+ */
+export const BEDROCK_REGIONS: string[] = [
+  'us-east-1',
+  'us-east-2',
+  'us-west-2',
+  'ap-southeast-2',
+  'ap-southeast-3',
+  'ap-south-1',
+  'ap-northeast-1',
+  'eu-central-1',
+  'eu-west-1',
+  'eu-west-2',
+  'eu-south-1',
+  'eu-north-1',
+  'sa-east-1',
+];
 
 export interface AgentNodeData {
   /** System prompt. ALWAYS markdown — edited as markdown, rendered sanitized. */
@@ -98,6 +152,12 @@ export interface AgentNodeData {
   provider?: ModelProviderId;
   /** Model id. Absent = inherit the application default (with `provider`). */
   model?: string;
+  /**
+   * AWS region for Amazon Bedrock agents (e.g. `ap-southeast-2`). Absent =
+   * inherit the application default Bedrock region (Settings → Models). Lets
+   * different agents target models hosted in different regions.
+   */
+  region?: string;
   temperature?: number;
   maxTokens?: number;
 }
