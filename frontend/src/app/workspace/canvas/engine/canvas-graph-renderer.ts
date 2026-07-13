@@ -59,6 +59,12 @@ export interface RendererNode {
   groupDividers?: { y: number; label: string; line?: boolean }[];
   /** Whether the node can be drilled into (shows an edit button in the header). */
   drillable?: boolean;
+  /**
+   * Whether the node has a configuration warning (e.g. an MCP server missing
+   * credentials). Draws an amber warning badge in the header's top-right
+   * corner; click opens a popover with details + a settings deep-link.
+   */
+  warning?: boolean;
 }
 
 export interface RendererEdge {
@@ -155,6 +161,11 @@ const HEADER_H = 30;
 const EDIT_BTN_SIZE = 18;
 const EDIT_BTN_MARGIN = 8;
 
+/** Warning badge hit region (world px). Mirrors the DOM overlay badge that
+ * sits at the node's top-right corner; used for pointer-cursor feedback. */
+const WARN_BADGE_SIZE = 16;
+const WARN_BADGE_MARGIN = 4;
+
 /**
  * Zoom bounds. The 15% floor keeps users out of the unusable full-zoom-out
  * range (3–8fps on huge graphs); the minimap handles overview navigation.
@@ -223,6 +234,8 @@ export class CanvasGraphRenderer {
   private activeEdges = new Set<string>();
   /** Node ids carrying a breakpoint badge. */
   private breakpointNodes = new Set<string>();
+  /** Node ids carrying a configuration warning badge. */
+  private warningNodes = new Set<string>();
   /** Selected connection (edge) ids — drawn highlighted. */
   private selectedEdges = new Set<string>();
   /** Edge id currently hovered (its wire is brightened). */
@@ -353,6 +366,12 @@ export class CanvasGraphRenderer {
   /** Node ids showing a breakpoint badge. */
   setBreakpoints(ids: Iterable<string>): void {
     this.breakpointNodes = new Set(ids);
+    this.dirty = true;
+  }
+
+  /** Node ids showing a configuration warning badge. */
+  setWarningNodes(ids: Iterable<string>): void {
+    this.warningNodes = new Set(ids);
     this.dirty = true;
   }
 
@@ -699,6 +718,26 @@ export class CanvasGraphRenderer {
       const ebx = n.x + n.w - EDIT_BTN_MARGIN - EDIT_BTN_SIZE;
       const eby = n.y + (HEADER_H - EDIT_BTN_SIZE) / 2;
       if (wx >= ebx && wx <= ebx + EDIT_BTN_SIZE && wy >= eby && wy <= eby + EDIT_BTN_SIZE) {
+        return n.id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Hit-tests the configuration warning badge on a node. Returns the node id
+   * when the point lands inside the badge's region (top-right corner), or
+   * null. The badge is present only on nodes flagged via `setWarningNodes`.
+   */
+  hitTestWarningBadge(wx: number, wy: number): string | null {
+    const candidates = this.queryNodes(wx, wy, wx, wy);
+    for (const i of candidates) {
+      const n = this.nodes[i];
+      if (!this.warningNodes.has(n.id)) continue;
+      if (!(wx >= n.x && wx <= n.x + n.w && wy >= n.y && wy <= n.y + n.h)) continue;
+      const wbx = n.x + n.w - WARN_BADGE_MARGIN - WARN_BADGE_SIZE;
+      const wby = n.y - WARN_BADGE_MARGIN;
+      if (wx >= wbx && wx <= wbx + WARN_BADGE_SIZE && wy >= wby && wy <= wby + WARN_BADGE_SIZE) {
         return n.id;
       }
     }
@@ -1316,6 +1355,19 @@ export class CanvasGraphRenderer {
     this.roundRect(ctx, n.x, n.y, n.w, n.h, 8);
     ctx.stroke();
 
+    // Configuration warning outline - a subtle amber dashed ring around
+    // nodes flagged via setWarningNodes. Sits just outside the regular
+    // border so it reads as a status indicator without obscuring selection.
+    if (this.warningNodes.has(n.id) && !sel && !edit) {
+      ctx.save();
+      ctx.strokeStyle = this.theme.wireWarning;
+      ctx.lineWidth = 1.5 / this.sc;
+      ctx.setLineDash([5 / this.sc, 3 / this.sc]);
+      this.roundRect(ctx, n.x - 2, n.y - 2, n.w + 4, n.h + 4, 9);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Run-state ring — the execution theatre. Sits just outside the border.
     const runState = this.nodeStates.get(n.id);
     if (runState && runState !== 'idle') {
@@ -1343,7 +1395,7 @@ export class CanvasGraphRenderer {
       ctx.restore();
     }
 
-    // Breakpoint badge — red dot hugging the header's left edge (VS Code style).
+    // Breakpoint badge - red dot hugging the header's left edge (VS Code style).
     if (this.breakpointNodes.has(n.id)) {
       ctx.save();
       ctx.beginPath();

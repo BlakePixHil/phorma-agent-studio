@@ -157,6 +157,44 @@ export class ModelTransportService {
     return [...new Set(ids)].sort();
   }
 
+  /**
+   * Lists model ids installed in the local Ollama daemon (via `/api/tags`).
+   * Desktop goes through the Rust `ollama_status` command (which also reports
+   * whether the daemon is running); browser preview fetches directly. No API
+   * key is required for Ollama.
+   *
+   * Returns `{ running, models }` so callers can distinguish "daemon not
+   * running" from "running but no models installed" — both yield an empty
+   * model list but warrant different empty-state UI.
+   */
+  async listOllamaModels(baseUrl?: string): Promise<{ running: boolean; models: string[] }> {
+    const url = (baseUrl ?? loadLayout('ollamaBaseUrl', 'http://localhost:11434')).trim();
+
+    if (this.tauri.isDesktop) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const status = await invoke<{ running: boolean; version?: string; models: string[] }>(
+        'ollama_status',
+        { baseUrl: url },
+      );
+      return { running: status.running, models: status.models };
+    }
+
+    try {
+      const tagsResp = await fetch(`${url}/api/tags`);
+      if (!tagsResp.ok) {
+        return { running: false, models: [] };
+      }
+      const body = (await tagsResp.json()) as { models?: { name?: string }[] };
+      const models = (body.models ?? [])
+        .map(m => m.name)
+        .filter((name): name is string => !!name)
+        .sort();
+      return { running: true, models };
+    } catch {
+      return { running: false, models: [] };
+    }
+  }
+
   /** Provider models-list endpoint URL (browser path). */
   private providerModelsUrl(provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter'): string {
     switch (provider) {

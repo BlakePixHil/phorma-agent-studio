@@ -39,12 +39,14 @@ export interface NodeCatalogEntry {
   defaultData: () => WorkflowNodeData;
 }
 
-/** Section ordering + labels for the Agents palette. */
+/** Section ordering + labels for the Agents palette.
+ * Tools is intentionally last so the MCP Servers sub-section (rendered
+ * underneath the tool entries) sits at the bottom of the palette. */
 export const NODE_CATEGORY_SECTIONS: { category: NodeCategory; label: string }[] = [
   { category: 'agent', label: 'Agents' },
   { category: 'trigger', label: 'Triggers' },
-  { category: 'tool', label: 'Tools' },
   { category: 'flow', label: 'Flow' },
+  { category: 'tool', label: 'Tools' },
 ];
 
 /**

@@ -1,12 +1,14 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   HostListener,
   computed,
   effect,
   inject,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
@@ -34,6 +36,7 @@ import { THEME_PALETTES, type ThemePalette, type ThemePaletteId } from '../../..
 import { MCP_PRESETS, type McpPreset } from '../../../core/node-catalog';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
+import { InfoPopover } from '../../../shared/info-popover/info-popover';
 import {
   MODEL_PROVIDERS,
   PROVIDER_MODEL_SUGGESTIONS,
@@ -62,7 +65,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon],
+  imports: [FormsModule, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, InfoPopover],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })
@@ -77,6 +80,9 @@ export class SettingsDialog {
   private readonly transport = inject(ModelTransportService);
 
   protected readonly isDesktop = this.tauri.isDesktop;
+
+  /** The scrollable content pane (for anchor scrolling). */
+  private readonly contentRef = viewChild<ElementRef<HTMLElement>>('contentRef');
 
   // ── Navigation + search ─────────────────────────────────────────────────
 
@@ -209,8 +215,6 @@ export class SettingsDialog {
   protected readonly loadingBedrockModels = signal(false);
   /** Last Bedrock fetch error (null when the last fetch succeeded). */
   protected readonly bedrockFetchError = signal<string | null>(null);
-  /** Whether the user dismissed the current fetch-failure warning. */
-  protected readonly bedrockWarningDismissed = signal(false);
   /** Region already fetched (or fetching), to avoid duplicate auto-fetches. */
   private lastBedrockFetch = '';
 
@@ -223,6 +227,17 @@ export class SettingsDialog {
   /** Provider already fetched (or fetching), to avoid duplicate auto-fetches. */
   private lastModelFetch = '';
 
+  /** Ollama models installed locally (empty until loaded). */
+  protected readonly ollamaModels = signal<string[]>([]);
+  /** True while fetching the installed Ollama model list. */
+  protected readonly loadingOllamaModels = signal(false);
+  /** Whether the Ollama daemon was reachable on the last fetch. */
+  protected readonly ollamaRunning = signal(true);
+  /** True after the first Ollama fetch completes (controls empty-state UI). */
+  protected readonly ollamaFetched = signal(false);
+  /** Guards against duplicate auto-fetches within a single dialog session. */
+  private ollamaFetchedOnce = false;
+
   /**
    * Options for the default-model dropdown. Bedrock is populated from the live
    * mantle catalog (auto-fetched); Phorma Cloud uses the curated list; BYO
@@ -233,10 +248,43 @@ export class SettingsDialog {
     const provider = this.settings.defaultProvider();
     if (provider === 'bedrock') return this.bedrockModels();
     if (provider === 'phorma-cloud') return PROVIDER_MODEL_SUGGESTIONS['phorma-cloud'];
+    if (provider === 'ollama') {
+      return this.ollamaModels().length > 0 ? this.ollamaModels() : PROVIDER_MODEL_SUGGESTIONS['ollama'];
+    }
     if (LIVE_FETCH_PROVIDERS.has(provider)) {
       return this.liveModels().length > 0 ? this.liveModels() : PROVIDER_MODEL_SUGGESTIONS[provider];
     }
     return PROVIDER_MODEL_SUGGESTIONS[provider] ?? [];
+  });
+
+  /**
+   * Placeholder text for the model input, per provider. Shown when no model
+   * is selected (e.g. when the provider requires a key but none is stored).
+   */
+  protected readonly modelPlaceholder = computed(() => {
+    switch (this.settings.defaultProvider()) {
+      case 'anthropic':   return 'claude-sonnet-5';
+      case 'openai':      return 'gpt-5-mini';
+      case 'gemini':      return 'gemini-3.5-flash';
+      case 'openrouter':  return 'anthropic/claude-sonnet-4.5';
+      case 'bedrock':     return 'e.g. anthropic.claude-sonnet-4-6-v1';
+      case 'ollama':      return 'e.g. llama3.2';
+      default:            return 'model id';
+    }
+  });
+
+  /**
+   * Value bound to the model input/dropdown. Returns an empty string (so the
+   * placeholder shows) when the selected provider requires an API key but
+   * none is stored — the input should not appear pre-filled in that case.
+   * Keyless providers (Ollama, Phorma Cloud) and configured providers show the
+   * stored model value as normal.
+   */
+  protected readonly modelDisplayValue = computed(() => {
+    const provider = this.settings.defaultProvider();
+    if (provider === 'ollama' || provider === 'phorma-cloud') return this.settings.defaultModel();
+    if (this.settings.keyConfigured()[provider]) return this.settings.defaultModel();
+    return '';
   });
 
   /**
@@ -256,15 +304,40 @@ export class SettingsDialog {
     () => this.settings.defaultProvider() === 'phorma-cloud',
   );
 
-  /** The inline fetch-failure warning message, or null when there's nothing to show. */
-  protected readonly bedrockWarning = computed(() =>
-    this.settings.defaultProvider() === 'bedrock' && !this.bedrockWarningDismissed()
-      ? this.bedrockFetchError()
-      : null,
-  );
+  /**
+   * When Bedrock is selected but the API key is missing, the model catalog
+   * fetch will always fail. This returns the fetch error (if any) so it can
+   * be shown as a secondary hint inside the missing-key warning block,
+   * rather than as a separate dismissible warning.
+   */
+  protected readonly bedrockFetchHint = computed<string | null>(() => {
+    if (this.settings.defaultProvider() !== 'bedrock') return null;
+    if (this.settings.keyConfigured()['bedrock']) return null;
+    return this.bedrockFetchError();
+  });
 
-  protected dismissBedrockWarning(): void {
-    this.bedrockWarningDismissed.set(true);
+  /**
+   * Warning shown when the selected provider requires an API key but none is
+   * stored. Returns the provider label (for the message) or null when the
+   * key is configured, the provider is keyless (Ollama / Phorma Cloud), or
+   * Phorma Cloud is showing the subscribe CTA.
+   */
+  protected readonly missingKeyWarning = computed<string | null>(() => {
+    const provider = this.settings.defaultProvider();
+    if (provider === 'ollama' || provider === 'phorma-cloud') return null;
+    if (this.needsPhormaCloudSubscription()) return null;
+    if (this.settings.keyConfigured()[provider]) return null;
+    const entry = MODEL_PROVIDERS.find(p => p.id === provider);
+    return entry?.label ?? provider;
+  });
+
+  /** Deep-links to the API Keys settings page and focuses the input for the
+   * currently-selected provider (so the user can paste their key immediately). */
+  protected openApiKeys(): void {
+    const provider = this.settings.defaultProvider();
+    const anchor = `api-key-${provider}`;
+    this.dialog.activePageId.set('api-keys');
+    this.dialog.anchorId.set(anchor);
   }
 
   protected onDefaultProviderChange(provider: ModelProviderId): void {
@@ -303,7 +376,6 @@ export class SettingsDialog {
   private async loadBedrockModels(region: string): Promise<void> {
     this.loadingBedrockModels.set(true);
     this.bedrockFetchError.set(null);
-    this.bedrockWarningDismissed.set(false);
 
     const [profiles, models] = await Promise.allSettled([
       this.transport.listBedrockInferenceProfiles(region),
@@ -351,6 +423,38 @@ export class SettingsDialog {
     } finally {
       this.loadingModels.set(false);
     }
+  }
+
+  /**
+   * Fetches the list of models installed in the local Ollama daemon into
+   * {@link ollamaModels}. Runs automatically whenever the dialog is open and
+   * Ollama is the default provider. When the daemon is unreachable or has no
+   * models installed, the picker falls back to static suggestions and the
+   * empty-state UI offers a link to the Ollama model catalog and the setup
+   * wizard.
+   */
+  private async loadOllamaModels(): Promise<void> {
+    this.loadingOllamaModels.set(true);
+    try {
+      const { running, models } = await this.transport.listOllamaModels(this.settings.ollamaBaseUrl());
+      this.ollamaRunning.set(running);
+      this.ollamaModels.set(models);
+    } catch {
+      this.ollamaRunning.set(false);
+      this.ollamaModels.set([]);
+    } finally {
+      this.loadingOllamaModels.set(false);
+      this.ollamaFetched.set(true);
+    }
+  }
+
+  /**
+   * Deep-links to the General settings page and highlights the Setup wizard
+   * setting so the user can install Ollama / pull a model.
+   */
+  protected openSetupWizardSetting(): void {
+    this.dialog.activePageId.set('general');
+    this.dialog.anchorId.set('run-setup-wizard');
   }
 
   // ── Integrations (custom template) ──────────────────────────────────────
@@ -450,6 +554,36 @@ export class SettingsDialog {
       });
     });
 
+    // Scroll to a specific anchor (e.g. an integration card) after the dialog
+    // opens. The anchor id is set by `SettingsDialogService.open()` and cleared
+    // after consumption. Deferred to the next microtask + rAF so the dialog's
+    // DOM has rendered before we try to scroll.
+    effect(() => {
+      const visible = this.dialog.visible();
+      const anchor = this.dialog.anchorId();
+      if (!visible || !anchor) return;
+      untracked(() => {
+        queueMicrotask(() => {
+          requestAnimationFrame(() => {
+            const container = this.contentRef()?.nativeElement;
+            if (!container) return;
+            const target = container.querySelector(`#${CSS.escape(anchor)}`);
+            if (target instanceof HTMLElement) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              // Briefly flash the card so the user notices it.
+              target.classList.add('phorma-settings__integration--highlight');
+              setTimeout(() => target.classList.remove('phorma-settings__integration--highlight'), 2000);
+              // If the target is an input, focus it so the user can type immediately.
+              if (target instanceof HTMLInputElement) {
+                target.focus();
+              }
+            }
+            this.dialog.anchorId.set(null);
+          });
+        });
+      });
+    });
+
     // Refresh the Phorma Cloud profile whenever the Cloud page is shown with
     // the phorma provider active (quota bar stays current).
     effect(() => {
@@ -481,6 +615,17 @@ export class SettingsDialog {
       if (!LIVE_FETCH_PROVIDERS.has(provider)) return;
       if (this.lastModelFetch === provider) return;
       untracked(() => void this.loadModels(provider));
+    });
+
+    // Auto-fetch the installed Ollama model list whenever the dialog is open
+    // with Ollama as the default provider. Runs once per dialog session so
+    // a pull started from the setup wizard is picked up on the next open.
+    effect(() => {
+      if (!this.dialog.visible()) return;
+      if (this.settings.defaultProvider() !== 'ollama') return;
+      if (this.ollamaFetchedOnce) return;
+      this.ollamaFetchedOnce = true;
+      untracked(() => void this.loadOllamaModels());
     });
   }
 

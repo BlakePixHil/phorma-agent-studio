@@ -9,9 +9,6 @@
     >
       <!-- Header -->
       <header class="phorma-settings__header">
-        <span class="phorma-settings__icon">
-          <i class="ti ti-settings" aria-hidden="true"></i>
-        </span>
         <div class="phorma-settings__header-text">
           <h2>Settings</h2>
           <p>{{ storageLabel }}</p>
@@ -56,7 +53,7 @@
         </nav>
 
         <!-- Content -->
-        <div class="phorma-settings__content">
+        <div class="phorma-settings__content" #contentRef>
           @if (activePage(); as page) {
             <h3 class="phorma-settings__page-title">{{ page.label }}</h3>
             @if (page.description) {
@@ -74,7 +71,7 @@
 
                 <!-- Generic descriptor-driven settings -->
                 @for (setting of section.settings; track setting.id) {
-                  <div class="phorma-settings__setting">
+                  <div class="phorma-settings__setting" [attr.id]="setting.id">
                     <div class="phorma-settings__setting-text">
                       <label class="phorma-settings__setting-label" [attr.for]="setting.id">
                         {{ setting.label }}
@@ -188,6 +185,7 @@
                         <input
                           type="password"
                           class="phorma-settings__input"
+                          [attr.id]="'api-key-' + provider.id"
                           [placeholder]="settings.keyConfigured()[provider.id] ? '••••••••  (stored)' : 'Paste API key'"
                           [value]="keyDrafts()[provider.id] ?? ''"
                           (input)="onKeyDraftInput(provider.id, $event)"
@@ -263,25 +261,46 @@
                             class="phorma-settings__model-select"
                             [options]="defaultModelSuggestions()"
                             [editable]="isPhormaCloud() ? false : true"
-                            [ngModel]="settings.defaultModel()"
+                            [ngModel]="modelDisplayValue()"
                             (ngModelChange)="onDefaultModelChange($event)"
                             size="small"
                             appendTo="body"
-                            placeholder="model id"
+                            [placeholder]="modelPlaceholder()"
                             ariaLabel="Default model id"
                           />
                         } @else {
                           <input
                             type="text"
                             class="phorma-settings__input phorma-settings__input--mono phorma-settings__model-select"
-                            [value]="settings.defaultModel()"
+                            [value]="modelDisplayValue()"
                             (input)="onDefaultModelInput($event)"
-                            placeholder="e.g. anthropic.claude-sonnet-4-6-v1"
+                            [placeholder]="modelPlaceholder()"
                             aria-label="Default model id"
                           />
                         }
                       }
                     </div>
+                    @if (missingKeyWarning(); as providerLabel) {
+                      <div class="phorma-settings__inline-warning" role="status">
+                        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                        <span class="phorma-settings__inline-warning-text">
+                          No {{ providerLabel }} API key configured. Add one to use this provider.
+                          @if (bedrockFetchHint(); as hint) {
+                            <span class="phorma-settings__inline-warning-sub">
+                              Couldn't fetch the Bedrock model catalog without an API key configured.
+                            </span>
+                          }
+                        </span>
+                        <button
+                          type="button"
+                          class="phorma-settings__link"
+                          (click)="openApiKeys()"
+                        >
+                          <i class="ti ti-key" aria-hidden="true"></i>
+                          Add API key
+                        </button>
+                      </div>
+                    }
                     @if (needsPhormaCloudSubscription()) {
                       <div class="phorma-settings__subscribe">
                         <p class="phorma-settings__subscribe-title">
@@ -306,28 +325,43 @@
                     @if (loadingModels()) {
                       <p class="phorma-settings__note">Loading models…</p>
                     }
+                    @if (loadingOllamaModels()) {
+                      <p class="phorma-settings__note">Loading installed Ollama models…</p>
+                    }
+                    @if (settings.defaultProvider() === 'ollama' && ollamaFetched() && ollamaModels().length === 0) {
+                      <div class="phorma-settings__inline-warning" role="status">
+                        <i class="ti ti-info-circle" aria-hidden="true"></i>
+                        <span class="phorma-settings__inline-warning-text">
+                          @if (ollamaRunning()) {
+                            No Ollama models installed. Install one to use the local provider.
+                          } @else {
+                            Ollama daemon isn't running. Start it, then install a model.
+                          }
+                        </span>
+                        <a
+                          class="phorma-settings__link"
+                          href="https://ollama.com/search"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <i class="ti ti-external-link" aria-hidden="true"></i>
+                          Model catalog
+                        </a>
+                        <button
+                          type="button"
+                          class="phorma-settings__link"
+                          (click)="openSetupWizardSetting()"
+                        >
+                          <i class="ti ti-sparkles" aria-hidden="true"></i>
+                          Setup wizard
+                        </button>
+                      </div>
+                    }
                     @if (isPhormaCloud() && phormaCloud.subscribed()) {
                       <p class="phorma-settings__note">
                         Phorma Cloud runs on your subscription credits — no API key needed.
                         Usage counts against your monthly credits.
                       </p>
-                    }
-                    @if (bedrockWarning(); as warn) {
-                      <div class="phorma-settings__inline-warning" role="status">
-                        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-                        <span class="phorma-settings__inline-warning-text">
-                          Couldn’t load Amazon Bedrock models — enter a model id manually.
-                          {{ warn }}
-                        </span>
-                        <button
-                          type="button"
-                          class="phorma-settings__inline-warning-close"
-                          (click)="dismissBedrockWarning()"
-                          aria-label="Dismiss warning"
-                        >
-                          <i class="ti ti-x" aria-hidden="true"></i>
-                        </button>
-                      </div>
                     }
                     <div class="phorma-settings__setting">
                       <div class="phorma-settings__setting-text">
@@ -368,7 +402,7 @@
                       the preset uses them unless overridden on the node itself.
                     </p>
                     @for (preset of mcpPresets; track preset.id) {
-                      <div class="phorma-settings__integration">
+                      <div class="phorma-settings__integration" [attr.id]="'integration-' + preset.id">
                         <div class="phorma-settings__integration-head">
                           <i class="{{ preset.icon }}" aria-hidden="true"></i>
                           <div>
@@ -583,14 +617,46 @@
                       }
 
                       @if (settings.cloudProvider() === 'cloudflare') {
-                        <p class="phorma-settings__note">
-                          <i class="ti ti-terminal-2" aria-hidden="true"></i>
-                          One-time setup: run <code>npx wrangler login</code>, deploy the
-                          worker from the Cloud dialog, then set provider secrets with
-                          <code>npx wrangler secret put ANTHROPIC_API_KEY</code>.
-                        </p>
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-terminal-2" aria-hidden="true"></i>
+                            One-time setup to deploy the runtime worker to your own Cloudflare account.
+                          </p>
+                          <ol class="phorma-settings__cloud-setup-steps">
+                            <li>
+                              Authenticate wrangler with your Cloudflare account:
+                              <code>npx wrangler login</code>
+                            </li>
+                            <li>
+                              Deploy the worker from the Cloud dialog (uses the
+                              <code>cloud/</code> folder below).
+                            </li>
+                            <li>
+                              Set provider secrets on the worker:
+                              <code>npx wrangler secret put ANTHROPIC_API_KEY</code>
+                            </li>
+                          </ol>
+                        </div>
                         <div class="phorma-settings__row">
-                          <span class="phorma-settings__row-label">Worker URL</span>
+                          <span class="phorma-settings__row-label">
+                            Worker URL
+                            <app-info-popover label="Worker URL" heading="What is the Worker URL?">
+                              <p>
+                                The public URL of your deployed Cloudflare Worker - the runtime
+                                that executes your agents when deployed to the cloud.
+                              </p>
+                              <p>
+                                Find it in the
+                                <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer">Cloudflare dashboard</a>
+                                under <strong>Workers &amp; Pages</strong>, or run
+                                <code>npx wrangler deployments list</code> in the
+                                <code>cloud/</code> folder.
+                              </p>
+                              <p>
+                                Example: <code>https://phorma-agent-studio-cloud.you.workers.dev</code>
+                              </p>
+                            </app-info-popover>
+                          </span>
                           <input
                             type="text"
                             class="phorma-settings__input phorma-settings__input--mono"
@@ -601,7 +667,22 @@
                           />
                         </div>
                         <div class="phorma-settings__row">
-                          <span class="phorma-settings__row-label">Token</span>
+                          <span class="phorma-settings__row-label">
+                            Token
+                            <app-info-popover label="Token" heading="What is the Token?">
+                              <p>
+                                An optional bearer token set as the <code>PHORMA_TOKEN</code>
+                                secret on your worker. When set, the studio sends it with every
+                                request so only you can invoke your worker.
+                              </p>
+                              <p>
+                                Configure it by running
+                                <code>npx wrangler secret put PHORMA_TOKEN</code> in the
+                                <code>cloud/</code> folder, then paste the same value here.
+                                Leave blank if your worker has no token check.
+                              </p>
+                            </app-info-popover>
+                          </span>
                           <input
                             type="password"
                             class="phorma-settings__input"
@@ -613,7 +694,20 @@
                           />
                         </div>
                         <div class="phorma-settings__row">
-                          <span class="phorma-settings__row-label">cloud/ folder</span>
+                          <span class="phorma-settings__row-label">
+                            cloud/ folder
+                            <app-info-popover label="Cloud folder" heading="What is the cloud/ folder?">
+                              <p>
+                                The local path to the <code>cloud/</code> folder from the Phorma
+                                Agent Studio repo. Wrangler commands (deploy, secret put) run here.
+                              </p>
+                              <p>
+                                Example: <code>C:\\Dev\\phorma\\phorma-agent-studio\\cloud</code>
+                                on Windows, or <code>/home/you/phorma-agent-studio/cloud</code> on
+                                macOS/Linux.
+                              </p>
+                            </app-info-popover>
+                          </span>
                           <input
                             type="text"
                             class="phorma-settings__input phorma-settings__input--mono"

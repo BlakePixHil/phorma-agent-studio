@@ -25,13 +25,15 @@ import { PanelRegistryService } from '../../core/panel-registry.service';
 import { TerminalOutputService } from '../../core/terminal-output.service';
 import { NodeDragService } from '../../core/node-drag.service';
 import { RunControllerService } from '../../core/run-controller.service';
-import { NODE_CATALOG, NODE_CATEGORY_SECTIONS, PHORMA_NODE_MIME } from '../../core/node-catalog';
+import { NODE_CATALOG, NODE_CATEGORY_SECTIONS, PHORMA_NODE_MIME, findMcpPreset } from '../../core/node-catalog';
 import { ToastService } from '../../shared/toast/toast.service';
+import { McpOAuthService } from '../../core/mcp-oauth.service';
 import { CanvasGraphRenderer, type RendererTheme } from './engine/canvas-graph-renderer';
 import { graphToScene } from './engine/graph-to-scene';
 import { ThinkingOverlay } from './thinking-overlay/thinking-overlay';
+import { McpWarningOverlay } from './mcp-warning-overlay/mcp-warning-overlay';
 import { canConnectPorts, findNodeForConnector } from '../../core/workflow.model';
-import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
+import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/workflow.model';
 
 /**
  * ── GraphCanvas ─────────────────────────────────────────────────────────────
@@ -47,7 +49,7 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
 @Component({
   selector: 'app-graph-canvas',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ContextMenuModule, ThinkingOverlay],
+  imports: [ContextMenuModule, ThinkingOverlay, McpWarningOverlay],
   template: `
     <canvas
       #cv
@@ -102,6 +104,24 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
           [screenW]="item.screenW"
           [text]="item.text"
           [streaming]="item.streaming"
+        />
+      }
+    </div>
+
+    <!-- MCP configuration-warning overlays: one per MCP node missing
+         credentials or OAuth connection. Each renders a clickable amber
+         badge at the node's top-right corner; clicking opens a frosted-glass
+         popover with a deep-link to Settings -> Integrations. -->
+    <div class="phorma-mcp-warn-layer" aria-hidden="false">
+      @for (item of mcpWarningOverlays(); track item.nodeId) {
+        <app-mcp-warning-overlay
+          [nodeId]="item.nodeId"
+          [warning]="item.warning"
+          [presetId]="item.presetId"
+          [style.left.px]="item.screenX"
+          [style.top.px]="item.screenY"
+          [style.width.px]="item.screenW"
+          [style.height.px]="item.screenH"
         />
       }
     </div>
@@ -193,6 +213,12 @@ import type { GraphPosition, WorkflowGraph } from '../../core/workflow.model';
         z-index: 15;
         pointer-events: none;
       }
+      .phorma-mcp-warn-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 16;
+        pointer-events: none;
+      }
     `,
   ],
 })
@@ -210,6 +236,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   private readonly terminal = inject(TerminalOutputService);
   private readonly toast = inject(ToastService);
   private readonly settings = inject(SettingsService);
+  private readonly oauth = inject(McpOAuthService);
 
   @ViewChild('cv', { static: true }) private cvRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('mini') private miniRef?: ElementRef<HTMLCanvasElement>;
@@ -316,8 +343,170 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
     return out;
   });
 
+  /**
+   * OAuth connection state per node id (`true` when the node has a stored
+   * session). Refreshed asynchronously by {@link mcpCredentialRefresher}.
+   * Kept as a signal so {@link mcpWarningOverlays} reacts when a connection
+   * completes.
+   */
+  private readonly oauthConnected = signal<ReadonlyMap<string, boolean>>(new Map());
+
+  /**
+   * Node ids of MCP nodes that currently carry a configuration warning.
+   * Computed from the graph + credential flags + OAuth state WITHOUT reading
+   * `transformTick`, so it can feed the renderer's `setWarningNodes` without
+   * creating a per-frame feedback loop.
+   */
+  protected readonly mcpWarningNodeIds = computed<Set<string>>(() => {
+    const g = this.graph();
+    const flags = this.settings.mcpSecretsConfigured();
+    const oauthConnected = this.oauthConnected();
+    const out = new Set<string>();
+    for (const node of g.nodes) {
+      if (node.kind !== 'mcp-tool') continue;
+      const warning = this.mcpNodeWarning(node, flags, oauthConnected);
+      if (warning) out.add(node.id);
+    }
+    return out;
+  });
+
+  /**
+   * Per-node MCP configuration-warning overlays projected into screen space.
+   * Emits one entry per MCP node that is missing credentials or not yet
+   * connected via OAuth. Reads the live transform (via `transformTick`) so
+   * the badges track pan/zoom, mirroring the thinking-overlay pattern.
+   */
+  protected readonly mcpWarningOverlays = computed(() => {
+    const warningIds = this.mcpWarningNodeIds();
+    if (warningIds.size === 0) return [];
+    const g = this.graph();
+    // Touch the tick so this recomputes every frame the renderer paints.
+    this.transformTick();
+    const sc = this.engine.scale;
+    const ox = this.engine.offsetX;
+    const oy = this.engine.offsetY;
+    const flags = this.settings.mcpSecretsConfigured();
+    const oauthConnected = this.oauthConnected();
+    const out: { nodeId: string; screenX: number; screenY: number; screenW: number; screenH: number; warning: string; presetId: string | null }[] = [];
+    for (const node of g.nodes) {
+      if (!warningIds.has(node.id)) continue;
+      const warning = this.mcpNodeWarning(node, flags, oauthConnected);
+      if (!warning) continue;
+      const bounds = this.engine.nodeWorldBounds(node.id);
+      if (!bounds) continue;
+      const data = node.data as { presetId?: string };
+      out.push({
+        nodeId: node.id,
+        screenX: bounds.x * sc + ox, // left edge
+        screenY: bounds.y * sc + oy, // top edge
+        screenW: bounds.w * sc,
+        screenH: bounds.h * sc,
+        warning,
+        presetId: data.presetId ?? null,
+      });
+    }
+    return out;
+  });
+
+  /**
+   * Determines the warning text for an MCP node, or `null` when fully
+   * configured. Mirrors the logic in `PropertiesPanel.presetFullyConfigured`
+   * but also covers OAuth nodes and generic (non-preset) MCP servers.
+   */
+  private mcpNodeWarning(
+    node: WorkflowNode,
+    flags: Record<string, boolean>,
+    oauthConnected: ReadonlyMap<string, boolean>,
+  ): string | null {
+    const data = node.data as { transport?: string; envKeys?: string[]; authMode?: string; authKey?: string; presetId?: string; command?: string; url?: string };
+    if (!data) return null;
+
+    // OAuth nodes: warn when not yet connected.
+    if (data.authMode === 'oauth') {
+      if (!oauthConnected.get(node.id)) {
+        const preset = data.presetId ? findMcpPreset(data.presetId) : null;
+        const name = preset?.label ?? node.name;
+        return `"${name}" is not connected. Select the node and click Connect to authorize.`;
+      }
+      return null;
+    }
+
+    // Bearer / env-var nodes: warn when any declared env key is missing.
+    const envKeys = data.envKeys ?? [];
+    if (envKeys.length === 0) {
+      // Generic stdio MCP with no command configured.
+      if (data.transport === 'stdio' && !data.command) {
+        return `"${node.name}" has no command configured. Open Settings to set it up.`;
+      }
+      // Generic SSE MCP with no URL configured.
+      if (data.transport === 'sse' && !data.url) {
+        return `"${node.name}" has no server URL configured. Open Settings to set it up.`;
+      }
+      return null;
+    }
+
+    const preset = data.presetId ? findMcpPreset(data.presetId) : null;
+    const missing = envKeys.filter(
+      key => !flags[`${node.id}:${key}`] && !flags[`preset:${data.presetId}:${key}`],
+    );
+    if (missing.length === 0) return null;
+
+    const name = preset?.label ?? node.name;
+    if (preset) {
+      const missingLabels = missing
+        .map(key => preset.envSchema.find(f => f.name === key)?.label ?? key)
+        .join(', ');
+      return `"${name}" is missing credentials (${missingLabels}). Set application defaults in Settings -> Integrations.`;
+    }
+    return `"${name}" is missing credentials. Configure them in Settings -> Integrations.`;
+  }
+
+  /**
+   * Refreshes MCP secret flags + OAuth connection state for every MCP node in
+   * the graph whenever the graph changes. This keeps the canvas warning badges
+   * accurate as nodes are added/removed. Runs untracked for the refresh calls
+   * to avoid feedback loops: the refreshes write to `mcpSecretsConfigured`
+   * asynchronously, and reading that signal here would retrigger this effect.
+   * The {@link mcpWarningNodeIds} computed reads `mcpSecretsConfigured`
+   * reactively, so badge state updates once the refresh completes.
+   */
+  protected readonly mcpCredentialRefresher = effect(() => {
+    const g = this.graph();
+    untracked(() => {
+      const mcpNodes = g.nodes.filter(n => n.kind === 'mcp-tool');
+      // Refresh secret flags for each MCP node (node scope + preset scope).
+      for (const node of mcpNodes) {
+        const data = node.data as { envKeys?: string[]; presetId?: string; authMode?: string };
+        if (data.envKeys?.length) {
+          void this.settings.refreshMcpSecretFlags(node.id, data.envKeys);
+          if (data.presetId) {
+            void this.settings.refreshPresetSecretFlags(data.presetId, data.envKeys);
+          }
+        }
+      }
+      // Refresh OAuth connection state for OAuth nodes.
+      const oauthNodes = mcpNodes.filter(n => (n.data as { authMode?: string }).authMode === 'oauth');
+      if (oauthNodes.length === 0) {
+        if (this.oauthConnected().size > 0) this.oauthConnected.set(new Map());
+        return;
+      }
+      Promise.all(oauthNodes.map(n => this.oauth.isConnected(n.id).then(c => [n.id, c] as const))).then(
+        results => {
+          const next = new Map<string, boolean>();
+          for (const [id, connected] of results) next.set(id, connected);
+          this.oauthConnected.set(next);
+        },
+      );
+    });
+  });
+
   /** Minimap backing-store device-pixel size, kept in sync with its CSS box. */
   private miniDpr = 1;
+
+  /** Whether any MCP node currently carries a warning (for the onAfterDraw hook). */
+  private hasMcpWarnings(): boolean {
+    return this.mcpWarningNodeIds().size > 0;
+  }
   private draggingMinimap = false;
 
   /** The active workflow graph. */
@@ -459,6 +648,11 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       const breakpoints = this.runController.breakpoints();
       untracked(() => this.engine.setBreakpoints(breakpoints));
     });
+    // MCP configuration warnings: dashed amber outline on unconfigured nodes.
+    effect(() => {
+      const ids = this.mcpWarningNodeIds();
+      untracked(() => this.engine.setWarningNodes(ids));
+    });
     // Click-to-add from the palette: place at the viewport centre, cascading
     // successive adds so they don't stack exactly.
     effect(() => {
@@ -519,10 +713,10 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       this.zone.run(() => this.canvasState.zoomScale.set(Math.round(s * 100)));
     this.engine.onAfterDraw = () => {
       this.drawMinimap();
-      // Bump the thinking-overlay transform tick so they re-project from the
-      // live pan/zoom. Only run inside Angular's zone when there are overlays
-      // to reposition (avoids CD thrash on every idle frame).
-      if (this.runController.nodeThinking().size > 0) {
+      // Bump the overlay transform tick so they re-project from the live
+      // pan/zoom. Only run inside Angular's zone when there are overlays to
+      // reposition (avoids CD thrash on every idle frame).
+      if (this.runController.nodeThinking().size > 0 || this.hasMcpWarnings()) {
         this.zone.run(() => this.transformTick.update(v => v + 1));
       }
     };

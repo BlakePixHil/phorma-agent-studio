@@ -147,6 +147,15 @@
   background: var(--section-color, var(--p-primary-color));
 }
 
+.phorma-palette__subheading {
+  margin: 0.5rem 0 0.35rem 0.15rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--section-color, var(--p-primary-color)) 75%, var(--p-text-muted-color));
+}
+
 .phorma-palette__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -184,10 +193,12 @@
     background 0.15s ease,
     border-color 0.15s ease;
 
-  // Glow halo (animated rainbow gradient) - hidden by default, fades in on hover.
-  // Rendered ON TOP of content as a ring: a mask cuts out the centre so only
-  // the outline glow shows. This avoids needing an opaque ::after backdrop
-  // (which clipped the halo) and keeps the body clean.
+  // Glow halo (animated hue-shift gradient of the section's base colour) -
+  // hidden by default, fades in on hover. Rendered ON TOP of content as a ring:
+  // a mask cuts out the centre so only the outline glow shows. Each section
+  // gets its own hue range (derived from --section-color) so Agents, Triggers,
+  // Tools, and Flow glow with distinct, recognisable colours instead of a
+  // shared rainbow that collides visually with the command-palette ring.
   &::before {
     content: '';
     position: absolute;
@@ -199,15 +210,11 @@
     padding: 2px;
     background: linear-gradient(
       45deg,
-      #ff0000,
-      #ff7300,
-      #fffb00,
-      #48ff00,
-      #00ffd5,
-      #002bff,
-      #7a00ff,
-      #ff00c8,
-      #ff0000
+      hsl(from var(--section-color, var(--p-primary-color)) calc(h + 0) s l),
+      hsl(from var(--section-color, var(--p-primary-color)) calc(h + 40) s l),
+      hsl(from var(--section-color, var(--p-primary-color)) calc(h + 80) s l),
+      hsl(from var(--section-color, var(--p-primary-color)) calc(h + 40) s l),
+      hsl(from var(--section-color, var(--p-primary-color)) calc(h + 0) s l)
     );
     background-size: 400%;
     filter: blur(4px);
@@ -228,7 +235,7 @@
   }
 
   &:hover {
-    border-color: color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+    border-color: color-mix(in srgb, var(--section-color, var(--p-primary-color)) 45%, transparent);
 
     &::before {
       opacity: 1;
@@ -257,7 +264,7 @@
   color: var(--p-text-muted-color);
 
   .phorma-palette__item:hover & {
-    color: var(--p-primary-color, #818cf8);
+    color: var(--section-color, var(--p-primary-color, #818cf8));
   }
 }
 
