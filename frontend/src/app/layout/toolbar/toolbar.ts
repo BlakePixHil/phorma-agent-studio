@@ -19,6 +19,7 @@ import { CloudService } from '../../core/cloud.service';
 import { SettingsService } from '../../core/settings.service';
 import { CloudDialogService } from '../../workspace/cloud/cloud-dialog.service';
 import { SettingsDialogService } from '../../workspace/settings/settings-dialog.service';
+import { CommandPaletteService } from '../../core/command-palette.service';
 import { ToastService } from '../../shared/toast/toast.service';
 
 /**
@@ -48,6 +49,7 @@ export class Toolbar {
   protected readonly clerk = inject(ClerkService);
   private readonly cloudDialog = inject(CloudDialogService);
   private readonly settingsDialog = inject(SettingsDialogService);
+  private readonly commandPalette = inject(CommandPaletteService);
   private readonly settings = inject(SettingsService);
   private readonly tauri = inject(TauriService);
   private readonly panels = inject(PanelRegistryService);
@@ -206,6 +208,14 @@ export class Toolbar {
       this.workflow.newWorkflow();
       return;
     }
+    // AI command palette (Ctrl+P / Cmd+P) — registered before the
+    // text-editing guard (like Save) so it works from any focus, and always
+    // preventDefault to suppress the browser's print dialog.
+    if (ctrl && !shift && key === 'p') {
+      e.preventDefault();
+      this.commandPalette.toggle();
+      return;
+    }
 
     // ── Edit menu hotkeys ──────────────────────────────────────────────────
     // Skip when the user is typing in an input/textarea/contenteditable so
@@ -311,6 +321,12 @@ export class Toolbar {
           icon: 'ti ti-plus',
           shortcut: 'Ctrl+N',
           command: () => this.workflow.newWorkflow(),
+        },
+        {
+          label: 'Build with AI',
+          icon: 'ti ti-sparkles',
+          shortcut: 'Ctrl+P',
+          command: () => this.commandPalette.open(),
         },
         {
           label: 'Open Workflow',

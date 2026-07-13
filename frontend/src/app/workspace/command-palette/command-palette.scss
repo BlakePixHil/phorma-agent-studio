@@ -1,0 +1,349 @@
+:host {
+  display: contents;
+}
+
+/* ── Overlay — click-through-free scrim, palette anchored ~top quarter ──── */
+.phorma-cmdk {
+  position: fixed;
+  inset: 0;
+  z-index: 90; /* above dialogs (80) — the palette is a summoned surface */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 14vh 24px 24px;
+  background: rgba(3, 7, 18, 0.28);
+  animation: phorma-cmdk-fade-in 0.14s ease-out;
+}
+
+.phorma-cmdk__panel {
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: phorma-cmdk-rise 0.16s ease-out;
+}
+
+@keyframes phorma-cmdk-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes phorma-cmdk-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── The frosted-glass input box ─────────────────────────────────────────── */
+.phorma-cmdk__box {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px 10px;
+  border-radius: 18px;
+  border: 1px solid var(--phorma-border, rgba(255, 255, 255, 0.1));
+  /* Liquid glass — same recipe as the app chrome, slightly stronger tint so
+     the input text stays legible over any canvas content. */
+  background: var(--phorma-chrome-bg, rgba(14, 15, 18, 0.45));
+  backdrop-filter: blur(20px) saturate(200%) brightness(1.04);
+  -webkit-backdrop-filter: blur(20px) saturate(200%) brightness(1.04);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+
+  /* Radial rainbow glow ring — the agents-palette hover effect, driven by
+     focus instead. Sits on top as a masked ring so the halo never washes
+     out the glass body. */
+  &::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    width: calc(100% + 4px);
+    height: calc(100% + 4px);
+    border-radius: inherit;
+    padding: 2px;
+    background: linear-gradient(
+      45deg,
+      #ff0000,
+      #ff7300,
+      #fffb00,
+      #48ff00,
+      #00ffd5,
+      #002bff,
+      #7a00ff,
+      #ff00c8,
+      #ff0000
+    );
+    background-size: 400%;
+    filter: blur(4px);
+    opacity: 0;
+    z-index: 1;
+    transition: opacity 0.3s ease-in-out;
+    animation: phorma-cmdk-glowing 20s linear infinite;
+    pointer-events: none;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+
+  &:focus-within::before,
+  &--busy::before {
+    opacity: 1;
+  }
+
+  > * {
+    position: relative;
+    z-index: 2;
+  }
+}
+
+@keyframes phorma-cmdk-glowing {
+  0% {
+    background-position: 0 0;
+  }
+  50% {
+    background-position: 400% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+.phorma-cmdk__spark {
+  position: absolute;
+  top: 17px;
+  left: 16px;
+  font-size: 17px;
+  color: var(--p-primary-color, #8578f6);
+  pointer-events: none;
+}
+
+.phorma-cmdk__input {
+  width: 100%;
+  min-height: 30px;
+  max-height: 40vh;
+  padding: 2px 4px 2px 4px;
+  border: none;
+  background: transparent;
+  resize: none;
+  color: var(--p-text-color, #f8fafc);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  field-sizing: content; /* grows with the draft (Chromium 123+) */
+
+  &:focus {
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.55));
+  }
+
+  &:disabled {
+    opacity: 0.6;
+  }
+}
+
+/* ── Bottom row: mode toggle + submit ────────────────────────────────────── */
+.phorma-cmdk__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.phorma-cmdk__modes {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-border, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--p-text-color, #fff) 4%, transparent);
+}
+
+.phorma-cmdk__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.6));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+
+  i {
+    font-size: 13px;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--p-text-color, #f8fafc);
+  }
+
+  &--active {
+    background: color-mix(in srgb, var(--p-primary-color, #8578f6) 22%, transparent);
+    color: var(--p-text-color, #f8fafc);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.phorma-cmdk__submit {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  background: var(--p-primary-color, #8578f6);
+  color: var(--p-primary-contrast-color, #fff);
+  font-size: 15px;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.35;
+  }
+}
+
+/* ── Status rail / hint under the box ────────────────────────────────────── */
+.phorma-cmdk__hint,
+.phorma-cmdk__status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.6));
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.phorma-cmdk__status--done {
+  color: var(--phorma-accent-green, #34d399);
+}
+
+.phorma-cmdk__status--error {
+  color: var(--phorma-accent-red, #f87171);
+}
+
+.phorma-cmdk__error-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-cmdk__spin {
+  animation: phorma-cmdk-spin 0.9s linear infinite;
+}
+
+@keyframes phorma-cmdk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── CTA buttons (retry / buy credits — secondary pill style) ────────────── */
+.phorma-cmdk__cta {
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  border: 1px solid var(--phorma-border, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color, #fff) 6%, transparent);
+  color: var(--p-text-color, #f8fafc);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color, #fff) 12%, transparent);
+  }
+}
+
+/* ── Non-subscriber upsell state ─────────────────────────────────────────── */
+.phorma-cmdk__box--locked {
+  padding: 18px 20px;
+}
+
+/* PrimeNG primary button in the upsell — matches the Settings dialog's
+   standard primary button (no severity = primary). Sized to sit comfortably
+   in the frosted palette card. */
+:host ::ng-deep .phorma-cmdk__primary-btn.p-button {
+  min-width: 64px;
+}
+
+.phorma-cmdk__locked {
+  padding-left: 30px;
+}
+
+.phorma-cmdk__locked-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--p-text-color, #f8fafc);
+}
+
+.phorma-cmdk__locked-copy {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.7));
+}
+
+.phorma-cmdk__locked-actions {
+  margin-top: 12px;
+}
+
+/* ── Accessibility fallbacks ─────────────────────────────────────────────── */
+@media (prefers-reduced-transparency: reduce) {
+  .phorma-cmdk__box {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--phorma-canvas-bg, #0e0f12) 96%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phorma-cmdk,
+  .phorma-cmdk__panel {
+    animation: none;
+  }
+
+  .phorma-cmdk__box::before {
+    animation: none;
+  }
+}

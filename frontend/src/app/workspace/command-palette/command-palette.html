@@ -1,0 +1,129 @@
+@if (palette.visible()) {
+  <div class="phorma-cmdk" (click)="onBackdropClick()">
+    <div class="phorma-cmdk__panel" (click)="$event.stopPropagation()">
+      @if (canBuild()) {
+        <!-- ── Subscriber: the AI builder input ── -->
+        <div class="phorma-cmdk__box" [class.phorma-cmdk__box--busy]="busy()">
+          <textarea
+            #promptInput
+            class="phorma-cmdk__input"
+            rows="1"
+            placeholder="What would you like to build?"
+            [value]="draft()"
+            [disabled]="busy()"
+            (input)="draft.set(promptInput.value)"
+            (keydown)="onInputKeydown($event)"
+          ></textarea>
+
+          <div class="phorma-cmdk__actions">
+            <!-- Mode toggle: Plan (one-shot) vs Agent (live tool loop) -->
+            <div class="phorma-cmdk__modes" role="radiogroup" aria-label="Build mode">
+              <button
+                type="button"
+                class="phorma-cmdk__mode"
+                [class.phorma-cmdk__mode--active]="palette.mode() === 'plan'"
+                [disabled]="busy()"
+                (click)="setMode('plan')"
+                title="Plan: the AI drafts a complete plan, then applies it"
+              >
+                <i class="ti ti-list-check" aria-hidden="true"></i> Plan
+              </button>
+              <button
+                type="button"
+                class="phorma-cmdk__mode"
+                [class.phorma-cmdk__mode--active]="palette.mode() === 'agent'"
+                [disabled]="busy()"
+                (click)="setMode('agent')"
+                title="Agent: the AI edits the canvas live, step by step"
+              >
+                <i class="ti ti-robot" aria-hidden="true"></i> Agent
+              </button>
+            </div>
+
+            <button
+              type="button"
+              class="phorma-cmdk__submit"
+              [disabled]="busy() || !draft().trim()"
+              (click)="submit()"
+              aria-label="Build workflow"
+            >
+              <i class="ti ti-arrow-up" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- ── Status rail beneath the box ── -->
+        @switch (builder.status()) {
+          @case ('thinking') {
+            <div class="phorma-cmdk__status">
+              <i class="ti ti-loader-2 phorma-cmdk__spin" aria-hidden="true"></i>
+              Designing your workflow…
+            </div>
+          }
+          @case ('applying') {
+            <div class="phorma-cmdk__status">
+              <i class="ti ti-loader-2 phorma-cmdk__spin" aria-hidden="true"></i>
+              @if (builder.progress(); as progress) {
+                Building on canvas — {{ progress.applied }} / {{ progress.total }}
+              } @else {
+                Building on canvas…
+              }
+            </div>
+          }
+          @case ('done') {
+            <div class="phorma-cmdk__status phorma-cmdk__status--done">
+              <i class="ti ti-check" aria-hidden="true"></i>
+              {{ builder.summary() ?? 'Workflow updated.' }}
+            </div>
+          }
+          @case ('error') {
+            <div class="phorma-cmdk__status phorma-cmdk__status--error">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              <span class="phorma-cmdk__error-text">{{ builder.error() }}</span>
+              @if (builder.creditsExhausted()) {
+                <button type="button" class="phorma-cmdk__cta" (click)="openCredits()">
+                  Buy credits
+                </button>
+              } @else {
+                <button type="button" class="phorma-cmdk__cta" (click)="retry()">Retry</button>
+              }
+            </div>
+          }
+          @default {
+            <div class="phorma-cmdk__hint">
+              Describe a workflow and the AI builds it on your canvas — uses Phorma Cloud credits
+            </div>
+          }
+        }
+      } @else {
+        <!-- ── Non-subscriber: upsell state ── -->
+        <div class="phorma-cmdk__box phorma-cmdk__box--locked">
+          <div class="phorma-cmdk__locked">
+            <p class="phorma-cmdk__locked-title">Build workflows with AI</p>
+            <p class="phorma-cmdk__locked-copy">
+              Describe what you want and the AI assembles it on your canvas. Requires an active
+              Phorma Cloud subscription.
+            </p>
+            <div class="phorma-cmdk__locked-actions">
+              @if (phormaCloud.signedIn()) {
+                <p-button
+                  styleClass="phorma-cmdk__primary-btn"
+                  size="small"
+                  label="Subscribe to Phorma Cloud"
+                  (onClick)="openSubscribe()"
+                />
+              } @else {
+                <p-button
+                  styleClass="phorma-cmdk__primary-btn"
+                  size="small"
+                  label="Sign in to Phorma Cloud"
+                  (onClick)="signIn()"
+                />
+              }
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+}

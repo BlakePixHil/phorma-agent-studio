@@ -24,10 +24,14 @@ const LAYER_ORIGIN_Y = 80;
 @Injectable({ providedIn: 'root' })
 export class GraphLayoutService {
   /**
-   * Layered (Sugiyama-style) layout. Entry nodes (triggers) land in layer 0;
-   * each downstream node lands one layer right of its deepest upstream
-   * dependency. Within a layer, nodes are ordered by the barycenter of their
-   * upstream neighbours to reduce wire crossings.
+   * Layered (Sugiyama-style) layout with human-style tool placement.
+   *
+   * Only HANDOFF edges drive the left→right layering — tool links are
+   * capability declarations, not sequential flow, so including them made
+   * tool nodes look like downstream steps (a tool used by the first and
+   * last agent would land in a trailing column). Instead, tool nodes float
+   * BELOW the agents that use them, at the horizontal barycenter of their
+   * linked agents.
    *
    * Returns a position for every node in the graph. Disconnected nodes
    * (no connections) are stacked in a trailing column.
@@ -36,11 +40,16 @@ export class GraphLayoutService {
     const nodes = graph.nodes;
     if (nodes.length === 0) return new Map();
 
-    const ids = nodes.map(node => node.id);
+    // Tool nodes are laid out separately (below their linked agents); the
+    // layered pass only sees the control-flow nodes.
+    const flowNodes = nodes.filter(node => node.category !== 'tool');
+    const toolNodes = nodes.filter(node => node.category === 'tool');
+
+    const ids = flowNodes.map(node => node.id);
     const idSet = new Set(ids);
 
-    // ── Build adjacency: for each node, the set of nodes that feed INTO it
-    //    (i.e. this node reads from their output ports). ──
+    // ── Build adjacency from HANDOFF edges only: for each node, the set of
+    //    nodes that feed INTO it. ──
     const incoming = new Map<string, Set<string>>();
     const outgoing = new Map<string, Set<string>>();
     for (const id of ids) {
@@ -48,6 +57,7 @@ export class GraphLayoutService {
       outgoing.set(id, new Set());
     }
     for (const conn of graph.connections) {
+      if (conn.kind === 'tool-link') continue;
       const source = this.nodeIdForConnector(graph, conn.outputId);
       const target = this.nodeIdForConnector(graph, conn.inputId);
       if (!source || !target || source === target) continue;
@@ -64,7 +74,7 @@ export class GraphLayoutService {
     // already layered. Cycles (shouldn't happen — saveDraft rejects them — but
     // guard anyway) fall back to max-layer + 1.
     const pending = new Set(ids);
-    let guard = nodes.length + 1;
+    let guard = flowNodes.length + 1;
     while (pending.size > 0 && guard-- > 0) {
       const ready: string[] = [];
       for (const id of pending) {
@@ -88,7 +98,7 @@ export class GraphLayoutService {
           const depLayer = layers.get(dep) ?? 0;
           if (depLayer > maxDepLayer) maxDepLayer = depLayer;
         }
-        const node = nodes.find(n => n.id === id)!;
+        const node = flowNodes.find(n => n.id === id)!;
         const layer = entryKinds.has(node.kind) ? 0 : maxDepLayer + 1;
         layers.set(id, layer);
         pending.delete(id);
@@ -132,6 +142,49 @@ export class GraphLayoutService {
           x: LAYER_ORIGIN_X + layer * LAYER_COLUMN_WIDTH,
           y: LAYER_ORIGIN_Y + rank * LAYER_ROW_HEIGHT,
         });
+      });
+    }
+
+    // ── Tool nodes float BELOW the flow row, at the horizontal barycenter of
+    //    the agents linked to them — the way a human would place a shared
+    //    capability. Tools sharing the same column nudge right to avoid
+    //    stacking on each other. ──
+    const flowBottomY =
+      Math.max(LAYER_ORIGIN_Y, ...[...positions.values()].map(pos => pos.y)) + LAYER_ROW_HEIGHT;
+    const toolLinksFor = (toolId: string): string[] => {
+      const linked: string[] = [];
+      for (const conn of graph.connections) {
+        if (conn.kind !== 'tool-link') continue;
+        const source = this.nodeIdForConnector(graph, conn.outputId);
+        const target = this.nodeIdForConnector(graph, conn.inputId);
+        if (source === toolId && target && positions.has(target)) linked.push(target);
+        else if (target === toolId && source && positions.has(source)) linked.push(source);
+      }
+      return linked;
+    };
+    const takenToolSlots = new Set<number>();
+    const orderedTools = toolNodes
+      .map(node => {
+        const linked = toolLinksFor(node.id);
+        const x =
+          linked.length > 0
+            ? linked.reduce((sum, id) => sum + positions.get(id)!.x, 0) / linked.length
+            : NaN;
+        return { node, x, connected: linked.length > 0 };
+      })
+      .sort((a, b) => (a.x || 0) - (b.x || 0));
+    for (const tool of orderedTools) {
+      if (!tool.connected) continue; // handled by the disconnected pass below
+      // Snap the barycenter onto the column grid, then probe right for a
+      // free slot so multiple tools never overlap.
+      let column = Math.round((tool.x - LAYER_ORIGIN_X) / LAYER_COLUMN_WIDTH);
+      while (takenToolSlots.has(column)) {
+        column += 1;
+      }
+      takenToolSlots.add(column);
+      positions.set(tool.node.id, {
+        x: LAYER_ORIGIN_X + column * LAYER_COLUMN_WIDTH,
+        y: flowBottomY,
       });
     }
 

@@ -22,6 +22,8 @@ import { CloudDialog } from './workspace/cloud/cloud-dialog/cloud-dialog';
 import { CreditsDialog } from './workspace/cloud/credits-dialog/credits-dialog';
 import { OnboardingDialog } from './workspace/onboarding/onboarding-dialog/onboarding-dialog';
 import { OnboardingService } from './workspace/onboarding/onboarding.service';
+import { CommandPalette } from './workspace/command-palette/command-palette';
+import { AiReviewBar } from './workspace/command-palette/ai-review-bar';
 import { ConfirmDialog } from './shared/confirm-dialog/confirm-dialog';
 import { Toast } from './shared/toast/toast';
 
@@ -50,6 +52,8 @@ import { Toast } from './shared/toast/toast';
     CloudDialog,
     CreditsDialog,
     OnboardingDialog,
+    CommandPalette,
+    AiReviewBar,
     ConfirmDialog,
     Toast,
   ],
