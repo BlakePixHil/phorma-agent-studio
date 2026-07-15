@@ -141,6 +141,11 @@ jobs:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GOTCHA: VERSION must be set HERE, not only on the sync step below.
+          # Without it `gh release download ""` silently falls back to the
+          # release marked "Latest" on GitHub — which for prerelease chains is
+          # an OLD version — and the updater manifest gets poisoned.
+          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p release-assets
           gh release download "$VERSION" \

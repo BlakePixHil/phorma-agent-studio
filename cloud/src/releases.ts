@@ -254,6 +254,36 @@ function compareVersions(a: string, b: string): number {
   // A pre-release version is less than the same core without pre-release.
   if (pa.pre && !pb.pre) return -1;
   if (!pa.pre && pb.pre) return 1;
-  if (pa.pre && pb.pre) return pa.pre < pb.pre ? -1 : pa.pre > pb.pre ? 1 : 0;
+  if (pa.pre && pb.pre) return comparePrerelease(pa.pre, pb.pre);
+  return 0;
+}
+
+/**
+ * SemVer-style prerelease comparison: dot-separated identifiers, numeric
+ * identifiers compared numerically (so beta.10 > beta.9 — plain string
+ * comparison gets this wrong and silently stops updates at .10).
+ */
+function comparePrerelease(a: string, b: string): number {
+  const as = a.split('.');
+  const bs = b.split('.');
+  const len = Math.max(as.length, bs.length);
+  for (let i = 0; i < len; i++) {
+    const x = as[i];
+    const y = bs[i];
+    // Fewer identifiers sorts first (1.0.0-beta < 1.0.0-beta.1).
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) {
+      const diff = parseInt(x, 10) - parseInt(y, 10);
+      if (diff !== 0) return diff;
+    } else if (xn !== yn) {
+      // Numeric identifiers sort before alphanumeric ones.
+      return xn ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
   return 0;
 }

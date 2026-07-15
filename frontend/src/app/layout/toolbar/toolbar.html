@@ -87,6 +87,24 @@
 
   <!-- Right-side window controls -->
   <div class="flex items-center gap-1">
+    <!--
+      Update button — appears only when a newer version is available (desktop
+      only). One click downloads (if needed), installs silently, and restarts
+      into the new version. Styled like the settings dialog's primary buttons.
+    -->
+    @if (isDesktop && updates.badgeVisible()) {
+      <p-button
+        styleClass="phorma-update-button"
+        size="small"
+        [label]="updates.downloading() ? 'Updating…' : 'Update'"
+        icon="ti ti-arrow-big-up-lines"
+        [loading]="updates.downloading()"
+        [pTooltip]="updateTooltip()"
+        tooltipPosition="bottom"
+        (onClick)="updateNow()"
+      />
+      <span class="phorma-toolbar-divider"></span>
+    }
     <p-button
       [text]="true"
       severity="secondary"

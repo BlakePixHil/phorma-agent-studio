@@ -38,6 +38,35 @@
           e.preventDefault();
         }
       });
+
+      // ── Desktop shell: suppress browser accelerator keys ────────────────
+      // In the built app (Tauri/WebView2) the browser's own shortcuts must
+      // never surface — no print preview (Ctrl+P), no find bar (Ctrl+F), no
+      // page reload (Ctrl+R / F5), no view-source, etc. preventDefault on
+      // keydown stops the WebView's default handling but does NOT stop
+      // propagation, so the app's own handlers (Ctrl+P palette, F5 run
+      // controls) still receive the event. Guarded to Tauri so browser
+      // previews (`ng serve`) keep normal dev shortcuts like reload.
+      if ('__TAURI_INTERNALS__' in window) {
+        window.addEventListener(
+          'keydown',
+          (e) => {
+            const ctrl = e.ctrlKey || e.metaKey;
+            const key = e.key.toLowerCase();
+            // Browser-owned function keys: reload / find-next / caret browsing.
+            if (['f5', 'f3', 'f7'].includes(key)) e.preventDefault();
+            if (!ctrl) return;
+            // Ctrl/Cmd + browser accelerators. The app repurposes some of
+            // these (P = palette, S = save, N = new); preventDefault here is
+            // the safety net so the browser NEVER handles them, even if an
+            // app-level handler regresses.
+            if (['p', 'f', 'r', 'j', 'o', 'u', 'h', 'l', 'k', 'e', 'd', 't', 'w'].includes(key)) {
+              e.preventDefault();
+            }
+          },
+          { capture: true }
+        );
+      }
     </script>
   </head>
   <body>

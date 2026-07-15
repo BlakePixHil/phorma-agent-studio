@@ -66,6 +66,21 @@ if (entries.length === 1 && entries[0].isDirectory()) {
 }
 
 const files = readdirSync(assetDir);
+
+// ── Sanity check: the downloaded assets must belong to THIS version ───────
+// Guards against the "gh release download with empty tag falls back to the
+// release marked Latest" failure mode, which once poisoned latest.json with
+// an old version's files uploaded under a new version's prefix.
+const versionedFiles = files.filter(f => f.includes(version));
+if (versionedFiles.length === 0) {
+  console.error(
+    `FATAL: none of the ${files.length} downloaded assets contain the version "${version}".\n` +
+    `Files: ${files.join(', ')}\n` +
+    `The wrong GitHub release was probably downloaded. Aborting before touching R2.`,
+  );
+  process.exit(1);
+}
+
 console.log(`Uploading ${files.length} assets to ${prefix}/...`);
 
 for (const file of files) {
@@ -85,6 +100,13 @@ for (const file of files) {
     try {
       const raw = readFileSync(join(assetDir, file), 'utf8');
       const parsed = JSON.parse(raw);
+      if (parsed.version && parsed.version !== version) {
+        console.error(
+          `FATAL: release latest.json says version "${parsed.version}" but the tag is "${version}".\n` +
+          `The wrong GitHub release was downloaded. Aborting before touching R2.`,
+        );
+        process.exit(1);
+      }
       latestByTarget._meta = {
         version: parsed.version,
         notes: parsed.notes,

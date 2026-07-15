@@ -20,6 +20,7 @@ import { SettingsService } from '../../core/settings.service';
 import { CloudDialogService } from '../../workspace/cloud/cloud-dialog.service';
 import { SettingsDialogService } from '../../workspace/settings/settings-dialog.service';
 import { CommandPaletteService } from '../../core/command-palette.service';
+import { UpdateService } from '../../core/update.service';
 import { ToastService } from '../../shared/toast/toast.service';
 
 /**
@@ -51,6 +52,7 @@ export class Toolbar {
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly commandPalette = inject(CommandPaletteService);
   private readonly settings = inject(SettingsService);
+  protected readonly updates = inject(UpdateService);
   private readonly tauri = inject(TauriService);
   private readonly panels = inject(PanelRegistryService);
   private readonly history = inject(HistoryService);
@@ -62,6 +64,27 @@ export class Toolbar {
   protected readonly clerkUser = toSignal(this.clerk.user$, { initialValue: null });
   /** True once Clerk reports a signed-in user. */
   protected readonly isSignedIn = computed(() => this.clerkUser() != null);
+
+  /** True when running inside the Tauri desktop runtime. */
+  protected readonly isDesktop = this.tauri.isDesktop;
+
+  /** Tooltip for the toolbar Update button, reflecting the update state. */
+  protected readonly updateTooltip = computed(() => {
+    const version = this.updates.available()?.version;
+    if (this.updates.downloading()) {
+      const pct = this.updates.progress();
+      return `Downloading update${pct > 0 ? ` ${Math.round(pct * 100)}%` : ''}…`;
+    }
+    if (this.updates.readyToRestart()) {
+      return `Restart to update${version ? ` to v${version}` : ''}`;
+    }
+    return version ? `Update to v${version} and restart` : 'Update and restart';
+  });
+
+  /** One-click update: download (if needed), silent install, restart. */
+  protected updateNow(): void {
+    void this.updates.updateNow();
+  }
 
   /** Opens Clerk's modal sign-in flow. */
   protected openSignIn(): void {

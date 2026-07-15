@@ -59,7 +59,10 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2NTQ3MUFCQkFGRkIzQzkKUldUSnMvKzZxM0ZVbHJzdU5TVWdLUDZnMlBiT2ZNcXRIeDBrRHM4bVRBUmdScHZhelh4ZmFRR0QK",
       "endpoints": [
         "https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev/update/stable/{{target}}/{{arch}}/{{current_version}}"
-      ]
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
     }
   }
 }

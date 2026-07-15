@@ -146,6 +146,18 @@
   -webkit-app-region: no-drag;
 }
 
+// Update button — filled primary (same treatment as the settings dialog's
+// primary buttons, e.g. Save), compacted to fit the 44px toolbar row.
+:host ::ng-deep .phorma-update-button.p-button {
+  min-width: 64px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+
+  .p-button-icon {
+    font-size: 0.875rem;
+  }
+}
+
 // Clerk UserButton trigger (avatar) — make it clearly clickable.
 :host ::ng-deep clerk-user-button {
   -webkit-app-region: no-drag;

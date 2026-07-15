@@ -110,17 +110,10 @@ export class App {
   protected readonly Math = Math;
 
   /**
-   * Status-bar update badge click handler. If an update is staged, restarts
-   * to install; if one is available but not yet downloading, starts the
-   * download; otherwise re-checks the endpoint.
+   * Status-bar update badge click handler — same one-click path as the
+   * toolbar Update button: download (if needed), silent install, restart.
    */
   async onUpdateBadgeClick(): Promise<void> {
-    if (this.updates.readyToRestart()) {
-      await this.updates.installAndRelaunch();
-    } else if (this.updates.available() && !this.updates.downloading()) {
-      await this.updates.download();
-    } else {
-      await this.updates.check();
-    }
+    await this.updates.updateNow();
   }
 }
