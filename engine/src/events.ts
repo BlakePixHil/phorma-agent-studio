@@ -14,6 +14,7 @@ export type RunNodeState =
   | 'queued'
   | 'thinking'
   | 'waiting-approval'
+  | 'waiting-event'
   | 'done'
   | 'error';
 
@@ -30,6 +31,15 @@ export type RunEvent =
   | { type: 'tool-result'; runId: string; nodeId: string; toolNodeId: string; name: string; result: string; isError: boolean; at: number }
   | { type: 'approval-required'; runId: string; nodeId: string; message: string; payload: string; at: number }
   | { type: 'approval-resolved'; runId: string; nodeId: string; approved: boolean; at: number }
+  // ForEach loop lifecycle: one loop-started, one loop-iteration per item,
+  // one loop-completed (with per-item failure summary) per loop execution.
+  | { type: 'loop-started'; runId: string; nodeId: string; nodeName: string; total: number; at: number }
+  | { type: 'loop-iteration'; runId: string; nodeId: string; index: number; total: number; item: string; at: number }
+  | { type: 'loop-completed'; runId: string; nodeId: string; total: number; succeeded: number; failed: number; at: number }
+  // Wait-for-Event: the run suspends until an external event with a matching
+  // correlation key arrives (webhook, e-sign callback, manual injection).
+  | { type: 'wait-started'; runId: string; nodeId: string; nodeName: string; correlationKey: string; message: string; payload: string; at: number }
+  | { type: 'wait-resolved'; runId: string; nodeId: string; correlationKey: string; eventPayload: string; at: number }
   | { type: 'run-paused'; runId: string; nodeId?: string; at: number }
   | { type: 'run-resumed'; runId: string; at: number }
   | { type: 'run-completed'; runId: string; output: string; at: number }

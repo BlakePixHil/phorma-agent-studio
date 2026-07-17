@@ -94,6 +94,34 @@
     </section>
   }
 
+  <!-- Suspended waits (external events) -->
+  @for (wait of runController.pendingWaits(); track wait.nodeId) {
+    <section class="phorma-runs__approval phorma-runs__wait">
+      <header>
+        <i class="ti ti-hourglass-high" aria-hidden="true"></i>
+        <strong>{{ wait.nodeName }}</strong>
+        <code class="phorma-runs__wait-key" title="Correlation key">{{ wait.correlationKey }}</code>
+      </header>
+      <p class="phorma-runs__approval-message">{{ wait.message }}</p>
+      <textarea
+        class="phorma-runs__input phorma-runs__wait-input"
+        rows="2"
+        placeholder='Event payload (JSON or text) — e.g. {"signedPdfUrl": "…"}'
+        [value]="waitDraft(wait.nodeId)"
+        (input)="onWaitDraft(wait.nodeId, $event)"
+      ></textarea>
+      <div class="phorma-runs__approval-actions">
+        <button
+          type="button"
+          class="phorma-runs__btn phorma-runs__btn--approve"
+          (click)="injectEvent(wait.nodeId)"
+        >
+          <i class="ti ti-bolt" aria-hidden="true"></i> Deliver event
+        </button>
+      </div>
+    </section>
+  }
+
   <!-- Trace timeline -->
   <section class="phorma-runs__section phorma-runs__section--grow">
     <label class="phorma-runs__label">Trace</label>

@@ -1,4 +1,26 @@
 <div class="phorma-workflows">
+  <!-- Built-in templates -->
+  <div class="phorma-workflows__section-label">Templates</div>
+  <ul class="phorma-workflows__list">
+    @for (template of templates; track template.id) {
+      <li>
+        <button
+          type="button"
+          class="phorma-workflows__item"
+          (click)="openTemplate(template)"
+          [title]="template.description"
+        >
+          <i [class]="template.icon" aria-hidden="true"></i>
+          <span class="phorma-workflows__meta">
+            <span class="phorma-workflows__name">{{ template.label }}</span>
+            <span class="phorma-workflows__date">Template</span>
+          </span>
+        </button>
+      </li>
+    }
+  </ul>
+
+  <div class="phorma-workflows__section-label">Saved</div>
   @if (workflow.library().length > 0) {
     <ul class="phorma-workflows__list">
       @for (spec of workflow.library(); track spec.id) {

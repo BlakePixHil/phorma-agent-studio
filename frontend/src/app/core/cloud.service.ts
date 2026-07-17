@@ -342,6 +342,8 @@ export class CloudService {
       this.connection.set('connected');
       this.runController.remoteApprovalSender = (nodeId, approved) =>
         this.approveRemote(nodeId, approved);
+      this.runController.remoteEventSender = (correlationKey, payload) =>
+        this.sendEventRemote(correlationKey, payload);
       this.terminal.append('run', 'success', `Cloud monitor connected (${spec.name}).`);
     };
     socket.onmessage = message => {
@@ -373,6 +375,7 @@ export class CloudService {
     this.socket = null;
     this.connection.set('disconnected');
     this.runController.remoteApprovalSender = null;
+    this.runController.remoteEventSender = null;
     socket?.close();
   }
 
@@ -390,6 +393,11 @@ export class CloudService {
 
   approveRemote(nodeId: string, approved: boolean): void {
     this.send({ type: 'approval', nodeId, approved });
+  }
+
+  /** Delivers an external event to a suspended Wait-for-Event node remotely. */
+  sendEventRemote(correlationKey: string, payload: string): void {
+    this.send({ type: 'event', correlationKey, payload });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

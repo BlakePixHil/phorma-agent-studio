@@ -5,11 +5,14 @@ import { WorkflowService } from '../../../core/workflow.service';
 import { SettingsService } from '../../../core/settings.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
+import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from '../../../core/workflow-templates';
 import type { WorkflowSpec } from '../../../core/workflow.model';
 
 /**
- * The Workflows panel (left side): the saved workflow library. Click to open
- * in a tab; the trash affordance deletes from storage after confirmation.
+ * The Workflows panel (left side): the saved workflow library plus the
+ * built-in template gallery. Click to open in a tab; templates open as
+ * fresh unsaved copies; the trash affordance deletes from storage after
+ * confirmation.
  */
 @Component({
   selector: 'app-workflows-panel',
@@ -24,8 +27,16 @@ export class WorkflowsPanel {
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly toast = inject(ToastService);
 
+  /** Built-in template gallery (registry-driven). */
+  protected readonly templates = WORKFLOW_TEMPLATES;
+
   protected open(spec: WorkflowSpec): void {
     this.workflow.openWorkflow(spec.id);
+  }
+
+  /** Opens a template as a fresh unsaved workflow tab. */
+  protected openTemplate(template: WorkflowTemplate): void {
+    this.workflow.importSpec(template.build());
   }
 
   protected async rename(event: Event, spec: WorkflowSpec): Promise<void> {

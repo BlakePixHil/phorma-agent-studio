@@ -32,7 +32,9 @@ export type WorkflowNodeKind =
   | 'router'
   | 'parallel'
   | 'aggregator'
-  | 'approval-gate';
+  | 'approval-gate'
+  | 'for-each'
+  | 'wait-event';
 
 /** Category accent colors (hex) shared by the canvas renderer and minimap. */
 export const NODE_CATEGORY_COLORS: Record<NodeCategory, string> = {
@@ -219,6 +221,38 @@ export interface ApprovalGateData {
   message?: string;
 }
 
+export interface ForEachNodeData {
+  /**
+   * Optional dotted path to the array inside the incoming JSON payload
+   * (e.g. `jobs`). Empty = auto-detect (whole-payload array, single array
+   * property, or first embedded JSON array).
+   */
+  itemsPath?: string;
+  /** Maximum concurrent iterations (1–8; default 1 = sequential). */
+  concurrency?: number;
+  /**
+   * When true (default) a failing item is recorded as an exception and the
+   * loop continues; when false the first failure fails the run.
+   */
+  continueOnError?: boolean;
+}
+
+export interface WaitEventNodeData {
+  /**
+   * Correlation key template; `{{field}}` interpolates against the incoming
+   * JSON payload (e.g. `signed:{{jobId}}`). The run resumes when an external
+   * event with the rendered key arrives.
+   */
+  correlationKey?: string;
+  /** Note shown while waiting. Markdown. */
+  message?: string;
+  /**
+   * Maximum hours to wait before the node fails (0/absent = wait forever).
+   * Measured from (re-)registration; a resumed run restarts the clock.
+   */
+  timeoutHours?: number;
+}
+
 /**
  * Union of all kind-specific node configuration. Narrow via `node.kind`
  * (e.g. `isAgentNode(node)`); nodes without configuration carry `{}`.
@@ -232,6 +266,8 @@ export type WorkflowNodeData =
   | McpToolData
   | RouterNodeData
   | ApprovalGateData
+  | ForEachNodeData
+  | WaitEventNodeData
   | Record<string, never>;
 
 // ── Nodes, connections, graph ────────────────────────────────────────────────

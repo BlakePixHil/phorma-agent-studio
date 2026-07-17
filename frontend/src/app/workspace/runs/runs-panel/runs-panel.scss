@@ -160,6 +160,27 @@
   gap: 0.4rem;
 }
 
+// Suspended Wait-for-Event cards share the approval card shell.
+.phorma-runs__wait {
+  header {
+    flex-wrap: wrap;
+  }
+}
+
+.phorma-runs__wait-key {
+  margin-left: auto;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.4rem;
+  font-size: 0.68rem;
+  background: color-mix(in srgb, var(--phorma-port-tools, #fbbf24) 14%, transparent);
+  color: var(--p-text-color);
+}
+
+.phorma-runs__wait-input {
+  font-family: var(--phorma-font-mono, monospace);
+  font-size: 0.72rem;
+}
+
 .phorma-runs__trace {
   margin: 0;
   padding: 0;

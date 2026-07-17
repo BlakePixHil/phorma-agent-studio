@@ -23,18 +23,21 @@
 import type { RunEvent, RunEventSink } from './events.js';
 import { RunGate, RunStoppedError } from './gate.js';
 import type { ModelClient, ChatMessage, ToolCall } from './model.js';
+import { extractItems, interpolatePayload, mergePayloads } from './payload.js';
 import { resolveAgentTools, type ResolvedTool, type ToolHost } from './tools.js';
 import {
   isAgentNode,
   nodeForConnector,
   portBaseId,
+  type ForEachNodeData,
   type ModelProviderId,
+  type WaitEventNodeData,
   type WorkflowConnection,
   type WorkflowGraph,
   type WorkflowNode,
 } from './types.js';
 
-/** Safety budget: total node executions per run (cycles are allowed, runaway loops are not). */
+/** Default safety budget: total node executions per run (cycles are allowed, runaway loops are not). */
 const MAX_NODE_EXECUTIONS = 100;
 /** Default maximum model→tools→model rounds per agent execution. */
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
@@ -64,6 +67,11 @@ export interface RunOptions {
   /** Maximum model→tools→model rounds per agent execution (default 8). */
   maxToolRounds?: number;
   /**
+   * Total node-execution budget per run (default 100). Batch workflows
+   * (ForEach over many items) may need more headroom.
+   */
+  maxExecutions?: number;
+  /**
    * Host-provided tool discovery + execution (HTTP, web search, MCP).
    * When omitted, agents run without callable tools (capabilities are still
    * described in their prompts).
@@ -75,6 +83,28 @@ export interface RunOptions {
    * wires it to a webhook/WebSocket reply.
    */
   requestApproval(nodeId: string, message: string, payload: string): Promise<boolean>;
+  /**
+   * Suspends until an external event with the given correlation key arrives
+   * (webhook callback, e-sign completion, manual injection from the Runs
+   * panel). Resolves with the event's payload; rejects to fail the node
+   * (e.g. on timeout). Hosts that cannot deliver external events may omit
+   * this — reaching a Wait for Event node then fails the run with a
+   * descriptive error. `timeoutMs` (when set) asks the host to reject the
+   * wait after that long; hosts that cannot enforce it may ignore it.
+   */
+  waitForEvent?(
+    nodeId: string,
+    correlationKey: string,
+    message: string,
+    payload: string,
+    timeoutMs?: number,
+  ): Promise<string>;
+  /**
+   * Durable replay journal (see {@link RunJournal}). When present, node
+   * results are recorded as they complete and replayed on restart, letting
+   * hosts resume an interrupted run without repeating side effects.
+   */
+  journal?: RunJournal;
 }
 
 export interface RunHandle {
@@ -86,6 +116,41 @@ export interface RunHandle {
   resume(): void;
   step(): void;
   stop(): void;
+}
+
+/** A journaled node-execution result (see {@link RunJournal}). */
+export interface JournalEntry {
+  output: string;
+  /** Out ports the node routed through, when it restricted them. */
+  viaPortIds?: string[];
+}
+
+/**
+ * Durable replay journal — the engine's checkpoint/resume contract.
+ *
+ * When provided, every completed node execution is recorded under a
+ * deterministic key (`nodeId|payloadHash|occurrence`). Restarting the SAME
+ * run (same graph + input) with the recorded journal REPLAYS journaled
+ * executions instantly — no model calls, no tool side effects, no duplicate
+ * approval prompts — until execution reaches the first un-journaled node,
+ * where real execution resumes. This is how deployed runs survive Durable
+ * Object eviction while suspended on approvals or external events.
+ */
+export interface RunJournal {
+  /** Returns the recorded result for a key, or undefined. */
+  lookup(key: string): JournalEntry | undefined;
+  /** Durably records a result. Awaited before execution continues. */
+  record(key: string, entry: JournalEntry): void | Promise<void>;
+}
+
+/** FNV-1a 32-bit hash — stable payload fingerprint for journal keys. */
+function fnv1a(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 const TRIGGER_KINDS = new Set(['manual-trigger', 'schedule-trigger', 'webhook-trigger']);
@@ -112,11 +177,16 @@ class WorkflowRun {
   private readonly aggregations = new Map<string, Map<string, string>>();
   /** Terminal outputs (payloads that reached nodes with no outgoing handoff). */
   private readonly terminalOutputs: string[] = [];
+  /** Effective node-execution budget for this run. */
+  private readonly maxExecutions: number;
+  /** Occurrence counters per (node, payload-hash) for journal keys. */
+  private readonly journalCounts = new Map<string, number>();
 
   constructor(
     private readonly options: RunOptions,
     private readonly gate: RunGate,
   ) {
+    this.maxExecutions = Math.max(1, options.maxExecutions ?? MAX_NODE_EXECUTIONS);
     gate.onPauseChange = (paused, nodeId) => {
       this.emit(
         paused
@@ -172,25 +242,71 @@ class WorkflowRun {
     );
   }
 
-  /** Executes one node and recursively follows its outgoing handoffs. */
-  private async executeNode(node: WorkflowNode, payload: string): Promise<void> {
+  /** Deterministic journal key for this execution of `node` with `payload`. */
+  private nextJournalKey(node: WorkflowNode, payload: string): string {
+    const base = `${node.id}|${fnv1a(payload)}`;
+    const occurrence = this.journalCounts.get(base) ?? 0;
+    this.journalCounts.set(base, occurrence + 1);
+    return `${base}|${occurrence}`;
+  }
+
+  /**
+   * Executes one node and recursively follows its outgoing handoffs.
+   * `sink` collects terminal payloads for the innermost enclosing ForEach
+   * (absent at the run's top level, where terminals feed the final output).
+   */
+  private async executeNode(node: WorkflowNode, payload: string, sink?: string[]): Promise<void> {
     await this.gate.checkpoint(node.id);
 
     this.executions += 1;
-    if (this.executions > MAX_NODE_EXECUTIONS) {
+    if (this.executions > this.maxExecutions) {
       throw new Error(
-        `Run exceeded the execution budget (${MAX_NODE_EXECUTIONS} node executions). ` +
-          'Check the workflow for an unbounded loop.',
+        `Run exceeded the execution budget (${this.maxExecutions} node executions). ` +
+          'Check the workflow for an unbounded loop, or raise the budget for batch runs.',
       );
     }
 
-    const { runId } = this.options;
+    const { runId, journal } = this.options;
     this.emit({ type: 'node-started', runId, nodeId: node.id, nodeName: node.name, at: Date.now() });
 
+    // Replay: a journaled result short-circuits the node body entirely —
+    // no model/tool calls, no approval prompts, no waits. The occurrence
+    // counter keeps repeated executions of the same node+payload distinct.
+    const journalKey = journal ? this.nextJournalKey(node, payload) : null;
+    if (journal && journalKey) {
+      const cached = journal.lookup(journalKey);
+      if (cached) {
+        this.emit({
+          type: 'node-completed',
+          runId,
+          nodeId: node.id,
+          nodeName: node.name,
+          output: cached.output,
+          at: Date.now(),
+        });
+        await this.followHandoffs(
+          node,
+          cached.output,
+          cached.viaPortIds ? new Set(cached.viaPortIds) : undefined,
+          sink,
+        );
+        return;
+      }
+    }
+
     try {
-      const result = await this.runNodeBody(node, payload);
+      const result = await this.runNodeBody(node, payload, sink);
       // Aggregators return null until every input has arrived.
       if (result === null) return;
+
+      // Record durably BEFORE following handoffs, so a crash downstream
+      // never loses this node's completed work.
+      if (journal && journalKey) {
+        await journal.record(journalKey, {
+          output: result.output,
+          viaPortIds: result.viaPortIds ? [...result.viaPortIds] : undefined,
+        });
+      }
 
       this.emit({
         type: 'node-completed',
@@ -201,7 +317,7 @@ class WorkflowRun {
         at: Date.now(),
       });
 
-      await this.followHandoffs(node, result.output, result.viaPortIds);
+      await this.followHandoffs(node, result.output, result.viaPortIds, sink);
     } catch (error) {
       if (error instanceof RunStoppedError) throw error;
       this.emit({
@@ -224,6 +340,7 @@ class WorkflowRun {
   private async runNodeBody(
     node: WorkflowNode,
     payload: string,
+    sink?: string[],
   ): Promise<{ output: string; viaPortIds?: Set<string> } | null> {
     if (TRIGGER_KINDS.has(node.kind)) {
       return { output: payload };
@@ -245,6 +362,10 @@ class WorkflowRun {
         return { output: payload };
       case 'approval-gate':
         return this.runApprovalGate(node, payload);
+      case 'for-each':
+        return this.runForEach(node, payload);
+      case 'wait-event':
+        return this.runWaitEvent(node, payload);
       default:
         if (TOOL_KINDS.has(node.kind)) {
           // Tool nodes are capabilities, not flow steps. Reaching one via a
@@ -413,7 +534,9 @@ class WorkflowRun {
     node: WorkflowNode,
     toolsCallable: boolean,
   ): string {
-    let prompt = template.split('{{input}}').join(payload || '(no input provided)');
+    // `{{input}}` interpolates the whole payload; `{{a.b.c}}` digs into it
+    // when the payload parses as JSON (structured handoffs).
+    let prompt = interpolatePayload(template, payload);
 
     const tools = this.attachedTools(node);
     if (tools.length > 0 && !toolsCallable) {
@@ -484,13 +607,183 @@ class WorkflowRun {
     return { output: payload, viaPortIds: via ? new Set([via.id]) : new Set() };
   }
 
+  /**
+   * ForEach — iterates a JSON array, executing the loop-body subgraph once
+   * per item. Port convention (by position, like the approval gate): first
+   * message-out port = the body ("Each item"), second = "Done".
+   *
+   * Each item's body execution collects its terminal payloads into a
+   * per-iteration sink; the Done port then receives an aggregate JSON
+   * `{ results, exceptions }` document. A failing item is recorded as an
+   * exception and the loop continues (unless `continueOnError` is false).
+   *
+   * Iterations run sequentially by default. Bounded concurrency is opt-in
+   * and must be used with care: aggregators inside a loop body are keyed by
+   * node id, so concurrent iterations sharing one would collide.
+   */
+  private async runForEach(
+    node: WorkflowNode,
+    payload: string,
+  ): Promise<{ output: string; viaPortIds: Set<string> }> {
+    const data = node.data as ForEachNodeData;
+    const items = extractItems(payload, data.itemsPath);
+    if (!items) {
+      throw new Error(
+        `ForEach "${node.name}" needs a JSON array to iterate` +
+          (data.itemsPath ? ` (items path "${data.itemsPath}")` : '') +
+          '. The incoming payload does not contain one.',
+      );
+    }
+
+    const outs = node.ports.filter(port => port.role === 'message-out');
+    const bodyPort = outs[0];
+    // With a single out port it serves as the body; the aggregate then has
+    // nowhere to flow (terminal) rather than re-entering the body edge.
+    const donePort = outs.length > 1 ? outs[1] : undefined;
+    const continueOnError = data.continueOnError ?? true;
+    const concurrency = Math.max(1, Math.min(data.concurrency ?? 1, 8));
+
+    this.emit({
+      type: 'loop-started',
+      runId: this.options.runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      total: items.length,
+      at: Date.now(),
+    });
+
+    const results: unknown[] = new Array(items.length).fill(null);
+    const exceptions: { index: number; item: unknown; error: string }[] = [];
+
+    const runItem = async (index: number): Promise<void> => {
+      const item = items[index];
+      const itemPayload = typeof item === 'string' ? item : JSON.stringify(item);
+      this.emit({
+        type: 'loop-iteration',
+        runId: this.options.runId,
+        nodeId: node.id,
+        index,
+        total: items.length,
+        item: itemPayload.length > 500 ? `${itemPayload.slice(0, 500)}…` : itemPayload,
+        at: Date.now(),
+      });
+      const sink: string[] = [];
+      try {
+        if (bodyPort) {
+          await this.followHandoffs(node, itemPayload, new Set([bodyPort.id]), sink);
+        } else {
+          sink.push(itemPayload);
+        }
+        results[index] =
+          sink.length === 0 ? null : sink.length === 1 ? tryParseJson(sink[0]) : sink.map(tryParseJson);
+      } catch (error) {
+        if (error instanceof RunStoppedError || !continueOnError) throw error;
+        exceptions.push({
+          index,
+          item,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    // Bounded-concurrency worker pool over the item indices.
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        await runItem(index);
+      }
+    });
+    await Promise.all(workers);
+
+    this.emit({
+      type: 'loop-completed',
+      runId: this.options.runId,
+      nodeId: node.id,
+      total: items.length,
+      succeeded: items.length - exceptions.length,
+      failed: exceptions.length,
+      at: Date.now(),
+    });
+
+    const output = JSON.stringify({ results, exceptions }, null, 2);
+    return { output, viaPortIds: donePort ? new Set([donePort.id]) : new Set() };
+  }
+
+  /**
+   * Wait for Event — suspends the run until the host delivers an external
+   * event whose correlation key matches this node's rendered key (webhook
+   * callback, e-sign completion, manual injection). The event's payload is
+   * merged into the waiting payload (JSON objects shallow-merge).
+   */
+  private async runWaitEvent(
+    node: WorkflowNode,
+    payload: string,
+  ): Promise<{ output: string }> {
+    const data = node.data as WaitEventNodeData;
+    const keyTemplate = data.correlationKey?.trim() || node.id;
+    const correlationKey = interpolatePayload(keyTemplate, payload);
+    const timeoutMs =
+      typeof data.timeoutHours === 'number' && data.timeoutHours > 0
+        ? Math.round(data.timeoutHours * 3_600_000)
+        : undefined;
+    const message =
+      typeof data.message === 'string' && data.message.trim()
+        ? data.message
+        : `Waiting for external event "${correlationKey}".`;
+
+    if (!this.options.waitForEvent) {
+      throw new Error(
+        `"${node.name}" waits for an external event, but this host cannot deliver events. ` +
+          'Deploy the workflow to the cloud or run it from the studio.',
+      );
+    }
+
+    this.emit({
+      type: 'wait-started',
+      runId: this.options.runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      correlationKey,
+      message,
+      payload,
+      at: Date.now(),
+    });
+
+    const eventPayload = await this.options.waitForEvent(
+      node.id,
+      correlationKey,
+      message,
+      payload,
+      timeoutMs,
+    );
+    if (this.gate.stopped) throw new RunStoppedError();
+
+    this.emit({
+      type: 'wait-resolved',
+      runId: this.options.runId,
+      nodeId: node.id,
+      correlationKey,
+      eventPayload,
+      at: Date.now(),
+    });
+
+    return { output: mergePayloads(payload, eventPayload) };
+  }
+
   // ── Flow ───────────────────────────────────────────────────────────────────
 
-  /** Follows outgoing handoffs (optionally restricted to given out ports). */
+  /**
+   * Follows outgoing handoffs (optionally restricted to given out ports).
+   * `sink` collects terminal payloads for an enclosing ForEach iteration;
+   * absent at the top level, where terminals feed the run's final output.
+   */
   private async followHandoffs(
     node: WorkflowNode,
     payload: string,
     viaPortIds?: Set<string>,
+    sink?: string[],
   ): Promise<void> {
     const outgoing = this.options.graph.connections.filter(conn => {
       if (conn.kind !== 'handoff') return false;
@@ -500,13 +793,14 @@ class WorkflowRun {
     });
 
     if (outgoing.length === 0) {
-      // Terminal node — its payload is part of the run's final output.
-      if (payload) this.terminalOutputs.push(payload);
+      // Terminal node — its payload joins the enclosing loop iteration's
+      // results, or the run's final output at the top level.
+      if (payload) (sink ?? this.terminalOutputs).push(payload);
       return;
     }
 
     // Fan out concurrently; the shared gate keeps debugger semantics intact.
-    await Promise.all(outgoing.map(conn => this.deliver(conn, node, payload)));
+    await Promise.all(outgoing.map(conn => this.deliver(conn, node, payload, sink)));
   }
 
   /** Delivers a payload across one connection, emitting the handoff event. */
@@ -514,6 +808,7 @@ class WorkflowRun {
     connection: WorkflowConnection,
     from: WorkflowNode,
     payload: string,
+    sink?: string[],
   ): Promise<void> {
     const target = nodeForConnector(this.options.graph, connection.inputId);
     if (!target) return;
@@ -533,11 +828,11 @@ class WorkflowRun {
       if (!complete) return; // still waiting on sibling branches
       const merged = this.mergedAggregation(target);
       this.aggregations.delete(target.id);
-      await this.executeNode(target, merged);
+      await this.executeNode(target, merged, sink);
       return;
     }
 
-    await this.executeNode(target, payload);
+    await this.executeNode(target, payload, sink);
   }
 
   /** Records an aggregator arrival; true when every connected input has one. */
@@ -610,5 +905,14 @@ class WorkflowRun {
     } catch {
       // Event sinks must never break a run.
     }
+  }
+}
+
+/** Parses a string as JSON when possible; otherwise returns it unchanged. */
+function tryParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
   }
 }

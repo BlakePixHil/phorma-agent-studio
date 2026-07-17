@@ -1,0 +1,21 @@
+{
+  "name": "@phorma/practice-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phorma Practice MCP server — Xero (multi-tenant Accounting + Payroll AU), XPM jobs, IAS PDF generation, and e-signature (Annature) tools for accounting-firm workflows. Runs over stdio (desktop debug) and streamable HTTP (cloud).",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "phorma-practice-mcp": "dist/stdio.js"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc",
+    "stdio": "npx -y tsx src/stdio.ts",
+    "http": "npx -y tsx src/http.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}

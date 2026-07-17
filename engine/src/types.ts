@@ -33,6 +33,42 @@ export type ModelProviderId =
   // is already a full OpenRouter slug (curated big-name models only).
   | 'phorma-cloud';
 
+/** Configuration for a `for-each` flow node. */
+export interface ForEachNodeData {
+  /**
+   * Optional dotted path to the array inside the incoming JSON payload
+   * (e.g. `jobs`). When empty the node auto-detects: whole-payload array,
+   * single array property, or first embedded JSON array.
+   */
+  itemsPath?: string;
+  /** Maximum concurrent iterations (default 1 = sequential). */
+  concurrency?: number;
+  /**
+   * When true (default), an item whose subgraph fails is recorded as an
+   * exception and the loop continues. When false the first failure fails
+   * the whole run.
+   */
+  continueOnError?: boolean;
+}
+
+/** Configuration for a `wait-event` flow node. */
+export interface WaitEventNodeData {
+  /**
+   * Correlation key template. `{{field}}` placeholders interpolate against
+   * the incoming JSON payload (e.g. `signed:{{jobId}}`). The run resumes
+   * when an external event with the rendered key arrives.
+   */
+  correlationKey?: string;
+  /** Human-readable note shown while waiting. Markdown. */
+  message?: string;
+  /**
+   * Maximum hours to wait before the node fails (0/absent = wait forever).
+   * Enforced by the host; measured from (re-)registration, so a resumed
+   * run restarts the clock.
+   */
+  timeoutHours?: number;
+}
+
 export interface AgentNodeData {
   /** Markdown system prompt. `{{input}}` interpolates the incoming task. */
   prompt: string;

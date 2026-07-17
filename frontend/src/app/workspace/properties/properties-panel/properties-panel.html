@@ -503,6 +503,91 @@
       </section>
     }
 
+    <!-- ForEach loop -->
+    @if (forEachData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-items-path">Items path</label>
+        <input
+          id="prop-items-path"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.itemsPath ?? ''"
+          (input)="patchData({ itemsPath: inputValue($event) })"
+          placeholder="jobs (empty = auto-detect the array)"
+        />
+        <p class="phorma-props__hint">
+          Dotted path to the array inside the incoming JSON payload. Leave empty to
+          auto-detect. The loop body receives one item at a time; the Done port
+          receives the aggregated results and exceptions.
+        </p>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-concurrency">Concurrency</label>
+        <input
+          id="prop-concurrency"
+          type="number"
+          class="phorma-props__input"
+          min="1"
+          max="8"
+          [value]="data.concurrency ?? 1"
+          (input)="patchData({ concurrency: numberValue($event, 1) })"
+        />
+        <label class="phorma-props__check">
+          <input
+            type="checkbox"
+            [checked]="data.continueOnError ?? true"
+            (change)="patchData({ continueOnError: checkboxValue($event) })"
+          />
+          Continue when an item fails
+        </label>
+      </section>
+    }
+
+    <!-- Wait for Event -->
+    @if (waitEventData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-correlation">Correlation key</label>
+        <input
+          id="prop-correlation"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.correlationKey ?? ''"
+          (input)="patchData({ correlationKey: inputValue($event) })"
+          placeholder="signed:{{ '{' }}{{ '{' }}jobId{{ '}' }}{{ '}' }}"
+        />
+        <p class="phorma-props__hint">
+          The run resumes when an external event with this key arrives.
+          {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} placeholders interpolate against the incoming JSON payload.
+        </p>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-wait-message">Waiting note (markdown)</label>
+        <textarea
+          id="prop-wait-message"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.message ?? ''"
+          (input)="patchData({ message: inputValue($event) })"
+          placeholder="Waiting for the signed IAS to be returned."
+        ></textarea>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-wait-timeout">Timeout (hours)</label>
+        <input
+          id="prop-wait-timeout"
+          type="number"
+          class="phorma-props__input"
+          min="0"
+          [value]="data.timeoutHours ?? 0"
+          (input)="patchData({ timeoutHours: numberValue($event, 0) })"
+        />
+        <p class="phorma-props__hint">
+          Fail the node if no event arrives within this many hours. 0 waits forever.
+          Deployed runs enforce this with a durable alarm that survives restarts.
+        </p>
+      </section>
+    }
+
     <!-- Branch ports (router routes / parallel branches / aggregator inputs) -->
     @if (editableOutPorts(); as branch) {
       <section class="phorma-props__section">

@@ -51,6 +51,9 @@ export class RunsPanel {
   protected readonly copiedId = signal<number | null>(null);
   private copyTimer?: ReturnType<typeof setTimeout>;
 
+  /** Draft event payloads per suspended wait node (manual injection). */
+  protected readonly waitDrafts = signal<Record<string, string>>({});
+
   /** Cumulative run usage (tokens + cost when the provider reports it). */
   protected readonly usage = this.runController.runUsage;
 
@@ -120,6 +123,26 @@ export class RunsPanel {
       return;
     }
     this.runController.stop();
+  }
+
+  protected waitDraft(nodeId: string): string {
+    return this.waitDrafts()[nodeId] || '';
+  }
+
+  protected onWaitDraft(nodeId: string, event: Event): void {
+    const value = (event.target as HTMLTextAreaElement | null)?.value ?? '';
+    this.waitDrafts.update(drafts => ({ ...drafts, [nodeId]: value }));
+  }
+
+  /** Manually delivers an external event to a suspended Wait-for-Event node. */
+  protected injectEvent(nodeId: string): void {
+    const payload = this.waitDrafts()[nodeId] ?? '';
+    this.waitDrafts.update(drafts => {
+      const next = { ...drafts };
+      delete next[nodeId];
+      return next;
+    });
+    this.runController.resolveWait(nodeId, payload.trim());
   }
 
   protected toggleExpanded(id: number): void {

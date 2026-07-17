@@ -90,6 +90,21 @@
   color: var(--p-text-muted-color);
 }
 
+.phorma-props__check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--p-text-color);
+  cursor: pointer;
+
+  input[type='checkbox'] {
+    accent-color: var(--p-primary-color);
+    cursor: pointer;
+  }
+}
+
 .phorma-props__ports {
   margin: 0;
   padding: 0;

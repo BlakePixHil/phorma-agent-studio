@@ -298,6 +298,37 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     ],
     defaultData: () => ({ message: '' }),
   },
+  {
+    id: 'flow-for-each',
+    label: 'ForEach',
+    description: 'Runs the loop body once per item of a JSON array.',
+    icon: 'ti ti-repeat',
+    category: 'flow',
+    kind: 'for-each',
+    keywords: ['loop', 'iterate', 'batch', 'each', 'map', 'items'],
+    defaultName: 'ForEach',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Each item', role: 'message-out' },
+      { name: 'Done', role: 'message-out' },
+    ],
+    defaultData: () => ({ itemsPath: '', concurrency: 1, continueOnError: true }),
+  },
+  {
+    id: 'flow-wait-event',
+    label: 'Wait for Event',
+    description: 'Suspends the run until an external event arrives.',
+    icon: 'ti ti-hourglass-high',
+    category: 'flow',
+    kind: 'wait-event',
+    keywords: ['wait', 'webhook', 'event', 'suspend', 'resume', 'callback', 'sign'],
+    defaultName: 'Wait for Event',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Resumed', role: 'message-out' },
+    ],
+    defaultData: () => ({ correlationKey: '', message: '' }),
+  },
 ];
 
 // ── MCP presets ─────────────────────────────────────────────────────────────
@@ -613,6 +644,92 @@ export const MCP_PRESETS: McpPreset[] = [
     authMode: 'oauth',
     keywords: ['mcp', 'remote', 'oauth', 'custom', 'server', 'url'],
     envSchema: [],
+  },
+  {
+    id: 'xero',
+    label: 'Xero',
+    description:
+      'Xero’s official MCP server: contacts, invoices, manual journals, reports, and chart of accounts for one organisation (Custom Connection).',
+    icon: 'ti ti-wallet',
+    command: 'npx',
+    args: ['-y', '@xeroapi/xero-mcp-server@latest'],
+    keywords: ['xero', 'accounting', 'invoice', 'journal', 'ledger', 'bookkeeping'],
+    envSchema: [
+      {
+        name: 'XERO_CLIENT_ID',
+        label: 'Client ID',
+        description:
+          'From a Xero Custom Connection (developer.xero.com → New app → Custom Connection). One connection per organisation.',
+        secret: false,
+        placeholder: 'ABCDEF0123456789…',
+      },
+      {
+        name: 'XERO_CLIENT_SECRET',
+        label: 'Client secret',
+        description: 'The Custom Connection client secret.',
+        secret: true,
+        placeholder: '…',
+      },
+    ],
+  },
+  {
+    id: 'phorma-practice',
+    label: 'Practice Suite',
+    description:
+      'Accounting-practice automation: multi-entity Xero (pay runs, payroll figures, journals), XPM jobs and clients, IAS PDF generation, and e-signatures. One firm login covers every client organisation.',
+    icon: 'ti ti-briefcase',
+    command: 'npx',
+    args: ['-y', 'tsx', 'mcp/phorma-practice-mcp/src/stdio.ts'],
+    keywords: [
+      'practice', 'accounting', 'xero', 'xpm', 'payroll', 'ias', 'paygw', 'bas',
+      'tax', 'journal', 'esign', 'annature', 'firm', 'entity', 'lodgement',
+    ],
+    envSchema: [
+      {
+        name: 'XERO_CLIENT_ID',
+        label: 'Xero app Client ID',
+        description: 'The firm’s Xero OAuth app (standard web app, offline_access scope).',
+        secret: false,
+        placeholder: 'ABCDEF0123456789…',
+      },
+      {
+        name: 'XERO_CLIENT_SECRET',
+        label: 'Xero app Client secret',
+        description: 'The firm’s Xero OAuth app secret.',
+        secret: true,
+        placeholder: '…',
+      },
+      {
+        name: 'XERO_REFRESH_TOKEN',
+        label: 'Xero refresh token',
+        description:
+          'From the one-time firm consent flow. The server refreshes access tokens automatically and can reach every connected client organisation.',
+        secret: true,
+        placeholder: '…',
+      },
+      {
+        name: 'XPM_PRACTICE_TENANT_ID',
+        label: 'XPM practice tenant ID',
+        description:
+          'The PRACTICEMANAGER tenant id (run the xero_list_entities tool once to find it). Needed for job-list tools; requires Xero App Partner approval for XPM scopes.',
+        secret: false,
+        placeholder: 'xxxxxxxx-xxxx-…',
+      },
+      {
+        name: 'ANNATURE_ID',
+        label: 'Annature API ID',
+        description: 'From the Annature dashboard → Developers. Used by the e-signature tools.',
+        secret: false,
+        placeholder: '…',
+      },
+      {
+        name: 'ANNATURE_KEY',
+        label: 'Annature API key',
+        description: 'The matching Annature API key.',
+        secret: true,
+        placeholder: '…',
+      },
+    ],
   },
 ];
 

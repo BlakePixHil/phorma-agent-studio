@@ -19,9 +19,11 @@ import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 import type {
   ApprovalGateData,
+  ForEachNodeData,
   HttpToolData,
   McpToolData,
   ScheduleTriggerData,
+  WaitEventNodeData,
   WebhookTriggerData,
   WorkflowNode,
 } from '../../../core/workflow.model';
@@ -83,6 +85,14 @@ export class PropertiesPanel {
   protected readonly approvalData = computed<ApprovalGateData | null>(() => {
     const node = this.node();
     return node?.kind === 'approval-gate' ? (node.data as ApprovalGateData) : null;
+  });
+  protected readonly forEachData = computed<ForEachNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'for-each' ? (node.data as ForEachNodeData) : null;
+  });
+  protected readonly waitEventData = computed<WaitEventNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'wait-event' ? (node.data as WaitEventNodeData) : null;
   });
 
   /** The MCP preset that seeded the selected node, if any. */
@@ -392,6 +402,15 @@ export class PropertiesPanel {
 
   protected inputValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLTextAreaElement | null)?.value ?? '';
+  }
+
+  protected numberValue(event: Event, fallback: number): number {
+    const raw = Number((event.target as HTMLInputElement | null)?.value);
+    return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+  }
+
+  protected checkboxValue(event: Event): boolean {
+    return (event.target as HTMLInputElement | null)?.checked ?? false;
   }
 
   protected renamePort(node: WorkflowNode, portId: string, event: Event): void {

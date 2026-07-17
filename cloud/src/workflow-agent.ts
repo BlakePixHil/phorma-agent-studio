@@ -10,9 +10,14 @@
  * HTTP surface (all under /agents/workflow-agent/{instance}):
  *   POST /workflow   — upload/replace the workflow spec (studio "Push")
  *   POST /trigger    — start a run { input?: string } → { runId }
- *   GET  /status     — { name, hasWorkflow, running, savedAt }
+ *   POST /events     — deliver an external event to a suspended Wait-for-Event
+ *                      node: { correlationKey, payload? } → { ok, delivered }.
+ *                      This is the webhook target for e-sign callbacks etc.
+ *   POST /approvals  — resolve a pending approval: { nodeId, approved }
+ *   GET  /status     — { name, hasWorkflow, running, savedAt, pendingWaits }
  *   WS   connect     — receive RunEvents; send control frames:
  *                      { type: 'approval', nodeId, approved }
+ *                      { type: 'event', correlationKey, payload? }
  *                      { type: 'trigger', input }
  *                      { type: 'stop' }
  *
@@ -40,10 +45,12 @@ import {
   sanitizeToolName,
   startRun,
   webSearchToolDefinition,
+  type JournalEntry,
   type ModelProviderId,
   type ResolvedTool,
   type RunEvent,
   type RunHandle,
+  type RunJournal,
   type ToolHost,
   type WorkflowNode,
   type WorkflowSpec,
@@ -104,6 +111,13 @@ interface WorkflowAgentState {
   usageMonth?: string | null;
   /** Month-to-date usage across runs (quota display; ledger comes later). */
   monthUsage?: RunUsage | null;
+  /**
+   * The in-flight run, persisted so a Durable Object eviction (hibernation,
+   * deploy, crash) can resume it on the next wake. Cleared when the run
+   * settles. Resume replays journaled node results (no repeated side
+   * effects) until execution reaches the first unfinished node.
+   */
+  activeRun?: { runId: string; input: string; startedAt: number } | null;
 }
 
 /** The identity attached to an authorized request. */
@@ -112,6 +126,7 @@ interface WorkflowAgentState {
 /** Control frames the studio may send over the WebSocket. */
 type ControlFrame =
   | { type: 'approval'; nodeId: string; approved: boolean }
+  | { type: 'event'; correlationKey: string; payload?: string }
   | { type: 'trigger'; input?: string }
   | { type: 'stop' };
 
@@ -145,10 +160,42 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     monthUsage: null,
   };
 
+  /** Called on every DO wake (cold start). Resumes an interrupted run. */
+  override async onStart(): Promise<void> {
+    this.sql`
+      CREATE TABLE IF NOT EXISTS run_journal (
+        run_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        entry TEXT NOT NULL,
+        PRIMARY KEY (run_id, key)
+      )
+    `;
+    const active = this.state.activeRun;
+    if (active && !this.handle) {
+      // The previous instance died mid-run (eviction). Restart the run with
+      // its journal: completed nodes replay instantly, suspended waits and
+      // approvals re-register, and execution continues from where it stopped.
+      await this.trigger(active.input, active.runId);
+    }
+  }
+
   private handle: RunHandle | null = null;
   private runCounter = 0;
   /** Pending approval resolvers, keyed by node id. */
   private readonly approvals = new Map<string, (approved: boolean) => void>();
+  /**
+   * Suspended Wait-for-Event resolvers, keyed by correlation key. The run
+   * itself survives eviction via the journal + activeRun resume path; these
+   * resolvers re-register when the resumed run reaches the wait again.
+   * Events arriving with no waiter are buffered briefly so webhook races
+   * don't drop deliveries.
+   */
+  private readonly waits = new Map<
+    string,
+    { resolve: (payload: string) => void; reject: (error: Error) => void }
+  >();
+  /** Events that arrived before their waiter registered (key → payload). */
+  private readonly earlyEvents = new Map<string, string>();
   /** Ring buffer of this run's events, replayed to late-joining monitors. */
   private eventLog: RunEvent[] = [];
 
@@ -188,6 +235,32 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       return json(result, result.ok ? 200 : (result.status ?? 409));
     }
 
+    if (request.method === 'POST' && path.endsWith('/events')) {
+      const body = (await request.json().catch(() => ({}))) as {
+        correlationKey?: string;
+        payload?: unknown;
+      };
+      const key = body.correlationKey?.trim();
+      if (!key) return json({ error: 'correlationKey is required.' }, 400);
+      const payload =
+        typeof body.payload === 'string' ? body.payload : JSON.stringify(body.payload ?? '');
+      const delivered = this.deliverEvent(key, payload);
+      return json({ ok: true, delivered });
+    }
+
+    if (request.method === 'POST' && path.endsWith('/approvals')) {
+      const body = (await request.json().catch(() => ({}))) as {
+        nodeId?: string;
+        approved?: boolean;
+      };
+      if (!body.nodeId) return json({ error: 'nodeId is required.' }, 400);
+      const resolve = this.approvals.get(body.nodeId);
+      if (!resolve) return json({ ok: true, delivered: false });
+      this.approvals.delete(body.nodeId);
+      resolve(body.approved === true);
+      return json({ ok: true, delivered: true });
+    }
+
     if (request.method === 'GET' && path.endsWith('/status')) {
       return json({
         name: this.state.spec?.name ?? null,
@@ -197,6 +270,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         lastRunId: this.state.lastRunId,
         lastRunUsage: this.state.lastRunUsage ?? null,
         monthUsage: this.currentMonthUsage(),
+        /** Correlation keys the current run is suspended on. */
+        pendingWaits: [...this.waits.keys()],
       });
     }
 
@@ -237,6 +312,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         }
         break;
       }
+      case 'event':
+        if (frame.correlationKey?.trim()) {
+          this.deliverEvent(frame.correlationKey.trim(), frame.payload ?? '');
+        }
+        break;
       case 'trigger':
         void this.trigger(frame.input ?? '').then(result => {
           // Surface quota/config rejections to connected monitors — there is
@@ -253,6 +333,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         break;
       case 'stop':
         this.handle?.stop();
+        // A run suspended on an approval or external event is awaiting a
+        // host promise, not the gate — unblock those so the run can unwind
+        // (RunStoppedError is thrown at the next gate check).
+        for (const resolve of this.approvals.values()) resolve(false);
+        this.approvals.clear();
+        for (const waiter of this.waits.values()) waiter.resolve('');
+        this.waits.clear();
         break;
     }
   }
@@ -262,6 +349,21 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   /** Callback target for `this.schedule(cron, 'scheduledRun')`. */
   async scheduledRun(): Promise<void> {
     await this.trigger('');
+  }
+
+  /**
+   * Callback target for wait-timeout alarms (`this.schedule(seconds,
+   * 'waitTimedOut', correlationKey)`). Durable: fires even if the DO was
+   * evicted and the run resumed in between. A stale alarm (event already
+   * delivered, or run gone) is a no-op.
+   */
+  async waitTimedOut(correlationKey: string): Promise<void> {
+    const waiter = this.waits.get(correlationKey);
+    if (!waiter) return;
+    this.waits.delete(correlationKey);
+    waiter.reject(
+      new Error(`Timed out waiting for external event "${correlationKey}".`),
+    );
   }
 
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
@@ -291,6 +393,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   private async trigger(
     input: string,
+    resumeRunId?: string,
   ): Promise<{ ok: boolean; runId?: string; error?: string; status?: number }> {
     const spec = this.state.spec;
     if (!spec) return { ok: false, error: 'No workflow uploaded yet.', status: 409 };
@@ -338,9 +441,37 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
 
     this.runCounter += 1;
-    const runId = `cloudrun-${Date.now().toString(36)}-${this.runCounter}`;
+    const resuming = !!resumeRunId;
+    const runId = resumeRunId ?? `cloudrun-${Date.now().toString(36)}-${this.runCounter}`;
     this.eventLog = [];
-    const startedAt = Date.now();
+    const startedAt = resuming ? (this.state.activeRun?.startedAt ?? Date.now()) : Date.now();
+
+    // Durable replay journal: completed node results live in the DO's
+    // embedded SQLite. A resumed run replays them instantly (no model/tool
+    // side effects); a fresh run starts with an empty journal.
+    if (!resuming) {
+      this.sql`DELETE FROM run_journal WHERE run_id != ${runId}`;
+    }
+    const journalCache = new Map<string, JournalEntry>();
+    for (const row of this.sql<{ key: string; entry: string }>`
+      SELECT key, entry FROM run_journal WHERE run_id = ${runId}
+    `) {
+      try {
+        journalCache.set(row.key, JSON.parse(row.entry) as JournalEntry);
+      } catch {
+        // Corrupt row — ignore; the node simply re-executes.
+      }
+    }
+    const journal: RunJournal = {
+      lookup: key => journalCache.get(key),
+      record: (key, entry) => {
+        journalCache.set(key, entry);
+        this.sql`
+          INSERT OR REPLACE INTO run_journal (run_id, key, entry)
+          VALUES (${runId}, ${key}, ${JSON.stringify(entry)})
+        `;
+      },
+    };
 
     // Per-run usage accumulator — summed from node-usage events as they are
     // relayed, persisted ONCE when the run settles (never from event replay).
@@ -361,6 +492,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       runId,
       graph,
       input,
+      // Batch workflows (ForEach) legitimately execute far more nodes than
+      // the default anti-runaway budget allows.
+      maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
+      journal,
       model,
       tools: new CloudToolHost({
         restrictEgress: this.hosted,
@@ -385,17 +520,50 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         new Promise<boolean>(resolve => {
           this.approvals.set(nodeId, resolve);
         }),
+      waitForEvent: (_nodeId, correlationKey, _message, _payload, timeoutMs) =>
+        new Promise<string>((resolve, reject) => {
+          // An event may have raced ahead of the waiter (webhook fired while
+          // the previous node was still streaming) — consume it immediately.
+          const early = this.earlyEvents.get(correlationKey);
+          if (early !== undefined) {
+            this.earlyEvents.delete(correlationKey);
+            resolve(early);
+            return;
+          }
+          this.waits.set(correlationKey, { resolve, reject });
+          // Durable timeout: an Agents-SDK alarm survives eviction, so a
+          // multi-day expiry fires even across DO restarts. The clock
+          // restarts when a resumed run re-registers this wait.
+          if (timeoutMs && timeoutMs > 0) {
+            void this.schedule(Math.ceil(timeoutMs / 1000), 'waitTimedOut', correlationKey);
+          }
+        }),
     });
 
     this.handle = handle;
-    this.setState({ ...this.state, lastRunId: runId });
+    this.setState({
+      ...this.state,
+      lastRunId: runId,
+      // Persisted so an eviction mid-run (e.g. suspended on a wait) resumes
+      // on the next wake. Cleared when the run settles.
+      activeRun: { runId, input, startedAt },
+    });
     void handle.done.finally(() => {
       if (this.handle === handle) this.handle = null;
       // Reject anything still waiting so promises don't dangle.
       for (const resolve of this.approvals.values()) resolve(false);
       this.approvals.clear();
+      for (const waiter of this.waits.values()) waiter.resolve('');
+      this.waits.clear();
+      this.earlyEvents.clear();
+      // The run settled — drop the resume marker and its journal rows.
+      this.setState({ ...this.state, activeRun: null });
+      this.sql`DELETE FROM run_journal WHERE run_id = ${runId}`;
       this.recordRunUsage(runUsage);
       // Hosted: authoritative per-run ledger row + quota rollup in D1.
+      // A RESUMED run only ledgers the incremental usage of the re-execution
+      // (replayed nodes make no model calls) and must not bump the monthly
+      // run count a second time.
       if (this.hosted && tenant) {
         void store
           .recordRun({
@@ -406,6 +574,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
             tokensIn: runUsage.inputTokens,
             tokensOut: runUsage.outputTokens,
             durationMs: Date.now() - startedAt,
+            countsAsRun: !resuming,
           })
           .catch(() => undefined); // ledger failure must never break a run
       }
@@ -451,6 +620,24 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         costUsd: current.costUsd + usage.costUsd,
       },
     });
+  }
+
+  /**
+   * Delivers an external event to a suspended Wait-for-Event node. Returns
+   * true when a waiter consumed it; false buffers it for a short race window
+   * (an event that beats its waiter is consumed on registration).
+   */
+  private deliverEvent(correlationKey: string, payload: string): boolean {
+    const waiter = this.waits.get(correlationKey);
+    if (waiter) {
+      this.waits.delete(correlationKey);
+      waiter.resolve(payload);
+      return true;
+    }
+    // No waiter yet — keep it for a run that is about to reach the node.
+    // Only while a run is active; otherwise the event is dropped.
+    if (this.handle) this.earlyEvents.set(correlationKey, payload);
+    return false;
   }
 
   /** Buffers + broadcasts a RunEvent to every connected monitor. */

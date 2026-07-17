@@ -48,6 +48,17 @@ export interface PendingApproval {
   resolve: (approved: boolean) => void;
 }
 
+/** A suspended Wait-for-Event node, surfaced in the Runs panel. */
+export interface PendingWait {
+  nodeId: string;
+  nodeName: string;
+  correlationKey: string;
+  message: string;
+  payload: string;
+  /** Delivers the external event's payload (JSON or plain text). */
+  resolve: (eventPayload: string) => void;
+}
+
 /** How long a handoff edge stays lit after the pulse (ms). */
 const EDGE_PULSE_MS = 1400;
 /** Trace buffer cap. */
@@ -99,6 +110,8 @@ export class RunControllerService {
   readonly trace = signal<TraceEntry[]>([]);
   /** Approval requests awaiting a human. */
   readonly pendingApprovals = signal<PendingApproval[]>([]);
+  /** Wait-for-Event nodes awaiting an external event. */
+  readonly pendingWaits = signal<PendingWait[]>([]);
   /** Task input used for the next run (bound to the Runs panel textarea). */
   readonly runInput = signal('');
   /** Total streamed characters this run (cheap progress proxy). */
@@ -130,10 +143,21 @@ export class RunControllerService {
    */
   remoteApprovalSender: ((nodeId: string, approved: boolean) => void) | null = null;
 
+  /**
+   * Set by CloudService while a monitor is connected: delivers external
+   * events for REMOTE runs over the WebSocket (manual injection from the
+   * Runs panel; production events arrive via the worker's /events webhook).
+   */
+  remoteEventSender: ((correlationKey: string, payload: string) => void) | null = null;
+
   readonly running = computed(() => {
     const phase = this.terminal.phase();
     return (
-      phase === 'starting' || phase === 'running' || phase === 'paused' || phase === 'waiting-approval'
+      phase === 'starting' ||
+      phase === 'running' ||
+      phase === 'paused' ||
+      phase === 'waiting-approval' ||
+      phase === 'waiting-event'
     );
   });
   readonly paused = computed(() => this.terminal.phase() === 'paused');
@@ -170,6 +194,9 @@ export class RunControllerService {
       runId,
       graph: structuredClone(graph),
       input: this.runInput().trim(),
+      // Batch workflows (ForEach) legitimately execute far more nodes than
+      // the default anti-runaway budget allows.
+      maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
       bedrockRegion: this.settings.bedrockRegion(),
@@ -188,6 +215,39 @@ export class RunControllerService {
           this.pendingApprovals.update(list => [
             ...list,
             { nodeId, nodeName, message, payload, resolve },
+          ]);
+        }),
+      waitForEvent: (nodeId, correlationKey, message, payload, timeoutMs) =>
+        new Promise<string>((resolve, reject) => {
+          const nodeName =
+            this.workflow.graph().nodes.find(node => node.id === nodeId)?.name ?? nodeId;
+          // Local debug runs enforce the timeout with a plain timer; the
+          // deployed path uses a durable DO alarm instead.
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const settle = (fn: () => void) => {
+            if (timer) clearTimeout(timer);
+            this.pendingWaits.update(list => list.filter(item => item.nodeId !== nodeId));
+            fn();
+          };
+          if (timeoutMs && timeoutMs > 0) {
+            timer = setTimeout(
+              () =>
+                settle(() =>
+                  reject(new Error(`Timed out waiting for external event "${correlationKey}".`)),
+                ),
+              timeoutMs,
+            );
+          }
+          this.pendingWaits.update(list => [
+            ...list,
+            {
+              nodeId,
+              nodeName,
+              correlationKey,
+              message,
+              payload,
+              resolve: eventPayload => settle(() => resolve(eventPayload)),
+            },
           ]);
         }),
     });
@@ -211,9 +271,11 @@ export class RunControllerService {
   stop(): void {
     if (!this.handle) return;
     this.handle.stop();
-    // Unblock any pending approvals so the run can unwind.
+    // Unblock any pending approvals/waits so the run can unwind.
     for (const approval of this.pendingApprovals()) approval.resolve(false);
     this.pendingApprovals.set([]);
+    for (const wait of this.pendingWaits()) wait.resolve('');
+    this.pendingWaits.set([]);
   }
 
   /**
@@ -236,6 +298,17 @@ export class RunControllerService {
     if (!approval) return;
     this.pendingApprovals.update(list => list.filter(item => item.nodeId !== nodeId));
     approval.resolve(approved);
+  }
+
+  /**
+   * Delivers an external event to a suspended Wait-for-Event node (Runs
+   * panel manual injection; webhook-fed cloud runs resolve on the worker).
+   */
+  resolveWait(nodeId: string, eventPayload: string): void {
+    const wait = this.pendingWaits().find(item => item.nodeId === nodeId);
+    if (!wait) return;
+    this.pendingWaits.update(list => list.filter(item => item.nodeId !== nodeId));
+    wait.resolve(eventPayload);
   }
 
   /** Toggles a breakpoint on a node (context menu). */
@@ -385,6 +458,64 @@ export class RunControllerService {
           undefined,
           event.approved ? 'success' : 'warning',
         );
+        break;
+
+      case 'loop-started':
+        this.console('run', 'info', `${event.nodeName}: iterating ${event.total} item${event.total === 1 ? '' : 's'}.`);
+        this.pushTrace('ti ti-repeat', `${event.nodeName} — ${event.total} item${event.total === 1 ? '' : 's'}`, undefined, 'info');
+        break;
+
+      case 'loop-iteration':
+        this.console('run', 'info', `${this.nodeName(event.nodeId)}: item ${event.index + 1}/${event.total}`);
+        this.pushTrace(
+          'ti ti-repeat-once',
+          `Item ${event.index + 1}/${event.total}`,
+          event.item || undefined,
+          'info',
+        );
+        break;
+
+      case 'loop-completed': {
+        const tone = event.failed > 0 ? 'warning' : 'success';
+        const summary = `${event.succeeded}/${event.total} succeeded${event.failed > 0 ? `, ${event.failed} failed` : ''}`;
+        this.console('run', tone, `${this.nodeName(event.nodeId)}: loop finished — ${summary}.`);
+        this.pushTrace('ti ti-repeat', `Loop finished — ${summary}`, undefined, tone);
+        break;
+      }
+
+      case 'wait-started':
+        this.terminal.setPhase('waiting-event');
+        this.setNodeState(event.nodeId, 'waiting-event');
+        this.console('run', 'warning', `Waiting for event "${event.correlationKey}": ${event.message}`);
+        this.pushTrace('ti ti-hourglass-high', `Waiting for "${event.correlationKey}"`, event.message, 'warning');
+        // Remote runs: the engine callback lives in the cloud — synthesize a
+        // pending card whose resolver ships the event over the monitor socket.
+        if (
+          this.remoteEventSender &&
+          !this.pendingWaits().some(item => item.nodeId === event.nodeId)
+        ) {
+          const send = this.remoteEventSender;
+          this.pendingWaits.update(list => [
+            ...list,
+            {
+              nodeId: event.nodeId,
+              nodeName: this.nodeName(event.nodeId),
+              correlationKey: event.correlationKey,
+              message: event.message,
+              payload: event.payload,
+              resolve: payload => send(event.correlationKey, payload),
+            },
+          ]);
+        }
+        break;
+
+      case 'wait-resolved':
+        this.terminal.setPhase('running');
+        this.setNodeState(event.nodeId, 'done');
+        // Remote monitors may hold no local resolver — just clear any card.
+        this.pendingWaits.update(list => list.filter(item => item.nodeId !== event.nodeId));
+        this.console('run', 'info', `Event "${event.correlationKey}" arrived — resuming.`);
+        this.pushTrace('ti ti-bolt', `Event "${event.correlationKey}" arrived`, event.eventPayload || undefined, 'success');
         break;
 
       case 'run-paused':
@@ -567,6 +698,7 @@ export class RunControllerService {
     this.nodeStates.set(new Map());
     this.activeEdges.set(new Set());
     this.pendingApprovals.set([]);
+    this.pendingWaits.set([]);
     this.streamedChars.set(0);
     this.streamBuffers.clear();
     this.nodeThinking.set(new Map());
@@ -580,6 +712,8 @@ export class RunControllerService {
     this.agentStream.clearAll();
     for (const approval of this.pendingApprovals()) approval.resolve(false);
     this.pendingApprovals.set([]);
+    for (const wait of this.pendingWaits()) wait.resolve('');
+    this.pendingWaits.set([]);
     // If the run spent Phorma Cloud credits, pull a fresh quota so the account
     // chip / Settings bar reflect the new balance without waiting for the next
     // dialog open. Backend metering settles via waitUntil, so a short delay
