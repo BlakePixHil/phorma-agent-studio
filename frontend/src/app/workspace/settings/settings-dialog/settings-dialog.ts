@@ -238,7 +238,16 @@ export class SettingsDialog {
   /** Guards against duplicate auto-fetches within a single dialog session. */
   private ollamaFetchedOnce = false;
 
-
+  /** LM Studio models available from the local server (empty until loaded). */
+  protected readonly lmstudioModels = signal<string[]>([]);
+  /** True while fetching the LM Studio model list. */
+  protected readonly loadingLmstudioModels = signal(false);
+  /** Whether the LM Studio server was reachable on the last fetch. */
+  protected readonly lmstudioRunning = signal(true);
+  /** True after the first LM Studio fetch completes (controls empty-state UI). */
+  protected readonly lmstudioFetched = signal(false);
+  /** Guards against duplicate auto-fetches within a single dialog session. */
+  private lmstudioFetchedOnce = false;
 
   /**
    * Options for the default-model dropdown. Bedrock is populated from the live
@@ -252,6 +261,9 @@ export class SettingsDialog {
     if (provider === 'phorma-cloud') return PROVIDER_MODEL_SUGGESTIONS['phorma-cloud'];
     if (provider === 'ollama') {
       return this.ollamaModels().length > 0 ? this.ollamaModels() : PROVIDER_MODEL_SUGGESTIONS['ollama'];
+    }
+    if (provider === 'lmstudio') {
+      return this.lmstudioModels().length > 0 ? this.lmstudioModels() : PROVIDER_MODEL_SUGGESTIONS['lmstudio'];
     }
     if (LIVE_FETCH_PROVIDERS.has(provider)) {
       return this.liveModels().length > 0 ? this.liveModels() : PROVIDER_MODEL_SUGGESTIONS[provider];
@@ -460,6 +472,27 @@ export class SettingsDialog {
     this.dialog.anchorId.set('run-setup-wizard');
   }
 
+  /**
+   * Fetches the list of models available from the local LM Studio server into
+   * {@link lmstudioModels}. Runs automatically whenever the dialog is open and
+   * LM Studio is the default provider. When the server is unreachable, the
+   * picker falls back to static suggestions.
+   */
+  private async loadLmstudioModels(): Promise<void> {
+    this.loadingLmstudioModels.set(true);
+    try {
+      const { running, models } = await this.transport.listLmstudioModels(this.settings.lmstudioBaseUrl());
+      this.lmstudioRunning.set(running);
+      this.lmstudioModels.set(models);
+    } catch {
+      this.lmstudioRunning.set(false);
+      this.lmstudioModels.set([]);
+    } finally {
+      this.loadingLmstudioModels.set(false);
+      this.lmstudioFetched.set(true);
+    }
+  }
+
   // ── Integrations (custom template) ──────────────────────────────────────
 
   /**
@@ -629,6 +662,16 @@ export class SettingsDialog {
       if (this.ollamaFetchedOnce) return;
       this.ollamaFetchedOnce = true;
       untracked(() => void this.loadOllamaModels());
+    });
+
+    // Auto-fetch the LM Studio model list whenever the dialog is open with
+    // LM Studio as the default provider. Runs once per dialog session.
+    effect(() => {
+      if (!this.dialog.visible()) return;
+      if (this.settings.defaultProvider() !== 'lmstudio') return;
+      if (this.lmstudioFetchedOnce) return;
+      this.lmstudioFetchedOnce = true;
+      untracked(() => void this.loadLmstudioModels());
     });
 
   }

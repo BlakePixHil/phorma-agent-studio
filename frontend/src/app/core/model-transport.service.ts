@@ -195,6 +195,29 @@ export class ModelTransportService {
     }
   }
 
+  /**
+   * Lists model ids available from the local LM Studio server (via `/v1/models`).
+   * LM Studio exposes the standard OpenAI-compatible models endpoint. No API key
+   * is required. Returns `{ running, models }` so callers can distinguish
+   * "server not running" from "running but no models loaded".
+   */
+  async listLmstudioModels(baseUrl?: string): Promise<{ running: boolean; models: string[] }> {
+    const url = (baseUrl ?? loadLayout('lmstudioBaseUrl', 'http://localhost:1234')).trim();
+
+    try {
+      const response = await fetch(`${url}/v1/models`);
+      if (!response.ok) return { running: false, models: [] };
+      const body = (await response.json()) as { data?: { id?: string }[] };
+      const models = (body.data ?? [])
+        .map(m => m.id)
+        .filter((id): id is string => !!id)
+        .sort();
+      return { running: true, models };
+    } catch {
+      return { running: false, models: [] };
+    }
+  }
+
   /** Provider models-list endpoint URL (browser path). */
   private providerModelsUrl(provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter'): string {
     switch (provider) {
