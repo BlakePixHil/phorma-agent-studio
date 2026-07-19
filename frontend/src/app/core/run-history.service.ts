@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 
 import {
   createRunRecorder,
+  usageLedgerEntryOf,
   type RunEvent,
   type RunRecord,
   type RunRecorder,
@@ -10,6 +11,7 @@ import {
 } from '@phorma/engine';
 
 import { IndexedDbStorageService } from './indexed-db-storage.service';
+import { ModelPricingService } from './model-pricing.service';
 
 /** How many finished runs each workflow keeps locally; oldest are pruned. */
 const RUN_HISTORY_LIMIT = 50;
@@ -30,6 +32,7 @@ const RUN_HISTORY_LIMIT = 50;
 @Injectable({ providedIn: 'root' })
 export class RunHistoryService {
   private readonly storage = inject(IndexedDbStorageService);
+  private readonly pricing = inject(ModelPricingService);
 
   private recorder: RunRecorder | null = null;
   private activeRunId: string | null = null;
@@ -65,6 +68,9 @@ export class RunHistoryService {
       ...meta,
       source: 'manual',
       environment: 'local',
+      // BYO providers without usage accounting (OpenAI, Anthropic, Bedrock,
+      // Gemini) get an estimated USD cost from the synced pricing table.
+      estimateCost: this.pricing.estimator(),
     });
     this.activeRunId = meta.runId;
     this.activeWorkflowId = meta.workflowId;
@@ -89,6 +95,11 @@ export class RunHistoryService {
       this.recorder = null;
       this.activeRunId = null;
       void this.persist(recorder, this.activeWorkflowId);
+      // Usage ledger (EPIC 2): one compact row per settled run, separate
+      // from run records so cost analytics survive the history prune.
+      void this.storage
+        .saveUsage(usageLedgerEntryOf(recorder.summary()))
+        .catch(() => undefined);
       this.activeWorkflowId = null;
     }
   }
@@ -96,6 +107,24 @@ export class RunHistoryService {
   /** Loads one full record (for run detail / Bring to Canvas). */
   getRun(id: string): Promise<RunRecord | undefined> {
     return this.storage.getRun(id);
+  }
+
+  /**
+   * Persists a run recorded OUTSIDE the single active recorder — eval case
+   * runs (EPIC 4) build their own recorders (several run concurrently) but
+   * still land in normal run history with the same pruning + usage ledger.
+   */
+  async saveExternalRecord(record: RunRecord): Promise<void> {
+    try {
+      await this.storage.saveRun(record);
+      if (record.summary.endedAt !== undefined) {
+        await this.storage.pruneRuns(record.summary.workflowId, RUN_HISTORY_LIMIT);
+        await this.storage.saveUsage(usageLedgerEntryOf(record.summary)).catch(() => undefined);
+      }
+      await this.refresh();
+    } catch {
+      // Persistence failures must never break an eval run.
+    }
   }
 
   async deleteRun(id: string): Promise<void> {

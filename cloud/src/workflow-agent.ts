@@ -9,7 +9,7 @@
  *
  * HTTP surface (all under /agents/workflow-agent/{instance}):
  *   POST /workflow   — upload/replace the workflow spec (studio "Push")
- *   POST /trigger    — start a run { input?: string } → { runId }
+ *   POST /trigger    — start a run { input?: string, source?: 'eval' } → { runId }
  *   POST /events     — deliver an external event to a suspended Wait-for-Event
  *                      node: { correlationKey, payload? } → { ok, delivered }.
  *                      This is the webhook target for e-sign callbacks etc.
@@ -17,6 +17,7 @@
  *   GET  /status     — { name, hasWorkflow, running, savedAt, pendingWaits }
  *   GET  /runs       — run history: { runs: RunRecordSummary[], activeRunId }
  *   GET  /runs/{id}  — one full RunRecord (summary + graph + event log)
+ *   GET  /usage      — usage ledger: { usage: UsageLedgerEntry[] } (?since=ms)
  *   WS   connect     — receive RunEvents; send control frames:
  *                      { type: 'approval', nodeId, approved }
  *                      { type: 'event', correlationKey, payload? }
@@ -58,7 +59,9 @@ import {
   type RunRecord,
   type RunRecorder,
   type RunRecordSummary,
+  type RunRecordUsage,
   type RunSource,
+  type UsageLedgerEntry,
   type ToolHost,
   type WorkflowNode,
   type WorkflowSpec,
@@ -145,6 +148,7 @@ const PROVIDER_ENV_KEYS: Record<ModelProviderId, keyof Env | null> = {
   openrouter: 'OPENROUTER_API_KEY',
   bedrock: 'BEDROCK_API_KEY',
   ollama: null,
+  lmstudio: null,
   // Phorma Cloud never resolves a key from env — the tenant runtime key is
   // injected by the hosted inference path (DO trigger or /api/infer proxy).
   'phorma-cloud': null,
@@ -199,6 +203,22 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         PRIMARY KEY (run_id, seq)
       )
     `;
+    // Usage ledger (EPIC 2): one compact row per settled run, deliberately
+    // SEPARATE from the runs table so cost analytics survive run-history
+    // pruning. `usage` is the RunRecordSummary.usage JSON (totals + per-node
+    // and per-model rollups). Works hosted AND BYO (no D1 needed).
+    this.sql`
+      CREATE TABLE IF NOT EXISTS usage_ledger (
+        run_id TEXT PRIMARY KEY,
+        workflow_id TEXT,
+        workflow_name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        usage TEXT NOT NULL
+      )
+    `;
     const active = this.state.activeRun;
     if (active && !this.handle) {
       // The previous instance died mid-run (eviction). Restart the run with
@@ -232,6 +252,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   /** How many finished runs each workflow keeps; oldest are pruned. */
   private static readonly RUN_HISTORY_LIMIT = 50;
+  /** Usage-ledger retention: rows older than this are pruned at settle. */
+  private static readonly USAGE_LEDGER_MAX_AGE_MS = 366 * 24 * 60 * 60 * 1000;
+  /** Usage-ledger retention: hard row cap (newest kept). */
+  private static readonly USAGE_LEDGER_MAX_ROWS = 5000;
 
   // ── HTTP ───────────────────────────────────────────────────────────────────
 
@@ -264,8 +288,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
 
     if (request.method === 'POST' && path.endsWith('/trigger')) {
-      const body = (await request.json().catch(() => ({}))) as { input?: string };
-      const result = await this.trigger(body.input ?? '');
+      const body = (await request.json().catch(() => ({}))) as {
+        input?: string;
+        source?: string;
+      };
+      // Callers may tag eval-suite case runs; everything else stays manual.
+      const source: RunSource = body.source === 'eval' ? 'eval' : 'manual';
+      const result = await this.trigger(body.input ?? '', undefined, source);
       return json(result, result.ok ? 200 : (result.status ?? 409));
     }
 
@@ -310,6 +339,14 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         runs: this.listRunSummaries(),
         activeRunId: this.handle ? (this.state.activeRun?.runId ?? null) : null,
       });
+    }
+
+    // GET /usage?since={epochMs} — per-run usage ledger rows (newest first).
+    // Survives run-history pruning; the studio's analytics merge these with
+    // its local IndexedDB ledger.
+    if (request.method === 'GET' && path.endsWith('/usage')) {
+      const since = Number(url.searchParams.get('since') ?? 0) || 0;
+      return json({ usage: this.listUsageLedger(since) });
     }
 
     if (request.method === 'GET' && path.endsWith('/status')) {
@@ -423,6 +460,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     waiter.reject(
       new Error(`Timed out waiting for external event "${correlationKey}".`),
     );
+  }
+
+  /**
+   * Callback target for workflow-timeout alarms (`this.schedule(seconds,
+   * 'workflowTimedOut', runId)`). The engine enforces the deadline itself
+   * while the DO is awake; this durable alarm exists to WAKE an evicted DO
+   * (e.g. suspended on an approval) — `onStart` resumes the run, and the
+   * engine's re-armed deadline (remaining budget ≤ 0) fails it immediately.
+   * Stale alarms (run settled or superseded) are no-ops.
+   */
+  async workflowTimedOut(_runId: string): Promise<void> {
+    // Intentionally empty — waking the DO is the entire job.
   }
 
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
@@ -563,6 +612,19 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     const graph = this.hosted ? this.mapGraphToOpenRouter(spec.graph) : spec.graph;
     if (typeof graph === 'string') return { ok: false, error: graph, status: 422 };
 
+    // Workflow-level timeout: the engine enforces the deadline in-process; a
+    // durable alarm additionally wakes an evicted DO so a suspended run still
+    // times out on schedule. A RESUMED run keeps its original deadline — the
+    // remaining budget shrinks by the time already elapsed since startedAt.
+    const timeoutMinutes = spec.settings?.timeoutMinutes;
+    let runTimeoutMs: number | undefined;
+    if (typeof timeoutMinutes === 'number' && timeoutMinutes > 0) {
+      const limitMs = timeoutMinutes * 60_000;
+      const elapsedMs = resuming ? Date.now() - startedAt : 0;
+      runTimeoutMs = Math.max(1, limitMs - elapsedMs);
+      void this.schedule(Math.ceil(runTimeoutMs / 1000) + 5, 'workflowTimedOut', runId);
+    }
+
     const model = new FetchModelClient(async provider => {
       if (this.hosted) return tenantKey;
       const envKey = PROVIDER_ENV_KEYS[provider];
@@ -577,6 +639,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
       maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
+      runTimeoutMs,
       journal,
       model,
       tools: new CloudToolHost({
@@ -590,7 +653,17 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       }),
       ollamaBaseUrl: this.env.OLLAMA_BASE_URL,
       bedrockRegion: this.env.BEDROCK_REGION,
-      emit: event => {
+      emit: rawEvent => {
+        // Hosted inference is billed to the tenant's Phorma Cloud plan
+        // credits, so usage events are re-labeled `phorma-cloud` regardless
+        // of the OpenRouter mapping — the recorder's rollups and the studio
+        // UI use that provider to render credits instead of dollars (plan
+        // subscribers must never see raw USD). BYO deployments keep their
+        // real provider names (their cost IS dollars).
+        const event =
+          this.hosted && rawEvent.type === 'node-usage'
+            ? { ...rawEvent, provider: 'phorma-cloud' }
+            : rawEvent;
         if (event.type === 'node-usage') {
           runUsage.inputTokens += event.usage.inputTokens ?? 0;
           runUsage.outputTokens += event.usage.outputTokens ?? 0;
@@ -649,9 +722,17 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       for (const waiter of this.waits.values()) waiter.resolve('');
       this.waits.clear();
       this.earlyEvents.clear();
-      // The run settled — drop the resume marker and its journal rows.
+      // The run settled — drop the resume marker, its journal rows, and any
+      // pending workflow-timeout wake alarm.
       this.setState({ ...this.state, activeRun: null });
       this.sql`DELETE FROM run_journal WHERE run_id = ${runId}`;
+      void (async () => {
+        for (const schedule of this.getSchedules()) {
+          if (schedule.callback === 'workflowTimedOut') {
+            await this.cancelSchedule(schedule.id);
+          }
+        }
+      })().catch(() => undefined);
       this.recordRunUsage(runUsage);
       // Run history: finalize the summary, flush the coalesced event log,
       // and prune beyond the retention limit.
@@ -659,6 +740,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       this.persistRunSummary(record.summary, recordGraphJson);
       this.persistRunEvents(runId, record.events);
       this.pruneRunHistory();
+      this.writeUsageLedger(record.summary);
       if (this.recorder === recorder) this.recorder = null;
       // Hosted: authoritative per-run ledger row + quota rollup in D1.
       // A RESUMED run only ledgers the incremental usage of the re-execution
@@ -690,18 +772,36 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    */
   private mapGraphToOpenRouter(graph: WorkflowSpec['graph']): WorkflowSpec['graph'] | string {
     const mapped = structuredClone(graph);
-    for (const node of mapped.nodes) {
-      const data = node.data as { provider?: ModelProviderId; model?: string };
-      if (!data.provider || !data.model) continue;
-      const prefix = OPENROUTER_SLUG_PREFIX[data.provider];
+    const map = (
+      nodeName: string,
+      target: { provider?: ModelProviderId; model?: string },
+    ): string | null => {
+      if (!target.provider || !target.model) return null;
+      const prefix = OPENROUTER_SLUG_PREFIX[target.provider];
       if (prefix === null) {
-        return `Agent "${node.name}" uses ${data.provider}, which is not available on Phorma Cloud. Pick a cloud model.`;
+        return `Agent "${nodeName}" uses ${target.provider}, which is not available on Phorma Cloud. Pick a cloud model.`;
       }
       // openrouter + phorma-cloud already carry a full OpenRouter slug.
-      if (data.provider !== 'openrouter' && data.provider !== 'phorma-cloud') {
-        data.model = `${prefix}${data.model}`;
+      if (target.provider !== 'openrouter' && target.provider !== 'phorma-cloud') {
+        target.model = `${prefix}${target.model}`;
       }
-      data.provider = 'openrouter';
+      target.provider = 'openrouter';
+      return null;
+    };
+    for (const node of mapped.nodes) {
+      const data = node.data as {
+        provider?: ModelProviderId;
+        model?: string;
+        fallback?: { provider: ModelProviderId; model: string };
+      };
+      const primaryError = map(node.name, data);
+      if (primaryError) return primaryError;
+      // The LLM-fallback model must be mapped too — it is executed by the
+      // same hosted OpenRouter path when the primary fails.
+      if (data.fallback) {
+        const fallbackError = map(node.name, data.fallback);
+        if (fallbackError) return fallbackError;
+      }
     }
     return mapped;
   }
@@ -785,6 +885,75 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     } catch {
       return null;
     }
+  }
+
+  // ── Usage ledger (EPIC 2) ───────────────────────────────────────────────────────────
+
+  /** Writes (or replaces, for resumed runs) a settled run's ledger row. */
+  private writeUsageLedger(summary: RunRecordSummary): void {
+    this.sql`
+      INSERT OR REPLACE INTO usage_ledger
+        (run_id, workflow_id, workflow_name, source, status, started_at, ended_at, usage)
+      VALUES (
+        ${summary.id},
+        ${summary.workflowId},
+        ${summary.workflowName},
+        ${summary.source},
+        ${summary.status},
+        ${summary.startedAt},
+        ${summary.endedAt ?? null},
+        ${JSON.stringify(summary.usage)}
+      )
+    `;
+    // Retention: age-based first, then a hard row cap (newest kept).
+    this.sql`
+      DELETE FROM usage_ledger
+      WHERE started_at < ${Date.now() - WorkflowAgent.USAGE_LEDGER_MAX_AGE_MS}
+    `;
+    this.sql`
+      DELETE FROM usage_ledger WHERE run_id IN (
+        SELECT run_id FROM usage_ledger
+        ORDER BY started_at DESC
+        LIMIT -1 OFFSET ${WorkflowAgent.USAGE_LEDGER_MAX_ROWS}
+      )
+    `;
+  }
+
+  /** Ledger rows started at/after `since`, newest first. */
+  private listUsageLedger(since: number): UsageLedgerEntry[] {
+    const rows: UsageLedgerEntry[] = [];
+    for (const row of this.sql<{
+      run_id: string;
+      workflow_id: string | null;
+      workflow_name: string;
+      source: string;
+      status: string;
+      started_at: number;
+      ended_at: number | null;
+      usage: string;
+    }>`
+      SELECT run_id, workflow_id, workflow_name, source, status, started_at, ended_at, usage
+      FROM usage_ledger
+      WHERE started_at >= ${since}
+      ORDER BY started_at DESC
+    `) {
+      try {
+        rows.push({
+          runId: row.run_id,
+          workflowId: row.workflow_id,
+          workflowName: row.workflow_name,
+          source: row.source as RunSource,
+          status: row.status as RunRecordSummary['status'],
+          environment: 'cloud',
+          startedAt: row.started_at,
+          endedAt: row.ended_at ?? undefined,
+          usage: JSON.parse(row.usage) as RunRecordUsage,
+        });
+      } catch {
+        // Corrupt row — skip.
+      }
+    }
+    return rows;
   }
 
   /** The source recorded for a run's existing summary row (resume path). */

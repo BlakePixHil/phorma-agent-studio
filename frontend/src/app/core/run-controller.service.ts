@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 
 import {
   startRun,
+  withEstimatedCost,
   type RunEvent,
   type RunHandle,
   type RunNodeState,
@@ -10,6 +11,7 @@ import {
 
 import { AgentStreamService } from './agent-stream.service';
 import { ModelTransportService } from './model-transport.service';
+import { ModelPricingService } from './model-pricing.service';
 import { RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
 import { TerminalOutputService } from './terminal-output.service';
@@ -29,6 +31,29 @@ import { portBaseId } from './workflow.model';
  * user hits the wall, rather than making them dig through Settings.
  */
 const CREDITS_EXHAUSTED_PATTERN = /credits exhausted/i;
+
+/** Live usage totals for the current run (see {@link RunControllerService.runUsage}). */
+export interface RunUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  /** Total USD (reported + estimated), including the Phorma Cloud share. */
+  costUsd: number;
+  /** USD share billed to Phorma Cloud plan credits — display as credits only. */
+  phormaCloudCostUsd: number;
+  /** True when any portion of `costUsd` is a pricing-table estimate. */
+  estimated: boolean;
+  /** True once any round ran on Phorma Cloud. */
+  phormaCloud: boolean;
+}
+
+const EMPTY_RUN_USAGE: RunUsageTotals = {
+  inputTokens: 0,
+  outputTokens: 0,
+  costUsd: 0,
+  phormaCloudCostUsd: 0,
+  estimated: false,
+  phormaCloud: false,
+};
 
 /** One entry in the Runs panel trace timeline. */
 export interface TraceEntry {
@@ -101,6 +126,7 @@ export class RunControllerService {
   private readonly creditsDialog = inject(CreditsDialogService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
+  private readonly pricing = inject(ModelPricingService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -135,15 +161,13 @@ export class RunControllerService {
 
   /**
    * Cumulative token/cost usage for the current run, summed from node-usage
-   * events (one per model round). `costUsd` is only reported by providers
-   * with usage accounting (OpenRouter) — tokens are available more broadly.
+   * events (one per model round). `costUsd` is provider-reported where
+   * available (OpenRouter/Phorma Cloud) and pricing-table ESTIMATED
+   * otherwise (`estimated` flips true). `phormaCloudCostUsd` is the share
+   * billed to plan credits — the UI must render that share as credits,
+   * never dollars.
    */
-  readonly runUsage = signal<{ inputTokens: number; outputTokens: number; costUsd: number; phormaCloud: boolean }>({
-    inputTokens: 0,
-    outputTokens: 0,
-    costUsd: 0,
-    phormaCloud: false,
-  });
+  readonly runUsage = signal<RunUsageTotals>(EMPTY_RUN_USAGE);
 
   /**
    * Set while a persisted run is displayed on the canvas ("Bring to
@@ -235,6 +259,13 @@ export class RunControllerService {
         temperature: this.settings.defaultTemperature(),
       },
       maxToolRounds: this.settings.maxToolRounds(),
+      // Workflow-level timeout (Properties panel → Workflow settings).
+      runTimeoutMs: (() => {
+        const minutes = this.workflow.activeDoc()?.settings.timeoutMinutes;
+        return typeof minutes === 'number' && minutes > 0 ? minutes * 60_000 : undefined;
+      })(),
+      // Context-window lookup for automatic context compression.
+      contextWindow: this.pricing.contextWindowLookup(),
       tools: this.toolHost,
       // History records ONLY from the local engine's emit — cloud-monitor
       // events reach apply() directly and are persisted by the DO instead.
@@ -364,10 +395,19 @@ export class RunControllerService {
 
     this.nodeStates.set(states);
     this.nodeThinking.set(thinking);
-    this.trace.set(traceFromRunLog(record.events, nodeName));
+    this.trace.set(traceFromRunLog(record.events, nodeName, { formatCost: this.formatTraceCost }));
     this.traceCounter = this.trace().length;
     this.runInput.set(record.summary.input);
-    this.runUsage.set({ ...record.summary.usage, phormaCloud: false });
+    const usage = record.summary.usage;
+    const phormaCloudCostUsd = usage.phormaCloudCostUsd ?? 0;
+    this.runUsage.set({
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd: usage.costUsd,
+      phormaCloudCostUsd,
+      estimated: usage.estimated ?? false,
+      phormaCloud: phormaCloudCostUsd > 0,
+    });
     this.viewingHistoricalRunId.set(record.summary.id);
     this.terminal.setPhase(
       record.summary.status === 'running' ? 'idle' : record.summary.status,
@@ -419,12 +459,32 @@ export class RunControllerService {
 
   // ── RunEvent application (local engine AND cloud monitor feed this) ────────
 
+  /**
+   * Trace cost formatter (EPIC 2 display rule): Phorma Cloud-billed cost
+   * renders as plan credits — never dollars — while BYO cost renders as
+   * USD, labeled "(est.)" when it came from the pricing table.
+   */
+  readonly formatTraceCost = (provider: string, costUsd: number, estimated: boolean): string | null => {
+    if (provider === 'phorma-cloud') {
+      const credits = Math.max(1, Math.round(costUsd * this.phormaCloud.creditsPerUsd()));
+      return `${credits.toLocaleString()} cr`;
+    }
+    return `$${costUsd.toFixed(4)}${estimated ? ' (est.)' : ''}`;
+  };
+
   apply(event: RunEvent): void {
     // Trace entries come from the SAME pure builder the run-history detail
     // view uses (`describeRunEvent`) — live and historical timelines can
     // never drift apart. Token stream events never trace.
     if (event.type !== 'node-token' && event.type !== 'node-thinking') {
-      const desc = describeRunEvent(event, id => this.nodeName(id));
+      // Live BYO usage events may lack a cost until estimation — estimate
+      // here so the trace shows it (record/history paths estimate in the
+      // recorder instead).
+      const traced =
+        event.type === 'node-usage'
+          ? { ...event, usage: withEstimatedCost(event.usage, event.provider, event.model ?? '', this.pricing.estimator()) }
+          : event;
+      const desc = describeRunEvent(traced, id => this.nodeName(id), { formatCost: this.formatTraceCost });
       if (desc) this.pushTrace(desc.icon, desc.label, desc.detail, desc.tone, desc.kind);
     }
 
@@ -436,7 +496,7 @@ export class RunControllerService {
         // A new run dumps any prior thinking text (per the persistence rule:
         // thinking survives until node removal OR a restart).
         this.nodeThinking.set(new Map());
-        this.runUsage.set({ inputTokens: 0, outputTokens: 0, costUsd: 0, phormaCloud: false });
+        this.runUsage.set(EMPTY_RUN_USAGE);
         break;
 
       case 'node-started':
@@ -454,16 +514,29 @@ export class RunControllerService {
         this.appendThinking(event.nodeId, event.token);
         break;
 
-      case 'node-usage':
+      case 'node-usage': {
+        // Fill in an estimated cost for BYO providers that only report
+        // token counts. Reported (OpenRouter/Phorma Cloud) costs win.
+        const usage = withEstimatedCost(
+          event.usage,
+          event.provider,
+          event.model ?? '',
+          this.pricing.estimator(),
+        );
+        const costUsd = usage.costUsd ?? 0;
+        const cloud = event.provider === 'phorma-cloud';
         this.runUsage.update(current => ({
-          inputTokens: current.inputTokens + (event.usage.inputTokens ?? 0),
-          outputTokens: current.outputTokens + (event.usage.outputTokens ?? 0),
-          costUsd: current.costUsd + (event.usage.costUsd ?? 0),
-          // Once any round runs on Phorma Cloud, the run's cost is shown in
-          // abstract credits rather than dollars.
-          phormaCloud: current.phormaCloud || event.provider === 'phorma-cloud',
+          inputTokens: current.inputTokens + (usage.inputTokens ?? 0),
+          outputTokens: current.outputTokens + (usage.outputTokens ?? 0),
+          costUsd: current.costUsd + costUsd,
+          // The Phorma Cloud share is billed to plan credits — shown in
+          // abstract credits, never dollars.
+          phormaCloudCostUsd: current.phormaCloudCostUsd + (cloud ? costUsd : 0),
+          estimated: current.estimated || usage.costSource === 'estimated',
+          phormaCloud: current.phormaCloud || cloud,
         }));
         break;
+      }
 
       case 'node-completed':
         this.flushStreaming(event.nodeId);
@@ -478,6 +551,35 @@ export class RunControllerService {
         this.setNodeState(event.nodeId, 'error');
         this.agentStream.clearEditing(event.nodeId);
         this.console('problems', 'error', `${event.nodeName}: ${event.error}`);
+        break;
+
+      case 'node-retrying':
+        // The node stays in 'thinking' — the retry is part of its execution.
+        this.console(
+          'run',
+          'warning',
+          `${event.nodeName}: transient failure — retrying (attempt ${event.attempt + 1}/${event.maxAttempts}). ${event.error}`,
+        );
+        break;
+
+      case 'node-fallback':
+        this.console(
+          'run',
+          'warning',
+          `${event.nodeName}: primary model ${event.fromModel} failed — switching to fallback ${event.toModel}.`,
+        );
+        break;
+
+      case 'node-error-routed':
+        this.console('run', 'warning', `${event.nodeName}: failure routed to the error branch.`);
+        break;
+
+      case 'context-compressed':
+        this.console(
+          'run',
+          'info',
+          `${this.nodeName(event.nodeId)}: context compressed (~${event.beforeTokens.toLocaleString()} → ~${event.afterTokens.toLocaleString()} tokens).`,
+        );
         break;
 
       case 'handoff': {

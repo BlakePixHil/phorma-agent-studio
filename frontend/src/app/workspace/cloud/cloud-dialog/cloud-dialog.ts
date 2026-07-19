@@ -6,7 +6,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { CloudDialogService } from '../cloud-dialog.service';
 import { CloudService } from '../../../core/cloud.service';
-import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import { SettingsService } from '../../../core/settings.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { TauriService } from '../../../core/tauri.service';
@@ -37,6 +37,7 @@ export class CloudDialog {
   protected readonly workflow = inject(WorkflowService);
   protected readonly settings = inject(SettingsService);
   protected readonly phormaCloud = inject(PhormaCloudService);
+  protected readonly tierLabel = tierLabel;
   private readonly settingsDialog = inject(SettingsDialogService);
   protected readonly isDesktop = inject(TauriService).isDesktop;
 

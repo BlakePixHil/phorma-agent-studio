@@ -1,11 +1,11 @@
 import { Injectable } from '@angular/core';
 
-import type { RunRecord } from '@phorma/engine';
+import type { EvalRunSummary, EvalSuite, RunRecord, UsageLedgerEntry } from '@phorma/engine';
 
 import type { WorkflowSpec } from './workflow.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -13,6 +13,30 @@ const WORKFLOWS_STORE = 'workflows';
 const RUNS_STORE = 'runs';
 const RUNS_BY_WORKFLOW = 'by-workflow';
 const RUNS_BY_STARTED = 'by-started';
+/**
+ * Object store holding per-run {@link UsageLedgerEntry} rows (keyPath
+ * `runId`) — deliberately separate from the runs store so cost analytics
+ * survive run-history pruning (EPIC 2).
+ */
+const USAGE_STORE = 'usage';
+const USAGE_BY_WORKFLOW = 'by-workflow';
+const USAGE_BY_STARTED = 'by-started';
+
+/** Usage-ledger retention: rows older than this are pruned on write. */
+const USAGE_MAX_AGE_MS = 366 * 24 * 60 * 60 * 1000;
+/** Usage-ledger retention: hard row cap (newest kept). */
+const USAGE_MAX_ROWS = 5000;
+
+/** Object store holding {@link EvalSuite} documents (keyPath `id`) — EPIC 4. */
+const EVAL_SUITES_STORE = 'eval-suites';
+const EVAL_SUITES_BY_WORKFLOW = 'by-workflow';
+/** Object store holding {@link EvalRunSummary} rows (keyPath `id`) — EPIC 4. */
+const EVAL_RUNS_STORE = 'eval-runs';
+const EVAL_RUNS_BY_SUITE = 'by-suite';
+const EVAL_RUNS_BY_WORKFLOW = 'by-workflow';
+
+/** Eval-run retention per suite (newest kept). */
+const EVAL_RUNS_KEEP = 50;
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -101,6 +125,116 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Usage ledger (EPIC 2) ─────────────────────────────────────
+
+  /** All usage-ledger rows started at/after `since`, newest first. */
+  async listUsage(since = 0): Promise<UsageLedgerEntry[]> {
+    const db = await this.open();
+    const store = db.transaction(USAGE_STORE, 'readonly').objectStore(USAGE_STORE);
+    const rows = await this.request<StoredUsage[]>(
+      store.index(USAGE_BY_STARTED).getAll(IDBKeyRange.lowerBound(since)),
+    );
+    return rows.sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  /** Upserts a run's usage-ledger row and applies retention. */
+  async saveUsage(entry: UsageLedgerEntry): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(USAGE_STORE, 'readwrite').objectStore(USAGE_STORE).put(toStoredUsage(entry)),
+    );
+    await this.pruneUsage();
+  }
+
+  // ── Evals (EPIC 4) ────────────────────────────────────────────────────
+
+  /** All eval suites for a workflow (`null` = unsaved drafts), newest first. */
+  async listEvalSuites(workflowId: string | null): Promise<EvalSuite[]> {
+    const db = await this.open();
+    const store = db.transaction(EVAL_SUITES_STORE, 'readonly').objectStore(EVAL_SUITES_STORE);
+    const suites = await this.request<EvalSuite[]>(
+      store.index(EVAL_SUITES_BY_WORKFLOW).getAll(workflowId ?? 'draft'),
+    );
+    return suites.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async saveEvalSuite(suite: EvalSuite): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(EVAL_SUITES_STORE, 'readwrite')
+        .objectStore(EVAL_SUITES_STORE)
+        .put(toStoredEvalSuite(suite)),
+    );
+  }
+
+  async removeEvalSuite(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(EVAL_SUITES_STORE, 'readwrite').objectStore(EVAL_SUITES_STORE).delete(id),
+    );
+    // A suite's run history dies with it.
+    const runsStore = db.transaction(EVAL_RUNS_STORE, 'readwrite').objectStore(EVAL_RUNS_STORE);
+    const runs = await this.request<EvalRunSummary[]>(
+      runsStore.index(EVAL_RUNS_BY_SUITE).getAll(id),
+    );
+    await Promise.all(runs.map(run => this.request(runsStore.delete(run.id))));
+  }
+
+  /** All eval runs for a suite, newest first. */
+  async listEvalRuns(suiteId: string): Promise<EvalRunSummary[]> {
+    const db = await this.open();
+    const store = db.transaction(EVAL_RUNS_STORE, 'readonly').objectStore(EVAL_RUNS_STORE);
+    const runs = await this.request<EvalRunSummary[]>(
+      store.index(EVAL_RUNS_BY_SUITE).getAll(suiteId),
+    );
+    return runs.sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  /** Upserts an eval run (used at case boundaries and again on settle). */
+  async saveEvalRun(run: EvalRunSummary): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(EVAL_RUNS_STORE, 'readwrite')
+        .objectStore(EVAL_RUNS_STORE)
+        .put(toStoredEvalRun(run)),
+    );
+    await this.pruneEvalRuns(run.suiteId);
+  }
+
+  async removeEvalRun(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(EVAL_RUNS_STORE, 'readwrite').objectStore(EVAL_RUNS_STORE).delete(id),
+    );
+  }
+
+  /** Deletes this suite's oldest eval runs beyond {@link EVAL_RUNS_KEEP}. */
+  private async pruneEvalRuns(suiteId: string): Promise<void> {
+    const runs = await this.listEvalRuns(suiteId);
+    if (runs.length <= EVAL_RUNS_KEEP) return;
+    const db = await this.open();
+    const store = db.transaction(EVAL_RUNS_STORE, 'readwrite').objectStore(EVAL_RUNS_STORE);
+    await Promise.all(runs.slice(EVAL_RUNS_KEEP).map(run => this.request(store.delete(run.id))));
+  }
+
+  /** Age + row-cap retention for the usage ledger. */
+  private async pruneUsage(): Promise<void> {
+    const db = await this.open();
+    const store = db.transaction(USAGE_STORE, 'readwrite').objectStore(USAGE_STORE);
+    const rows = await this.request<StoredUsage[]>(store.index(USAGE_BY_STARTED).getAll());
+    const cutoff = Date.now() - USAGE_MAX_AGE_MS;
+    const doomed = [
+      ...rows.filter(row => row.startedAt < cutoff),
+      ...rows
+        .filter(row => row.startedAt >= cutoff)
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .slice(USAGE_MAX_ROWS),
+    ];
+    await Promise.all(doomed.map(row => this.request(store.delete(row.runId))));
+  }
+
   private open(): Promise<IDBDatabase> {
     this.dbPromise ??= new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -115,6 +249,20 @@ export class IndexedDbStorageService {
           // because IDB indexes skip records whose key value is null.
           runs.createIndex(RUNS_BY_WORKFLOW, 'workflowKey');
           runs.createIndex(RUNS_BY_STARTED, 'summary.startedAt');
+        }
+        if (!db.objectStoreNames.contains(USAGE_STORE)) {
+          const usage = db.createObjectStore(USAGE_STORE, { keyPath: 'runId' });
+          usage.createIndex(USAGE_BY_WORKFLOW, 'workflowKey');
+          usage.createIndex(USAGE_BY_STARTED, 'startedAt');
+        }
+        if (!db.objectStoreNames.contains(EVAL_SUITES_STORE)) {
+          const suites = db.createObjectStore(EVAL_SUITES_STORE, { keyPath: 'id' });
+          suites.createIndex(EVAL_SUITES_BY_WORKFLOW, 'workflowKey');
+        }
+        if (!db.objectStoreNames.contains(EVAL_RUNS_STORE)) {
+          const evalRuns = db.createObjectStore(EVAL_RUNS_STORE, { keyPath: 'id' });
+          evalRuns.createIndex(EVAL_RUNS_BY_SUITE, 'suiteId');
+          evalRuns.createIndex(EVAL_RUNS_BY_WORKFLOW, 'workflowKey');
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -137,4 +285,21 @@ export class IndexedDbStorageService {
  */
 function toStoredRun(record: RunRecord): RunRecord & { workflowKey: string } {
   return { ...record, workflowKey: record.summary.workflowId ?? 'draft' };
+}
+
+type StoredUsage = UsageLedgerEntry & { workflowKey: string };
+
+/** Same null-key workaround as {@link toStoredRun}. */
+function toStoredUsage(entry: UsageLedgerEntry): StoredUsage {
+  return { ...entry, workflowKey: entry.workflowId ?? 'draft' };
+}
+
+/** Same null-key workaround as {@link toStoredRun}. */
+function toStoredEvalSuite(suite: EvalSuite): EvalSuite & { workflowKey: string } {
+  return { ...suite, workflowKey: suite.workflowId ?? 'draft' };
+}
+
+/** Same null-key workaround as {@link toStoredRun}. */
+function toStoredEvalRun(run: EvalRunSummary): EvalRunSummary & { workflowKey: string } {
+  return { ...run, workflowKey: run.workflowId ?? 'draft' };
 }

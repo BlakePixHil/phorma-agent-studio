@@ -11,7 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DecimalPipe } from '@angular/common';
+import { CurrencyPipe, DecimalPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { SliderModule } from 'primeng/slider';
@@ -22,7 +22,7 @@ import { SettingsDialogService } from '../settings-dialog.service';
 import { CloudService, PHORMA_CLOUD_DEFAULT_URL } from '../../../core/cloud.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
-import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import { SettingsService } from '../../../core/settings.service';
 import {
   SettingsRegistryService,
@@ -32,6 +32,7 @@ import {
 } from '../../../core/settings-registry';
 import { TauriService } from '../../../core/tauri.service';
 import { ThemeService } from '../../../core/theme.service';
+import { UsageAnalyticsService } from '../../../core/usage-analytics.service';
 import { THEME_PALETTES, type ThemePalette, type ThemePaletteId } from '../../../core/theme-palettes';
 import { MCP_PRESETS, type McpPreset } from '../../../core/node-catalog';
 import { ToastService } from '../../../shared/toast/toast.service';
@@ -65,7 +66,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, InfoPopover],
+  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, InfoPopover],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })
@@ -75,6 +76,7 @@ export class SettingsDialog {
   protected readonly settings = inject(SettingsService);
   protected readonly theme = inject(ThemeService);
   protected readonly creditsDialog = inject(CreditsDialogService);
+  protected readonly usageAnalytics = inject(UsageAnalyticsService);
   private readonly tauri = inject(TauriService);
   private readonly toast = inject(ToastService);
   private readonly transport = inject(ModelTransportService);
@@ -511,6 +513,7 @@ export class SettingsDialog {
 
   protected readonly cloud = inject(CloudService);
   protected readonly phormaCloud = inject(PhormaCloudService);
+  protected readonly tierLabel = tierLabel;
 
   /** Signed-in Clerk user (null while loading / signed out). */
   protected readonly clerkUser = this.phormaCloud.user;
@@ -573,6 +576,12 @@ export class SettingsDialog {
   }
 
   constructor() {
+    // Usage page (EPIC 2): refresh the ledgers when the page is opened.
+    effect(() => {
+      if (!this.dialog.visible() || this.dialog.activePageId() !== 'usage') return;
+      untracked(() => void this.usageAnalytics.refresh());
+    });
+
     // Refresh preset-scoped configured flags whenever the dialog opens so
     // Integrations badges are accurate. `untracked` is REQUIRED: the refresh
     // reads AND writes `mcpSecretsConfigured` synchronously (browser path),

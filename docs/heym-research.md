@@ -33,27 +33,30 @@ Every run (local + cloud) persisted with inputs, per-node outputs, trace, status
 - *Fits us well:* we already have IndexedDB storage (`indexed-db-storage.service.ts`), a WebSocket monitor (`cloud.service.ts`), and DO checkpoint state to restore from.
 - *Pillar:* directly extends "execution theatre" and debugger discipline to production runs. This is our wedge.
 
-### [ ] EPIC 2: Cost & Usage Observability
+### [x] EPIC 2: Cost & Usage Observability — shipped 2026-07-19
 
 We already emit `node-usage` events with `costUsd` (`run-controller.service.ts` sums them per run). Missing: persistence + analytics - per-workflow/per-model cost over time, token charts, a synced pricing table so *all* providers get USD cost (not just OpenRouter/phorma-cloud), and per-node cost in the trace panel.
 
 - *Pillar:* powerful + simpler. Ops owners deciding whether to deploy a workflow need "this costs $0.04/run".
 - *Depends on:* EPIC 1 (persisted runs).
+- *Shipped:* `engine/src/pricing.ts` (OpenRouter-synced price table + estimation, `costSource` reported/estimated), per-node + per-model rollups in `RunRecordSummary.usage`, a prune-proof usage ledger (IndexedDB v3 `usage` store + DO `usage_ledger` table + `GET /usage`), the Usage sidebar panel (chart.js, deferred) and Settings → Usage page, per-node usage in the trace. Display rule enforced end to end: Phorma Cloud-billed usage renders as plan credits (never USD, `phormaCloudCostUsd` split), BYO renders USD marked "(est.)" when estimated. Plus plan removed (starter/pro/team + custom enterprise later).
 
-### [ ] EPIC 3: Workflow Robustness Primitives
+### [x] EPIC 3: Workflow Robustness Primitives — shipped 2026-07-19
 
 Node-level **retry with backoff**, an **error output branch** (route failure instead of failing the run), **workflow-level error handler** node, **workflow timeout**, and **LLM fallback** (secondary model when primary errors). Also heym's **automatic context compression** (summarize middle messages at ~80% of context window) - very relevant for our long agent loops in `engine/src/engine.ts`.
 
 - *Fits us well:* registry-driven node kinds mean error-branch ports are catalog entries; retry/fallback are engine-level and provider-agnostic.
 - *Pillar:* powerful. Without these, deployed workflows are fragile in ways users only discover in production.
 - *No dependencies* - engine-only work, can run in parallel with EPIC 1.
+- *Shipped:* all six primitives. Retry is ON BY DEFAULT for transient failures (429/5xx/network, `ModelRequestError` + `isTransientModelError`), tunable/disable-able per node; fallback model retries the round on a secondary provider/model; agents get an optional "On error" out-port (red dot) that routes a JSON error payload instead of failing the run; a new Error Handler flow node runs its subtree when the run fails (run still settles failed); per-node `timeoutSec` + workflow `settings.timeoutMinutes` (pause-aware locally, durable wake alarm in the DO); context compression summarizes middle tool rounds at 80% of the model's context window (OpenRouter-synced `contextTokens` in the pricing table). New RunEvents: `node-retrying`, `node-fallback`, `node-error-routed`, `context-compressed`. Reliability section in the Prompt panel; workflow timeout in the Properties panel's no-selection state. Test: `engine/test/robustness.e2e.mts` (52 checks).
 
-### [ ] EPIC 4: Evals
+### [x] EPIC 4: Evals — shipped 2026-07-19
 
 Test suites against a workflow: input cases + expected outputs, scoring by exact match / contains / LLM-as-judge, run the suite with one click, compare across models.
 
 - *Pillar:* simpler + powerful - "trust what you built" is literally pillar 2, and evals are the mechanism.
 - *Depends on:* EPIC 1 (run persistence for eval run history).
+- *Shipped:* `engine/src/evals.ts` (suite/case/result types + pure `scoreOutput` with tolerant judge-verdict parsing), `RunSource` extended with `'eval'`. Every case execution is a REAL engine run persisted as a normal RunRecord (flask badge in the Runs panel, full trace, Bring to Canvas). Local suites run in a 3-wide pool via `EvalRunnerService` (bypasses the single-run `RunControllerService`); cloud suites run sequentially against the deployed DO (`POST /trigger` now accepts `source: 'eval'`, new `CloudService.triggerHttp` + poll). Model comparison re-runs the suite per model via `defaultModel` override (local only - cloud specs are materialized at push). IndexedDB v4 adds `eval-suites` + `eval-runs` stores. Evals sidebar panel: suite list → case editor (matcher select, judge model, comparison models) → scored results with judge reasoning and per-case run links. Test: `engine/test/evals.e2e.mts` (30 checks).
 
 ### [ ] EPIC 5: Deeper AI-Assisted Building
 

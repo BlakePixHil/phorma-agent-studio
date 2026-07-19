@@ -758,6 +758,73 @@
   margin-top: 2px;
 }
 
+/* ── Usage page (EPIC 2) ─────────────────────────────────────────────── */
+
+.phorma-settings__usage-plan,
+.phorma-settings__usage-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 10px;
+
+  h5 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-settings__usage-totals {
+  margin-top: 12px;
+}
+
+.phorma-settings__usage-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.phorma-settings__usage-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 84px;
+  padding: 8px 12px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+
+  strong {
+    font-size: 13px;
+    color: var(--p-text-color);
+  }
+
+  span {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--p-text-muted-color);
+  }
+}
+
+.phorma-settings__usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.phorma-settings__usage-cost {
+  font-size: 11px;
+  font-family: var(--phorma-font-mono, monospace);
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
+}
+
 .phorma-settings__row--actions {
   align-items: center;
   gap: 10px;

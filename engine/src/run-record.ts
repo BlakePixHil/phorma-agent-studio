@@ -20,10 +20,14 @@
 
 import type { RunEvent } from './events.js';
 import type { ModelUsage } from './model.js';
+import { withEstimatedCost, type CostEstimator } from './pricing.js';
 import type { WorkflowGraph } from './types.js';
 
-/** What initiated a run. `resume` = journal replay after host eviction. */
-export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume';
+/**
+ * What initiated a run. `resume` = journal replay after host eviction.
+ * `eval` = a test case executed by an eval suite run.
+ */
+export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume' | 'eval';
 
 /** Where the run executed. */
 export type RunEnvironment = 'local' | 'cloud';
@@ -31,11 +35,33 @@ export type RunEnvironment = 'local' | 'cloud';
 /** Terminal (or in-flight) status of a recorded run. */
 export type RunRecordStatus = 'running' | 'completed' | 'failed' | 'stopped';
 
+/** One usage rollup bucket (per node or per model). */
+export interface RunUsageBucket {
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  /** True when any summed sample's cost was estimated (or unpriceable). */
+  estimated: boolean;
+}
+
 /** Cumulative usage across the run (summed from `node-usage` events). */
 export interface RunRecordUsage {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /**
+   * USD portion billed to Phorma Cloud plan credits (provider
+   * `phorma-cloud`). UIs must render this share as credits, never dollars.
+   */
+  phormaCloudCostUsd?: number;
+  /** True when any portion of `costUsd` is a pricing-table estimate. */
+  estimated?: boolean;
+  /** nodeId → rollup. Immune to the event-log cap. */
+  byNode?: Record<string, RunUsageBucket>;
+  /** `provider:model` key -> rollup. */
+  byModel?: Record<string, RunUsageBucket>;
 }
 
 /**
@@ -104,6 +130,39 @@ export interface RunRecord {
   events: RunLogEvent[];
 }
 
+/**
+ * One usage-ledger row (EPIC 2): a compact per-run usage record persisted
+ * SEPARATELY from run history so cost analytics survive run pruning. The
+ * studio stores these in IndexedDB for local runs; the cloud runtime stores
+ * them in DO SQLite and serves them via `GET /usage`.
+ */
+export interface UsageLedgerEntry {
+  runId: string;
+  workflowId: string | null;
+  workflowName: string;
+  source: RunSource;
+  status: RunRecordStatus;
+  environment: RunEnvironment;
+  startedAt: number;
+  endedAt?: number;
+  usage: RunRecordUsage;
+}
+
+/** Projects a settled run's summary into its usage-ledger row. */
+export function usageLedgerEntryOf(summary: RunRecordSummary): UsageLedgerEntry {
+  return {
+    runId: summary.id,
+    workflowId: summary.workflowId,
+    workflowName: summary.workflowName,
+    source: summary.source,
+    status: summary.status,
+    environment: summary.environment,
+    startedAt: summary.startedAt,
+    endedAt: summary.endedAt,
+    usage: summary.usage,
+  };
+}
+
 /** Identity/context the host knows before the first event arrives. */
 export interface RunRecorderMeta {
   runId: string;
@@ -113,6 +172,11 @@ export interface RunRecorderMeta {
   environment: RunEnvironment;
   /** Graph snapshot taken at start (the recorder does not clone it). */
   graph: WorkflowGraph;
+  /**
+   * Optional pricing hook: estimates USD for usage samples whose provider
+   * didn't report cost (see pricing.ts). Reported costs always win.
+   */
+  estimateCost?: CostEstimator;
 }
 
 export interface RunRecorder {
@@ -131,6 +195,13 @@ const MAX_PAYLOAD_CHARS = 64 * 1024;
 /** Max stored log entries per run (token streams don't count — coalesced). */
 const MAX_LOG_EVENTS = 2000;
 const TRUNCATION_MARKER = '\n… [truncated for run history]';
+
+/** Deep-copies a rollup map (buckets are flat objects). */
+function structuredCloneBuckets(
+  buckets: Record<string, RunUsageBucket>,
+): Record<string, RunUsageBucket> {
+  return Object.fromEntries(Object.entries(buckets).map(([key, bucket]) => [key, { ...bucket }]));
+}
 
 function clip(text: string): { text: string; clipped: boolean } {
   if (text.length <= MAX_PAYLOAD_CHARS) return { text, clipped: false };
@@ -209,12 +280,41 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
     events.push({ type, runId: meta.runId, nodeId, text: token, at: Date.now() });
   }
 
-  function addUsage(usage: ModelUsage): void {
-    summary.usage = {
-      inputTokens: summary.usage.inputTokens + (usage.inputTokens ?? 0),
-      outputTokens: summary.usage.outputTokens + (usage.outputTokens ?? 0),
-      costUsd: summary.usage.costUsd + (usage.costUsd ?? 0),
-    };
+  function addToBucket(
+    buckets: Record<string, RunUsageBucket>,
+    key: string,
+    provider: string,
+    model: string,
+    usage: ModelUsage,
+  ): void {
+    const bucket = (buckets[key] ??= {
+      provider,
+      model,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      estimated: false,
+    });
+    bucket.provider = provider;
+    bucket.model = model;
+    bucket.inputTokens += usage.inputTokens ?? 0;
+    bucket.outputTokens += usage.outputTokens ?? 0;
+    bucket.costUsd += usage.costUsd ?? 0;
+    if (usage.costSource !== 'reported') bucket.estimated = true;
+  }
+
+  function addUsage(nodeId: string, provider: string, model: string, raw: ModelUsage): void {
+    const usage = withEstimatedCost(raw, provider, model, meta.estimateCost);
+    const current = summary.usage;
+    current.inputTokens += usage.inputTokens ?? 0;
+    current.outputTokens += usage.outputTokens ?? 0;
+    current.costUsd += usage.costUsd ?? 0;
+    if (provider === 'phorma-cloud') {
+      current.phormaCloudCostUsd = (current.phormaCloudCostUsd ?? 0) + (usage.costUsd ?? 0);
+    }
+    if (usage.costSource !== 'reported') current.estimated = true;
+    addToBucket((current.byNode ??= {}), nodeId, provider, model, usage);
+    addToBucket((current.byModel ??= {}), `${provider}:${model}`, provider, model, usage);
   }
 
   function record(event: RunEvent): void {
@@ -236,10 +336,12 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
         thinkingIndex.delete(event.nodeId);
         push(event);
         return;
-      case 'node-usage':
-        addUsage(event.usage);
-        push(event);
+      case 'node-usage': {
+        addUsage(event.nodeId, event.provider, event.model ?? '', event.usage);
+        const usage = withEstimatedCost(event.usage, event.provider, event.model ?? '', meta.estimateCost);
+        push(usage === event.usage ? event : { ...event, usage });
         return;
+      }
       case 'node-completed': {
         const { text, clipped } = clip(event.output);
         if (clipped) markTruncated();
@@ -292,14 +394,22 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
     }
   }
 
+  function cloneUsage(usage: RunRecordUsage): RunRecordUsage {
+    return {
+      ...usage,
+      byNode: usage.byNode ? structuredCloneBuckets(usage.byNode) : undefined,
+      byModel: usage.byModel ? structuredCloneBuckets(usage.byModel) : undefined,
+    };
+  }
+
   return {
     record,
     snapshot: () => ({
-      summary: { ...summary, usage: { ...summary.usage } },
+      summary: { ...summary, usage: cloneUsage(summary.usage) },
       graph: meta.graph,
       events: [...events],
     }),
-    summary: () => ({ ...summary, usage: { ...summary.usage } }),
+    summary: () => ({ ...summary, usage: cloneUsage(summary.usage) }),
     get settled() {
       return settled;
     },

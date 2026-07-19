@@ -22,6 +22,48 @@ import type { ModelProviderId } from './types.js';
 
 export const API_KEY_PLACEHOLDER = '{{API_KEY}}';
 
+/**
+ * A failed model HTTP request. Carries the status code so retry logic can
+ * classify transient (429/5xx) vs permanent (auth, bad request) failures
+ * without parsing message strings.
+ */
+export class ModelRequestError extends Error {
+  constructor(
+    message: string,
+    /** HTTP status, when the failure was an HTTP response (absent = network). */
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'ModelRequestError';
+  }
+}
+
+/**
+ * Classifies an error thrown by a model stream as transient (worth retrying:
+ * rate limits, server errors, network drops, timeouts) or permanent (auth
+ * failures, malformed requests — retrying cannot help).
+ */
+export function isTransientModelError(error: unknown): boolean {
+  if (error instanceof ModelRequestError) {
+    if (error.status === undefined) return true; // network-level failure
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  }
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'NodeTimeoutError') return true;
+  // Clients that don't throw ModelRequestError (e.g. the desktop Rust proxy)
+  // embed the status in the message: "openai request failed (503): …".
+  const status = /\((\d{3})\)/.exec(error.message);
+  if (status) {
+    const code = Number(status[1]);
+    return code === 408 || code === 429 || code >= 500;
+  }
+  // fetch network failures surface as TypeError('fetch failed') & friends.
+  if (error.name === 'TypeError') return true;
+  return /network|fetch failed|ECONNRESET|ETIMEDOUT|EPIPE|socket|connection|timed? ?out/i.test(
+    error.message,
+  );
+}
+
 /** A tool call requested by the model (arguments = raw JSON string). */
 export interface ToolCall {
   id: string;
@@ -66,8 +108,14 @@ export interface ModelRequest {
 export interface ModelUsage {
   inputTokens?: number;
   outputTokens?: number;
-  /** USD actually charged — present only when the provider reports it (OpenRouter). */
+  /** USD actually charged - present only when the provider reports it (OpenRouter). */
   costUsd?: number;
+  /**
+   * How `costUsd` was obtained: `reported` = the provider returned the exact
+   * charge (OpenRouter usage accounting); `estimated` = computed from token
+   * counts and a pricing table (see pricing.ts). Absent when costUsd is absent.
+   */
+  costSource?: 'reported' | 'estimated';
 }
 
 /** One parsed frame of a model stream. */
@@ -273,17 +321,18 @@ function openAiMessages(request: ModelRequest): object[] {
 }
 
 function openAiBody(request: ModelRequest): string {
-  // Usage reporting: OpenAI + OpenRouter support stream_options.include_usage
-  // (final chunk carries token counts). OpenRouter additionally returns the
-  // actual USD cost when usage accounting is requested. Gemini's and Ollama's
-  // OpenAI-compat shims are not guaranteed to accept these fields, so they
-  // are only sent to providers known to support them. Phorma Cloud reuses the
-  // OpenRouter wire format (the proxy forwards to OpenRouter), so it gets the
-  // same usage accounting.
+  // Usage reporting: OpenAI, OpenRouter, Gemini's OpenAI-compat shim, and
+  // Ollama all support stream_options.include_usage (final chunk carries
+  // token counts). OpenRouter additionally returns the actual USD cost when
+  // usage accounting is requested. Phorma Cloud reuses the OpenRouter wire
+  // format (the proxy forwards to OpenRouter), so it gets the same usage
+  // accounting.
   const wantsUsage =
     request.provider === 'openai' ||
     request.provider === 'openrouter' ||
-    request.provider === 'phorma-cloud';
+    request.provider === 'phorma-cloud' ||
+    request.provider === 'gemini' ||
+    request.provider === 'ollama';
   const wantsCost = request.provider === 'openrouter' || request.provider === 'phorma-cloud';
   return JSON.stringify({
     model: request.model,
@@ -350,6 +399,7 @@ class OpenAiStreamParser implements StreamParser {
           inputTokens: parsed.usage.prompt_tokens,
           outputTokens: parsed.usage.completion_tokens,
           costUsd: parsed.usage.cost,
+          costSource: parsed.usage.cost !== undefined ? 'reported' : undefined,
         },
       });
     }
@@ -710,8 +760,9 @@ export class FetchModelClient implements ModelClient {
 
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => '');
-      throw new Error(
+      throw new ModelRequestError(
         `${request.provider} request failed (${response.status}): ${truncate(detail, 300)}`,
+        response.status,
       );
     }
 

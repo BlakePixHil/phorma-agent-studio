@@ -25,11 +25,18 @@ function nodeAccentRaw(node: WorkflowNode): string {
   return NODE_CATEGORY_COLORS[node.category] ?? NODE_CATEGORY_COLORS.flow;
 }
 
-/** Port dot colour by role. */
-function portColorRaw(role: WorkflowPort['role']): string {
+/** Port dot colour by role (error out-ports get a distinct red accent). */
+function portColorRaw(role: WorkflowPort['role'], isErrorPort = false): string {
+  if (isErrorPort) return 'var(--phorma-port-error, #f87171)';
   return role === 'tools'
     ? 'var(--phorma-port-tools, #fbbf24)'
     : 'var(--phorma-port-message, #94a3b8)';
+}
+
+/** Whether a port is the node's "On error" branch (agents) or the Error Handler's out-port. */
+function isErrorPortOf(node: WorkflowNode, port: WorkflowPort): boolean {
+  if (node.kind === 'error-handler') return port.role === 'message-out';
+  return isAgentNode(node) && node.data.errorPortId === port.id;
 }
 
 /** Truncates display text to at most `max` characters, appending an ellipsis. */
@@ -75,7 +82,7 @@ export function graphToScene(
     let cursor = SCENE_HEADER_H + SCENE_PAD;
     ordered.forEach((port, index) => {
       const y = cursor + SCENE_ROW_H / 2;
-      const color = resolveColor(portColorRaw(port.role));
+      const color = resolveColor(portColorRaw(port.role, isErrorPortOf(node, port)));
       const side: RendererPort['side'] =
         port.role === 'message-in' || (port.role === 'tools' && node.category === 'tool')
           ? 'in'

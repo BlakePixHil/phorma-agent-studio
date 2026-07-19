@@ -462,6 +462,105 @@
                     }
                   }
 
+                  @case ('usage-stats') {
+                    <!-- Phorma Cloud plan credits (subscribers see credits, never USD) -->
+                    @if (phormaCloud.subscribed() && phormaCloud.profile(); as profile) {
+                      <div class="phorma-settings__usage-plan">
+                        <h5>
+                          <span class="phorma-settings__tier">{{ tierLabel(profile.tier) }}</span>
+                          plan credits
+                        </h5>
+                        @if (profile.quota; as quota) {
+                          <div class="phorma-settings__quota">
+                            <div class="phorma-settings__quota-row">
+                              <span>Credits this month</span>
+                              <span>{{ quota.creditsUsed | number }} / {{ quota.creditsLimit | number }}</span>
+                            </div>
+                            <div class="phorma-settings__quota-bar">
+                              <span
+                                [style.width.%]="(phormaCloud.creditsFraction() ?? 0) * 100"
+                                [class.phorma-settings__quota-fill--warn]="(phormaCloud.creditsFraction() ?? 0) > 0.85"
+                              ></span>
+                            </div>
+                            <div class="phorma-settings__quota-row">
+                              <span>Runs this month</span>
+                              <span>{{ quota.runsUsed | number }} / {{ quota.runsLimit | number }}</span>
+                            </div>
+                            <div class="phorma-settings__quota-bar">
+                              <span [style.width.%]="(phormaCloud.runsFraction() ?? 0) * 100"></span>
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    <!-- Studio-side ledger totals (30 days) -->
+                    <div class="phorma-settings__usage-totals">
+                      <h5>
+                        Last 30 days
+                        <p-button
+                          styleClass="phorma-settings__btn"
+                          [text]="true"
+                          severity="secondary"
+                          size="small"
+                          icon="ti ti-refresh"
+                          pTooltip="Refresh usage"
+                          tooltipPosition="top"
+                          [loading]="usageAnalytics.loading()"
+                          (onClick)="usageAnalytics.refresh()"
+                          ariaLabel="Refresh usage"
+                        />
+                      </h5>
+                      @if (usageAnalytics.accountTotals(); as totals) {
+                        <div class="phorma-settings__usage-grid">
+                          <div class="phorma-settings__usage-cell">
+                            <strong>{{ totals.runs | number }}</strong>
+                            <span>runs</span>
+                          </div>
+                          <div class="phorma-settings__usage-cell">
+                            <strong>{{ totals.inputTokens + totals.outputTokens | number }}</strong>
+                            <span>tokens</span>
+                          </div>
+                          @if (totals.credits > 0) {
+                            <div class="phorma-settings__usage-cell">
+                              <strong>{{ totals.credits | number }}</strong>
+                              <span>credits</span>
+                            </div>
+                          }
+                          @if (totals.usd > 0) {
+                            <div class="phorma-settings__usage-cell">
+                              <strong>{{ totals.usd | currency: 'USD' : 'symbol' : '1.2-4' }}</strong>
+                              <span>BYO keys{{ totals.estimated ? ' (est.)' : '' }}</span>
+                            </div>
+                          }
+                        </div>
+                      }
+                      @if (usageAnalytics.accountByWorkflow().length > 0) {
+                        <div class="phorma-settings__usage-list">
+                          @for (row of usageAnalytics.accountByWorkflow(); track row.workflowId ?? 'draft') {
+                            <div class="phorma-settings__row">
+                              <span class="phorma-settings__row-label">{{ row.workflowName }}</span>
+                              <span class="phorma-settings__usage-cost">
+                                {{ row.runs | number }} {{ row.runs === 1 ? 'run' : 'runs' }}
+                                @if (row.credits; as credits) {
+                                  · {{ credits | number }} cr
+                                }
+                                @if (row.usd; as usd) {
+                                  · {{ usd | currency: 'USD' : 'symbol' : '1.2-4' }}{{ row.estimated ? ' (est.)' : '' }}
+                                }
+                              </span>
+                            </div>
+                          }
+                        </div>
+                      } @else {
+                        <p class="phorma-settings__hint">No usage recorded in the last 30 days.</p>
+                      }
+                      <p class="phorma-settings__hint">
+                        Open the Usage panel (right sidebar) for charts and per-model breakdowns.
+                      </p>
+                    </div>
+                  }
+
                   @case ('cloud-provider') {
                     @if (settings.cloudProvider() === null) {
                       <p class="phorma-settings__note">
@@ -530,7 +629,7 @@
                                 @if (phormaCloud.profile(); as profile) {
                                   @if (profile.provisioned && profile.status === 'active') {
                                     <p>
-                                      <span class="phorma-settings__tier">{{ profile.tier }}</span>
+                                      <span class="phorma-settings__tier">{{ tierLabel(profile.tier) }}</span>
                                       plan · active
                                     </p>
                                   } @else if (profile.provisioned) {

@@ -58,7 +58,8 @@ export type SettingsCustomTemplate =
   | 'palette-picker'
   | 'default-model'
   | 'integrations'
-  | 'cloud-provider';
+  | 'cloud-provider'
+  | 'usage-stats';
 
 export interface SettingsSectionDef {
   id: string;
@@ -381,6 +382,23 @@ export class SettingsRegistryService {
           keywords: [
             'cloud', 'phorma', 'cloudflare', 'hosted', 'deploy', 'worker',
             'wrangler', 'subscription', 'token', 'monitor',
+          ],
+        },
+      ],
+    },
+    {
+      id: 'usage',
+      label: 'Usage',
+      icon: 'ti ti-chart-bar',
+      description: 'Account-level usage: plan credits and BYO spend.',
+      sections: [
+        {
+          id: 'usage-stats',
+          settings: [],
+          customTemplate: 'usage-stats',
+          keywords: [
+            'usage', 'credits', 'cost', 'spend', 'tokens', 'billing',
+            'analytics', 'quota', 'plan',
           ],
         },
       ],

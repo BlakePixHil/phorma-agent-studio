@@ -59,6 +59,18 @@ export class PropertiesPanel {
   protected readonly node = computed(() => this.selection.selectedNode());
   protected readonly multiSelection = computed(() => this.selection.selectedNodes().length > 1);
 
+  /** Workflow-level execution settings (rendered when nothing is selected). */
+  protected readonly workflowSettings = computed(
+    () => this.workflow.activeDoc()?.settings ?? {},
+  );
+
+  protected onWorkflowTimeoutInput(event: Event): void {
+    const raw = Number((event.target as HTMLInputElement | null)?.value);
+    this.workflow.updateSettings({
+      timeoutMinutes: Number.isFinite(raw) && raw > 0 ? Math.round(raw) : undefined,
+    });
+  }
+
   /** Catalog description for the selected node's kind. */
   protected readonly kindLabel = computed(() => {
     const node = this.node();

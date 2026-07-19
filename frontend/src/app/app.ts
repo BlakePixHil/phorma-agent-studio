@@ -7,6 +7,7 @@ import { SidePanelPane } from './layout/sidebar/side-panel-pane.directive';
 import { DocumentTabs } from './layout/document-tabs/document-tabs';
 import { GraphCanvas } from './workspace/canvas/graph-canvas';
 import { TauriService } from './core/tauri.service';
+import { TestHarnessService } from './core/test-harness.service';
 import { WorkflowService } from './core/workflow.service';
 import { PanelRegistryService } from './core/panel-registry.service';
 import { UpdateService } from './core/update.service';
@@ -17,6 +18,8 @@ import { WorkflowsPanel } from './workspace/workflows/workflows-panel/workflows-
 import { PromptPanel } from './workspace/prompt/prompt-panel/prompt-panel';
 import { PropertiesPanel } from './workspace/properties/properties-panel/properties-panel';
 import { RunsPanel } from './workspace/runs/runs-panel/runs-panel';
+import { UsagePanel } from './workspace/usage/usage-panel/usage-panel';
+import { EvalsPanel } from './workspace/evals/evals-panel/evals-panel';
 import { SettingsDialog } from './workspace/settings/settings-dialog/settings-dialog';
 import { CloudDialog } from './workspace/cloud/cloud-dialog/cloud-dialog';
 import { CreditsDialog } from './workspace/cloud/credits-dialog/credits-dialog';
@@ -48,6 +51,8 @@ import { Toast } from './shared/toast/toast';
     PromptPanel,
     PropertiesPanel,
     RunsPanel,
+    UsagePanel,
+    EvalsPanel,
     SettingsDialog,
     CloudDialog,
     CreditsDialog,
@@ -68,6 +73,7 @@ export class App {
   private readonly panels = inject(PanelRegistryService);
   protected readonly updates = inject(UpdateService);
   private readonly onboarding = inject(OnboardingService);
+  private readonly testHarness = inject(TestHarnessService);
 
   protected readonly title = signal('Phorma Agent Studio');
 
@@ -79,6 +85,8 @@ export class App {
     this.updates.start();
     // Open the first-run wizard on a fresh desktop install.
     this.onboarding.maybeAutoOpen();
+    // Dev-only programmatic E2E harness (window.__phormaTest). No-op in prod.
+    this.testHarness.install();
   }
 
   /** Toolbar height (px) — the tab bar sits directly below it. */

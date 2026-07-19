@@ -35,10 +35,26 @@ export interface PhormaCloudProfile {
  */
 const TIER_MONTHLY_CREDITS: Record<string, number> = {
   starter: 1000,
-  plus: 2000,
   pro: 3000,
   team: 10000,
 };
+
+/**
+ * Marketing names for tier ids — the raw id is a D1 string (`team`, not
+ * "Teams"). Unknown ids (e.g. a custom enterprise tier) title-case through.
+ */
+const TIER_LABELS: Record<string, string> = {
+  starter: 'Starter',
+  pro: 'Pro',
+  team: 'Teams',
+  enterprise: 'Enterprise',
+};
+
+/** Display label for a tier id. */
+export function tierLabel(tier: string | null | undefined): string {
+  if (!tier) return 'Free';
+  return TIER_LABELS[tier] ?? tier.charAt(0).toUpperCase() + tier.slice(1);
+}
 
 /**
  * Backfills `creditsUsed`/`creditsLimit` on a `/api/me` payload when a stale

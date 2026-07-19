@@ -1,0 +1,405 @@
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.phorma-evals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 0;
+  padding: 0.65rem 0.75rem 0.8rem;
+  overflow-y: auto;
+}
+
+.phorma-evals__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.phorma-evals__label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__empty,
+.phorma-evals__hint {
+  font-size: 0.76rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.36rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.77rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  &--danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+.phorma-evals__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: auto;
+  border-radius: 0.4rem;
+  border: none;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &--danger {
+    margin-left: 0;
+
+    &:hover {
+      background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+      color: var(--phorma-accent-red, #ef4444);
+    }
+  }
+}
+
+.phorma-evals__input {
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.8rem;
+
+  &:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+  }
+
+  &--grow {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.phorma-evals__textarea {
+  @extend .phorma-evals__input;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: inherit;
+}
+
+.phorma-evals__case {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 35%, transparent);
+}
+
+.phorma-evals__case-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.phorma-evals__model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  > :nth-child(2) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.phorma-evals__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.phorma-evals__list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-color);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  }
+}
+
+.phorma-evals__list-icon {
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__list-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.phorma-evals__list-title {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-evals__list-sub {
+  font-size: 0.7rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.4rem;
+  color: var(--p-text-muted-color);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+  .phorma-evals__list-item:hover &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+.phorma-evals__detail-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  &--sub {
+    margin-top: -0.35rem;
+  }
+}
+
+.phorma-evals__detail-time {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__progress {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__pass-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-red, #ef4444) 45%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 10%, transparent);
+  color: var(--phorma-accent-red, #ef4444);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+
+  &--ok {
+    border-color: color-mix(in srgb, var(--phorma-accent-green, #34d399) 45%, transparent);
+    background: color-mix(in srgb, var(--phorma-accent-green, #34d399) 10%, transparent);
+    color: var(--phorma-accent-green, #34d399);
+  }
+}
+
+.phorma-evals__model-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+  background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  color: var(--p-primary-color, #818cf8);
+  font-size: 0.62rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phorma-evals__results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.phorma-evals__result {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--phorma-card-border);
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  }
+
+  &--live {
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+}
+
+.phorma-evals__result-status {
+  font-size: 0.95rem;
+  color: var(--p-text-muted-color);
+
+  &--passed {
+    color: var(--phorma-accent-green, #34d399);
+  }
+
+  &--failed {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  &--error {
+    color: var(--phorma-accent-amber, #f59e0b);
+  }
+}
+
+.phorma-evals__result-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.phorma-evals__result-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+  font-weight: 600;
+}
+
+.phorma-evals__result-sub {
+  font-size: 0.69rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__result-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 45%, transparent);
+}
+
+.phorma-evals__result-error {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-evals__result-reasoning {
+  margin: 0;
+  font-size: 0.74rem;
+  font-style: italic;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evals__result-output {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--p-content-background) 80%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.phorma-evals__spin {
+  animation: phorma-evals-spin 1s linear infinite;
+}
+
+@keyframes phorma-evals-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -23,13 +23,19 @@
 import type { RunEvent, RunEventSink } from './events.js';
 import type { RunSource } from './run-record.js';
 import { RunGate, RunStoppedError } from './gate.js';
-import type { ModelClient, ChatMessage, ToolCall } from './model.js';
+import {
+  isTransientModelError,
+  type ChatMessage,
+  type ModelClient,
+  type ToolCall,
+} from './model.js';
 import { extractItems, interpolatePayload, mergePayloads } from './payload.js';
 import { resolveAgentTools, type ResolvedTool, type ToolHost } from './tools.js';
 import {
   isAgentNode,
   nodeForConnector,
   portBaseId,
+  type AgentNodeData,
   type ForEachNodeData,
   type ModelProviderId,
   type WaitEventNodeData,
@@ -42,6 +48,84 @@ import {
 const MAX_NODE_EXECUTIONS = 100;
 /** Default maximum model→tools→model rounds per agent execution. */
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
+/** Default retry policy: one automatic retry for transient model failures. */
+const DEFAULT_RETRY_ATTEMPTS = 2;
+const MAX_RETRY_ATTEMPTS = 5;
+const DEFAULT_RETRY_BACKOFF_MS = 1000;
+/** Extra execution budget granted to the workflow error handler's subtree. */
+const ERROR_HANDLER_BUDGET_BONUS = 25;
+/** Context window assumed when no lookup is available for a model. */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+/** Fraction of the context window that triggers compression. */
+const COMPRESSION_THRESHOLD = 0.8;
+/** Complete tool rounds kept verbatim when compressing (pairs of messages). */
+const COMPRESSION_KEEP_TAIL_PAIRS = 2;
+/** Character cap for the transcript handed to the summarizer. */
+const COMPRESSION_TRANSCRIPT_MAX_CHARS = 24_000;
+
+/** Thrown when a node exceeds its configured `timeoutSec`. */
+export class NodeTimeoutError extends Error {
+  constructor(nodeName: string, timeoutSec: number) {
+    super(`"${nodeName}" timed out after ${timeoutSec}s.`);
+    this.name = 'NodeTimeoutError';
+  }
+}
+
+/** Thrown when a run exceeds the workflow-level timeout. */
+export class WorkflowTimeoutError extends Error {
+  constructor(limitMs: number) {
+    super(`Workflow timed out after ${formatDurationMs(limitMs)}.`);
+    this.name = 'WorkflowTimeoutError';
+  }
+}
+
+function formatDurationMs(ms: number): string {
+  const minutes = ms / 60_000;
+  if (minutes >= 1 && Number.isInteger(minutes)) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/** Estimates the input tokens a message list + system prompt will consume (chars/4 heuristic). */
+function estimateMessageTokens(system: string, messages: ChatMessage[]): number {
+  let chars = system.length;
+  for (const message of messages) {
+    if (message.role === 'user' || message.role === 'assistant') {
+      chars += message.content.length;
+    } else if (message.role === 'assistant-tool-calls') {
+      chars += (message.text?.length ?? 0);
+      for (const call of message.calls) chars += call.name.length + call.arguments.length;
+    } else if (message.role === 'tool-results') {
+      for (const result of message.results) chars += result.name.length + result.content.length;
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
+/** Renders one message as plain text for the compression summarizer. */
+function describeMessageForSummary(message: ChatMessage): string {
+  switch (message.role) {
+    case 'user':
+      return `User:\n${message.content}`;
+    case 'assistant':
+      return `Assistant:\n${message.content}`;
+    case 'assistant-tool-calls': {
+      const calls = message.calls
+        .map(call => `${call.name}(${clipText(call.arguments, 300)})`)
+        .join(', ');
+      return `Assistant${message.text ? `:\n${message.text}\n` : ' '}called tools: ${calls}`;
+    }
+    case 'tool-results':
+      return message.results
+        .map(result => `Tool ${result.name} returned:\n${clipText(result.content, 600)}`)
+        .join('\n');
+  }
+}
+
+function clipText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
 
 export interface RunOptions {
   runId: string;
@@ -76,6 +160,20 @@ export interface RunOptions {
    * (ForEach over many items) may need more headroom.
    */
   maxExecutions?: number;
+  /**
+   * Workflow-level timeout in milliseconds. When the run's cumulative
+   * RUNNING time (paused time doesn't count) exceeds this, the run stops
+   * and fails with a timeout error. 0/absent = no limit. The studio wires
+   * this from `WorkflowSpec.settings.timeoutMinutes`.
+   */
+  runTimeoutMs?: number;
+  /**
+   * Context-window lookup for automatic context compression. Returns the
+   * model's maximum context length in tokens, or undefined when unknown
+   * (a conservative default applies). Hosts wire this to the OpenRouter
+   * model sync (see pricing.ts).
+   */
+  contextWindow?: (provider: string, model: string) => number | undefined;
   /**
    * Host-provided tool discovery + execution (HTTP, web search, MCP).
    * When omitted, agents run without callable tools (capabilities are still
@@ -183,22 +281,66 @@ class WorkflowRun {
   /** Terminal outputs (payloads that reached nodes with no outgoing handoff). */
   private readonly terminalOutputs: string[] = [];
   /** Effective node-execution budget for this run. */
-  private readonly maxExecutions: number;
+  private maxExecutions: number;
   /** Occurrence counters per (node, payload-hash) for journal keys. */
   private readonly journalCounts = new Map<string, number>();
+  /** True when the workflow-level timeout stopped the run. */
+  private timedOut = false;
+  /** Workflow-timeout bookkeeping (paused time doesn't count). */
+  private timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  private runningSince = 0;
+  private runningMsConsumed = 0;
 
   constructor(
     private readonly options: RunOptions,
-    private readonly gate: RunGate,
+    /** Mutable: the error handler swaps in a fresh gate after a stop/timeout. */
+    private gate: RunGate,
   ) {
     this.maxExecutions = Math.max(1, options.maxExecutions ?? MAX_NODE_EXECUTIONS);
     gate.onPauseChange = (paused, nodeId) => {
+      // A paused run's clock freezes: bank the running time on pause and
+      // re-arm the deadline timer with the remaining budget on resume.
+      if (paused) {
+        this.runningMsConsumed += Date.now() - this.runningSince;
+        this.disarmWorkflowTimeout();
+      } else {
+        this.runningSince = Date.now();
+        this.armWorkflowTimeout();
+      }
       this.emit(
         paused
           ? { type: 'run-paused', runId: options.runId, nodeId, at: Date.now() }
           : { type: 'run-resumed', runId: options.runId, at: Date.now() },
       );
     };
+  }
+
+  /** Remaining running-time budget in ms, or null when no timeout is set. */
+  private workflowTimeoutRemaining(): number | null {
+    const limit = this.options.runTimeoutMs;
+    if (!limit || limit <= 0) return null;
+    const consumed =
+      this.runningMsConsumed + (this.gate.paused ? 0 : Date.now() - this.runningSince);
+    return limit - consumed;
+  }
+
+  private armWorkflowTimeout(): void {
+    const remaining = this.workflowTimeoutRemaining();
+    if (remaining === null) return;
+    this.disarmWorkflowTimeout();
+    this.timeoutTimer = setTimeout(() => {
+      this.timedOut = true;
+      this.gate.stop();
+    }, Math.max(0, remaining));
+    // Never keep a Node.js event loop alive just for the deadline.
+    (this.timeoutTimer as { unref?: () => void }).unref?.();
+  }
+
+  private disarmWorkflowTimeout(): void {
+    if (this.timeoutTimer !== undefined) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = undefined;
+    }
   }
 
   async execute(): Promise<void> {
@@ -216,6 +358,9 @@ class WorkflowRun {
       return;
     }
 
+    this.runningSince = Date.now();
+    this.armWorkflowTimeout();
+
     try {
       await this.executeNode(start, input);
       this.emit({
@@ -225,16 +370,52 @@ class WorkflowRun {
         at: Date.now(),
       });
     } catch (error) {
-      if (error instanceof RunStoppedError) {
+      if (error instanceof RunStoppedError && !this.timedOut) {
         this.emit({ type: 'run-stopped', runId, at: Date.now() });
         return;
       }
-      this.emit({
-        type: 'run-failed',
-        runId,
-        error: error instanceof Error ? error.message : String(error),
-        at: Date.now(),
-      });
+      const message = this.timedOut
+        ? new WorkflowTimeoutError(this.options.runTimeoutMs ?? 0).message
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      // A workflow-level Error Handler node (when present) gets one shot at
+      // the failure — notifications, cleanup, escalation — before the run
+      // settles as failed. Its own failures never mask the original error.
+      await this.runErrorHandler(message);
+      this.emit({ type: 'run-failed', runId, error: message, at: Date.now() });
+    } finally {
+      this.disarmWorkflowTimeout();
+    }
+  }
+
+  /**
+   * Executes the workflow's Error Handler subtree (if any) with a JSON error
+   * payload. Swallows every failure — the handler is best-effort and the run
+   * is already failing. Skipped when the run was stopped/timed out (the user
+   * asked it to end) … except timeouts DO run the handler, since a timeout is
+   * a failure the workflow may want to escalate.
+   */
+  private async runErrorHandler(errorMessage: string): Promise<void> {
+    const handler = this.options.graph.nodes.find(node => node.kind === 'error-handler');
+    if (!handler) return;
+    const payload = JSON.stringify(
+      { error: errorMessage, at: new Date().toISOString() },
+      null,
+      2,
+    );
+    // Grant headroom in case the run died on the execution budget itself.
+    this.maxExecutions = this.executions + ERROR_HANDLER_BUDGET_BONUS;
+    const previousGate = this.gate;
+    try {
+      // The gate may be stopped (workflow timeout) — handler execution still
+      // needs checkpoints to pass, so swap in a fresh permissive gate.
+      if (previousGate.stopped) this.gate = new RunGate();
+      await this.executeNode(handler, payload);
+    } catch {
+      // Best-effort: a failing handler never masks the original run failure.
+    } finally {
+      this.gate = previousGate;
     }
   }
 
@@ -300,7 +481,52 @@ class WorkflowRun {
     }
 
     try {
-      const result = await this.runNodeBody(node, payload, sink);
+      let result: { output: string; viaPortIds?: Set<string> } | null;
+      try {
+        result = await this.runNodeBody(node, payload, sink);
+      } catch (error) {
+        // Error branch: an agent with a connected "On error" out-port routes
+        // its OWN failure onward instead of failing the run. Scoped to the
+        // node body only — a failure further downstream must never be
+        // captured by an ancestor's error branch.
+        if (error instanceof RunStoppedError) throw error;
+        const errorPortId = this.errorRoutePortId(node);
+        if (!errorPortId) throw error;
+
+        const message = error instanceof Error ? error.message : String(error);
+        this.emit({
+          type: 'node-failed',
+          runId,
+          nodeId: node.id,
+          nodeName: node.name,
+          error: message,
+          at: Date.now(),
+        });
+        this.emit({
+          type: 'node-error-routed',
+          runId,
+          nodeId: node.id,
+          nodeName: node.name,
+          error: message,
+          at: Date.now(),
+        });
+        // JSON payload so downstream agents can interpolate `{{error}}` /
+        // `{{node}}` / `{{input}}` in their prompts.
+        const errorPayload = JSON.stringify(
+          { error: message, node: node.name, input: payload },
+          null,
+          2,
+        );
+        if (journal && journalKey) {
+          await journal.record(journalKey, {
+            output: errorPayload,
+            viaPortIds: [errorPortId],
+          });
+        }
+        await this.followHandoffs(node, errorPayload, new Set([errorPortId]), sink);
+        return;
+      }
+
       // Aggregators return null until every input has arrived.
       if (result === null) return;
 
@@ -338,6 +564,24 @@ class WorkflowRun {
   }
 
   /**
+   * Resolves the agent's "On error" out-port id, but only when a handoff is
+   * actually connected to it — an unwired error port keeps fail-fast
+   * semantics so mistakes stay loud.
+   */
+  private errorRoutePortId(node: WorkflowNode): string | null {
+    if (!isAgentNode(node)) return null;
+    const errorPortId = (node.data as AgentNodeData).errorPortId;
+    if (!errorPortId) return null;
+    if (!node.ports.some(port => port.id === errorPortId && port.role === 'message-out')) {
+      return null;
+    }
+    const wired = this.options.graph.connections.some(
+      conn => conn.kind === 'handoff' && portBaseId(conn.outputId) === errorPortId,
+    );
+    return wired ? errorPortId : null;
+  }
+
+  /**
    * Runs a node's behaviour. Returns the outgoing payload and (optionally)
    * the subset of out ports to follow; null when the node is still waiting
    * (aggregator collecting inputs).
@@ -352,7 +596,17 @@ class WorkflowRun {
     }
 
     if (isAgentNode(node)) {
-      return { output: await this.runAgent(node, payload) };
+      const output = await this.runAgent(node, payload);
+      // Success never flows through the "On error" branch: restrict routing
+      // to the regular out-ports when an error port is declared.
+      const errorPortId = (node.data as AgentNodeData).errorPortId;
+      if (errorPortId && node.ports.some(port => port.id === errorPortId)) {
+        const regular = node.ports
+          .filter(port => port.role === 'message-out' && port.id !== errorPortId)
+          .map(port => port.id);
+        return { output, viaPortIds: new Set(regular) };
+      }
+      return { output };
     }
 
     switch (node.kind) {
@@ -384,28 +638,20 @@ class WorkflowRun {
   // ── Node behaviours ────────────────────────────────────────────────────────
 
   private async runAgent(node: WorkflowNode, payload: string): Promise<string> {
-    const data = node.data as {
-      prompt: string;
-      provider?: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama' | 'bedrock';
-      model?: string;
-      /** Per-node AWS region override for Amazon Bedrock agents. */
-      region?: string;
-      temperature?: number;
-      maxTokens?: number;
-    };
+    const data = node.data as AgentNodeData & { region?: string };
 
     // Resolve the model: explicit node config wins; otherwise inherit the
     // run's default model (the studio's application settings).
-    const fallback = this.options.defaultModel;
-    const provider: ModelProviderId | undefined = data.provider ?? fallback?.provider;
-    const model = data.provider ? data.model : (data.model ?? fallback?.model);
+    const inherited = this.options.defaultModel;
+    const provider: ModelProviderId | undefined = data.provider ?? inherited?.provider;
+    const model = data.provider ? data.model : (data.model ?? inherited?.model);
     if (!provider || !model) {
       throw new Error(
         `Agent "${node.name}" has no model configured and no application default model is set. ` +
           'Pick a model on the node or set a default in Settings → Models.',
       );
     }
-    const temperature = data.temperature ?? (data.provider ? undefined : fallback?.temperature);
+    const temperature = data.temperature ?? (data.provider ? undefined : inherited?.temperature);
 
     // Resolve callable tools from the agent's tool-link edges.
     const toolNodes = this.attachedTools(node);
@@ -416,17 +662,50 @@ class WorkflowRun {
     const byWireName = new Map(resolved.map(tool => [tool.definition.name, tool]));
 
     const system = this.renderPrompt(data.prompt, payload, node, resolved.length > 0);
-    const messages: ChatMessage[] = [{ role: 'user', content: payload || 'Begin.' }];
+    let messages: ChatMessage[] = [{ role: 'user', content: payload || 'Begin.' }];
     let output = '';
 
-    const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
-    for (let round = 0; round < maxToolRounds; round++) {
+    // Per-node timeout covers the WHOLE node body: every model round and
+    // every tool call. Checked between stream chunks (like gate.stopped).
+    const timeoutSec = typeof data.timeoutSec === 'number' && data.timeoutSec > 0 ? data.timeoutSec : 0;
+    const nodeDeadline = timeoutSec > 0 ? Date.now() + timeoutSec * 1000 : 0;
+    const checkDeadline = (): void => {
+      if (nodeDeadline && Date.now() > nodeDeadline) {
+        throw new NodeTimeoutError(node.name, timeoutSec);
+      }
+    };
+
+    // The active (provider, model) pair — swapped once if the fallback kicks in.
+    let active = { provider, model };
+    let usedFallback = false;
+    const fallback =
+      data.fallback && data.fallback.provider && data.fallback.model ? data.fallback : undefined;
+
+    // Retry policy: ON by default for transient failures (one retry, 1s
+    // backoff, doubling). Nodes tune or disable via `data.retry`.
+    const retry = data.retry ?? {};
+    const maxAttempts = retry.disabled
+      ? 1
+      : Math.max(1, Math.min(retry.maxAttempts ?? DEFAULT_RETRY_ATTEMPTS, MAX_RETRY_ATTEMPTS));
+    const backoffMs = Math.max(0, retry.backoffMs ?? DEFAULT_RETRY_BACKOFF_MS);
+    const retryAll = retry.retryOn === 'all';
+
+    // Context compression bookkeeping: prefer real token counts from usage
+    // chunks; fall back to a chars/4 estimate.
+    let lastReportedInputTokens: number | undefined;
+
+    /**
+     * Streams one model round. Emitted tokens are buffered until the stream
+     * survives its first chunk? No — tokens stream live (execution theatre);
+     * a retried round may therefore show a partial then a fresh stream. The
+     * trace's node-retrying entry explains the restart.
+     */
+    const streamRound = async (): Promise<{ roundText: string; calls: ToolCall[] }> => {
       let roundText = '';
       const calls: ToolCall[] = [];
-
       for await (const chunk of this.options.model.stream({
-        provider,
-        model,
+        provider: active.provider,
+        model: active.model,
         system,
         messages,
         tools: resolved.map(tool => tool.definition),
@@ -438,6 +717,7 @@ class WorkflowRun {
         bedrockRegion: data.region ?? this.options.bedrockRegion,
       })) {
         if (this.gate.stopped) throw new RunStoppedError();
+        checkDeadline();
         if (chunk.type === 'text') {
           roundText += chunk.text;
           this.emit({ type: 'node-token', runId: this.options.runId, nodeId: node.id, token: chunk.text });
@@ -447,12 +727,16 @@ class WorkflowRun {
           // handoffs or the final answer.
           this.emit({ type: 'node-thinking', runId: this.options.runId, nodeId: node.id, token: chunk.text });
         } else if (chunk.type === 'usage') {
+          if (typeof chunk.usage.inputTokens === 'number') {
+            lastReportedInputTokens = chunk.usage.inputTokens;
+          }
           // One usage event per model round; consumers sum rounds per node.
           this.emit({
             type: 'node-usage',
             runId: this.options.runId,
             nodeId: node.id,
-            provider,
+            provider: active.provider,
+            model: active.model,
             usage: chunk.usage,
             at: Date.now(),
           });
@@ -460,6 +744,76 @@ class WorkflowRun {
           calls.push(chunk.call);
         }
       }
+      return { roundText, calls };
+    };
+
+    /** One round with retries, then (once) the fallback model with retries. */
+    const streamRoundRobustly = async (): Promise<{ roundText: string; calls: ToolCall[] }> => {
+      for (;;) {
+        let lastError: unknown;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            return await streamRound();
+          } catch (error) {
+            if (error instanceof RunStoppedError) throw error;
+            lastError = error;
+            const retryable = retryAll || isTransientModelError(error);
+            if (!retryable || attempt === maxAttempts) break;
+            const delayMs = backoffMs * 2 ** (attempt - 1);
+            this.emit({
+              type: 'node-retrying',
+              runId: this.options.runId,
+              nodeId: node.id,
+              nodeName: node.name,
+              attempt,
+              maxAttempts,
+              delayMs,
+              error: error instanceof Error ? error.message : String(error),
+              at: Date.now(),
+            });
+            await this.gate.sleep(delayMs);
+            checkDeadline();
+          }
+        }
+        // Primary (or fallback) attempts exhausted — switch to the fallback
+        // model once, or give up.
+        if (fallback && !usedFallback) {
+          usedFallback = true;
+          this.emit({
+            type: 'node-fallback',
+            runId: this.options.runId,
+            nodeId: node.id,
+            nodeName: node.name,
+            fromProvider: active.provider,
+            fromModel: active.model,
+            toProvider: fallback.provider,
+            toModel: fallback.model,
+            error: lastError instanceof Error ? lastError.message : String(lastError),
+            at: Date.now(),
+          });
+          active = { provider: fallback.provider, model: fallback.model };
+          continue;
+        }
+        throw lastError;
+      }
+    };
+
+    const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
+    for (let round = 0; round < maxToolRounds; round++) {
+      // Compress the conversation when the next request would land near the
+      // model's context limit. Best-effort: failures never break the node.
+      if (!data.compressionDisabled && round > 0) {
+        messages = await this.maybeCompressContext(
+          node,
+          active.provider,
+          active.model,
+          system,
+          messages,
+          lastReportedInputTokens,
+        );
+      }
+
+      const { roundText, calls } = await streamRoundRobustly();
 
       output += (output && roundText ? '\n' : '') + roundText;
       if (calls.length === 0) break;
@@ -469,13 +823,98 @@ class WorkflowRun {
       const results: { id: string; name: string; content: string }[] = [];
       for (const call of calls) {
         if (this.gate.stopped) throw new RunStoppedError();
+        checkDeadline();
         const content = await this.executeToolCall(node, call, byWireName);
         results.push({ id: call.id, name: call.name, content });
       }
       messages.push({ role: 'tool-results', results });
+      checkDeadline();
     }
 
     return output.trim();
+  }
+
+  /**
+   * Automatic context compression — when the conversation approaches the
+   * model's context window (~80%), the middle messages are replaced by an
+   * LLM-written summary. The first user message and the last two complete
+   * tool rounds stay verbatim. Best-effort: any failure returns the
+   * original messages untouched.
+   */
+  private async maybeCompressContext(
+    node: WorkflowNode,
+    provider: string,
+    model: string,
+    system: string,
+    messages: ChatMessage[],
+    reportedInputTokens: number | undefined,
+  ): Promise<ChatMessage[]> {
+    const window = this.options.contextWindow?.(provider, model) ?? DEFAULT_CONTEXT_WINDOW;
+    const estimated = estimateMessageTokens(system, messages);
+    const current = Math.max(reportedInputTokens ?? 0, estimated);
+    if (current < window * COMPRESSION_THRESHOLD) return messages;
+
+    // Keep: the opening user message + the last N complete tool rounds
+    // (assistant-tool-calls / tool-results pairs, plus anything after).
+    const keepHead = 1;
+    let tailStart = messages.length;
+    let pairs = 0;
+    for (let i = messages.length - 1; i >= keepHead && pairs < COMPRESSION_KEEP_TAIL_PAIRS; i--) {
+      if (messages[i].role === 'assistant-tool-calls') pairs += 1;
+      tailStart = i;
+    }
+    const middle = messages.slice(keepHead, tailStart);
+    if (middle.length < 2) return messages; // nothing meaningful to fold
+
+    const transcript = clipText(
+      middle.map(describeMessageForSummary).join('\n\n'),
+      COMPRESSION_TRANSCRIPT_MAX_CHARS,
+    );
+
+    try {
+      let summary = '';
+      for await (const chunk of this.options.model.stream({
+        provider: provider as ModelProviderId,
+        model,
+        system:
+          'Summarize the following working transcript so an agent can continue the task. ' +
+          'Preserve every fact, decision, tool result detail, id, and number that later steps ' +
+          'might need. Be dense and factual. Output only the summary.',
+        messages: [{ role: 'user', content: transcript }],
+        maxTokens: 1024,
+        ollamaBaseUrl: this.options.ollamaBaseUrl,
+        lmstudioBaseUrl: this.options.lmstudioBaseUrl,
+        bedrockRegion: this.options.bedrockRegion,
+      })) {
+        if (this.gate.stopped) throw new RunStoppedError();
+        if (chunk.type === 'text') summary += chunk.text;
+      }
+      if (!summary.trim()) return messages;
+
+      // The summary rides as a user message: providers with strict
+      // user/assistant alternation (Anthropic) reject back-to-back
+      // assistant turns, and the opening message is already user-role.
+      const compressed: ChatMessage[] = [
+        ...messages.slice(0, keepHead),
+        {
+          role: 'user',
+          content: `[Context compressed — summary of your earlier work]\n\n${summary.trim()}`,
+        },
+        ...messages.slice(tailStart),
+      ];
+      this.emit({
+        type: 'context-compressed',
+        runId: this.options.runId,
+        nodeId: node.id,
+        beforeTokens: current,
+        afterTokens: estimateMessageTokens(system, compressed),
+        at: Date.now(),
+      });
+      return compressed;
+    } catch (error) {
+      if (error instanceof RunStoppedError) throw error;
+      return messages; // compression must never fail the node
+    }
   }
 
   /** Executes one tool call via the host, emitting call/result events. */

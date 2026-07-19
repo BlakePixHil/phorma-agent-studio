@@ -73,8 +73,9 @@
           <span>{{ u.inputTokens | number }} in · {{ u.outputTokens | number }} out</span>
           @if (usageCredits(); as credits) {
             <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
-          } @else if (u.costUsd > 0) {
-            <span class="phorma-runs__usage-cost">{{ u.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</span>
+          }
+          @if (usageByoUsd() > 0) {
+            <span class="phorma-runs__usage-cost">{{ usageByoUsd() | currency: 'USD' : 'symbol' : '1.4-4' }}{{ u.estimated ? ' (est.)' : '' }}</span>
           }
         </div>
       }
@@ -233,8 +234,13 @@
                     @if (duration(row.summary); as dur) {
                       <span>· {{ dur }}</span>
                     }
-                    @if (row.summary.usage.costUsd > 0) {
-                      <span>· {{ row.summary.usage.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</span>
+                    @if (costParts(row.summary.usage); as cost) {
+                      @if (cost.credits; as credits) {
+                        <span>· {{ credits | number }} cr</span>
+                      }
+                      @if (cost.usd; as usd) {
+                        <span>· {{ usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ cost.estimated ? ' (est.)' : '' }}</span>
+                      }
                     }
                   </span>
                 </span>
@@ -289,8 +295,13 @@
             <span class="phorma-runs__detail-row phorma-runs__usage">
               <i class="ti ti-coins" aria-hidden="true"></i>
               <span>{{ record.summary.usage.inputTokens | number }} in · {{ record.summary.usage.outputTokens | number }} out</span>
-              @if (record.summary.usage.costUsd > 0) {
-                <span class="phorma-runs__usage-cost">{{ record.summary.usage.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</span>
+              @if (costParts(record.summary.usage); as cost) {
+                @if (cost.credits; as credits) {
+                  <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
+                }
+                @if (cost.usd; as usd) {
+                  <span class="phorma-runs__usage-cost">{{ usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ cost.estimated ? ' (est.)' : '' }}</span>
+                }
               }
             </span>
           }

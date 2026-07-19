@@ -33,5 +33,6 @@ Read `agent.md` in the project root for the full product vision, target audience
 - Never use the em dash "—". Use plain dash "-" instead.
 - When making technical decisions, do not give much weight to development cost.
 - When doing bug fixes, always start with reproducing the bug in an E2E setting as closely aligned with how an end user will use it. This makes sure you find the real problem so your fix will actually solve it.
+- When E2E testing in the browser, read `docs/e2e-testing.md` FIRST. Build workflow state programmatically via `window.__phormaTest` (dev-only harness) - never construct graphs by synthetic drag-and-drop; reserve pixel interaction for the behavior actually under test.
 - When end-to-end testing a product, be picky about the UI you see and be obsessed with pixel perfection.
 - Apply that same high standard to engineering excellence: lint, test failure, and test flakiness. If you see one, even if it is not caused by what you are working on right now, still get it fixed.

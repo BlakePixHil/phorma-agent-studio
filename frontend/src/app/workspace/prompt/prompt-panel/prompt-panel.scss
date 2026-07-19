@@ -224,6 +224,40 @@
   }
 }
 
+.phorma-prompt__check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+  cursor: pointer;
+
+  input[type='checkbox'] {
+    accent-color: var(--p-primary-color, #818cf8);
+    cursor: pointer;
+  }
+
+  & + & {
+    margin-top: 0.35rem;
+  }
+}
+
+.phorma-prompt__inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.phorma-prompt__inline-label {
+  font-size: 0.7rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-prompt__number {
+  flex: 0 0 5.5rem;
+}
+
 .phorma-prompt__chips {
   display: flex;
   flex-wrap: wrap;

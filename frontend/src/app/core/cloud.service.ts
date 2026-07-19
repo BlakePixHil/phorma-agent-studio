@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import type { RunEvent, RunRecord, RunRecordSummary } from '@phorma/engine';
+import type { RunEvent, RunRecord, RunRecordSummary, UsageLedgerEntry } from '@phorma/engine';
 
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
@@ -340,6 +340,26 @@ export class CloudService {
     }
   }
 
+  /**
+   * Fetches the deployed workflow's usage ledger (EPIC 2) — per-run usage
+   * rows that survive run-history pruning. Null when unreachable/never
+   * pushed, same contract as {@link listRuns}.
+   */
+  async fetchUsage(workflowId: string, since = 0): Promise<UsageLedgerEntry[] | null> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) return null;
+    try {
+      const response = await fetch(`${base}/usage?since=${since}`, {
+        headers: await this.headers(),
+      });
+      if (!response.ok) return null;
+      const body = (await response.json()) as { usage?: UsageLedgerEntry[] };
+      return body.usage ?? [];
+    } catch {
+      return null;
+    }
+  }
+
   /** Fetches one full cloud RunRecord (detail view / Bring to Canvas). */
   async fetchRunRecord(workflowId: string, runId: string): Promise<RunRecord | null> {
     const base = this.instanceUrl(workflowId);
@@ -426,7 +446,33 @@ export class CloudService {
   }
 
   // ── Remote run control (over the socket) ───────────────────────────────────
-
+  /**
+   * Triggers a run over HTTP (no monitor socket required) — used by the
+   * eval runner (EPIC 4), which polls `listRuns` for completion instead of
+   * listening on the WebSocket. Throws on rejection (409 busy, 402 quota…).
+   */
+  async triggerHttp(
+    workflowId: string,
+    input: string,
+    source?: 'eval',
+  ): Promise<{ runId: string }> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) throw new Error('Cloud worker is not configured.');
+    const response = await fetch(`${base}/trigger`, {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ input, ...(source ? { source } : {}) }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      runId?: string;
+      error?: string;
+    } | null;
+    if (!response.ok || !body?.ok || !body.runId) {
+      throw new Error(body?.error ?? `Trigger failed (HTTP ${response.status}).`);
+    }
+    return { runId: body.runId };
+  }
   triggerRemote(input: string): void {
     if (!this.send({ type: 'trigger', input })) {
       this.toast.warning('Not connected', 'Connect the cloud monitor first.');
