@@ -9,6 +9,7 @@
 export * from './types.js';
 export * from './run-record.js';
 export * from './events.js';
+export * from './pricing.js';
 export * from './gate.js';
 export * from './payload.js';
 export * from './model.js';

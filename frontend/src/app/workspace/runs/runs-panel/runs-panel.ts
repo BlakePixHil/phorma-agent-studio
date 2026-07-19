@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 
-import type { RunRecord, RunRecordSummary } from '@phorma/engine';
+import type { RunRecord, RunRecordSummary, RunRecordUsage } from '@phorma/engine';
 
 import { CloudService } from '../../../core/cloud.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
@@ -102,16 +102,37 @@ export class RunsPanel {
   protected readonly usage = this.runController.runUsage;
 
   /**
-   * The run's cost expressed in abstract usage credits, shown only for runs
-   * that used Phorma Cloud (BYO runs keep the raw USD figure). Uses the
-   * tenant tier's burn rate; null when the run wasn't on Phorma Cloud or had
-   * no reported cost.
+   * The Phorma Cloud share of the run's cost expressed in plan credits.
+   * Cloud-billed usage is NEVER shown in dollars — subscribers buy credits,
+   * not inference at cost. Null when no round ran on Phorma Cloud.
    */
   protected readonly usageCredits = computed(() => {
     const u = this.usage();
-    if (!u.phormaCloud || u.costUsd <= 0) return null;
-    return Math.max(0, Math.round(u.costUsd * this.phormaCloud.creditsPerUsd()));
+    if (!u.phormaCloud || u.phormaCloudCostUsd <= 0) return null;
+    return Math.max(1, Math.round(u.phormaCloudCostUsd * this.phormaCloud.creditsPerUsd()));
   });
+
+  /** The BYO-key share of the run's cost in USD (0 when fully cloud-billed). */
+  protected readonly usageByoUsd = computed(() => {
+    const u = this.usage();
+    return u.costUsd - u.phormaCloudCostUsd;
+  });
+
+  /**
+   * Splits a persisted usage total for display: the Phorma Cloud share as
+   * plan credits (never USD), the BYO share as USD. Backward compatible with
+   * pre-EPIC-2 records that lack the split — their cost shows as USD, which
+   * is correct for BYO and the best available fallback for old cloud runs.
+   */
+  protected costParts(usage: RunRecordUsage): { credits: number | null; usd: number | null; estimated: boolean } {
+    const cloudShare = usage.phormaCloudCostUsd ?? 0;
+    const byoShare = usage.costUsd - cloudShare;
+    return {
+      credits: cloudShare > 0 ? Math.max(1, Math.round(cloudShare * this.phormaCloud.creditsPerUsd())) : null,
+      usd: byoShare > 0 ? byoShare : null,
+      estimated: usage.estimated ?? false,
+    };
+  }
 
   /**
    * The trace, with consecutive tool-activity entries folded into containers.
@@ -153,7 +174,9 @@ export class RunsPanel {
     const record = this.selectedRun();
     if (!record) return [];
     const names = new Map(record.graph.nodes.map(node => [node.id, node.name]));
-    const entries = traceFromRunLog(record.events, id => names.get(id) ?? id)
+    const entries = traceFromRunLog(record.events, id => names.get(id) ?? id, {
+      formatCost: this.runController.formatTraceCost,
+    })
       // Negative ids keep detail expansion state disjoint from the live trace.
       .map(entry => ({ ...entry, id: -entry.id }));
     return foldTraceGroups(entries);

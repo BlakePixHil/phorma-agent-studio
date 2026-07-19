@@ -66,8 +66,14 @@ export interface ModelRequest {
 export interface ModelUsage {
   inputTokens?: number;
   outputTokens?: number;
-  /** USD actually charged — present only when the provider reports it (OpenRouter). */
+  /** USD actually charged - present only when the provider reports it (OpenRouter). */
   costUsd?: number;
+  /**
+   * How `costUsd` was obtained: `reported` = the provider returned the exact
+   * charge (OpenRouter usage accounting); `estimated` = computed from token
+   * counts and a pricing table (see pricing.ts). Absent when costUsd is absent.
+   */
+  costSource?: 'reported' | 'estimated';
 }
 
 /** One parsed frame of a model stream. */
@@ -273,17 +279,18 @@ function openAiMessages(request: ModelRequest): object[] {
 }
 
 function openAiBody(request: ModelRequest): string {
-  // Usage reporting: OpenAI + OpenRouter support stream_options.include_usage
-  // (final chunk carries token counts). OpenRouter additionally returns the
-  // actual USD cost when usage accounting is requested. Gemini's and Ollama's
-  // OpenAI-compat shims are not guaranteed to accept these fields, so they
-  // are only sent to providers known to support them. Phorma Cloud reuses the
-  // OpenRouter wire format (the proxy forwards to OpenRouter), so it gets the
-  // same usage accounting.
+  // Usage reporting: OpenAI, OpenRouter, Gemini's OpenAI-compat shim, and
+  // Ollama all support stream_options.include_usage (final chunk carries
+  // token counts). OpenRouter additionally returns the actual USD cost when
+  // usage accounting is requested. Phorma Cloud reuses the OpenRouter wire
+  // format (the proxy forwards to OpenRouter), so it gets the same usage
+  // accounting.
   const wantsUsage =
     request.provider === 'openai' ||
     request.provider === 'openrouter' ||
-    request.provider === 'phorma-cloud';
+    request.provider === 'phorma-cloud' ||
+    request.provider === 'gemini' ||
+    request.provider === 'ollama';
   const wantsCost = request.provider === 'openrouter' || request.provider === 'phorma-cloud';
   return JSON.stringify({
     model: request.model,
@@ -350,6 +357,7 @@ class OpenAiStreamParser implements StreamParser {
           inputTokens: parsed.usage.prompt_tokens,
           outputTokens: parsed.usage.completion_tokens,
           costUsd: parsed.usage.cost,
+          costSource: parsed.usage.cost !== undefined ? 'reported' : undefined,
         },
       });
     }

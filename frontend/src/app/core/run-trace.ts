@@ -11,6 +11,16 @@ export interface TraceDescription {
   kind: TraceEntry['kind'];
 }
 
+export interface TraceOptions {
+  /**
+   * Formats a usage cost for display. Callers supply this so the trace can
+   * apply the display rule (Phorma Cloud-billed cost renders as plan
+   * credits, BYO cost as USD, estimates labeled) without this pure module
+   * knowing the tenant's credit rate. Return null to omit the cost.
+   */
+  formatCost?: (provider: string, costUsd: number, estimated: boolean) => string | null;
+}
+
 /**
  * Maps one run event to its Runs-panel trace entry — the single source of
  * icons, labels, and tones shared by the LIVE trace
@@ -23,8 +33,25 @@ export interface TraceDescription {
 export function describeRunEvent(
   event: RunLogEvent,
   nodeName: (nodeId: string) => string,
+  options?: TraceOptions,
 ): TraceDescription | null {
   switch (event.type) {
+    case 'node-usage': {
+      const usage = event.usage;
+      if (usage.inputTokens === undefined && usage.outputTokens === undefined) return null;
+      const tokens = `${(usage.inputTokens ?? 0).toLocaleString()} in · ${(usage.outputTokens ?? 0).toLocaleString()} out`;
+      const cost =
+        usage.costUsd && usage.costUsd > 0 && options?.formatCost
+          ? options.formatCost(event.provider, usage.costUsd, usage.costSource === 'estimated')
+          : null;
+      return {
+        icon: 'ti ti-coins',
+        label: `${nodeName(event.nodeId)} — ${tokens}${cost ? ` · ${cost}` : ''}`,
+        detail: event.model || undefined,
+        tone: 'info',
+        kind: 'event',
+      };
+    }
     case 'run-started':
       return { icon: 'ti ti-player-play', label: 'Run started', detail: event.input || undefined, tone: 'info', kind: 'event' };
     case 'node-started':
@@ -102,8 +129,8 @@ export function describeRunEvent(
     case 'run-stopped':
       return { icon: 'ti ti-player-stop', label: 'Run stopped', tone: 'warning', kind: 'event' };
     default:
-      // node-usage, run-paused, run-resumed, node-output-text,
-      // node-thinking-text — no trace entry.
+      // run-paused, run-resumed, node-output-text, node-thinking-text —
+      // no trace entry.
       return null;
   }
 }
@@ -115,10 +142,11 @@ export function describeRunEvent(
 export function traceFromRunLog(
   events: RunLogEvent[],
   nodeName: (nodeId: string) => string,
+  options?: TraceOptions,
 ): TraceEntry[] {
   const entries: TraceEntry[] = [];
   for (const event of events) {
-    const desc = describeRunEvent(event, nodeName);
+    const desc = describeRunEvent(event, nodeName, options);
     if (!desc) continue;
     entries.push({
       id: entries.length + 1,

@@ -45,7 +45,7 @@
                 @if (phormaCloud.profile(); as profile) {
                   @if (profile.provisioned && profile.status === 'active' && profile.quota) {
                     <span>
-                      {{ profile.tier }} plan ·
+                      {{ tierLabel(profile.tier) }} plan ·
                       {{ profile.quota!.runsUsed }}/{{ profile.quota!.runsLimit }} runs ·
                       {{ profile.quota!.creditsUsed | number }} of
                       {{ profile.quota!.creditsLimit | number }} credits used

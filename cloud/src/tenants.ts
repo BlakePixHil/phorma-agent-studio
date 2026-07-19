@@ -58,12 +58,15 @@ export interface TierLimits {
 // margin on the AI spend line — the only real cost, since Cloudflare infra
 // (DO duration/requests + D1 + KV) runs at a small fraction of a cent per run
 // and is not a meaningful lever. Prices (margin reference, enforced once
-// billing lands): starter $20 (80%), plus $40 (79.6%, +2% bonus), pro $60
-// (79%, +5%), team $200 (78%, +10%). Credit numbers are UNCHANGED by this —
-// only the internal budget moved, which is the point of the abstraction.
+// billing lands): starter $20 (80%), pro $60 (79%, +5% bonus), team $200
+// (78%, +10%). Credit numbers are UNCHANGED by this — only the internal
+// budget moved, which is the point of the abstraction.
+//
+// Tier lineup: starter / pro / team (displayed "Teams"), plus a custom
+// enterprise tier that is provisioned per-deal (no fixed limits here —
+// unknown tiers fall back to starter until provisioned properly).
 export const TIERS: Record<string, TierLimits> = {
   starter: { monthlyCredits: 1000, monthlyCostUsd: 4, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1 },
-  plus: { monthlyCredits: 2000, monthlyCostUsd: 8.16, monthlyRuns: 1000, concurrentRuns: 2, schedulesPerWorkflow: 3 },
   pro: { monthlyCredits: 3000, monthlyCostUsd: 12.6, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5 },
   team: { monthlyCredits: 10000, monthlyCostUsd: 44, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20 },
 };

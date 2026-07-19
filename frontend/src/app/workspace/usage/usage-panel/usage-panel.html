@@ -1,0 +1,163 @@
+<div class="phorma-usage">
+  <!-- Scope + period controls -->
+  <section class="phorma-usage__section">
+    <label class="phorma-usage__label">
+      Usage
+      <button
+        type="button"
+        class="phorma-usage__refresh"
+        title="Refresh usage"
+        aria-label="Refresh usage"
+        [disabled]="analytics.loading()"
+        (click)="analytics.refresh()"
+      >
+        <i
+          class="ti ti-refresh"
+          [class.phorma-usage__refresh--spinning]="analytics.loading()"
+          aria-hidden="true"
+        ></i>
+      </button>
+    </label>
+    <div class="phorma-usage__controls">
+      <select
+        class="phorma-usage__select"
+        [value]="analytics.scope() ?? ''"
+        (change)="onScopeChange($event)"
+        aria-label="Workflow scope"
+      >
+        @for (scope of scopes(); track scope.id ?? 'all') {
+          <option [value]="scope.id ?? ''">{{ scope.label }}</option>
+        }
+      </select>
+      <div class="phorma-usage__periods" role="tablist" aria-label="Period">
+        @for (period of periods; track period.id) {
+          <button
+            type="button"
+            role="tab"
+            class="phorma-usage__period"
+            [class.phorma-usage__period--active]="analytics.period() === period.id"
+            [attr.aria-selected]="analytics.period() === period.id"
+            (click)="setPeriod(period.id)"
+          >
+            {{ period.label }}
+          </button>
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Totals -->
+  @if (analytics.totals(); as totals) {
+    <section class="phorma-usage__totals">
+      <div class="phorma-usage__stat">
+        <span class="phorma-usage__stat-value">{{ totals.runs | number }}</span>
+        <span class="phorma-usage__stat-label">runs</span>
+      </div>
+      <div class="phorma-usage__stat">
+        <span class="phorma-usage__stat-value">{{ totals.inputTokens + totals.outputTokens | number }}</span>
+        <span class="phorma-usage__stat-label">tokens</span>
+      </div>
+      @if (totals.credits > 0) {
+        <div class="phorma-usage__stat phorma-usage__stat--credits">
+          <span class="phorma-usage__stat-value">{{ totals.credits | number }}</span>
+          <span class="phorma-usage__stat-label">credits</span>
+        </div>
+      }
+      @if (totals.usd > 0) {
+        <div class="phorma-usage__stat phorma-usage__stat--usd">
+          <span class="phorma-usage__stat-value">{{ totals.usd | currency: 'USD' : 'symbol' : '1.2-4' }}</span>
+          <span class="phorma-usage__stat-label">BYO{{ totals.estimated ? ' (est.)' : '' }}</span>
+        </div>
+      }
+    </section>
+  }
+
+  <!-- Cost over time -->
+  <section class="phorma-usage__section">
+    <label class="phorma-usage__label">Cost over time</label>
+    @if (hasChartData()) {
+      <div class="phorma-usage__chart">
+        <!-- @defer keeps chart.js out of the initial bundle (~240KB). -->
+        @defer (on immediate) {
+          <p-chart type="bar" [data]="chartData()" [options]="chartOptions" height="160px" />
+        }
+      </div>
+    } @else {
+      <p class="phorma-usage__empty">No usage recorded in this period.</p>
+    }
+  </section>
+
+  <!-- Per-model breakdown -->
+  @if (analytics.byModel().length > 0) {
+    <section class="phorma-usage__section">
+      <label class="phorma-usage__label">By model</label>
+      <table class="phorma-usage__table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th class="phorma-usage__num">Runs</th>
+            <th class="phorma-usage__num">Tokens</th>
+            <th class="phorma-usage__num">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of analytics.byModel(); track row.provider + ':' + row.model) {
+            <tr>
+              <td class="phorma-usage__model" [title]="row.provider + ' · ' + row.model">
+                {{ row.model }}
+              </td>
+              <td class="phorma-usage__num">{{ row.runs | number }}</td>
+              <td class="phorma-usage__num">{{ row.inputTokens + row.outputTokens | number }}</td>
+              <td class="phorma-usage__num">
+                @if (row.credits; as credits) {
+                  <span class="phorma-usage__credits">{{ credits | number }} cr</span>
+                }
+                @if (row.usd; as usd) {
+                  <span>{{ usd | currency: 'USD' : 'symbol' : '1.2-4' }}{{ row.estimated ? ' (est.)' : '' }}</span>
+                }
+                @if (!row.credits && !row.usd) {
+                  <span class="phorma-usage__muted">—</span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </section>
+  }
+
+  <!-- Per-workflow breakdown (only in the All scope) -->
+  @if (analytics.scope() === null && analytics.byWorkflow().length > 1) {
+    <section class="phorma-usage__section">
+      <label class="phorma-usage__label">By workflow</label>
+      <table class="phorma-usage__table">
+        <thead>
+          <tr>
+            <th>Workflow</th>
+            <th class="phorma-usage__num">Runs</th>
+            <th class="phorma-usage__num">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of analytics.byWorkflow(); track row.workflowId ?? 'draft') {
+            <tr>
+              <td class="phorma-usage__model" [title]="row.workflowName">{{ row.workflowName }}</td>
+              <td class="phorma-usage__num">{{ row.runs | number }}</td>
+              <td class="phorma-usage__num">
+                @if (row.credits; as credits) {
+                  <span class="phorma-usage__credits">{{ credits | number }} cr</span>
+                }
+                @if (row.usd; as usd) {
+                  <span>{{ usd | currency: 'USD' : 'symbol' : '1.2-4' }}{{ row.estimated ? ' (est.)' : '' }}</span>
+                }
+                @if (!row.credits && !row.usd) {
+                  <span class="phorma-usage__muted">—</span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </section>
+  }
+</div>

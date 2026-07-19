@@ -453,6 +453,7 @@ class WorkflowRun {
             runId: this.options.runId,
             nodeId: node.id,
             provider,
+            model,
             usage: chunk.usage,
             at: Date.now(),
           });

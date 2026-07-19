@@ -1,11 +1,11 @@
 import { Injectable } from '@angular/core';
 
-import type { RunRecord } from '@phorma/engine';
+import type { RunRecord, UsageLedgerEntry } from '@phorma/engine';
 
 import type { WorkflowSpec } from './workflow.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -13,6 +13,19 @@ const WORKFLOWS_STORE = 'workflows';
 const RUNS_STORE = 'runs';
 const RUNS_BY_WORKFLOW = 'by-workflow';
 const RUNS_BY_STARTED = 'by-started';
+/**
+ * Object store holding per-run {@link UsageLedgerEntry} rows (keyPath
+ * `runId`) — deliberately separate from the runs store so cost analytics
+ * survive run-history pruning (EPIC 2).
+ */
+const USAGE_STORE = 'usage';
+const USAGE_BY_WORKFLOW = 'by-workflow';
+const USAGE_BY_STARTED = 'by-started';
+
+/** Usage-ledger retention: rows older than this are pruned on write. */
+const USAGE_MAX_AGE_MS = 366 * 24 * 60 * 60 * 1000;
+/** Usage-ledger retention: hard row cap (newest kept). */
+const USAGE_MAX_ROWS = 5000;
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -101,6 +114,43 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Usage ledger (EPIC 2) ─────────────────────────────────────
+
+  /** All usage-ledger rows started at/after `since`, newest first. */
+  async listUsage(since = 0): Promise<UsageLedgerEntry[]> {
+    const db = await this.open();
+    const store = db.transaction(USAGE_STORE, 'readonly').objectStore(USAGE_STORE);
+    const rows = await this.request<StoredUsage[]>(
+      store.index(USAGE_BY_STARTED).getAll(IDBKeyRange.lowerBound(since)),
+    );
+    return rows.sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  /** Upserts a run's usage-ledger row and applies retention. */
+  async saveUsage(entry: UsageLedgerEntry): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(USAGE_STORE, 'readwrite').objectStore(USAGE_STORE).put(toStoredUsage(entry)),
+    );
+    await this.pruneUsage();
+  }
+
+  /** Age + row-cap retention for the usage ledger. */
+  private async pruneUsage(): Promise<void> {
+    const db = await this.open();
+    const store = db.transaction(USAGE_STORE, 'readwrite').objectStore(USAGE_STORE);
+    const rows = await this.request<StoredUsage[]>(store.index(USAGE_BY_STARTED).getAll());
+    const cutoff = Date.now() - USAGE_MAX_AGE_MS;
+    const doomed = [
+      ...rows.filter(row => row.startedAt < cutoff),
+      ...rows
+        .filter(row => row.startedAt >= cutoff)
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .slice(USAGE_MAX_ROWS),
+    ];
+    await Promise.all(doomed.map(row => this.request(store.delete(row.runId))));
+  }
+
   private open(): Promise<IDBDatabase> {
     this.dbPromise ??= new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -115,6 +165,11 @@ export class IndexedDbStorageService {
           // because IDB indexes skip records whose key value is null.
           runs.createIndex(RUNS_BY_WORKFLOW, 'workflowKey');
           runs.createIndex(RUNS_BY_STARTED, 'summary.startedAt');
+        }
+        if (!db.objectStoreNames.contains(USAGE_STORE)) {
+          const usage = db.createObjectStore(USAGE_STORE, { keyPath: 'runId' });
+          usage.createIndex(USAGE_BY_WORKFLOW, 'workflowKey');
+          usage.createIndex(USAGE_BY_STARTED, 'startedAt');
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -137,4 +192,11 @@ export class IndexedDbStorageService {
  */
 function toStoredRun(record: RunRecord): RunRecord & { workflowKey: string } {
   return { ...record, workflowKey: record.summary.workflowId ?? 'draft' };
+}
+
+type StoredUsage = UsageLedgerEntry & { workflowKey: string };
+
+/** Same null-key workaround as {@link toStoredRun}. */
+function toStoredUsage(entry: UsageLedgerEntry): StoredUsage {
+  return { ...entry, workflowKey: entry.workflowId ?? 'draft' };
 }

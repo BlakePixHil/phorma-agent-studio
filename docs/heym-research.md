@@ -33,12 +33,13 @@ Every run (local + cloud) persisted with inputs, per-node outputs, trace, status
 - *Fits us well:* we already have IndexedDB storage (`indexed-db-storage.service.ts`), a WebSocket monitor (`cloud.service.ts`), and DO checkpoint state to restore from.
 - *Pillar:* directly extends "execution theatre" and debugger discipline to production runs. This is our wedge.
 
-### [ ] EPIC 2: Cost & Usage Observability
+### [x] EPIC 2: Cost & Usage Observability — shipped 2026-07-19
 
 We already emit `node-usage` events with `costUsd` (`run-controller.service.ts` sums them per run). Missing: persistence + analytics - per-workflow/per-model cost over time, token charts, a synced pricing table so *all* providers get USD cost (not just OpenRouter/phorma-cloud), and per-node cost in the trace panel.
 
 - *Pillar:* powerful + simpler. Ops owners deciding whether to deploy a workflow need "this costs $0.04/run".
 - *Depends on:* EPIC 1 (persisted runs).
+- *Shipped:* `engine/src/pricing.ts` (OpenRouter-synced price table + estimation, `costSource` reported/estimated), per-node + per-model rollups in `RunRecordSummary.usage`, a prune-proof usage ledger (IndexedDB v3 `usage` store + DO `usage_ledger` table + `GET /usage`), the Usage sidebar panel (chart.js, deferred) and Settings → Usage page, per-node usage in the trace. Display rule enforced end to end: Phorma Cloud-billed usage renders as plan credits (never USD, `phormaCloudCostUsd` split), BYO renders USD marked "(est.)" when estimated. Plus plan removed (starter/pro/team + custom enterprise later).
 
 ### [ ] EPIC 3: Workflow Robustness Primitives
 

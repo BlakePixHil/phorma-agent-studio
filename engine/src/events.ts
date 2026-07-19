@@ -24,7 +24,7 @@ export type RunEvent =
   | { type: 'node-started'; runId: string; nodeId: string; nodeName: string; at: number }
   | { type: 'node-token'; runId: string; nodeId: string; token: string }
   | { type: 'node-thinking'; runId: string; nodeId: string; token: string }
-  | { type: 'node-usage'; runId: string; nodeId: string; provider: string; usage: ModelUsage; at: number }
+  | { type: 'node-usage'; runId: string; nodeId: string; provider: string; model: string; usage: ModelUsage; at: number }
   | { type: 'node-completed'; runId: string; nodeId: string; nodeName: string; output: string; at: number }
   | { type: 'node-failed'; runId: string; nodeId: string; nodeName: string; error: string; at: number }
   | { type: 'handoff'; runId: string; connectionId: string; fromNodeId: string; toNodeId: string; payload: string; at: number }

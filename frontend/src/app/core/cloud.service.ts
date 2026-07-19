@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import type { RunEvent, RunRecord, RunRecordSummary } from '@phorma/engine';
+import type { RunEvent, RunRecord, RunRecordSummary, UsageLedgerEntry } from '@phorma/engine';
 
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
@@ -335,6 +335,26 @@ export class CloudService {
       const response = await fetch(`${base}/runs`, { headers: await this.headers() });
       if (!response.ok) return null;
       return (await response.json()) as { runs: RunRecordSummary[]; activeRunId: string | null };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetches the deployed workflow's usage ledger (EPIC 2) — per-run usage
+   * rows that survive run-history pruning. Null when unreachable/never
+   * pushed, same contract as {@link listRuns}.
+   */
+  async fetchUsage(workflowId: string, since = 0): Promise<UsageLedgerEntry[] | null> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) return null;
+    try {
+      const response = await fetch(`${base}/usage?since=${since}`, {
+        headers: await this.headers(),
+      });
+      if (!response.ok) return null;
+      const body = (await response.json()) as { usage?: UsageLedgerEntry[] };
+      return body.usage ?? [];
     } catch {
       return null;
     }

@@ -42,6 +42,13 @@
       <ng-template sidePanelPane tabId="runs">
         <app-runs-panel />
       </ng-template>
+
+      <ng-template sidePanelPane tabId="usage">
+        <!-- @defer code-splits the analytics subtree out of the initial bundle. -->
+        @defer (on immediate) {
+          <app-usage-panel />
+        }
+      </ng-template>
     </app-sidebar>
 
     <!-- ── Right sidebar (z-10) ── -->
@@ -56,6 +63,12 @@
 
       <ng-template sidePanelPane tabId="runs">
         <app-runs-panel />
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="usage">
+        @defer (on immediate) {
+          <app-usage-panel />
+        }
       </ng-template>
 
       <!-- These tabs may be moved here from the left -->
