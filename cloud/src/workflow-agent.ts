@@ -15,6 +15,8 @@
  *                      This is the webhook target for e-sign callbacks etc.
  *   POST /approvals  — resolve a pending approval: { nodeId, approved }
  *   GET  /status     — { name, hasWorkflow, running, savedAt, pendingWaits }
+ *   GET  /runs       — run history: { runs: RunRecordSummary[], activeRunId }
+ *   GET  /runs/{id}  — one full RunRecord (summary + graph + event log)
  *   WS   connect     — receive RunEvents; send control frames:
  *                      { type: 'approval', nodeId, approved }
  *                      { type: 'event', correlationKey, payload? }
@@ -45,12 +47,18 @@ import {
   sanitizeToolName,
   startRun,
   webSearchToolDefinition,
+  createRunRecorder,
   type JournalEntry,
   type ModelProviderId,
   type ResolvedTool,
   type RunEvent,
   type RunHandle,
   type RunJournal,
+  type RunLogEvent,
+  type RunRecord,
+  type RunRecorder,
+  type RunRecordSummary,
+  type RunSource,
   type ToolHost,
   type WorkflowNode,
   type WorkflowSpec,
@@ -170,6 +178,27 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         PRIMARY KEY (run_id, key)
       )
     `;
+    // Run history (EPIC 1): a summary row per run plus its coalesced event
+    // log, written when the run settles. Lives in the DO's embedded SQLite so
+    // history works identically in hosted AND BYO deployments (no D1 needed).
+    this.sql`
+      CREATE TABLE IF NOT EXISTS runs (
+        run_id TEXT PRIMARY KEY,
+        workflow_id TEXT,
+        summary TEXT NOT NULL,
+        graph TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        status TEXT NOT NULL
+      )
+    `;
+    this.sql`
+      CREATE TABLE IF NOT EXISTS run_events (
+        run_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        event TEXT NOT NULL,
+        PRIMARY KEY (run_id, seq)
+      )
+    `;
     const active = this.state.activeRun;
     if (active && !this.handle) {
       // The previous instance died mid-run (eviction). Restart the run with
@@ -198,6 +227,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private readonly earlyEvents = new Map<string, string>();
   /** Ring buffer of this run's events, replayed to late-joining monitors. */
   private eventLog: RunEvent[] = [];
+  /** Run-history recorder for the in-flight run (EPIC 1). */
+  private recorder: RunRecorder | null = null;
+
+  /** How many finished runs each workflow keeps; oldest are pruned. */
+  private static readonly RUN_HISTORY_LIMIT = 50;
 
   // ── HTTP ───────────────────────────────────────────────────────────────────
 
@@ -261,6 +295,23 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       return json({ ok: true, delivered: true });
     }
 
+    {
+      // GET /runs/{runId} — one full RunRecord.
+      const match = request.method === 'GET' ? /\/runs\/([^/]+)$/.exec(path) : null;
+      if (match) {
+        const record = this.loadRunRecord(decodeURIComponent(match[1]));
+        if (!record) return json({ error: 'Run not found.' }, 404);
+        return json(record);
+      }
+    }
+
+    if (request.method === 'GET' && path.endsWith('/runs')) {
+      return json({
+        runs: this.listRunSummaries(),
+        activeRunId: this.handle ? (this.state.activeRun?.runId ?? null) : null,
+      });
+    }
+
     if (request.method === 'GET' && path.endsWith('/status')) {
       return json({
         name: this.state.spec?.name ?? null,
@@ -292,6 +343,14 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     for (const event of this.eventLog) {
       connection.send(JSON.stringify(event));
     }
+    // Sentinel so the studio can tell replayed history from live events.
+    connection.send(
+      JSON.stringify({
+        type: 'monitor-synced',
+        runId: this.state.activeRun?.runId ?? this.state.lastRunId ?? null,
+        at: Date.now(),
+      }),
+    );
   }
 
   override async onMessage(connection: Connection, message: string | ArrayBuffer): Promise<void> {
@@ -348,7 +407,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   /** Callback target for `this.schedule(cron, 'scheduledRun')`. */
   async scheduledRun(): Promise<void> {
-    await this.trigger('');
+    await this.trigger('', undefined, 'schedule');
   }
 
   /**
@@ -394,6 +453,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private async trigger(
     input: string,
     resumeRunId?: string,
+    source: RunSource = 'manual',
   ): Promise<{ ok: boolean; runId?: string; error?: string; status?: number }> {
     const spec = this.state.spec;
     if (!spec) return { ok: false, error: 'No workflow uploaded yet.', status: 409 };
@@ -446,6 +506,27 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     this.eventLog = [];
     const startedAt = resuming ? (this.state.activeRun?.startedAt ?? Date.now()) : Date.now();
 
+    // Run-history recorder (EPIC 1). A resumed run keeps its original source
+    // (its summary row already exists); the journal replay re-emits earlier
+    // events, rebuilding the recorder's log from scratch — so drop any rows
+    // persisted for this run before the eviction.
+    const recordedSource = resuming ? (this.recordedSource(runId) ?? 'resume') : source;
+    const recorder = createRunRecorder({
+      runId,
+      workflowId: spec.id ?? null,
+      workflowName: spec.name,
+      source: recordedSource,
+      environment: 'cloud',
+      // Snapshot the spec graph as the user authored it (hosted provider
+      // mapping is an execution detail, not what "Bring to Canvas" shows).
+      graph: structuredClone(spec.graph),
+    });
+    const recordGraphJson = JSON.stringify(spec.graph);
+    this.recorder = recorder;
+    if (resuming) {
+      this.sql`DELETE FROM run_events WHERE run_id = ${runId}`;
+    }
+
     // Durable replay journal: completed node results live in the DO's
     // embedded SQLite. A resumed run replays them instantly (no model/tool
     // side effects); a fresh run starts with an empty journal.
@@ -492,6 +573,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       runId,
       graph,
       input,
+      source: recordedSource,
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
       maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
@@ -513,6 +595,17 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
           runUsage.inputTokens += event.usage.inputTokens ?? 0;
           runUsage.outputTokens += event.usage.outputTokens ?? 0;
           runUsage.costUsd += event.usage.costUsd ?? 0;
+        }
+        recorder.record(event);
+        // Crash tolerance: refresh the summary row at node boundaries so an
+        // evicted-and-never-resumed run still shows up (as 'running') in
+        // history. Event rows are flushed once, when the run settles.
+        if (
+          event.type === 'run-started' ||
+          event.type === 'node-completed' ||
+          event.type === 'node-failed'
+        ) {
+          this.persistRunSummary(recorder.summary(), recordGraphJson);
         }
         this.relay(event);
       },
@@ -560,6 +653,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       this.setState({ ...this.state, activeRun: null });
       this.sql`DELETE FROM run_journal WHERE run_id = ${runId}`;
       this.recordRunUsage(runUsage);
+      // Run history: finalize the summary, flush the coalesced event log,
+      // and prune beyond the retention limit.
+      const record = recorder.snapshot();
+      this.persistRunSummary(record.summary, recordGraphJson);
+      this.persistRunEvents(runId, record.events);
+      this.pruneRunHistory();
+      if (this.recorder === recorder) this.recorder = null;
       // Hosted: authoritative per-run ledger row + quota rollup in D1.
       // A RESUMED run only ledgers the incremental usage of the re-execution
       // (replayed nodes make no model calls) and must not bump the monthly
@@ -604,6 +704,101 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       data.provider = 'openrouter';
     }
     return mapped;
+  }
+
+  // ── Run history (EPIC 1) ───────────────────────────────────────────────────
+
+  /** Upserts a run's summary row (called at node boundaries + settle). */
+  private persistRunSummary(summary: RunRecordSummary, graph: string): void {
+    this.sql`
+      INSERT OR REPLACE INTO runs (run_id, workflow_id, summary, graph, started_at, status)
+      VALUES (
+        ${summary.id},
+        ${summary.workflowId},
+        ${JSON.stringify(summary)},
+        ${graph},
+        ${summary.startedAt},
+        ${summary.status}
+      )
+    `;
+  }
+
+  /** Replaces a run's stored event log with the recorder's coalesced log. */
+  private persistRunEvents(runId: string, events: RunLogEvent[]): void {
+    this.sql`DELETE FROM run_events WHERE run_id = ${runId}`;
+    for (let seq = 0; seq < events.length; seq++) {
+      this.sql`
+        INSERT OR REPLACE INTO run_events (run_id, seq, event)
+        VALUES (${runId}, ${seq}, ${JSON.stringify(events[seq])})
+      `;
+    }
+  }
+
+  /** Drops runs (and their events) beyond the retention limit, oldest first. */
+  private pruneRunHistory(): void {
+    const doomed = [
+      ...this.sql<{ run_id: string }>`
+        SELECT run_id FROM runs
+        ORDER BY started_at DESC
+        LIMIT -1 OFFSET ${WorkflowAgent.RUN_HISTORY_LIMIT}
+      `,
+    ];
+    for (const row of doomed) {
+      this.sql`DELETE FROM run_events WHERE run_id = ${row.run_id}`;
+      this.sql`DELETE FROM runs WHERE run_id = ${row.run_id}`;
+    }
+  }
+
+  /** All stored run summaries, newest first. */
+  private listRunSummaries(): RunRecordSummary[] {
+    const summaries: RunRecordSummary[] = [];
+    for (const row of this.sql<{ summary: string }>`
+      SELECT summary FROM runs ORDER BY started_at DESC
+    `) {
+      try {
+        summaries.push(JSON.parse(row.summary) as RunRecordSummary);
+      } catch {
+        // Corrupt row — skip.
+      }
+    }
+    return summaries;
+  }
+
+  /** Loads one full RunRecord (summary + graph snapshot + event log). */
+  private loadRunRecord(runId: string): RunRecord | null {
+    const rows = [
+      ...this.sql<{ summary: string; graph: string }>`
+        SELECT summary, graph FROM runs WHERE run_id = ${runId}
+      `,
+    ];
+    if (rows.length === 0) return null;
+    try {
+      const summary = JSON.parse(rows[0].summary) as RunRecordSummary;
+      const graph = JSON.parse(rows[0].graph) as WorkflowSpec['graph'];
+      const events: RunLogEvent[] = [];
+      for (const row of this.sql<{ event: string }>`
+        SELECT event FROM run_events WHERE run_id = ${runId} ORDER BY seq ASC
+      `) {
+        events.push(JSON.parse(row.event) as RunLogEvent);
+      }
+      return { summary, graph, events };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The source recorded for a run's existing summary row (resume path). */
+  private recordedSource(runId: string): RunSource | null {
+    for (const row of this.sql<{ summary: string }>`
+      SELECT summary FROM runs WHERE run_id = ${runId}
+    `) {
+      try {
+        return (JSON.parse(row.summary) as RunRecordSummary).source;
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   /** Persists a settled run's usage into the instance's monthly rollup. */

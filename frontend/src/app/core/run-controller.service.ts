@@ -1,9 +1,16 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 
-import { startRun, type RunEvent, type RunHandle, type RunNodeState } from '@phorma/engine';
+import {
+  startRun,
+  type RunEvent,
+  type RunHandle,
+  type RunNodeState,
+  type RunRecord,
+} from '@phorma/engine';
 
 import { AgentStreamService } from './agent-stream.service';
 import { ModelTransportService } from './model-transport.service';
+import { RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
@@ -11,6 +18,7 @@ import { WorkflowService } from './workflow.service';
 import { ToastService } from '../shared/toast/toast.service';
 import { CreditsDialogService } from '../workspace/cloud/credits-dialog.service';
 import { PhormaCloudService } from './phorma-cloud.service';
+import { describeRunEvent, traceFromRunLog } from './run-trace';
 import { portBaseId } from './workflow.model';
 
 /**
@@ -92,6 +100,7 @@ export class RunControllerService {
   private readonly toast = inject(ToastService);
   private readonly creditsDialog = inject(CreditsDialogService);
   private readonly phormaCloud = inject(PhormaCloudService);
+  private readonly runHistory = inject(RunHistoryService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -135,6 +144,13 @@ export class RunControllerService {
     costUsd: 0,
     phormaCloud: false,
   });
+
+  /**
+   * Set while a persisted run is displayed on the canvas ("Bring to
+   * Canvas"). Cleared when a new run starts or the session is reset. The
+   * Runs panel shows a "viewing past run" banner while non-null.
+   */
+  readonly viewingHistoricalRunId = signal<string | null>(null);
 
   /**
    * Set by CloudService while a monitor is connected: routes approval
@@ -187,12 +203,24 @@ export class RunControllerService {
     }
 
     this.resetRunState();
+    this.viewingHistoricalRunId.set(null);
     this.runCounter += 1;
     const runId = `run-${Date.now().toString(36)}-${this.runCounter}`;
 
+    // One snapshot serves both the engine and the run-history record — the
+    // user can keep editing the canvas while the run executes.
+    const graphSnapshot = structuredClone(graph);
+    const doc = this.workflow.activeDoc();
+    this.runHistory.beginRun({
+      runId,
+      workflowId: doc?.workflowId ?? null,
+      workflowName: doc?.name ?? 'Untitled Workflow',
+      graph: graphSnapshot,
+    });
+
     const handle = startRun({
       runId,
-      graph: structuredClone(graph),
+      graph: graphSnapshot,
       input: this.runInput().trim(),
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
@@ -207,7 +235,12 @@ export class RunControllerService {
       },
       maxToolRounds: this.settings.maxToolRounds(),
       tools: this.toolHost,
-      emit: event => this.apply(event),
+      // History records ONLY from the local engine's emit — cloud-monitor
+      // events reach apply() directly and are persisted by the DO instead.
+      emit: event => {
+        this.runHistory.record(event);
+        this.apply(event);
+      },
       requestApproval: (nodeId, message, payload) =>
         new Promise<boolean>(resolve => {
           const nodeName =
@@ -289,6 +322,63 @@ export class RunControllerService {
     if (!this.canReset()) return;
     this.resetRunState();
     this.nodeThinking.set(new Map());
+    this.viewingHistoricalRunId.set(null);
+    this.terminal.setPhase('idle');
+  }
+
+  /**
+   * Seeds the canvas + Runs panel with a persisted run's final state
+   * ("Bring to Canvas"). Read-only: no pending cards, no edge pulses, no
+   * phase transitions beyond marking the viewer state — the run is history,
+   * not resumable. The caller is responsible for opening the run's graph
+   * snapshot first (see `WorkflowService.openRunSnapshot`).
+   */
+  loadHistoricalRun(record: RunRecord): void {
+    if (this.running()) return;
+    this.resetRunState();
+
+    const names = new Map(record.graph.nodes.map(node => [node.id, node.name]));
+    const nodeName = (id: string) => names.get(id) ?? id;
+
+    // Final node rings from the event log (last state wins — re-executed
+    // nodes in cycles/loops settle on their final outcome).
+    const states = new Map<string, RunNodeState>();
+    const thinking = new Map<string, { text: string; streaming: boolean }>();
+    for (const event of record.events) {
+      switch (event.type) {
+        case 'node-started':
+          states.set(event.nodeId, 'thinking');
+          break;
+        case 'node-completed':
+          states.set(event.nodeId, 'done');
+          break;
+        case 'node-failed':
+          states.set(event.nodeId, 'error');
+          break;
+        case 'node-thinking-text':
+          thinking.set(event.nodeId, { text: event.text, streaming: false });
+          break;
+      }
+    }
+
+    this.nodeStates.set(states);
+    this.nodeThinking.set(thinking);
+    this.trace.set(traceFromRunLog(record.events, nodeName));
+    this.traceCounter = this.trace().length;
+    this.runInput.set(record.summary.input);
+    this.runUsage.set({ ...record.summary.usage, phormaCloud: false });
+    this.viewingHistoricalRunId.set(record.summary.id);
+    this.terminal.setPhase(
+      record.summary.status === 'running' ? 'idle' : record.summary.status,
+    );
+  }
+
+  /** Exits historical-run viewing, clearing the seeded state (banner ×). */
+  stopViewingHistoricalRun(): void {
+    if (!this.viewingHistoricalRunId()) return;
+    if (this.running()) return;
+    this.resetRunState();
+    this.viewingHistoricalRunId.set(null);
     this.terminal.setPhase('idle');
   }
 
@@ -329,12 +419,19 @@ export class RunControllerService {
   // ── RunEvent application (local engine AND cloud monitor feed this) ────────
 
   apply(event: RunEvent): void {
+    // Trace entries come from the SAME pure builder the run-history detail
+    // view uses (`describeRunEvent`) — live and historical timelines can
+    // never drift apart. Token stream events never trace.
+    if (event.type !== 'node-token' && event.type !== 'node-thinking') {
+      const desc = describeRunEvent(event, id => this.nodeName(id));
+      if (desc) this.pushTrace(desc.icon, desc.label, desc.detail, desc.tone, desc.kind);
+    }
+
     switch (event.type) {
       case 'run-started':
         this.terminal.setPhase('running');
         if (this.settings.autoOpenConsoleOnRun()) this.terminal.open('run');
         this.console('run', 'info', `Run started${event.input ? ` — "${event.input}"` : ''}.`);
-        this.pushTrace('ti ti-player-play', 'Run started', event.input || undefined, 'info');
         // A new run dumps any prior thinking text (per the persistence rule:
         // thinking survives until node removal OR a restart).
         this.nodeThinking.set(new Map());
@@ -345,7 +442,6 @@ export class RunControllerService {
         this.setNodeState(event.nodeId, 'thinking');
         this.agentStream.markEditing(event.nodeId);
         this.console('run', 'info', `→ ${event.nodeName}`);
-        this.pushTrace('ti ti-loader-2', `${event.nodeName} started`, undefined, 'info');
         break;
 
       case 'node-token':
@@ -373,12 +469,6 @@ export class RunControllerService {
         this.finishThinking(event.nodeId);
         this.setNodeState(event.nodeId, 'done');
         this.agentStream.clearEditing(event.nodeId);
-        this.pushTrace(
-          'ti ti-circle-check',
-          `${event.nodeName} completed`,
-          event.output || undefined,
-          'success',
-        );
         break;
 
       case 'node-failed':
@@ -387,7 +477,6 @@ export class RunControllerService {
         this.setNodeState(event.nodeId, 'error');
         this.agentStream.clearEditing(event.nodeId);
         this.console('problems', 'error', `${event.nodeName}: ${event.error}`);
-        this.pushTrace('ti ti-circle-x', `${event.nodeName} failed`, event.error, 'error');
         break;
 
       case 'handoff': {
@@ -396,7 +485,6 @@ export class RunControllerService {
         const to = this.nodeName(event.toNodeId);
         this.setNodeState(event.toNodeId, 'queued');
         this.console('run', 'info', `${from} ⇢ ${to}`);
-        this.pushTrace('ti ti-arrow-narrow-right', `${from} → ${to}`, undefined, 'info');
         break;
       }
 
@@ -406,27 +494,18 @@ export class RunControllerService {
         if (edge) this.pulseEdge(edge);
         if (event.toolNodeId) this.setNodeState(event.toolNodeId, 'thinking');
         this.console('tools', 'info', `${this.nodeName(event.nodeId)} → ${event.name}(${truncateArgs(event.arguments)})`);
-        this.pushTrace('ti ti-tool', `Tool call: ${event.name}`, event.arguments, 'info', 'tool-call');
         break;
       }
 
       case 'tool-result':
         if (event.toolNodeId) this.setNodeState(event.toolNodeId, event.isError ? 'error' : 'done');
         this.console('tools', event.isError ? 'error' : 'info', `${event.name} → ${firstLine(event.result)}`);
-        this.pushTrace(
-          event.isError ? 'ti ti-alert-triangle' : 'ti ti-tool',
-          `Tool ${event.isError ? 'error' : 'result'}: ${event.name}`,
-          event.result,
-          event.isError ? 'error' : 'success',
-          'tool-result',
-        );
         break;
 
       case 'approval-required':
         this.terminal.setPhase('waiting-approval');
         this.setNodeState(event.nodeId, 'waiting-approval');
         this.console('run', 'warning', `Approval required: ${event.message}`);
-        this.pushTrace('ti ti-user-check', 'Approval required', event.message, 'warning');
         // Remote runs: the engine callback lives in the cloud, so synthesize
         // the pending entry here and resolve it over the monitor socket.
         if (
@@ -452,34 +531,20 @@ export class RunControllerService {
         this.setNodeState(event.nodeId, event.approved ? 'done' : 'idle');
         // Remote monitors may still hold a synthetic pending card — clear it.
         this.pendingApprovals.update(list => list.filter(item => item.nodeId !== event.nodeId));
-        this.pushTrace(
-          event.approved ? 'ti ti-thumb-up' : 'ti ti-thumb-down',
-          event.approved ? 'Approved' : 'Rejected',
-          undefined,
-          event.approved ? 'success' : 'warning',
-        );
         break;
 
       case 'loop-started':
         this.console('run', 'info', `${event.nodeName}: iterating ${event.total} item${event.total === 1 ? '' : 's'}.`);
-        this.pushTrace('ti ti-repeat', `${event.nodeName} — ${event.total} item${event.total === 1 ? '' : 's'}`, undefined, 'info');
         break;
 
       case 'loop-iteration':
         this.console('run', 'info', `${this.nodeName(event.nodeId)}: item ${event.index + 1}/${event.total}`);
-        this.pushTrace(
-          'ti ti-repeat-once',
-          `Item ${event.index + 1}/${event.total}`,
-          event.item || undefined,
-          'info',
-        );
         break;
 
       case 'loop-completed': {
         const tone = event.failed > 0 ? 'warning' : 'success';
         const summary = `${event.succeeded}/${event.total} succeeded${event.failed > 0 ? `, ${event.failed} failed` : ''}`;
         this.console('run', tone, `${this.nodeName(event.nodeId)}: loop finished — ${summary}.`);
-        this.pushTrace('ti ti-repeat', `Loop finished — ${summary}`, undefined, tone);
         break;
       }
 
@@ -487,7 +552,6 @@ export class RunControllerService {
         this.terminal.setPhase('waiting-event');
         this.setNodeState(event.nodeId, 'waiting-event');
         this.console('run', 'warning', `Waiting for event "${event.correlationKey}": ${event.message}`);
-        this.pushTrace('ti ti-hourglass-high', `Waiting for "${event.correlationKey}"`, event.message, 'warning');
         // Remote runs: the engine callback lives in the cloud — synthesize a
         // pending card whose resolver ships the event over the monitor socket.
         if (
@@ -515,7 +579,6 @@ export class RunControllerService {
         // Remote monitors may hold no local resolver — just clear any card.
         this.pendingWaits.update(list => list.filter(item => item.nodeId !== event.nodeId));
         this.console('run', 'info', `Event "${event.correlationKey}" arrived — resuming.`);
-        this.pushTrace('ti ti-bolt', `Event "${event.correlationKey}" arrived`, event.eventPayload || undefined, 'success');
         break;
 
       case 'run-paused':
@@ -531,14 +594,12 @@ export class RunControllerService {
       case 'run-completed':
         this.terminal.setPhase('completed');
         this.console('run', 'success', 'Run completed.');
-        this.pushTrace('ti ti-flag-check', 'Run completed', event.output || undefined, 'success');
         this.finishRun();
         break;
 
       case 'run-failed':
         this.terminal.setPhase('failed');
         this.console('problems', 'error', event.error);
-        this.pushTrace('ti ti-flag-x', 'Run failed', event.error, 'error');
         // Catch the exact moment a Phorma Cloud tenant runs out of credits —
         // surface a "Buy credits" CTA right on a toast instead of making them
         // dig through Settings to find the top-up option. Other failures keep
@@ -555,7 +616,6 @@ export class RunControllerService {
       case 'run-stopped':
         this.terminal.setPhase('stopped');
         this.console('run', 'warning', 'Run stopped.');
-        this.pushTrace('ti ti-player-stop', 'Run stopped', undefined, 'warning');
         this.finishRun();
         break;
     }

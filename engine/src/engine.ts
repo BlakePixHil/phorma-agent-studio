@@ -21,6 +21,7 @@
  */
 
 import type { RunEvent, RunEventSink } from './events.js';
+import type { RunSource } from './run-record.js';
 import { RunGate, RunStoppedError } from './gate.js';
 import type { ModelClient, ChatMessage, ToolCall } from './model.js';
 import { extractItems, interpolatePayload, mergePayloads } from './payload.js';
@@ -47,6 +48,8 @@ export interface RunOptions {
   graph: WorkflowGraph;
   /** The task handed to the trigger. */
   input: string;
+  /** What initiated the run (defaults to 'manual'). Stamped on `run-started`. */
+  source?: RunSource;
   /** Node to start from; defaults to the first trigger (any kind). */
   startNodeId?: string;
   model: ModelClient;
@@ -197,8 +200,8 @@ class WorkflowRun {
   }
 
   async execute(): Promise<void> {
-    const { runId, graph, input } = this.options;
-    this.emit({ type: 'run-started', runId, input, at: Date.now() });
+    const { runId, input, source } = this.options;
+    this.emit({ type: 'run-started', runId, input, source: source ?? 'manual', at: Date.now() });
 
     const start = this.startNode();
     if (!start) {

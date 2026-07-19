@@ -402,6 +402,26 @@ export class WorkflowService {
     this.activeDocIdState.set(doc.docId);
   }
 
+  /**
+   * Opens a past run's graph snapshot as a new unsaved tab ("Bring to
+   * Canvas"). Always a snapshot tab — the workflow may have been edited (or
+   * never saved) since the run, so the run's own graph is the only faithful
+   * record of what actually executed.
+   */
+  openRunSnapshot(graph: WorkflowGraph, runLabel: string): void {
+    docCounter += 1;
+    const doc: OpenWorkflowDoc = {
+      docId: `doc-${docCounter}`,
+      workflowId: null,
+      name: runLabel,
+      description: '',
+      graph: structuredClone(graph),
+      dirty: false,
+    };
+    this.docsState.update(docs => [...docs, doc]);
+    this.activeDocIdState.set(doc.docId);
+  }
+
   // ── Graph mutations (active document) ──────────────────────────────────────
 
   /** Drops a node from a palette catalog entry onto the canvas. */

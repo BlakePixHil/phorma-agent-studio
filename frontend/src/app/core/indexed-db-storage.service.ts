@@ -1,12 +1,18 @@
 import { Injectable } from '@angular/core';
 
+import type { RunRecord } from '@phorma/engine';
+
 import type { WorkflowSpec } from './workflow.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
+/** Object store holding persisted {@link RunRecord}s (keyPath `summary.id`). */
+const RUNS_STORE = 'runs';
+const RUNS_BY_WORKFLOW = 'by-workflow';
+const RUNS_BY_STARTED = 'by-started';
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -47,6 +53,54 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Run history (EPIC 1) ───────────────────────────────────────────────
+
+  /** All local run records, newest first. Optionally scoped to a workflow. */
+  async listRuns(workflowId?: string | null): Promise<RunRecord[]> {
+    const db = await this.open();
+    const store = db.transaction(RUNS_STORE, 'readonly').objectStore(RUNS_STORE);
+    const records =
+      workflowId !== undefined
+        ? await this.request<RunRecord[]>(
+            store.index(RUNS_BY_WORKFLOW).getAll(workflowId ?? 'draft'),
+          )
+        : await this.request<RunRecord[]>(store.getAll());
+    return records.sort((a, b) => b.summary.startedAt - a.summary.startedAt);
+  }
+
+  async getRun(id: string): Promise<RunRecord | undefined> {
+    const db = await this.open();
+    return this.request<RunRecord | undefined>(
+      db.transaction(RUNS_STORE, 'readonly').objectStore(RUNS_STORE).get(id),
+    );
+  }
+
+  /** Upserts a run record (used mid-run and again when the run settles). */
+  async saveRun(record: RunRecord): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(RUNS_STORE, 'readwrite').objectStore(RUNS_STORE).put(toStoredRun(record)),
+    );
+  }
+
+  async removeRun(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(RUNS_STORE, 'readwrite').objectStore(RUNS_STORE).delete(id),
+    );
+  }
+
+  /** Deletes this workflow's oldest runs beyond `keep`. */
+  async pruneRuns(workflowId: string | null, keep: number): Promise<void> {
+    const runs = await this.listRuns(workflowId);
+    if (runs.length <= keep) return;
+    const db = await this.open();
+    const store = db.transaction(RUNS_STORE, 'readwrite').objectStore(RUNS_STORE);
+    await Promise.all(
+      runs.slice(keep).map(run => this.request(store.delete(run.summary.id))),
+    );
+  }
+
   private open(): Promise<IDBDatabase> {
     this.dbPromise ??= new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -54,6 +108,13 @@ export class IndexedDbStorageService {
         const db = request.result;
         if (!db.objectStoreNames.contains(WORKFLOWS_STORE)) {
           db.createObjectStore(WORKFLOWS_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(RUNS_STORE)) {
+          const runs = db.createObjectStore(RUNS_STORE, { keyPath: 'summary.id' });
+          // Unsaved drafts have workflowId null — stored as the 'draft' bucket
+          // because IDB indexes skip records whose key value is null.
+          runs.createIndex(RUNS_BY_WORKFLOW, 'workflowKey');
+          runs.createIndex(RUNS_BY_STARTED, 'summary.startedAt');
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -68,4 +129,12 @@ export class IndexedDbStorageService {
       request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'));
     });
   }
+}
+
+/**
+ * The stored shape adds a non-null `workflowKey` ('draft' for unsaved docs)
+ * because IndexedDB indexes silently exclude records with null key values.
+ */
+function toStoredRun(record: RunRecord): RunRecord & { workflowKey: string } {
+  return { ...record, workflowKey: record.summary.workflowId ?? 'draft' };
 }

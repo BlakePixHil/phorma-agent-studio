@@ -1,4 +1,21 @@
 <div class="phorma-runs">
+  <!-- Viewing a past run ("Bring to Canvas") -->
+  @if (runController.viewingHistoricalRunId(); as historicalId) {
+    <div class="phorma-runs__history-banner">
+      <i class="ti ti-history" aria-hidden="true"></i>
+      <span>Viewing a past run</span>
+      <button
+        type="button"
+        class="phorma-runs__history-banner-close"
+        title="Dismiss"
+        aria-label="Stop viewing past run"
+        (click)="runController.stopViewingHistoricalRun()"
+      >
+        <i class="ti ti-x" aria-hidden="true"></i>
+      </button>
+    </div>
+  }
+
   <!-- Task input + run controls -->
   <section class="phorma-runs__section">
     <label class="phorma-runs__label" for="run-input">
@@ -163,6 +180,157 @@
       </ol>
     } @else {
       <p class="phorma-runs__empty">No run yet. Enter a task and press Run.</p>
+    }
+  </section>
+
+  <!-- Run history -->
+  <section class="phorma-runs__section">
+    @if (!selectedRun()) {
+      <label class="phorma-runs__label">
+        History
+        <button
+          type="button"
+          class="phorma-runs__history-refresh"
+          title="Refresh run history"
+          aria-label="Refresh run history"
+          [disabled]="historyLoading()"
+          (click)="refreshHistory()"
+        >
+          <i
+            class="ti ti-refresh"
+            [class.phorma-runs__history-refresh--spinning]="historyLoading()"
+            aria-hidden="true"
+          ></i>
+        </button>
+      </label>
+      @if (historyRows().length > 0) {
+        <ul class="phorma-runs__history">
+          @for (row of historyRows(); track row.summary.id) {
+            <li>
+              <button
+                type="button"
+                class="phorma-runs__history-item"
+                [class.phorma-runs__history-item--live]="row.live"
+                (click)="openRun(row)"
+              >
+                <i
+                  class="{{ statusIcon(row.summary) }} phorma-runs__history-status phorma-runs__history-status--{{ row.summary.status }}"
+                  aria-hidden="true"
+                ></i>
+                <span class="phorma-runs__history-meta">
+                  <span class="phorma-runs__history-title">
+                    {{ row.summary.input || row.summary.workflowName }}
+                    @if (row.live) {
+                      <span class="phorma-runs__live-badge">live</span>
+                    }
+                  </span>
+                  <span class="phorma-runs__history-sub">
+                    <i class="{{ sourceIcon(row.summary) }}" aria-hidden="true" [title]="row.summary.source"></i>
+                    @if (row.summary.environment === 'cloud') {
+                      <i class="ti ti-cloud" aria-hidden="true" title="Cloud run"></i>
+                    }
+                    <time>{{ row.summary.startedAt | date: 'MMM d, HH:mm:ss' }}</time>
+                    @if (duration(row.summary); as dur) {
+                      <span>· {{ dur }}</span>
+                    }
+                    @if (row.summary.usage.costUsd > 0) {
+                      <span>· {{ row.summary.usage.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</span>
+                    }
+                  </span>
+                </span>
+                @if (row.summary.environment === 'local') {
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="phorma-runs__history-delete"
+                    title="Delete run"
+                    aria-label="Delete run"
+                    (click)="deleteRun(row, $event)"
+                    (keydown.enter)="deleteRun(row, $event)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </span>
+                }
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="phorma-runs__empty">No runs recorded yet for this workflow.</p>
+      }
+    } @else {
+      <!-- Run detail -->
+      @if (selectedRun(); as record) {
+        <div class="phorma-runs__detail-header">
+          <button
+            type="button"
+            class="phorma-runs__btn"
+            (click)="closeRunDetail()"
+          >
+            <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+          </button>
+          <p-button
+            size="small"
+            icon="ti ti-layout-grid-add"
+            label="Bring to Canvas"
+            (onClick)="bringToCanvas(record)"
+          />
+        </div>
+        <div class="phorma-runs__detail-summary">
+          <span class="phorma-runs__detail-row">
+            <i class="{{ statusIcon(record.summary) }} phorma-runs__history-status phorma-runs__history-status--{{ record.summary.status }}" aria-hidden="true"></i>
+            <strong>{{ record.summary.status }}</strong>
+            <time>{{ record.summary.startedAt | date: 'MMM d, y HH:mm:ss' }}</time>
+            @if (duration(record.summary); as dur) {
+              <span>· {{ dur }}</span>
+            }
+          </span>
+          @if (record.summary.usage.inputTokens > 0 || record.summary.usage.outputTokens > 0) {
+            <span class="phorma-runs__detail-row phorma-runs__usage">
+              <i class="ti ti-coins" aria-hidden="true"></i>
+              <span>{{ record.summary.usage.inputTokens | number }} in · {{ record.summary.usage.outputTokens | number }} out</span>
+              @if (record.summary.usage.costUsd > 0) {
+                <span class="phorma-runs__usage-cost">{{ record.summary.usage.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</span>
+              }
+            </span>
+          }
+        </div>
+        <ol class="phorma-runs__trace">
+          @for (group of selectedTraceGroups(); track group.key) {
+            @if (group.grouped && groupStepCount(group) > 1) {
+              <li
+                class="phorma-runs__group"
+                [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)"
+              >
+                <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
+                  <i class="ti ti-stack-2 phorma-runs__group-icon" aria-hidden="true"></i>
+                  <span class="phorma-runs__group-title">Tool activity</span>
+                  <span class="phorma-runs__group-count">
+                    {{ groupStepCount(group) }} {{ groupStepCount(group) === 1 ? 'call' : 'calls' }}
+                  </span>
+                  <i
+                    class="ti phorma-runs__group-chevron"
+                    [class.ti-chevron-down]="!isGroupCollapsed(group.key)"
+                    [class.ti-chevron-right]="isGroupCollapsed(group.key)"
+                    aria-hidden="true"
+                  ></i>
+                </button>
+                @if (!isGroupCollapsed(group.key)) {
+                  <ol class="phorma-runs__group-entries">
+                    @for (entry of group.entries; track entry.id) {
+                      <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
+                    }
+                  </ol>
+                }
+              </li>
+            } @else {
+              @for (entry of group.entries; track entry.id) {
+                <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
+              }
+            }
+          }
+        </ol>
+      }
     }
   </section>
 </div>

@@ -8,6 +8,7 @@
  */
 
 import type { ModelUsage } from './model.js';
+import type { RunSource } from './run-record.js';
 
 export type RunNodeState =
   | 'idle'
@@ -19,7 +20,7 @@ export type RunNodeState =
   | 'error';
 
 export type RunEvent =
-  | { type: 'run-started'; runId: string; input: string; at: number }
+  | { type: 'run-started'; runId: string; input: string; source?: RunSource; at: number }
   | { type: 'node-started'; runId: string; nodeId: string; nodeName: string; at: number }
   | { type: 'node-token'; runId: string; nodeId: string; token: string }
   | { type: 'node-thinking'; runId: string; nodeId: string; token: string }

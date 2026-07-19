@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import type { RunEvent } from '@phorma/engine';
+import type { RunEvent, RunRecord, RunRecordSummary } from '@phorma/engine';
 
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
@@ -319,12 +319,56 @@ export class CloudService {
     }
   }
 
+  // ── Run history (EPIC 1) ──────────────────────────────────────────────────
+
+  /**
+   * Lists the deployed workflow's persisted runs from its Durable Object.
+   * Returns null when the workflow was never pushed (404) or the worker is
+   * unreachable — callers render local history only in that case.
+   */
+  async listRuns(
+    workflowId: string,
+  ): Promise<{ runs: RunRecordSummary[]; activeRunId: string | null } | null> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) return null;
+    try {
+      const response = await fetch(`${base}/runs`, { headers: await this.headers() });
+      if (!response.ok) return null;
+      return (await response.json()) as { runs: RunRecordSummary[]; activeRunId: string | null };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fetches one full cloud RunRecord (detail view / Bring to Canvas). */
+  async fetchRunRecord(workflowId: string, runId: string): Promise<RunRecord | null> {
+    const base = this.instanceUrl(workflowId);
+    if (!base) return null;
+    try {
+      const response = await fetch(`${base}/runs/${encodeURIComponent(runId)}`, {
+        headers: await this.headers(),
+      });
+      if (!response.ok) return null;
+      return (await response.json()) as RunRecord;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Monitor (WebSocket → RunControllerService.apply) ───────────────────────
 
-  async connect(): Promise<void> {
+  /**
+   * Connects the monitor WebSocket. Defaults to the active workflow; pass a
+   * `workflowId` to attach to a specific deployed workflow's live run (the
+   * DO replays the in-flight run's events, then sends a `monitor-synced`
+   * sentinel before live events continue).
+   */
+  async connect(workflowId?: string): Promise<void> {
     const spec = this.workflow.exportActiveSpec();
-    const base = this.instanceUrl(spec?.id ?? '');
-    if (!spec || !base) {
+    const targetId = workflowId ?? spec?.id ?? '';
+    const targetName = workflowId ?? spec?.name ?? 'workflow';
+    const base = this.instanceUrl(targetId);
+    if (!targetId || !base) {
       this.toast.warning('Set the worker URL', 'Enter your deployed worker URL first.');
       return;
     }
@@ -344,11 +388,13 @@ export class CloudService {
         this.approveRemote(nodeId, approved);
       this.runController.remoteEventSender = (correlationKey, payload) =>
         this.sendEventRemote(correlationKey, payload);
-      this.terminal.append('run', 'success', `Cloud monitor connected (${spec.name}).`);
+      this.terminal.append('run', 'success', `Cloud monitor connected (${targetName}).`);
     };
     socket.onmessage = message => {
       try {
-        const event = JSON.parse(message.data as string) as RunEvent;
+        const event = JSON.parse(message.data as string) as RunEvent | { type: 'monitor-synced' };
+        // The replay-complete sentinel is monitor plumbing, not a run event.
+        if (event.type === 'monitor-synced') return;
         this.runController.apply(event);
       } catch {
         // Ignore non-event frames.
