@@ -46,12 +46,14 @@ type Step =
   | 'source'
   | 'ollama-detect'
   | 'ollama-install'
+  | 'lmstudio-detect'
+  | 'lmstudio-not-found'
   | 'model-pick'
   | 'model-pull'
   | 'api-keys'
   | 'done';
 
-type Source = 'ollama' | 'api-keys';
+type Source = 'ollama' | 'lmstudio' | 'api-keys';
 
 /** Ordered wizard stages backing the progress indicator. */
 const STAGES = ['Welcome', 'Model source', 'Setup', 'Finish'] as const;
@@ -89,6 +91,10 @@ export class OnboardingDialog {
   // Ollama detection state
   protected readonly ollamaChecking = signal(false);
   protected readonly ollamaModels = signal<string[]>([]);
+
+  // LM Studio detection state
+  protected readonly lmstudioChecking = signal(false);
+  protected readonly lmstudioAvailable = signal(false);
 
   // Install state
   protected readonly installing = signal(false);
@@ -168,17 +174,21 @@ export class OnboardingDialog {
       case 'welcome':
         return 'Welcome to Phorma Agent Studio';
       case 'source':
-        return 'Choose your model source';
+        return 'Choose how you want to run AI models';
       case 'ollama-detect':
         return 'Checking for Ollama';
       case 'ollama-install':
         return 'Install Ollama';
+      case 'lmstudio-detect':
+        return 'Checking for LM Studio';
+      case 'lmstudio-not-found':
+        return 'LM Studio not found';
       case 'model-pick':
         return 'Pick a local model';
       case 'model-pull':
         return 'Downloading model';
       case 'api-keys':
-        return 'Use your own API keys';
+        return 'Connect your own AI provider';
       case 'done':
         return 'Setup complete';
     }
@@ -195,6 +205,10 @@ export class OnboardingDialog {
         return 'Looking for a local Ollama runtime on this machine.';
       case 'ollama-install':
         return 'Ollama runs AI models locally - free and private.';
+      case 'lmstudio-detect':
+        return 'Looking for LM Studio on this machine.';
+      case 'lmstudio-not-found':
+        return 'LM Studio was not detected on this machine.';
       case 'model-pick':
         return 'Downloads happen once; the model then runs fully offline.';
       case 'model-pull':
@@ -213,6 +227,9 @@ export class OnboardingDialog {
     if (src === 'ollama') {
       this.step.set('ollama-detect');
       void this.detectOllama();
+    } else if (src === 'lmstudio') {
+      this.step.set('lmstudio-detect');
+      void this.detectLmstudio();
     } else {
       this.step.set('api-keys');
     }
@@ -226,6 +243,8 @@ export class OnboardingDialog {
         break;
       case 'ollama-detect':
       case 'ollama-install':
+      case 'lmstudio-detect':
+      case 'lmstudio-not-found':
       case 'model-pick':
       case 'api-keys':
         this.step.set('source');
@@ -299,6 +318,28 @@ export class OnboardingDialog {
       this.diskFreeBytes.set(bytes);
     } catch {
       this.diskFreeBytes.set(null);
+    }
+  }
+
+  // ── LM Studio detection ─────────────────────────────────────────────────
+
+  protected async detectLmstudio(): Promise<void> {
+    this.lmstudioChecking.set(true);
+    try {
+      const response = await fetch('http://localhost:1234/v1/models');
+      this.lmstudioAvailable.set(response.ok);
+      if (response.ok) {
+        this.settings.defaultProvider.set('lmstudio');
+        this.settings.defaultModel.set('');
+        this.step.set('done');
+      } else {
+        this.step.set('lmstudio-not-found');
+      }
+    } catch {
+      this.lmstudioAvailable.set(false);
+      this.step.set('lmstudio-not-found');
+    } finally {
+      this.lmstudioChecking.set(false);
     }
   }
 

@@ -51,7 +51,7 @@
           <p class="phorma-setup__lead">
             Phorma Agent Studio lets you design, debug, and deploy multi-agent AI
             workflows on a visual canvas. To run agents you need a model source -
-            free local models via Ollama, or your own provider API keys.
+            free local models (Ollama or LM Studio), or your own provider API keys.
           </p>
           <div class="phorma-setup__note">
             <div class="phorma-setup__note-row">
@@ -68,14 +68,6 @@
         <!-- Source choice -->
         @if (step() === 'source') {
           <div class="phorma-setup__choices">
-            <button type="button" class="phorma-setup__choice" (click)="chooseSource('ollama')">
-              <i class="ti ti-cpu-2 phorma-setup__choice-icon" aria-hidden="true"></i>
-              <span class="phorma-setup__choice-text">
-                <strong>Local models via Ollama</strong>
-                <span>Free and private - models run entirely on your machine</span>
-              </span>
-              <i class="ti ti-chevron-right phorma-setup__choice-chevron" aria-hidden="true"></i>
-            </button>
             <button type="button" class="phorma-setup__choice" (click)="chooseSource('api-keys')">
               <i class="ti ti-key phorma-setup__choice-icon" aria-hidden="true"></i>
               <span class="phorma-setup__choice-text">
@@ -84,6 +76,23 @@
               </span>
               <i class="ti ti-chevron-right phorma-setup__choice-chevron" aria-hidden="true"></i>
             </button>
+            <button type="button" class="phorma-setup__choice" (click)="chooseSource('ollama')">
+              <i class="ti ti-cpu-2 phorma-setup__choice-icon" aria-hidden="true"></i>
+              <span class="phorma-setup__choice-text">
+                <strong>Local models via Ollama</strong>
+                <span>Free and private - models run entirely on your machine. We'll help you install it.</span>
+              </span>
+              <i class="ti ti-chevron-right phorma-setup__choice-chevron" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="phorma-setup__choice" (click)="chooseSource('lmstudio')">
+              <i class="ti ti-cpu-2 phorma-setup__choice-icon" aria-hidden="true"></i>
+              <span class="phorma-setup__choice-text">
+                <strong>Local models via LM Studio</strong>
+                <span>Use models you already have loaded in LM Studio. <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer">Download LM Studio</a> if you don't have it yet.</span>
+              </span>
+              <i class="ti ti-chevron-right phorma-setup__choice-chevron" aria-hidden="true"></i>
+            </button>
+            
           </div>
         }
 
@@ -123,6 +132,34 @@
               {{ err }}
             </p>
           }
+        }
+
+        <!-- LM Studio detect -->
+        @if (step() === 'lmstudio-detect') {
+          <div class="phorma-setup__center">
+            <i class="ti ti-loader-2 phorma-setup__spinner" aria-hidden="true"></i>
+            <p>Checking for LM Studio…</p>
+          </div>
+        }
+
+        <!-- LM Studio not found -->
+        @if (step() === 'lmstudio-not-found') {
+          <p class="phorma-setup__lead">
+            Make sure it's installed and running (the server must be listening on <strong>http://localhost:1234</strong>).
+          </p>
+          <div class="phorma-setup__note">
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-download" aria-hidden="true"></i>
+              <span>
+                <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer">Download LM Studio</a>
+                if you haven't installed it yet
+              </span>
+            </div>
+            <div class="phorma-setup__note-row">
+              <i class="ti ti-cpu-2" aria-hidden="true"></i>
+              <span>Once installed, load a model and start the local server, then come back here</span>
+            </div>
+          </div>
         }
 
         <!-- Model pick -->
@@ -290,6 +327,21 @@
                   (onClick)="installOllama()"
                 />
               }
+            }
+            @case ('lmstudio-not-found') {
+                <p-button
+                  label="Skip setup"
+                  [text]="true"
+                  severity="secondary"
+                  size="small"
+                  (onClick)="skip()"
+                />
+              <p-button
+                label="Try again"
+                icon="ti ti-refresh"
+                size="small"
+                (onClick)="chooseSource('lmstudio')"
+              />
             }
             @case ('model-pick') {
               <p-button
