@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 
 import {
   FetchModelClient,
+  ModelRequestError,
   buildWireRequest,
   createStreamParser,
   providerRequiresKey,
@@ -351,8 +352,9 @@ class PhormaCloudModelClient implements ModelClient {
       } catch {
         // keep raw text
       }
-      throw new Error(
+      throw new ModelRequestError(
         `Phorma Cloud request failed (${response.status}): ${message.slice(0, 300)}`,
+        response.status,
       );
     }
 

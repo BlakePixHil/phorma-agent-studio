@@ -7,6 +7,7 @@ import { SidePanelPane } from './layout/sidebar/side-panel-pane.directive';
 import { DocumentTabs } from './layout/document-tabs/document-tabs';
 import { GraphCanvas } from './workspace/canvas/graph-canvas';
 import { TauriService } from './core/tauri.service';
+import { TestHarnessService } from './core/test-harness.service';
 import { WorkflowService } from './core/workflow.service';
 import { PanelRegistryService } from './core/panel-registry.service';
 import { UpdateService } from './core/update.service';
@@ -70,6 +71,7 @@ export class App {
   private readonly panels = inject(PanelRegistryService);
   protected readonly updates = inject(UpdateService);
   private readonly onboarding = inject(OnboardingService);
+  private readonly testHarness = inject(TestHarnessService);
 
   protected readonly title = signal('Phorma Agent Studio');
 
@@ -81,6 +83,8 @@ export class App {
     this.updates.start();
     // Open the first-run wizard on a fresh desktop install.
     this.onboarding.maybeAutoOpen();
+    // Dev-only programmatic E2E harness (window.__phormaTest). No-op in prod.
+    this.testHarness.install();
   }
 
   /** Toolbar height (px) — the tab bar sits directly below it. */

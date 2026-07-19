@@ -329,6 +329,18 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     ],
     defaultData: () => ({ correlationKey: '', message: '' }),
   },
+  {
+    id: 'flow-error-handler',
+    label: 'Error Handler',
+    description: 'Runs its subtree when the workflow fails — notify, clean up, escalate.',
+    icon: 'ti ti-lifebuoy',
+    category: 'flow',
+    kind: 'error-handler',
+    keywords: ['error', 'failure', 'catch', 'recover', 'notify', 'fallback'],
+    defaultName: 'Error Handler',
+    ports: [{ name: 'Error', role: 'message-out' }],
+    defaultData: () => ({}),
+  },
 ];
 
 // ── MCP presets ─────────────────────────────────────────────────────────────

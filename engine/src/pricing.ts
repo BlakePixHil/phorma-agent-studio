@@ -22,6 +22,8 @@ import type { ModelUsage } from './model.js';
 export interface ModelPrice {
   promptUsdPerToken: number;
   completionUsdPerToken: number;
+  /** Model context window in tokens, when the source reports it. */
+  contextTokens?: number;
 }
 
 /** OpenRouter slug (`vendor/model`) → price. */
@@ -134,7 +136,28 @@ export function priceTableFromOpenRouter(response: unknown): ModelPriceTable {
     const completion = Number(pricing.completion);
     if (!Number.isFinite(prompt) || !Number.isFinite(completion)) continue;
     const slug = id.toLowerCase().split(':')[0] ?? id.toLowerCase();
-    table[slug] = { promptUsdPerToken: prompt, completionUsdPerToken: completion };
+    const contextLength = Number((row as { context_length?: unknown })?.context_length);
+    table[slug] = {
+      promptUsdPerToken: prompt,
+      completionUsdPerToken: completion,
+      contextTokens:
+        Number.isFinite(contextLength) && contextLength > 0 ? contextLength : undefined,
+    };
   }
   return table;
+}
+
+/**
+ * Looks up a model's context window (tokens) in a price table. Returns
+ * undefined when the model is unknown or the source didn't report one —
+ * callers apply a conservative default. Shaped for `RunOptions.contextWindow`.
+ */
+export function contextWindowOf(
+  table: ModelPriceTable,
+  provider: string,
+  model: string,
+): number | undefined {
+  const slug = toPricingSlug(provider, model);
+  if (!slug) return undefined;
+  return table[slug]?.contextTokens;
 }

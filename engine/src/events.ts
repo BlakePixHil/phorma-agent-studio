@@ -27,6 +27,13 @@ export type RunEvent =
   | { type: 'node-usage'; runId: string; nodeId: string; provider: string; model: string; usage: ModelUsage; at: number }
   | { type: 'node-completed'; runId: string; nodeId: string; nodeName: string; output: string; at: number }
   | { type: 'node-failed'; runId: string; nodeId: string; nodeName: string; error: string; at: number }
+  // Robustness primitives (EPIC 3): retry attempts, model fallback switches,
+  // error-branch routing, and context compression are all first-class trace
+  // moments so the canvas/trace explain exactly how a run recovered.
+  | { type: 'node-retrying'; runId: string; nodeId: string; nodeName: string; attempt: number; maxAttempts: number; delayMs: number; error: string; at: number }
+  | { type: 'node-fallback'; runId: string; nodeId: string; nodeName: string; fromProvider: string; fromModel: string; toProvider: string; toModel: string; error: string; at: number }
+  | { type: 'node-error-routed'; runId: string; nodeId: string; nodeName: string; error: string; at: number }
+  | { type: 'context-compressed'; runId: string; nodeId: string; beforeTokens: number; afterTokens: number; at: number }
   | { type: 'handoff'; runId: string; connectionId: string; fromNodeId: string; toNodeId: string; payload: string; at: number }
   | { type: 'tool-call'; runId: string; nodeId: string; toolNodeId: string; name: string; arguments: string; at: number }
   | { type: 'tool-result'; runId: string; nodeId: string; toolNodeId: string; name: string; result: string; isError: boolean; at: number }

@@ -632,8 +632,30 @@
     <p>Multiple nodes selected.</p>
   </div>
 } @else {
-  <div class="phorma-props__placeholder">
-    <i class="ti ti-adjustments" aria-hidden="true"></i>
-    <p>Select a node to edit its properties.</p>
+  <div class="phorma-props">
+    <header class="phorma-props__head">
+      <i class="ti ti-settings-2" aria-hidden="true"></i>
+      <span class="phorma-props__kind">Workflow</span>
+    </header>
+    <section class="phorma-props__section">
+      <label class="phorma-props__label" for="prop-wf-timeout">Timeout (minutes)</label>
+      <input
+        id="prop-wf-timeout"
+        type="number"
+        class="phorma-props__input"
+        min="0"
+        [value]="workflowSettings().timeoutMinutes ?? ''"
+        (input)="onWorkflowTimeoutInput($event)"
+        placeholder="none"
+      />
+      <p class="phorma-props__hint">
+        Fails the run if it takes longer than this end-to-end. Paused time doesn't count.
+        Leave empty for no limit. Applies to local and deployed runs.
+      </p>
+    </section>
+    <div class="phorma-props__placeholder phorma-props__placeholder--inline">
+      <i class="ti ti-adjustments" aria-hidden="true"></i>
+      <p>Select a node to edit its properties.</p>
+    </div>
   </div>
 }

@@ -123,6 +123,114 @@
       }
     </section>
 
+    <!-- Reliability -->
+    <section class="phorma-prompt__section">
+      <label class="phorma-prompt__label">Reliability</label>
+
+      <label class="phorma-prompt__check">
+        <input
+          type="checkbox"
+          [checked]="retryEnabled()"
+          (change)="toggleRetry($any($event.target).checked)"
+        />
+        Retry transient failures
+      </label>
+      @if (retryEnabled()) {
+        <div class="phorma-prompt__inline">
+          <label class="phorma-prompt__inline-label" for="retry-attempts">Attempts</label>
+          <input
+            id="retry-attempts"
+            type="number"
+            class="phorma-prompt__model phorma-prompt__number"
+            min="1"
+            max="5"
+            [value]="retryAttempts()"
+            (input)="onRetryAttemptsInput($event)"
+          />
+        </div>
+        <p class="phorma-prompt__hint">
+          Rate limits, server errors, and network drops retry automatically with backoff.
+        </p>
+      }
+
+      <label class="phorma-prompt__check">
+        <input
+          type="checkbox"
+          [checked]="hasFallback()"
+          (change)="toggleFallback($any($event.target).checked)"
+        />
+        Fallback model
+      </label>
+      @if (hasFallback() && node.data.fallback; as fb) {
+        <div class="phorma-prompt__model-row">
+          <p-select
+            class="phorma-prompt__provider"
+            [options]="fallbackProviders()"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="fb.provider"
+            (ngModelChange)="onFallbackProviderChange($event)"
+            size="small"
+            appendTo="body"
+          />
+          <p-select
+            class="phorma-prompt__model"
+            [options]="fallbackModelSuggestions()"
+            [editable]="true"
+            [ngModel]="fb.model"
+            (ngModelChange)="onFallbackModelChange($event)"
+            size="small"
+            appendTo="body"
+            placeholder="model id"
+            ariaLabel="Fallback model id"
+          />
+        </div>
+        <p class="phorma-prompt__hint">
+          Used when the primary model still fails after its retries.
+        </p>
+      }
+
+      <label class="phorma-prompt__check">
+        <input
+          type="checkbox"
+          [checked]="hasErrorBranch()"
+          (change)="toggleErrorBranch($any($event.target).checked)"
+        />
+        On-error output
+      </label>
+      @if (hasErrorBranch()) {
+        <p class="phorma-prompt__hint">
+          Failures route through the <strong>On error</strong> port instead of failing the
+          run. The error payload carries the message and the original input.
+        </p>
+      }
+
+      <div class="phorma-prompt__inline">
+        <label class="phorma-prompt__inline-label" for="node-timeout">Timeout (seconds)</label>
+        <input
+          id="node-timeout"
+          type="number"
+          class="phorma-prompt__model phorma-prompt__number"
+          min="0"
+          [value]="node.data.timeoutSec ?? ''"
+          (input)="onTimeoutInput($event)"
+          placeholder="none"
+        />
+      </div>
+
+      <label class="phorma-prompt__check">
+        <input
+          type="checkbox"
+          [checked]="!node.data.compressionDisabled"
+          (change)="toggleCompression($any($event.target).checked)"
+        />
+        Compress long conversations
+      </label>
+      <p class="phorma-prompt__hint">
+        Summarizes older tool rounds when the context window nears its limit.
+      </p>
+    </section>
+
     <!-- Capabilities summary -->
     <section class="phorma-prompt__section">
       <label class="phorma-prompt__label">Tools</label>

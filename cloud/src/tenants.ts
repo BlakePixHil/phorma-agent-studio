@@ -324,6 +324,7 @@ export const OPENROUTER_SLUG_PREFIX: Record<string, string | null> = {
   'phorma-cloud': '', // already a full OpenRouter slug (curated)
   bedrock: null, // BYO-key only — hosted (OpenRouter) inference has no Bedrock path
   ollama: null, // no hosted equivalent — rejected in hosted mode
+  lmstudio: null, // local server — no hosted equivalent
 };
 
 /**

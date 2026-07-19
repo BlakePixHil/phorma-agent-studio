@@ -184,6 +184,15 @@
     margin: 0;
     font-size: 0.75rem;
   }
+
+  // Inline variant: rendered beneath the workflow-settings section in the
+  // no-selection state, not vertically centered.
+  &--inline {
+    height: auto;
+    flex: 1;
+    justify-content: center;
+    padding: 1rem 0;
+  }
 }
 
 // ── MCP secret / args rows ─────────────────────────────────────────────────

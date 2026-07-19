@@ -17,6 +17,7 @@ import {
   type WorkflowConnection,
   type WorkflowGraph,
   type WorkflowNode,
+  type WorkflowSettings,
   type WorkflowSpec,
 } from './workflow.model';
 
@@ -29,6 +30,8 @@ export interface OpenWorkflowDoc {
   name: string;
   description: string;
   graph: WorkflowGraph;
+  /** Workflow-level execution settings (timeout, …). */
+  settings: WorkflowSettings;
   /** True when the draft has edits not yet saved to the library. */
   dirty: boolean;
 }
@@ -177,6 +180,7 @@ export class WorkflowService {
       name: spec.name,
       description: spec.description ?? '',
       graph: structuredClone(spec.graph),
+      settings: spec.settings ? { ...spec.settings } : {},
       dirty: false,
     };
   }
@@ -192,6 +196,7 @@ export class WorkflowService {
       name: 'Untitled Workflow',
       description: '',
       graph: emptyGraph(),
+      settings: {},
       dirty: false,
     };
     this.docsState.update(docs => [...docs, doc]);
@@ -294,6 +299,7 @@ export class WorkflowService {
       name: name.trim() || 'Untitled Workflow',
       description: doc.description.trim() || undefined,
       graph: structuredClone(doc.graph),
+      settings: Object.keys(doc.settings).length > 0 ? { ...doc.settings } : undefined,
       savedAt: new Date().toISOString(),
     };
 
@@ -373,6 +379,20 @@ export class WorkflowService {
     this.updateDoc(doc.docId, { description, dirty: true });
   }
 
+  /** Merges a patch into the active workflow's execution settings. */
+  updateSettings(patch: Partial<WorkflowSettings>): void {
+    const doc = this.activeDoc();
+    if (!doc) return;
+    const settings = { ...doc.settings, ...patch };
+    // Drop cleared values so empty settings serialize as absent.
+    for (const key of Object.keys(settings) as (keyof WorkflowSettings)[]) {
+      if (settings[key] === undefined || settings[key] === null || settings[key] === 0) {
+        delete settings[key];
+      }
+    }
+    this.updateDoc(doc.docId, { settings, dirty: true });
+  }
+
   /** Serializes the active document as a portable spec (for file export). */
   exportActiveSpec(): WorkflowSpec | null {
     const doc = this.activeDoc();
@@ -383,6 +403,7 @@ export class WorkflowService {
       name: doc.name,
       description: doc.description || undefined,
       graph: structuredClone(doc.graph),
+      settings: Object.keys(doc.settings).length > 0 ? { ...doc.settings } : undefined,
       savedAt: new Date().toISOString(),
     };
   }
@@ -396,6 +417,7 @@ export class WorkflowService {
       name: spec.name || 'Imported Workflow',
       description: spec.description ?? '',
       graph: structuredClone(spec.graph),
+      settings: spec.settings ? { ...spec.settings } : {},
       dirty: true,
     };
     this.docsState.update(docs => [...docs, doc]);
@@ -416,6 +438,7 @@ export class WorkflowService {
       name: runLabel,
       description: '',
       graph: structuredClone(graph),
+      settings: {},
       dirty: false,
     };
     this.docsState.update(docs => [...docs, doc]);

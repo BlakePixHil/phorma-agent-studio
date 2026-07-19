@@ -18,6 +18,7 @@ import {
   isAgentNode,
   portBaseId,
   type AgentNodeData,
+  type AgentRetryPolicy,
   type ModelProviderId,
   type WorkflowNode,
 } from '../../../core/workflow.model';
@@ -284,5 +285,128 @@ export class PromptPanel {
     // Empty = inherit the application default Bedrock region.
     const region = (event.target as HTMLInputElement | null)?.value.trim() || undefined;
     this.workflow.updateNodeData(agent.id, { region });
+  }
+
+  // ── Reliability (EPIC 3) ────────────────────────────────────────────────
+
+  /** Provider options for the fallback model picker (no sentinel row). */
+  protected readonly fallbackProviders = computed(() => {
+    const signedIn = this.phormaCloud.signedIn();
+    return MODEL_PROVIDERS.filter(p => p.id !== 'phorma-cloud' || signedIn);
+  });
+
+  /** Whether automatic retries are enabled (default ON). */
+  protected readonly retryEnabled = computed(() => !this.agent()?.data.retry?.disabled);
+
+  /** Retry attempts shown in the input (total attempts incl. the first). */
+  protected readonly retryAttempts = computed(() => this.agent()?.data.retry?.maxAttempts ?? 2);
+
+  /** Whether a fallback model is configured. */
+  protected readonly hasFallback = computed(() => !!this.agent()?.data.fallback);
+
+  /** Model suggestions for the fallback provider (static list — keep it simple). */
+  protected readonly fallbackModelSuggestions = computed(() => {
+    const provider = this.agent()?.data.fallback?.provider;
+    return provider ? (PROVIDER_MODEL_SUGGESTIONS[provider] ?? []) : [];
+  });
+
+  /** Whether this agent has an "On error" output branch. */
+  protected readonly hasErrorBranch = computed(() => {
+    const agent = this.agent();
+    const errorPortId = agent?.data.errorPortId;
+    return !!errorPortId && !!agent?.ports.some(port => port.id === errorPortId);
+  });
+
+  protected toggleRetry(enabled: boolean): void {
+    const agent = this.agent();
+    if (!agent) return;
+    const retry: AgentRetryPolicy = { ...agent.data.retry, disabled: enabled ? undefined : true };
+    if (retry.disabled === undefined) delete retry.disabled;
+    this.workflow.updateNodeData(agent.id, {
+      retry: Object.keys(retry).length > 0 ? retry : undefined,
+    });
+  }
+
+  protected onRetryAttemptsInput(event: Event): void {
+    const agent = this.agent();
+    if (!agent) return;
+    const raw = Number((event.target as HTMLInputElement | null)?.value);
+    const maxAttempts = Number.isFinite(raw) ? Math.min(Math.max(Math.round(raw), 1), 5) : 2;
+    this.workflow.updateNodeData(agent.id, {
+      retry: { ...agent.data.retry, maxAttempts: maxAttempts === 2 ? undefined : maxAttempts },
+    });
+  }
+
+  protected toggleFallback(enabled: boolean): void {
+    const agent = this.agent();
+    if (!agent) return;
+    if (!enabled) {
+      this.workflow.updateNodeData(agent.id, { fallback: undefined });
+      return;
+    }
+    // Seed with the agent's own provider (or the app default) + first suggestion.
+    const provider =
+      agent.data.provider ?? this.settings.defaultProvider();
+    const model = PROVIDER_MODEL_SUGGESTIONS[provider]?.[0] ?? '';
+    this.workflow.updateNodeData(agent.id, { fallback: { provider, model } });
+  }
+
+  protected onFallbackProviderChange(value: string): void {
+    const agent = this.agent();
+    if (!agent?.data.fallback) return;
+    const provider = value as ModelProviderId;
+    this.workflow.updateNodeData(agent.id, {
+      fallback: { provider, model: PROVIDER_MODEL_SUGGESTIONS[provider]?.[0] ?? '' },
+    });
+  }
+
+  protected onFallbackModelChange(model: string): void {
+    const agent = this.agent();
+    if (!agent?.data.fallback) return;
+    this.workflow.updateNodeData(agent.id, {
+      fallback: { ...agent.data.fallback, model: (model ?? '').trim() },
+    });
+  }
+
+  protected onTimeoutInput(event: Event): void {
+    const agent = this.agent();
+    if (!agent) return;
+    const raw = Number((event.target as HTMLInputElement | null)?.value);
+    const timeoutSec = Number.isFinite(raw) && raw > 0 ? Math.round(raw) : undefined;
+    this.workflow.updateNodeData(agent.id, { timeoutSec });
+  }
+
+  protected toggleErrorBranch(enabled: boolean): void {
+    const agent = this.agent();
+    if (!agent) return;
+    if (enabled) {
+      if (this.hasErrorBranch()) return;
+      // Reuse a stale errorPortId's port if it still exists; otherwise add one.
+      const port = {
+        id: `${agent.id}-err${Date.now().toString(36)}`,
+        name: 'On error',
+        role: 'message-out' as const,
+      };
+      this.workflow.updateNodePorts(agent.id, [...agent.ports, port]);
+      this.workflow.updateNodeData(agent.id, { errorPortId: port.id });
+    } else {
+      const errorPortId = agent.data.errorPortId;
+      this.workflow.updateNodeData(agent.id, { errorPortId: undefined });
+      if (errorPortId) {
+        // Removing the port also drops any connections wired to it.
+        this.workflow.updateNodePorts(
+          agent.id,
+          agent.ports.filter(port => port.id !== errorPortId),
+        );
+      }
+    }
+  }
+
+  protected toggleCompression(enabled: boolean): void {
+    const agent = this.agent();
+    if (!agent) return;
+    this.workflow.updateNodeData(agent.id, {
+      compressionDisabled: enabled ? undefined : true,
+    });
   }
 }

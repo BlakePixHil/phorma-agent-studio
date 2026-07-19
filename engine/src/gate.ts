@@ -88,6 +88,32 @@ export class RunGate {
     this.wakeAll();
   }
 
+  /**
+   * Sleeps for `ms`, waking immediately (and throwing {@link RunStoppedError})
+   * if the run is stopped mid-sleep. Used for retry backoff and timeout
+   * waits so Stop always unwinds promptly instead of waiting out a timer.
+   */
+  async sleep(ms: number): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (!this.stopped) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      await new Promise<void>(resolve => {
+        const wake = (): void => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          const index = this.waiters.indexOf(wake);
+          if (index >= 0) this.waiters.splice(index, 1);
+          resolve();
+        }, remaining);
+        this.waiters.push(wake);
+      });
+    }
+    throw new RunStoppedError();
+  }
+
   private wakeAll(): void {
     const waiters = this.waiters;
     this.waiters = [];

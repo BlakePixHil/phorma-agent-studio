@@ -1,6 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
 import {
+  contextWindowOf,
   createCostEstimator,
   priceTableFromOpenRouter,
   type CostEstimator,
@@ -11,7 +12,8 @@ import {
 import { FALLBACK_PRICE_TABLE } from './model-pricing-fallback';
 
 const MODELS_URL = 'https://openrouter.ai/api/v1/models';
-const CACHE_KEY = 'phorma.model-price-table.v1';
+// v2: rows gained `contextTokens` (context-window sync for compression).
+const CACHE_KEY = 'phorma.model-price-table.v2';
 /** Refresh the synced table daily; prices move slowly. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -55,6 +57,11 @@ export class ModelPricingService {
     // Rebind per call so long-lived recorders see table refreshes.
     return (provider, model, usage: ModelUsage) =>
       createCostEstimator(this.priceTable())(provider, model, usage);
+  }
+
+  /** Engine-shaped context-window lookup (for automatic compression). */
+  contextWindowLookup(): (provider: string, model: string) => number | undefined {
+    return (provider, model) => contextWindowOf(this.priceTable(), provider, model);
   }
 
   /** Fetches the OpenRouter table if the cache is stale. Never throws. */

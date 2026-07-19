@@ -259,6 +259,13 @@ export class RunControllerService {
         temperature: this.settings.defaultTemperature(),
       },
       maxToolRounds: this.settings.maxToolRounds(),
+      // Workflow-level timeout (Properties panel → Workflow settings).
+      runTimeoutMs: (() => {
+        const minutes = this.workflow.activeDoc()?.settings.timeoutMinutes;
+        return typeof minutes === 'number' && minutes > 0 ? minutes * 60_000 : undefined;
+      })(),
+      // Context-window lookup for automatic context compression.
+      contextWindow: this.pricing.contextWindowLookup(),
       tools: this.toolHost,
       // History records ONLY from the local engine's emit — cloud-monitor
       // events reach apply() directly and are persisted by the DO instead.
@@ -544,6 +551,35 @@ export class RunControllerService {
         this.setNodeState(event.nodeId, 'error');
         this.agentStream.clearEditing(event.nodeId);
         this.console('problems', 'error', `${event.nodeName}: ${event.error}`);
+        break;
+
+      case 'node-retrying':
+        // The node stays in 'thinking' — the retry is part of its execution.
+        this.console(
+          'run',
+          'warning',
+          `${event.nodeName}: transient failure — retrying (attempt ${event.attempt + 1}/${event.maxAttempts}). ${event.error}`,
+        );
+        break;
+
+      case 'node-fallback':
+        this.console(
+          'run',
+          'warning',
+          `${event.nodeName}: primary model ${event.fromModel} failed — switching to fallback ${event.toModel}.`,
+        );
+        break;
+
+      case 'node-error-routed':
+        this.console('run', 'warning', `${event.nodeName}: failure routed to the error branch.`);
+        break;
+
+      case 'context-compressed':
+        this.console(
+          'run',
+          'info',
+          `${this.nodeName(event.nodeId)}: context compressed (~${event.beforeTokens.toLocaleString()} → ~${event.afterTokens.toLocaleString()} tokens).`,
+        );
         break;
 
       case 'handoff': {

@@ -70,6 +70,28 @@ export interface WaitEventNodeData {
   timeoutHours?: number;
 }
 
+/**
+ * Retry policy for an agent's model calls. Transient failures (429, 5xx,
+ * network drops, timeouts) are retried BY DEFAULT (one retry, 1s backoff);
+ * this object tunes or disables that behaviour per node.
+ */
+export interface AgentRetryPolicy {
+  /** Total attempts including the first (default 2, i.e. one retry). */
+  maxAttempts?: number;
+  /** Base backoff before the first retry, doubled per attempt (default 1000). */
+  backoffMs?: number;
+  /** `transient` (default) retries 429/5xx/network only; `all` retries everything. */
+  retryOn?: 'transient' | 'all';
+  /** True disables automatic retries for this node. */
+  disabled?: boolean;
+}
+
+/** Secondary model used when the primary model still fails after retries. */
+export interface AgentFallbackModel {
+  provider: ModelProviderId;
+  model: string;
+}
+
 export interface AgentNodeData {
   /** Markdown system prompt. `{{input}}` interpolates the incoming task. */
   prompt: string;
@@ -83,6 +105,23 @@ export interface AgentNodeData {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Retry tuning for transient model failures (see {@link AgentRetryPolicy}). */
+  retry?: AgentRetryPolicy;
+  /** Fallback model tried when the primary fails after all retries. */
+  fallback?: AgentFallbackModel;
+  /**
+   * Maximum seconds for this node's whole execution (all model rounds and
+   * tool calls). 0/absent = no per-node timeout.
+   */
+  timeoutSec?: number;
+  /**
+   * Port base id of this agent's "On error" out-port. When set AND that port
+   * has a connected handoff, a failure routes an error payload through it
+   * instead of failing the run.
+   */
+  errorPortId?: string;
+  /** True disables automatic context compression for long tool loops. */
+  compressionDisabled?: boolean;
 }
 
 export interface WorkflowNode {
@@ -119,6 +158,15 @@ export interface WorkflowGraph {
   connections: WorkflowConnection[];
 }
 
+/** Workflow-level execution settings, persisted in the spec. */
+export interface WorkflowSettings {
+  /**
+   * Maximum minutes a run may take end-to-end before it fails with a
+   * timeout. Paused time doesn't count. 0/absent = no limit.
+   */
+  timeoutMinutes?: number;
+}
+
 /**
  * The portable workflow document — what the studio exports as
  * `.phorma.json` and pushes to the cloud runtime on deploy.
@@ -129,6 +177,8 @@ export interface WorkflowSpec {
   name: string;
   description?: string;
   graph: WorkflowGraph;
+  /** Workflow-level execution settings (timeout, …). */
+  settings?: WorkflowSettings;
   /** ISO timestamp of the last save. */
   savedAt: string;
 }

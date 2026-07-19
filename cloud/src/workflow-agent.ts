@@ -148,6 +148,7 @@ const PROVIDER_ENV_KEYS: Record<ModelProviderId, keyof Env | null> = {
   openrouter: 'OPENROUTER_API_KEY',
   bedrock: 'BEDROCK_API_KEY',
   ollama: null,
+  lmstudio: null,
   // Phorma Cloud never resolves a key from env — the tenant runtime key is
   // injected by the hosted inference path (DO trigger or /api/infer proxy).
   'phorma-cloud': null,
@@ -456,6 +457,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     );
   }
 
+  /**
+   * Callback target for workflow-timeout alarms (`this.schedule(seconds,
+   * 'workflowTimedOut', runId)`). The engine enforces the deadline itself
+   * while the DO is awake; this durable alarm exists to WAKE an evicted DO
+   * (e.g. suspended on an approval) — `onStart` resumes the run, and the
+   * engine's re-armed deadline (remaining budget ≤ 0) fails it immediately.
+   * Stale alarms (run settled or superseded) are no-ops.
+   */
+  async workflowTimedOut(_runId: string): Promise<void> {
+    // Intentionally empty — waking the DO is the entire job.
+  }
+
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
     // Drop existing cron schedules, then arm one per schedule-trigger node.
     for (const schedule of this.getSchedules()) {
@@ -594,6 +607,19 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     const graph = this.hosted ? this.mapGraphToOpenRouter(spec.graph) : spec.graph;
     if (typeof graph === 'string') return { ok: false, error: graph, status: 422 };
 
+    // Workflow-level timeout: the engine enforces the deadline in-process; a
+    // durable alarm additionally wakes an evicted DO so a suspended run still
+    // times out on schedule. A RESUMED run keeps its original deadline — the
+    // remaining budget shrinks by the time already elapsed since startedAt.
+    const timeoutMinutes = spec.settings?.timeoutMinutes;
+    let runTimeoutMs: number | undefined;
+    if (typeof timeoutMinutes === 'number' && timeoutMinutes > 0) {
+      const limitMs = timeoutMinutes * 60_000;
+      const elapsedMs = resuming ? Date.now() - startedAt : 0;
+      runTimeoutMs = Math.max(1, limitMs - elapsedMs);
+      void this.schedule(Math.ceil(runTimeoutMs / 1000) + 5, 'workflowTimedOut', runId);
+    }
+
     const model = new FetchModelClient(async provider => {
       if (this.hosted) return tenantKey;
       const envKey = PROVIDER_ENV_KEYS[provider];
@@ -608,6 +634,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
       maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
+      runTimeoutMs,
       journal,
       model,
       tools: new CloudToolHost({
@@ -690,9 +717,17 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       for (const waiter of this.waits.values()) waiter.resolve('');
       this.waits.clear();
       this.earlyEvents.clear();
-      // The run settled — drop the resume marker and its journal rows.
+      // The run settled — drop the resume marker, its journal rows, and any
+      // pending workflow-timeout wake alarm.
       this.setState({ ...this.state, activeRun: null });
       this.sql`DELETE FROM run_journal WHERE run_id = ${runId}`;
+      void (async () => {
+        for (const schedule of this.getSchedules()) {
+          if (schedule.callback === 'workflowTimedOut') {
+            await this.cancelSchedule(schedule.id);
+          }
+        }
+      })().catch(() => undefined);
       this.recordRunUsage(runUsage);
       // Run history: finalize the summary, flush the coalesced event log,
       // and prune beyond the retention limit.
@@ -732,18 +767,36 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    */
   private mapGraphToOpenRouter(graph: WorkflowSpec['graph']): WorkflowSpec['graph'] | string {
     const mapped = structuredClone(graph);
-    for (const node of mapped.nodes) {
-      const data = node.data as { provider?: ModelProviderId; model?: string };
-      if (!data.provider || !data.model) continue;
-      const prefix = OPENROUTER_SLUG_PREFIX[data.provider];
+    const map = (
+      nodeName: string,
+      target: { provider?: ModelProviderId; model?: string },
+    ): string | null => {
+      if (!target.provider || !target.model) return null;
+      const prefix = OPENROUTER_SLUG_PREFIX[target.provider];
       if (prefix === null) {
-        return `Agent "${node.name}" uses ${data.provider}, which is not available on Phorma Cloud. Pick a cloud model.`;
+        return `Agent "${nodeName}" uses ${target.provider}, which is not available on Phorma Cloud. Pick a cloud model.`;
       }
       // openrouter + phorma-cloud already carry a full OpenRouter slug.
-      if (data.provider !== 'openrouter' && data.provider !== 'phorma-cloud') {
-        data.model = `${prefix}${data.model}`;
+      if (target.provider !== 'openrouter' && target.provider !== 'phorma-cloud') {
+        target.model = `${prefix}${target.model}`;
       }
-      data.provider = 'openrouter';
+      target.provider = 'openrouter';
+      return null;
+    };
+    for (const node of mapped.nodes) {
+      const data = node.data as {
+        provider?: ModelProviderId;
+        model?: string;
+        fallback?: { provider: ModelProviderId; model: string };
+      };
+      const primaryError = map(node.name, data);
+      if (primaryError) return primaryError;
+      // The LLM-fallback model must be mapped too — it is executed by the
+      // same hosted OpenRouter path when the primary fails.
+      if (data.fallback) {
+        const fallbackError = map(node.name, data.fallback);
+        if (fallbackError) return fallbackError;
+      }
     }
     return mapped;
   }

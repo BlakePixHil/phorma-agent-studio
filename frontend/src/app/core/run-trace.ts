@@ -60,6 +60,37 @@ export function describeRunEvent(
       return { icon: 'ti ti-circle-check', label: `${event.nodeName} completed`, detail: event.output || undefined, tone: 'success', kind: 'event' };
     case 'node-failed':
       return { icon: 'ti ti-circle-x', label: `${event.nodeName} failed`, detail: event.error, tone: 'error', kind: 'event' };
+    case 'node-retrying':
+      return {
+        icon: 'ti ti-refresh',
+        label: `${event.nodeName} retrying (attempt ${event.attempt + 1}/${event.maxAttempts}) in ${event.delayMs >= 1000 ? `${Math.round(event.delayMs / 1000)}s` : `${event.delayMs}ms`}`,
+        detail: event.error,
+        tone: 'warning',
+        kind: 'event',
+      };
+    case 'node-fallback':
+      return {
+        icon: 'ti ti-arrows-exchange',
+        label: `${event.nodeName} switched to fallback model ${event.toModel}`,
+        detail: `Primary ${event.fromModel} failed: ${event.error}`,
+        tone: 'warning',
+        kind: 'event',
+      };
+    case 'node-error-routed':
+      return {
+        icon: 'ti ti-route',
+        label: `${event.nodeName} routed its failure to the error branch`,
+        detail: event.error,
+        tone: 'warning',
+        kind: 'event',
+      };
+    case 'context-compressed':
+      return {
+        icon: 'ti ti-arrows-minimize',
+        label: `${nodeName(event.nodeId)} — context compressed (~${event.beforeTokens.toLocaleString()} → ~${event.afterTokens.toLocaleString()} tokens)`,
+        tone: 'info',
+        kind: 'event',
+      };
     case 'handoff':
       return {
         icon: 'ti ti-arrow-narrow-right',
