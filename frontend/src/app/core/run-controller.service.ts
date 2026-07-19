@@ -227,6 +227,7 @@ export class RunControllerService {
       maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
+      lmstudioBaseUrl: this.settings.lmstudioBaseUrl(),
       bedrockRegion: this.settings.bedrockRegion(),
       defaultModel: {
         provider: this.settings.defaultProvider(),

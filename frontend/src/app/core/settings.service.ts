@@ -44,6 +44,9 @@ export class SettingsService {
   /** Ollama server base URL (local models need no key). */
   readonly ollamaBaseUrl = signal(loadLayout('ollamaBaseUrl', 'http://localhost:11434'));
 
+  /** LM Studio server base URL (local models need no key). */
+  readonly lmstudioBaseUrl = signal(loadLayout('lmstudioBaseUrl', 'http://localhost:1234'));
+
   /**
    * Default AWS region for Amazon Bedrock. Agents may override this per node,
    * so workflows can mix models hosted in different regions. The Bedrock API
@@ -139,6 +142,11 @@ export class SettingsService {
   setOllamaBaseUrl(url: string): void {
     this.ollamaBaseUrl.set(url.trim() || 'http://localhost:11434');
     saveLayout('ollamaBaseUrl', this.ollamaBaseUrl());
+  }
+
+  setLmstudioBaseUrl(url: string): void {
+    this.lmstudioBaseUrl.set(url.trim() || 'http://localhost:1234');
+    saveLayout('lmstudioBaseUrl', this.lmstudioBaseUrl());
   }
 
   setBedrockRegion(region: string): void {

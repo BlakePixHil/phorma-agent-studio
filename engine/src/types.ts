@@ -28,6 +28,7 @@ export type ModelProviderId =
   | 'openrouter'
   | 'ollama'
   | 'bedrock'
+  | 'lmstudio'
   // Routes inference through the Phorma Cloud proxy (POST /api/infer),
   // billed against the tenant's credit-limited OpenRouter key. The model id
   // is already a full OpenRouter slug (curated big-name models only).

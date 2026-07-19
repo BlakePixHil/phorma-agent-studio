@@ -20,8 +20,8 @@ const API_KEY_PLACEHOLDER: &str = "{{API_KEY}}";
 const LLM_STREAM_EVENT: &str = "llm-stream-event";
 
 /// Providers allowed to have keys stored. Guards the keyring namespace.
-const KNOWN_PROVIDERS: [&str; 6] =
-    ["anthropic", "openai", "gemini", "openrouter", "ollama", "bedrock"];
+const KNOWN_PROVIDERS: [&str; 7] =
+    ["anthropic", "openai", "gemini", "openrouter", "ollama", "bedrock", "lmstudio"];
 
 /// Max characters stored in a single keychain entry. Windows Credential
 /// Manager caps a credential blob at 2560 UTF-16 code units, so large secrets

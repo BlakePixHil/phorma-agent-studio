@@ -53,6 +53,8 @@ export interface ModelRequest {
   maxTokens?: number;
   /** Ollama server override; defaults to http://localhost:11434. */
   ollamaBaseUrl?: string;
+  /** LM Studio server override; defaults to http://localhost:1234. */
+  lmstudioBaseUrl?: string;
   /**
    * AWS region for Amazon Bedrock, used to build the regional endpoint URL
    * (e.g. `ap-southeast-2`). Defaults to us-east-1.
@@ -98,6 +100,7 @@ export interface StreamParser {
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+const DEFAULT_LMSTUDIO_BASE_URL = 'http://localhost:1234';
 /** Default AWS region for the Amazon Bedrock endpoint. */
 const DEFAULT_BEDROCK_REGION = 'us-east-1';
 
@@ -621,6 +624,11 @@ const ADAPTERS: Record<ModelProviderId, ProviderAdapter> = {
   ollama: openAiCompatible(
     request =>
       `${(request.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '')}/v1/chat/completions`,
+    false,
+  ),
+  lmstudio: openAiCompatible(
+    request =>
+      `${(request.lmstudioBaseUrl ?? DEFAULT_LMSTUDIO_BASE_URL).replace(/\/$/, '')}/v1/chat/completions`,
     false,
   ),
   bedrock: bedrockAdapter,

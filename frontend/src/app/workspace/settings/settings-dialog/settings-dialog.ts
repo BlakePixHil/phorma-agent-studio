@@ -238,6 +238,8 @@ export class SettingsDialog {
   /** Guards against duplicate auto-fetches within a single dialog session. */
   private ollamaFetchedOnce = false;
 
+
+
   /**
    * Options for the default-model dropdown. Bedrock is populated from the live
    * mantle catalog (auto-fetched); Phorma Cloud uses the curated list; BYO
@@ -269,6 +271,7 @@ export class SettingsDialog {
       case 'openrouter':  return 'anthropic/claude-sonnet-4.5';
       case 'bedrock':     return 'e.g. anthropic.claude-sonnet-4-6-v1';
       case 'ollama':      return 'e.g. llama3.2';
+      case 'lmstudio':    return 'e.g. llama-3.2-3b-instruct';
       default:            return 'model id';
     }
   });
@@ -282,7 +285,7 @@ export class SettingsDialog {
    */
   protected readonly modelDisplayValue = computed(() => {
     const provider = this.settings.defaultProvider();
-    if (provider === 'ollama' || provider === 'phorma-cloud') return this.settings.defaultModel();
+    if (provider === 'ollama' || provider === 'lmstudio' || provider === 'phorma-cloud') return this.settings.defaultModel();
     if (this.settings.keyConfigured()[provider]) return this.settings.defaultModel();
     return '';
   });
@@ -324,7 +327,7 @@ export class SettingsDialog {
    */
   protected readonly missingKeyWarning = computed<string | null>(() => {
     const provider = this.settings.defaultProvider();
-    if (provider === 'ollama' || provider === 'phorma-cloud') return null;
+    if (provider === 'ollama' || provider === 'lmstudio' || provider === 'phorma-cloud') return null;
     if (this.needsPhormaCloudSubscription()) return null;
     if (this.settings.keyConfigured()[provider]) return null;
     const entry = MODEL_PROVIDERS.find(p => p.id === provider);
@@ -627,6 +630,7 @@ export class SettingsDialog {
       this.ollamaFetchedOnce = true;
       untracked(() => void this.loadOllamaModels());
     });
+
   }
 
   protected presetFlagKey(presetId: string, envKey: string): string {

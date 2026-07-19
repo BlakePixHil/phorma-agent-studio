@@ -301,6 +301,23 @@ export class SettingsRegistryService {
           ],
         },
         {
+          id: 'lmstudio',
+          label: 'LM Studio',
+          // Shown only when LM Studio is the chosen application default provider.
+          visible: () => this.settings.defaultProvider() === 'lmstudio',
+          settings: [
+            {
+              id: 'lmstudio-base-url',
+              label: 'LM Studio server URL',
+              description: 'Base URL of the local LM Studio server (no API key required).',
+              keywords: ['lmstudio', 'local', 'url', 'server'],
+              control: { type: 'text', placeholder: 'http://localhost:1234' },
+              get: () => this.settings.lmstudioBaseUrl(),
+              set: value => this.settings.setLmstudioBaseUrl(String(value ?? '')),
+            },
+          ],
+        },
+        {
           id: 'bedrock',
           label: 'Amazon Bedrock',
           // Shown only when Amazon Bedrock is the chosen application default.

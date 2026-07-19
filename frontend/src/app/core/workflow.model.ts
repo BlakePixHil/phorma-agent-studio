@@ -73,6 +73,7 @@ export type ModelProviderId =
   | 'gemini'
   | 'openrouter'
   | 'ollama'
+  | 'lmstudio'
   | 'bedrock'
   // Routes inference through the Phorma Cloud proxy, billed against the
   // tenant's subscription credits. Curated big-name models only.
@@ -85,6 +86,7 @@ export const MODEL_PROVIDERS: { id: ModelProviderId; label: string }[] = [
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'bedrock', label: 'Amazon Bedrock' },
   { id: 'ollama', label: 'Ollama (local)' },
+  { id: 'lmstudio', label: 'LM Studio (local)' },
   { id: 'phorma-cloud', label: 'Phorma Cloud' },
 ];
 
@@ -108,6 +110,7 @@ export const PROVIDER_MODEL_SUGGESTIONS: Record<ModelProviderId, string[]> = {
     'apac.amazon.nova-pro-v1:0',
   ],
   ollama: ['llama3.2', 'qwen3', 'mistral-small'],
+  lmstudio: ['llama-3.2-3b-instruct', 'qwen2.5-7b-instruct', 'mistral-7b-instruct'],
   // Phorma Cloud offers a curated set of big-name models, routed through
   // OpenRouter on the tenant's credit-limited runtime key. These are full
   // OpenRouter slugs and the ONLY models selectable for this provider.

@@ -56,6 +56,8 @@ export interface RunOptions {
   emit: RunEventSink;
   /** Ollama server override, forwarded to model requests. */
   ollamaBaseUrl?: string;
+  /** LM Studio server override, forwarded to model requests. */
+  lmstudioBaseUrl?: string;
   /**
    * Default AWS region for Amazon Bedrock agents that don't specify their own
    * region. Individual agent nodes can override this per model.
@@ -431,6 +433,7 @@ class WorkflowRun {
         temperature,
         maxTokens: data.maxTokens,
         ollamaBaseUrl: this.options.ollamaBaseUrl,
+        lmstudioBaseUrl: this.options.lmstudioBaseUrl,
         // Per-node region wins; otherwise the run's default Bedrock region.
         bedrockRegion: data.region ?? this.options.bedrockRegion,
       })) {
