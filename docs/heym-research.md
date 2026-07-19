@@ -50,12 +50,13 @@ Node-level **retry with backoff**, an **error output branch** (route failure ins
 - *No dependencies* - engine-only work, can run in parallel with EPIC 1.
 - *Shipped:* all six primitives. Retry is ON BY DEFAULT for transient failures (429/5xx/network, `ModelRequestError` + `isTransientModelError`), tunable/disable-able per node; fallback model retries the round on a secondary provider/model; agents get an optional "On error" out-port (red dot) that routes a JSON error payload instead of failing the run; a new Error Handler flow node runs its subtree when the run fails (run still settles failed); per-node `timeoutSec` + workflow `settings.timeoutMinutes` (pause-aware locally, durable wake alarm in the DO); context compression summarizes middle tool rounds at 80% of the model's context window (OpenRouter-synced `contextTokens` in the pricing table). New RunEvents: `node-retrying`, `node-fallback`, `node-error-routed`, `context-compressed`. Reliability section in the Prompt panel; workflow timeout in the Properties panel's no-selection state. Test: `engine/test/robustness.e2e.mts` (52 checks).
 
-### [ ] EPIC 4: Evals
+### [x] EPIC 4: Evals — shipped 2026-07-19
 
 Test suites against a workflow: input cases + expected outputs, scoring by exact match / contains / LLM-as-judge, run the suite with one click, compare across models.
 
 - *Pillar:* simpler + powerful - "trust what you built" is literally pillar 2, and evals are the mechanism.
 - *Depends on:* EPIC 1 (run persistence for eval run history).
+- *Shipped:* `engine/src/evals.ts` (suite/case/result types + pure `scoreOutput` with tolerant judge-verdict parsing), `RunSource` extended with `'eval'`. Every case execution is a REAL engine run persisted as a normal RunRecord (flask badge in the Runs panel, full trace, Bring to Canvas). Local suites run in a 3-wide pool via `EvalRunnerService` (bypasses the single-run `RunControllerService`); cloud suites run sequentially against the deployed DO (`POST /trigger` now accepts `source: 'eval'`, new `CloudService.triggerHttp` + poll). Model comparison re-runs the suite per model via `defaultModel` override (local only - cloud specs are materialized at push). IndexedDB v4 adds `eval-suites` + `eval-runs` stores. Evals sidebar panel: suite list → case editor (matcher select, judge model, comparison models) → scored results with judge reasoning and per-case run links. Test: `engine/test/evals.e2e.mts` (30 checks).
 
 ### [ ] EPIC 5: Deeper AI-Assisted Building
 

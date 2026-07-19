@@ -1,0 +1,400 @@
+<div class="phorma-evals">
+  @if (!selectedSuite()) {
+    <!-- ── Suite list ── -->
+    <section class="phorma-evals__section">
+      <label class="phorma-evals__label">
+        Suites · {{ workflowName() }}
+        <button
+          type="button"
+          class="phorma-evals__icon-btn"
+          title="New suite"
+          aria-label="New suite"
+          (click)="createSuite()"
+        >
+          <i class="ti ti-plus" aria-hidden="true"></i>
+        </button>
+      </label>
+      @if (evals.suites().length > 0) {
+        <ul class="phorma-evals__list">
+          @for (suite of evals.suites(); track suite.id) {
+            <li>
+              <button type="button" class="phorma-evals__list-item" (click)="openSuite(suite)">
+                <i class="ti ti-flask phorma-evals__list-icon" aria-hidden="true"></i>
+                <span class="phorma-evals__list-meta">
+                  <span class="phorma-evals__list-title">{{ suite.name }}</span>
+                  <span class="phorma-evals__list-sub">
+                    {{ suite.cases.length }} {{ suite.cases.length === 1 ? 'case' : 'cases' }}
+                    · updated {{ suite.updatedAt | date: 'MMM d, HH:mm' }}
+                  </span>
+                </span>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-evals__delete"
+                  title="Delete suite"
+                  aria-label="Delete suite"
+                  (click)="deleteSuite(suite, $event)"
+                  (keydown.enter)="deleteSuite(suite, $event)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </span>
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="phorma-evals__empty">
+          No eval suites yet. Create one to test this workflow with repeatable cases.
+        </p>
+      }
+    </section>
+  } @else if (selectedSuite(); as suite) {
+    <!-- ── Suite header ── -->
+    <div class="phorma-evals__detail-header">
+      <button type="button" class="phorma-evals__btn" (click)="closeSuite()">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+      </button>
+      @if (!runner.running()) {
+        <p-button
+          size="small"
+          icon="ti ti-player-play"
+          label="Run"
+          (onClick)="runSuite('local')"
+        />
+        @if (cloudAvailable()) {
+          <p-button
+            size="small"
+            severity="secondary"
+            icon="ti ti-cloud"
+            label="Run on Cloud"
+            (onClick)="runSuite('cloud')"
+          />
+        }
+      } @else {
+        <button type="button" class="phorma-evals__btn phorma-evals__btn--danger" (click)="cancelRun()">
+          <i class="ti ti-player-stop" aria-hidden="true"></i> Cancel
+        </button>
+        <span class="phorma-evals__progress">
+          {{ runner.progress().done }}/{{ runner.progress().total }}
+        </span>
+      }
+    </div>
+
+    @if (!selectedRun()) {
+      <!-- ── Suite editor ── -->
+      <section class="phorma-evals__section">
+        <label class="phorma-evals__label" for="eval-suite-name">Suite name</label>
+        <input
+          id="eval-suite-name"
+          type="text"
+          class="phorma-evals__input"
+          [value]="suite.name"
+          (change)="onSuiteName($event)"
+        />
+      </section>
+
+      <section class="phorma-evals__section">
+        <label class="phorma-evals__label">
+          Cases
+          <button
+            type="button"
+            class="phorma-evals__icon-btn"
+            title="Add case"
+            aria-label="Add case"
+            (click)="addCase()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </label>
+        @for (case_ of suite.cases; track case_.id; let i = $index) {
+          <div class="phorma-evals__case">
+            <div class="phorma-evals__case-header">
+              <input
+                type="text"
+                class="phorma-evals__input phorma-evals__input--grow"
+                placeholder="Case name"
+                [value]="case_.name"
+                (change)="onCaseField(i, 'name', $event)"
+              />
+              <p-select
+                styleClass="phorma-evals__matcher"
+                size="small"
+                appendTo="body"
+                [options]="matcherOptions"
+                optionLabel="label"
+                optionValue="id"
+                [ngModel]="case_.matcher"
+                (ngModelChange)="patchCase(i, { matcher: $event })"
+              />
+              <button
+                type="button"
+                class="phorma-evals__icon-btn phorma-evals__icon-btn--danger"
+                title="Remove case"
+                aria-label="Remove case"
+                (click)="removeCase(i)"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+            <textarea
+              class="phorma-evals__textarea"
+              rows="2"
+              placeholder="Input handed to the workflow trigger"
+              [value]="case_.input"
+              (change)="onCaseField(i, 'input', $event)"
+            ></textarea>
+            <textarea
+              class="phorma-evals__textarea"
+              rows="2"
+              [placeholder]="case_.matcher === 'llm-judge' ? 'Reference answer the judge grades against' : 'Expected output'"
+              [value]="case_.expected"
+              (change)="onCaseField(i, 'expected', $event)"
+            ></textarea>
+            @if (case_.matcher === 'llm-judge') {
+              <textarea
+                class="phorma-evals__textarea"
+                rows="2"
+                placeholder="Extra grading criteria (optional)"
+                [value]="case_.judgeCriteria ?? ''"
+                (change)="onCaseField(i, 'judgeCriteria', $event)"
+              ></textarea>
+            }
+          </div>
+        } @empty {
+          <p class="phorma-evals__empty">No cases yet — add one.</p>
+        }
+      </section>
+
+      @if (usesJudge()) {
+        <section class="phorma-evals__section">
+          <label class="phorma-evals__label">Judge model</label>
+          <div class="phorma-evals__model-row">
+            <p-select
+              size="small"
+              appendTo="body"
+              [options]="judgeProviderOptions()"
+              optionLabel="label"
+              optionValue="id"
+              [ngModel]="suite.judge?.provider ?? null"
+              (ngModelChange)="setJudgeProvider($event)"
+            />
+            @if (suite.judge; as judge) {
+              <p-select
+                size="small"
+                appendTo="body"
+                [editable]="true"
+                [options]="modelSuggestions(judge.provider)"
+                [ngModel]="judge.model"
+                (ngModelChange)="setJudgeModel($event)"
+              />
+            }
+          </div>
+        </section>
+      }
+
+      <section class="phorma-evals__section">
+        <label class="phorma-evals__label">
+          Compare models
+          <button
+            type="button"
+            class="phorma-evals__icon-btn"
+            title="Add comparison model"
+            aria-label="Add comparison model"
+            (click)="addComparisonModel()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </label>
+        @for (ref of suite.models ?? []; track $index; let i = $index) {
+          <div class="phorma-evals__model-row">
+            <p-select
+              size="small"
+              appendTo="body"
+              [options]="providers()"
+              optionLabel="label"
+              optionValue="id"
+              [ngModel]="ref.provider"
+              (ngModelChange)="patchComparisonModel(i, { provider: $event })"
+            />
+            <p-select
+              size="small"
+              appendTo="body"
+              [editable]="true"
+              [options]="modelSuggestions(ref.provider)"
+              [ngModel]="ref.model"
+              (ngModelChange)="patchComparisonModel(i, { model: $event })"
+            />
+            <button
+              type="button"
+              class="phorma-evals__icon-btn phorma-evals__icon-btn--danger"
+              title="Remove model"
+              aria-label="Remove model"
+              (click)="removeComparisonModel(i)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          </div>
+        } @empty {
+          <p class="phorma-evals__hint">
+            The suite runs once with the studio default model. Add models to re-run the suite
+            per model (agents pinning an explicit model are unaffected; local runs only).
+          </p>
+        }
+      </section>
+
+      <!-- ── Live progress while running ── -->
+      @if (liveRun(); as live) {
+        <section class="phorma-evals__section">
+          <label class="phorma-evals__label">Running…</label>
+          <ul class="phorma-evals__results">
+            @for (case_ of suite.cases; track case_.id) {
+              <li class="phorma-evals__result phorma-evals__result--live">
+                <i
+                  class="ti phorma-evals__result-status"
+                  [class.ti-loader-2]="liveStatus(case_.id) === 'running' || liveStatus(case_.id) === 'scoring'"
+                  [class.phorma-evals__spin]="liveStatus(case_.id) === 'running' || liveStatus(case_.id) === 'scoring'"
+                  [class.ti-circle-check]="liveStatus(case_.id) === 'passed'"
+                  [class.phorma-evals__result-status--passed]="liveStatus(case_.id) === 'passed'"
+                  [class.ti-circle-x]="liveStatus(case_.id) === 'failed'"
+                  [class.phorma-evals__result-status--failed]="liveStatus(case_.id) === 'failed'"
+                  [class.ti-alert-triangle]="liveStatus(case_.id) === 'error'"
+                  [class.phorma-evals__result-status--error]="liveStatus(case_.id) === 'error'"
+                  [class.ti-circle-dashed]="liveStatus(case_.id) === 'pending' || !liveStatus(case_.id)"
+                  aria-hidden="true"
+                ></i>
+                <span class="phorma-evals__result-title">{{ case_.name }}</span>
+                <span class="phorma-evals__result-sub">{{ liveStatus(case_.id) ?? 'pending' }}</span>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
+      <!-- ── Past eval runs ── -->
+      <section class="phorma-evals__section">
+        <label class="phorma-evals__label">Runs</label>
+        @if (evals.runs().length > 0) {
+          <ul class="phorma-evals__list">
+            @for (run of evals.runs(); track run.id) {
+              <li>
+                <button type="button" class="phorma-evals__list-item" (click)="openRun(run)">
+                  <span
+                    class="phorma-evals__pass-badge"
+                    [class.phorma-evals__pass-badge--ok]="passCounts(run).passed === passCounts(run).total && run.status === 'completed'"
+                  >
+                    {{ passCounts(run).passed }}/{{ passCounts(run).total }}
+                  </span>
+                  <span class="phorma-evals__list-meta">
+                    <span class="phorma-evals__list-title">
+                      {{ run.startedAt | date: 'MMM d, HH:mm:ss' }}
+                      @if (run.environment === 'cloud') {
+                        <i class="ti ti-cloud" aria-hidden="true" title="Cloud run"></i>
+                      }
+                    </span>
+                    <span class="phorma-evals__list-sub">
+                      {{ run.status }}
+                      @if (run.models.length > 0) {
+                        · {{ run.models.length }} {{ run.models.length === 1 ? 'model' : 'models' }}
+                      }
+                    </span>
+                  </span>
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="phorma-evals__delete"
+                    title="Delete eval run"
+                    aria-label="Delete eval run"
+                    (click)="deleteEvalRun(run, $event)"
+                    (keydown.enter)="deleteEvalRun(run, $event)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </span>
+                </button>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="phorma-evals__empty">This suite hasn't been run yet.</p>
+        }
+      </section>
+    } @else if (selectedRun(); as run) {
+      <!-- ── Results view ── -->
+      <div class="phorma-evals__detail-header phorma-evals__detail-header--sub">
+        <button type="button" class="phorma-evals__btn" (click)="closeRun()">
+          <i class="ti ti-arrow-left" aria-hidden="true"></i> Runs
+        </button>
+        <span
+          class="phorma-evals__pass-badge"
+          [class.phorma-evals__pass-badge--ok]="passCounts(run).passed === passCounts(run).total && run.status === 'completed'"
+        >
+          {{ passCounts(run).passed }}/{{ passCounts(run).total }} passed
+        </span>
+        <time class="phorma-evals__detail-time">{{ run.startedAt | date: 'MMM d, HH:mm:ss' }}</time>
+      </div>
+
+      <ul class="phorma-evals__results">
+        @for (result of run.results; track resultKey(result)) {
+          <li>
+            <div
+              class="phorma-evals__result"
+              role="button"
+              tabindex="0"
+              (click)="toggleResult(result)"
+              (keydown.enter)="toggleResult(result)"
+            >
+              <i
+                class="{{ resultIcon(result) }} phorma-evals__result-status phorma-evals__result-status--{{ result.status }}"
+                aria-hidden="true"
+              ></i>
+              <span class="phorma-evals__result-meta">
+                <span class="phorma-evals__result-title">
+                  {{ caseName(run, result) }}
+                  @if (result.model) {
+                    <span class="phorma-evals__model-badge">{{ result.model }}</span>
+                  }
+                </span>
+                <span class="phorma-evals__result-sub">
+                  @if (result.score !== undefined) {
+                    score {{ result.score | number: '1.0-2' }} ·
+                  }
+                  {{ duration(result.durationMs) }}
+                  @if (result.costUsd) {
+                    · ${{ result.costUsd | number: '1.4-4' }}
+                  }
+                </span>
+              </span>
+              @if (result.runId) {
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-evals__icon-btn"
+                  title="Bring run to canvas"
+                  aria-label="Bring run to canvas"
+                  (click)="openCaseRun(run, result, $event)"
+                  (keydown.enter)="openCaseRun(run, result, $event)"
+                >
+                  <i class="ti ti-layout-grid-add" aria-hidden="true"></i>
+                </span>
+              }
+            </div>
+            @if (isResultExpanded(result)) {
+              <div class="phorma-evals__result-detail">
+                @if (result.error) {
+                  <p class="phorma-evals__result-error">{{ result.error }}</p>
+                }
+                @if (result.judgeReasoning) {
+                  <p class="phorma-evals__result-reasoning">{{ result.judgeReasoning }}</p>
+                }
+                @if (result.output) {
+                  <pre class="phorma-evals__result-output">{{ result.output }}</pre>
+                }
+              </div>
+            }
+          </li>
+        } @empty {
+          <p class="phorma-evals__empty">No results recorded.</p>
+        }
+      </ul>
+    }
+  }
+</div>

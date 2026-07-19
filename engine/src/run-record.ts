@@ -23,8 +23,11 @@ import type { ModelUsage } from './model.js';
 import { withEstimatedCost, type CostEstimator } from './pricing.js';
 import type { WorkflowGraph } from './types.js';
 
-/** What initiated a run. `resume` = journal replay after host eviction. */
-export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume';
+/**
+ * What initiated a run. `resume` = journal replay after host eviction.
+ * `eval` = a test case executed by an eval suite run.
+ */
+export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume' | 'eval';
 
 /** Where the run executed. */
 export type RunEnvironment = 'local' | 'cloud';

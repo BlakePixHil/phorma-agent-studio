@@ -49,6 +49,12 @@
           <app-usage-panel />
         }
       </ng-template>
+
+      <ng-template sidePanelPane tabId="evals">
+        @defer (on immediate) {
+          <app-evals-panel />
+        }
+      </ng-template>
     </app-sidebar>
 
     <!-- ── Right sidebar (z-10) ── -->
@@ -68,6 +74,12 @@
       <ng-template sidePanelPane tabId="usage">
         @defer (on immediate) {
           <app-usage-panel />
+        }
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="evals">
+        @defer (on immediate) {
+          <app-evals-panel />
         }
       </ng-template>
 

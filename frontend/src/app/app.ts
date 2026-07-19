@@ -19,6 +19,7 @@ import { PromptPanel } from './workspace/prompt/prompt-panel/prompt-panel';
 import { PropertiesPanel } from './workspace/properties/properties-panel/properties-panel';
 import { RunsPanel } from './workspace/runs/runs-panel/runs-panel';
 import { UsagePanel } from './workspace/usage/usage-panel/usage-panel';
+import { EvalsPanel } from './workspace/evals/evals-panel/evals-panel';
 import { SettingsDialog } from './workspace/settings/settings-dialog/settings-dialog';
 import { CloudDialog } from './workspace/cloud/cloud-dialog/cloud-dialog';
 import { CreditsDialog } from './workspace/cloud/credits-dialog/credits-dialog';
@@ -51,6 +52,7 @@ import { Toast } from './shared/toast/toast';
     PropertiesPanel,
     RunsPanel,
     UsagePanel,
+    EvalsPanel,
     SettingsDialog,
     CloudDialog,
     CreditsDialog,

@@ -9,7 +9,7 @@
  *
  * HTTP surface (all under /agents/workflow-agent/{instance}):
  *   POST /workflow   — upload/replace the workflow spec (studio "Push")
- *   POST /trigger    — start a run { input?: string } → { runId }
+ *   POST /trigger    — start a run { input?: string, source?: 'eval' } → { runId }
  *   POST /events     — deliver an external event to a suspended Wait-for-Event
  *                      node: { correlationKey, payload? } → { ok, delivered }.
  *                      This is the webhook target for e-sign callbacks etc.
@@ -288,8 +288,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
 
     if (request.method === 'POST' && path.endsWith('/trigger')) {
-      const body = (await request.json().catch(() => ({}))) as { input?: string };
-      const result = await this.trigger(body.input ?? '');
+      const body = (await request.json().catch(() => ({}))) as {
+        input?: string;
+        source?: string;
+      };
+      // Callers may tag eval-suite case runs; everything else stays manual.
+      const source: RunSource = body.source === 'eval' ? 'eval' : 'manual';
+      const result = await this.trigger(body.input ?? '', undefined, source);
       return json(result, result.ok ? 200 : (result.status ?? 409));
     }
 

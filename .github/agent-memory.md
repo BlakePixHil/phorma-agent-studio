@@ -243,3 +243,11 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 - 2026-07-19 - Local `wrangler dev` for `cloud/` picks up the repo `.env` (Clerk keys) → auth fails closed with 401. For open-instance local testing run `npx wrangler dev --local --env-file /tmp/empty/.env` (an empty env file).
 
 <!-- Append new dated learnings below, grouped under the topic headings above (create a new heading if none fits). -->
+
+## Evals (EPIC 4)
+
+- 2026-07-19 - EVALS shipped: `engine/src/evals.ts` owns suite/case/result types + pure `scoreOutput` (exact/contains/llm-judge; judge failures REJECT so callers record `error` status, never a silent pass/fail; `parseJudgeVerdict` walks balanced braces to survive prose/fences around JSON). `RunSource` now includes `'eval'`. E2E: `engine/test/evals.e2e.mts`.
+- 2026-07-19 - Eval runner architecture: `EvalRunnerService` bypasses the single-run `RunControllerService` and calls engine `startRun` directly per case (own `createRunRecorder`, pool of 3 locally). Case runs land in normal run history via `RunHistoryService.saveExternalRecord(record)` (added for recorders created outside the service). Unattended-run policy: `requestApproval: async () => true`, `waitForEvent` rejects immediately.
+- 2026-07-19 - Cloud eval runs: DO `POST /trigger` accepts optional `source` (whitelisted to `'eval'`, else `'manual'`); new `CloudService.triggerHttp(workflowId, input, source?)` (the WS `triggerRemote` needs a connected monitor - HTTP path doesn't). No await-completion endpoint on the DO: poll `GET /runs` until the summary settles. Sequential only - DO 409s concurrent triggers.
+- 2026-07-19 - Model comparison passes override `RunOptions.defaultModel` only (agents pinning provider/model unaffected). Deliberately local-only: cloud specs are materialized at push time (`materializeDefaults`), so defaultModel has no effect there.
+- 2026-07-19 - IndexedDB is now v4: `eval-suites` (by-workflow) + `eval-runs` (by-suite, by-workflow) stores; same `workflowKey: id ?? 'draft'` null-key workaround. Deleting a suite deletes its eval runs.

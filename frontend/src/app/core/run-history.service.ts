@@ -109,6 +109,24 @@ export class RunHistoryService {
     return this.storage.getRun(id);
   }
 
+  /**
+   * Persists a run recorded OUTSIDE the single active recorder — eval case
+   * runs (EPIC 4) build their own recorders (several run concurrently) but
+   * still land in normal run history with the same pruning + usage ledger.
+   */
+  async saveExternalRecord(record: RunRecord): Promise<void> {
+    try {
+      await this.storage.saveRun(record);
+      if (record.summary.endedAt !== undefined) {
+        await this.storage.pruneRuns(record.summary.workflowId, RUN_HISTORY_LIMIT);
+        await this.storage.saveUsage(usageLedgerEntryOf(record.summary)).catch(() => undefined);
+      }
+      await this.refresh();
+    } catch {
+      // Persistence failures must never break an eval run.
+    }
+  }
+
   async deleteRun(id: string): Promise<void> {
     await this.storage.removeRun(id);
     await this.refresh();

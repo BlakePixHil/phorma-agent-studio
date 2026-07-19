@@ -265,6 +265,8 @@ export class RunsPanel {
         return 'ti ti-webhook';
       case 'resume':
         return 'ti ti-refresh';
+      case 'eval':
+        return 'ti ti-flask';
       default:
         return 'ti ti-hand-click';
     }

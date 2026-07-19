@@ -446,7 +446,33 @@ export class CloudService {
   }
 
   // ── Remote run control (over the socket) ───────────────────────────────────
-
+  /**
+   * Triggers a run over HTTP (no monitor socket required) — used by the
+   * eval runner (EPIC 4), which polls `listRuns` for completion instead of
+   * listening on the WebSocket. Throws on rejection (409 busy, 402 quota…).
+   */
+  async triggerHttp(
+    workflowId: string,
+    input: string,
+    source?: 'eval',
+  ): Promise<{ runId: string }> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) throw new Error('Cloud worker is not configured.');
+    const response = await fetch(`${base}/trigger`, {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ input, ...(source ? { source } : {}) }),
+    });
+    const body = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      runId?: string;
+      error?: string;
+    } | null;
+    if (!response.ok || !body?.ok || !body.runId) {
+      throw new Error(body?.error ?? `Trigger failed (HTTP ${response.status}).`);
+    }
+    return { runId: body.runId };
+  }
   triggerRemote(input: string): void {
     if (!this.send({ type: 'trigger', input })) {
       this.toast.warning('Not connected', 'Connect the cloud monitor first.');
