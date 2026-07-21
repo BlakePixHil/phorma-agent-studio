@@ -281,7 +281,7 @@ export class AssistantChatService {
   /** Applies a plan-proposal attachment onto the canvas. */
   async applyProposal(turn: ChatTurn): Promise<void> {
     const attachment = turn.attachment;
-    if (!attachment || attachment.kind !== 'plan-proposal' || attachment.appliedAt) return;
+    if (!attachment || attachment.kind !== 'plan-proposal') return;
     if (this.busy()) return;
     this.busy.set(true);
     try {
@@ -341,6 +341,12 @@ export class AssistantChatService {
       // Recording must never break the palette flow.
     }
     return thread;
+  }
+
+  /** Re-runs a user turn — sends the same text again in the same mode. */
+  async reRunTurn(turn: ChatTurn): Promise<void> {
+    if (this.busy()) return;
+    await this.send(turn.text, turn.mode);
   }
 
   /** Opens a thread by id (used by the palette's "Continue in chat"). */

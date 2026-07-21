@@ -14,7 +14,30 @@
       @for (turn of thread.turns; track turn.id) {
         @if (turn.role === 'user') {
           <div class="phorma-chat__turn phorma-chat__turn--user">
-            <div class="phorma-chat__bubble phorma-chat__bubble--user selectable">{{ turn.text }}</div>
+            <div class="phorma-chat__bubble phorma-chat__bubble--user selectable">
+              {{ turn.text }}
+              <button
+                type="button"
+                class="phorma-chat__bubble-action"
+                [title]="copiedTurnId() === turn.id ? 'Copied!' : 'Copy prompt'"
+                aria-label="Copy prompt"
+                (click)="copyTurn(turn)"
+              >
+                <i class="ti" [class.ti-copy]="copiedTurnId() !== turn.id" [class.ti-check]="copiedTurnId() === turn.id" aria-hidden="true"></i>
+              </button>
+            </div>
+            @if (!chat.busy()) {
+              <button
+                type="button"
+                class="phorma-chat__rerun"
+                title="Re-run this prompt"
+                aria-label="Re-run this prompt"
+                (click)="reRunTurn(turn)"
+              >
+                <i class="ti ti-refresh" aria-hidden="true"></i>
+                <span>Re-run</span>
+              </button>
+            }
           </div>
         } @else {
           <div class="phorma-chat__turn phorma-chat__turn--assistant">
@@ -69,6 +92,14 @@
                       <p class="phorma-chat__proposal-applied">
                         <i class="ti ti-check" aria-hidden="true"></i> Applied to canvas
                       </p>
+                      <button
+                        type="button"
+                        class="phorma-chat__apply phorma-chat__apply--reapply"
+                        [disabled]="chat.busy()"
+                        (click)="applyProposal(turn)"
+                      >
+                        <i class="ti ti-refresh" aria-hidden="true"></i> Re-apply to canvas
+                      </button>
                     } @else {
                       <button
                         type="button"
