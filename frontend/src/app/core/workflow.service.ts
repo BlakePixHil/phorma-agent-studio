@@ -2,6 +2,7 @@ import { computed, effect, Injectable, inject, signal } from '@angular/core';
 
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { SettingsService } from './settings.service';
+import { SkillsService } from './skills.service';
 import { buildNodeFromCatalog, findCatalogEntry } from './node-catalog';
 import { loadLayout, saveLayout } from './layout-storage';
 import { ToastService } from '../shared/toast/toast.service';
@@ -56,6 +57,7 @@ let docCounter = 0;
 export class WorkflowService {
   private readonly storage = inject(IndexedDbStorageService);
   private readonly settings = inject(SettingsService);
+  private readonly skillsLibrary = inject(SkillsService);
   private readonly toast = inject(ToastService);
   private readonly confirmDialog = inject(ConfirmDialogService);
 
@@ -397,12 +399,16 @@ export class WorkflowService {
   exportActiveSpec(): WorkflowSpec | null {
     const doc = this.activeDoc();
     if (!doc) return null;
+    const graph = structuredClone(doc.graph);
+    // Exported specs travel without the studio's skill library — refresh
+    // the embedded skill copies so the file carries current content.
+    this.skillsLibrary.syncAttachedSkills(graph);
     return {
       version: WORKFLOW_SPEC_VERSION,
       id: doc.workflowId ?? `wf-${Date.now().toString(36)}`,
       name: doc.name,
       description: doc.description || undefined,
-      graph: structuredClone(doc.graph),
+      graph,
       settings: Object.keys(doc.settings).length > 0 ? { ...doc.settings } : undefined,
       savedAt: new Date().toISOString(),
     };

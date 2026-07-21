@@ -15,6 +15,7 @@ export interface PanelTab {
 const DEFAULT_TABS: PanelTab[] = [
   { id: 'agents',     label: 'Agents',     icon: 'ti ti-robot',      side: 'left',  order: 0 },
   { id: 'workflows',  label: 'Workflows',  icon: 'ti ti-topology-star-3', side: 'left', order: 1 },
+  { id: 'skills',     label: 'Skills',     icon: 'ti ti-books',      side: 'left',  order: 2 },
   { id: 'prompt',     label: 'Prompt',     icon: 'ti ti-message-2',  side: 'right', order: 0 },
   { id: 'properties', label: 'Properties', icon: 'ti ti-adjustments', side: 'right', order: 1 },
   { id: 'runs',       label: 'Runs',       icon: 'ti ti-history',    side: 'right', order: 2 },

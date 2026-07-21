@@ -969,9 +969,9 @@ class WorkflowRun {
   }
 
   /**
-   * Renders the agent's markdown prompt: interpolates `{{input}}` and appends
-   * a capabilities section describing attached tools and handoff targets so
-   * the model knows its place in the workflow.
+   * Renders the agent's markdown prompt: interpolates `{{input}}`, appends
+   * attached skills, and appends a capabilities section describing attached
+   * tools and handoff targets so the model knows its place in the workflow.
    */
   private renderPrompt(
     template: string,
@@ -982,6 +982,18 @@ class WorkflowRun {
     // `{{input}}` interpolates the whole payload; `{{a.b.c}}` digs into it
     // when the payload parses as JSON (structured handoffs).
     let prompt = interpolatePayload(template, payload);
+
+    // Attached skills render verbatim (no interpolation - skills are static
+    // guidance, not task templates), in attachment order, before the
+    // capabilities/hand-off sections.
+    const skills = (node.data as AgentNodeData).skills;
+    if (Array.isArray(skills)) {
+      for (const skill of skills) {
+        if (!skill || typeof skill.content !== 'string' || !skill.content.trim()) continue;
+        const name = typeof skill.name === 'string' && skill.name.trim() ? skill.name.trim() : 'Skill';
+        prompt += `\n\n# Skill: ${name}\n\n${skill.content.trim()}`;
+      }
+    }
 
     const tools = this.attachedTools(node);
     if (tools.length > 0 && !toolsCallable) {

@@ -1,0 +1,90 @@
+<div class="phorma-skills">
+  <section class="phorma-skills__section">
+    <label class="phorma-skills__label">
+      Skill library
+      <span class="phorma-skills__label-actions">
+        <label class="phorma-skills__icon-btn" title="Import SKILL.md" aria-label="Import SKILL.md">
+          <i class="ti ti-file-import" aria-hidden="true"></i>
+          <input type="file" accept=".md,.markdown,text/markdown" (change)="importFile($event)" hidden />
+        </label>
+        <button
+          type="button"
+          class="phorma-skills__icon-btn"
+          title="New skill"
+          aria-label="New skill"
+          (click)="newSkill()"
+        >
+          <i class="ti ti-plus" aria-hidden="true"></i>
+        </button>
+      </span>
+    </label>
+
+    @if (skills.skills().length > 0) {
+      <ul class="phorma-skills__list">
+        @for (skill of skills.skills(); track skill.id) {
+          <li>
+            <button type="button" class="phorma-skills__list-item" (click)="editSkill(skill)">
+              <i class="ti ti-books phorma-skills__list-icon" aria-hidden="true"></i>
+              <span class="phorma-skills__list-meta">
+                <span class="phorma-skills__list-title">{{ skill.name }}</span>
+                <span class="phorma-skills__list-sub">
+                  @if (skill.description) {
+                    {{ skill.description }}
+                  } @else {
+                    updated {{ skill.updatedAt | date: 'MMM d, HH:mm' }}
+                  }
+                </span>
+                @if (usedBy().get(skill.id); as count) {
+                  <span class="phorma-skills__used-by">
+                    <i class="ti ti-robot" aria-hidden="true"></i>
+                    Used by {{ count }} {{ count === 1 ? 'agent' : 'agents' }} on this canvas
+                  </span>
+                }
+              </span>
+              <span class="phorma-skills__row-actions">
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-skills__row-btn"
+                  title="Export SKILL.md"
+                  aria-label="Export SKILL.md"
+                  (click)="exportSkill(skill, $event)"
+                  (keydown.enter)="exportSkill(skill, $event)"
+                >
+                  <i class="ti ti-file-export" aria-hidden="true"></i>
+                </span>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-skills__row-btn"
+                  title="Duplicate skill"
+                  aria-label="Duplicate skill"
+                  (click)="duplicateSkill(skill, $event)"
+                  (keydown.enter)="duplicateSkill(skill, $event)"
+                >
+                  <i class="ti ti-copy" aria-hidden="true"></i>
+                </span>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-skills__row-btn phorma-skills__row-btn--danger"
+                  title="Delete skill"
+                  aria-label="Delete skill"
+                  (click)="deleteSkill(skill, $event)"
+                  (keydown.enter)="deleteSkill(skill, $event)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </span>
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    } @else {
+      <p class="phorma-skills__empty">
+        No skills yet. A skill is reusable markdown guidance (conventions, tool-usage
+        instructions, domain rules) you attach to agents from their Prompt panel.
+      </p>
+    }
+  </section>
+</div>

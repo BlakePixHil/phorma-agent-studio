@@ -31,6 +31,10 @@
         <app-workflows-panel />
       </ng-template>
 
+      <ng-template sidePanelPane tabId="skills">
+        <app-skills-panel />
+      </ng-template>
+
       <ng-template sidePanelPane tabId="prompt">
         <app-prompt-panel />
       </ng-template>
@@ -103,6 +107,10 @@
       <ng-template sidePanelPane tabId="workflows">
         <app-workflows-panel />
       </ng-template>
+
+      <ng-template sidePanelPane tabId="skills">
+        <app-skills-panel />
+      </ng-template>
     </app-sidebar>
   </div>
 
@@ -133,6 +141,9 @@
 
   <!-- ── AI Assistant (expanded chat dialog — EPIC 5) ── -->
   <app-assistant-dialog />
+
+  <!-- ── Skill editor (create/edit library skills — EPIC 6) ── -->
+  <app-skill-editor-dialog />
 
   <!-- ── First-run onboarding wizard ── -->
   <app-onboarding-dialog />

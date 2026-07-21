@@ -29,6 +29,9 @@ function describeNode(node: WorkflowNode): string {
       .find(line => line.length > 0 && !line.startsWith('#'));
     if (gist) parts.push(`prompt-gist: "${gist.slice(0, 120)}"`);
   }
+  if (isAgentNode(node) && node.data.skills?.length) {
+    parts.push(`skills: [${node.data.skills.map(skill => `"${skill.name}"`).join(', ')}]`);
+  }
   return parts.join(' | ');
 }
 

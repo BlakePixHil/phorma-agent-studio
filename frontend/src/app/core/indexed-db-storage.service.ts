@@ -3,10 +3,11 @@ import { Injectable } from '@angular/core';
 import type { EvalRunSummary, EvalSuite, RunRecord, UsageLedgerEntry } from '@phorma/engine';
 
 import type { ChatThread } from './assistant-chat.model';
+import type { SkillDef } from './skills.model';
 import type { WorkflowSpec } from './workflow.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -45,6 +46,12 @@ const CHAT_THREADS_BY_WORKFLOW = 'by-workflow';
 
 /** Chat-thread retention per workflow (newest kept). */
 const CHAT_THREADS_KEEP = 50;
+
+/**
+ * Object store holding {@link SkillDef} documents (keyPath `id`) — EPIC 6.
+ * The skill library is GLOBAL (cross-workflow), so there is no workflow index.
+ */
+const SKILLS_STORE = 'skills';
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -265,6 +272,31 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Skill library (EPIC 6) ─────────────────────────────────────────────
+
+  /** All library skills, most recently updated first. */
+  async listSkills(): Promise<SkillDef[]> {
+    const db = await this.open();
+    const skills = await this.request<SkillDef[]>(
+      db.transaction(SKILLS_STORE, 'readonly').objectStore(SKILLS_STORE).getAll(),
+    );
+    return skills.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async saveSkill(skill: SkillDef): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(SKILLS_STORE, 'readwrite').objectStore(SKILLS_STORE).put(skill),
+    );
+  }
+
+  async removeSkill(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(SKILLS_STORE, 'readwrite').objectStore(SKILLS_STORE).delete(id),
+    );
+  }
+
   /** Deletes this workflow's oldest chat threads beyond {@link CHAT_THREADS_KEEP}. */
   private async pruneChatThreads(workflowId: string | null): Promise<void> {
     const threads = await this.listChatThreads(workflowId);
@@ -324,6 +356,9 @@ export class IndexedDbStorageService {
         if (!db.objectStoreNames.contains(CHAT_THREADS_STORE)) {
           const chats = db.createObjectStore(CHAT_THREADS_STORE, { keyPath: 'id' });
           chats.createIndex(CHAT_THREADS_BY_WORKFLOW, 'workflowKey');
+        }
+        if (!db.objectStoreNames.contains(SKILLS_STORE)) {
+          db.createObjectStore(SKILLS_STORE, { keyPath: 'id' });
         }
       };
       request.onsuccess = () => resolve(request.result);

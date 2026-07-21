@@ -65,6 +65,16 @@ export interface RendererNode {
    * corner; click opens a popover with details + a settings deep-link.
    */
   warning?: boolean;
+  /**
+   * Number of skills attached to this agent (EPIC 6). Non-zero draws a
+   * small count pill in the header, left of the kind badge, using
+   * `skillGlyph`/`skillFont` for the book icon.
+   */
+  skillCount?: number;
+  /** Resolved icon glyph for the skill badge (e.g. Tabler books). */
+  skillGlyph?: string;
+  /** Icon font for {@link skillGlyph}. */
+  skillFont?: string;
 }
 
 export interface RendererEdge {
@@ -1333,13 +1343,42 @@ export class CanvasGraphRenderer {
       ctx.fillText(badgeText, bx + bw / 2, by + bh / 2 + 0.5);
       ctx.textAlign = 'left';
 
-      // Title (clipped between chip and badge).
+      // Skill-count pill (EPIC 6) — a compact book+count chip left of the
+      // kind badge, so agents with attached skills read at a glance.
+      let titleClipEnd = bx;
+      if (n.skillCount && n.skillCount > 0) {
+        ctx.font = '600 8px Nunito, system-ui, sans-serif';
+        const countText = String(n.skillCount);
+        const glyphW = 9;
+        const sbw = ctx.measureText(countText).width + glyphW + 10;
+        const sbx = bx - sbw - 4;
+        const sby = n.y + (HEADER_H - bh) / 2;
+        ctx.save();
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = n.accent;
+        this.roundRect(ctx, sbx, sby, sbw, bh, 4);
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = n.accent;
+        ctx.textBaseline = 'middle';
+        if (n.skillGlyph && n.skillFont) {
+          ctx.font = `9px "${n.skillFont}"`;
+          ctx.textAlign = 'left';
+          ctx.fillText(n.skillGlyph, sbx + 4, sby + bh / 2 + 0.5);
+        }
+        ctx.font = '600 8px Nunito, system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(countText, sbx + glyphW + 6, sby + bh / 2 + 0.5);
+        titleClipEnd = sbx;
+      }
+
+      // Title (clipped between chip and the leftmost header badge).
       ctx.fillStyle = this.theme.nodeTitle;
       ctx.font = '600 12px Nunito, system-ui, sans-serif';
       ctx.save();
       ctx.beginPath();
       const titleX = chipX + chip + 7;
-      ctx.rect(titleX, n.y, bx - titleX - 6, HEADER_H);
+      ctx.rect(titleX, n.y, titleClipEnd - titleX - 6, HEADER_H);
       ctx.clip();
       ctx.fillText(n.title, titleX, n.y + HEADER_H / 2 + 0.5);
       ctx.restore();

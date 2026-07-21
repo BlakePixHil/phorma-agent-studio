@@ -84,6 +84,51 @@ ${summarizeGraph(graph)}`,
       this.generatingFor.set(null);
     }
   }
+
+  /**
+   * Drafts (or improves) an agent skill's markdown body (EPIC 6). Skills are
+   * reusable guidance fragments, so the prompt asks for durable instructions
+   * rather than a task-specific role. Returns the markdown, or null on
+   * cancellation/empty output.
+   */
+  async generateSkill(seed: { name: string; description?: string; content?: string }): Promise<string | null> {
+    if (this.generatingFor()) return null;
+    this.generatingFor.set('__skill__');
+    try {
+      const model = this.builder.resolveModel();
+      const current = seed.content?.trim();
+      const request: ModelRequest = {
+        provider: model.provider,
+        model: model.model,
+        system: `You write reusable "skills" for AI agents in a workflow tool. A skill is a markdown fragment of durable guidance (conventions, tool-usage instructions, domain rules) appended to an agent's system prompt. Respond with ONLY the skill markdown body - no YAML frontmatter, no fences, no commentary. Write imperative, specific guidance under a few short headings; stay under 400 words. The skill must be reusable across workflows - never reference a specific workflow, node, or task instance.`,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              `Write the skill named "${seed.name.trim() || 'Untitled skill'}".`,
+              seed.description?.trim() ? `Its purpose: ${seed.description.trim()}` : '',
+              current
+                ? `Improve on its current body (keep the intent, raise the quality):\n\n${current}`
+                : 'It has no body yet - draft one from the name and purpose.',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        ],
+        temperature: 0.5,
+        maxTokens: 1024,
+      };
+
+      let text = '';
+      for await (const chunk of this.transport.create().stream(request)) {
+        if (chunk.type === 'text') text += chunk.text;
+      }
+      const body = stripFences(text.trim());
+      return body || null;
+    } finally {
+      this.generatingFor.set(null);
+    }
+  }
 }
 
 /** Strips accidental markdown fences from the model's output. */

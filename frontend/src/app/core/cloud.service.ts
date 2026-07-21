@@ -6,6 +6,7 @@ import type { RunEvent, RunRecord, RunRecordSummary, UsageLedgerEntry } from '@p
 
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
+import { SkillsService } from './skills.service';
 import { TauriService } from './tauri.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { WorkflowService } from './workflow.service';
@@ -37,6 +38,7 @@ export class CloudService {
   private readonly terminal = inject(TerminalOutputService);
   private readonly toast = inject(ToastService);
   private readonly settings = inject(SettingsService);
+  private readonly skillsLibrary = inject(SkillsService);
   private readonly clerk = inject(ClerkService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
@@ -282,6 +284,9 @@ export class CloudService {
    */
   private materializeDefaults(spec: WorkflowSpec): WorkflowSpec {
     const resolved = structuredClone(spec);
+    // Deployed runs can't reach the studio's skill library — refresh the
+    // embedded skill copies now so the cloud executes current content.
+    this.skillsLibrary.syncAttachedSkills(resolved.graph);
     for (const node of resolved.graph.nodes) {
       if (!isAgentNode(node)) continue;
       if (!node.data.provider || !node.data.model) {

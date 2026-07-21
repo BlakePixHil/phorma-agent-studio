@@ -50,6 +50,66 @@
       </p>
     </section>
 
+    <!-- Skills (EPIC 6) -->
+    <section class="phorma-prompt__section">
+      <label class="phorma-prompt__label">
+        Skills
+        <button
+          type="button"
+          class="phorma-prompt__label-btn"
+          title="Open the Skills panel"
+          aria-label="Open the Skills panel"
+          (click)="openSkillsPanel()"
+        >
+          <i class="ti ti-books" aria-hidden="true"></i>
+          Manage
+        </button>
+      </label>
+      @if (attachedSkills().length > 0) {
+        <ul class="phorma-prompt__skill-chips">
+          @for (skill of attachedSkills(); track skill.id) {
+            <li class="phorma-prompt__skill-chip" [title]="skill.description || skill.name">
+              <i class="ti ti-books" aria-hidden="true"></i>
+              <span class="phorma-prompt__skill-chip-name">{{ skill.name }}</span>
+              <button
+                type="button"
+                class="phorma-prompt__skill-chip-remove"
+                title="Detach skill"
+                aria-label="Detach skill"
+                (click)="detachSkill(skill.id)"
+              >
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+      @if (attachableSkills().length > 0) {
+        <p-select
+          class="phorma-prompt__skill-add"
+          [options]="attachableSkills()"
+          optionLabel="name"
+          optionValue="id"
+          [ngModel]="null"
+          (ngModelChange)="attachSkill($event)"
+          size="small"
+          appendTo="body"
+          placeholder="Add skill…"
+          ariaLabel="Add skill"
+        />
+      } @else if (!libraryHasSkills()) {
+        <p class="phorma-prompt__hint">
+          No skills in the library yet.
+          <button type="button" class="phorma-prompt__link" (click)="newSkill()">
+            Create one
+          </button>
+          — reusable markdown guidance appended to this agent's prompt.
+        </p>
+      } @else if (attachedSkills().length > 0) {
+        <p class="phorma-prompt__hint">All library skills attached.</p>
+      }
+    </section>
+
     <!-- Model configuration -->
     <section class="phorma-prompt__section">
       <label class="phorma-prompt__label">Model</label>

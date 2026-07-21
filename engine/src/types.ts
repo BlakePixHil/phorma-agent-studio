@@ -92,6 +92,22 @@ export interface AgentFallbackModel {
   model: string;
 }
 
+/**
+ * A skill attached to an agent - a named, reusable markdown fragment
+ * (prompt guidance + tool-usage instructions) appended to the agent's
+ * rendered system prompt. Skills are embedded BY VALUE in the spec so
+ * workflows stay portable; the `id` links back to the studio's skill
+ * library for re-sync. Markdown only - no scripts, no sandbox.
+ */
+export interface AgentSkill {
+  /** Library id (stable across edits; used to refresh embedded copies). */
+  id: string;
+  name: string;
+  description?: string;
+  /** Markdown body. Rendered verbatim into the system prompt (no `{{input}}` interpolation). */
+  content: string;
+}
+
 export interface AgentNodeData {
   /** Markdown system prompt. `{{input}}` interpolates the incoming task. */
   prompt: string;
@@ -122,6 +138,11 @@ export interface AgentNodeData {
   errorPortId?: string;
   /** True disables automatic context compression for long tool loops. */
   compressionDisabled?: boolean;
+  /**
+   * Skills attached to this agent, embedded by value (see {@link AgentSkill}).
+   * Rendered into the system prompt in array order.
+   */
+  skills?: AgentSkill[];
 }
 
 export interface WorkflowNode {

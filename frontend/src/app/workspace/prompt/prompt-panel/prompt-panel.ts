@@ -7,10 +7,14 @@ import { marked } from 'marked';
 
 import { FieldGenerationService } from '../../../core/field-generation.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
+import { PanelRegistryService } from '../../../core/panel-registry.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { SelectionService } from '../../../core/selection.service';
 import { SettingsService } from '../../../core/settings.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
+import { SkillEditorDialogService } from '../../skills/skill-editor-dialog.service';
+import { SkillsService } from '../../../core/skills.service';
+import { toAgentSkill } from '../../../core/skills.model';
 import { WorkflowService } from '../../../core/workflow.service';
 import {
   MODEL_PROVIDERS,
@@ -62,6 +66,9 @@ export class PromptPanel {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly settingsDialog = inject(SettingsDialogService);
   protected readonly fieldGen = inject(FieldGenerationService);
+  private readonly skills = inject(SkillsService);
+  private readonly skillEditor = inject(SkillEditorDialogService);
+  private readonly panels = inject(PanelRegistryService);
 
   /**
    * Provider options: "Application default" first, then explicit providers.
@@ -159,6 +166,56 @@ export class PromptPanel {
     if (LIVE_FETCH_PROVIDERS.has(provider)) return this.modelFetchError() === null;
     return false;
   });
+
+  // ── Skills (EPIC 6) ───────────────────────────────────────────────────
+
+  /** Skills attached to the selected agent (embedded by value). */
+  protected readonly attachedSkills = computed(() => this.agent()?.data.skills ?? []);
+
+  /** Library skills not yet attached — options for the "Add skill" picker. */
+  protected readonly attachableSkills = computed(() => {
+    const attached = new Set(this.attachedSkills().map(skill => skill.id));
+    return this.skills.skills().filter(skill => !attached.has(skill.id));
+  });
+
+  /** Whether the library has any skills at all (drives the empty hint). */
+  protected readonly libraryHasSkills = computed(() => this.skills.skills().length > 0);
+
+  /** Attaches a library skill (embedded by value) to the selected agent. */
+  protected attachSkill(skillId: string | null): void {
+    const agent = this.agent();
+    if (!agent || !skillId) return;
+    const skill = this.skills.byId().get(skillId);
+    if (!skill || this.attachedSkills().some(attached => attached.id === skillId)) return;
+    this.workflow.updateNodeData(agent.id, {
+      skills: [...this.attachedSkills(), toAgentSkill(skill)],
+    });
+  }
+
+  protected detachSkill(skillId: string): void {
+    const agent = this.agent();
+    if (!agent) return;
+    const remaining = this.attachedSkills().filter(skill => skill.id !== skillId);
+    // Empty lists serialize absent — keep specs clean.
+    this.workflow.updateNodeData(agent.id, {
+      skills: remaining.length > 0 ? remaining : undefined,
+    });
+  }
+
+  /** Opens the Skills panel (library management lives there). */
+  protected openSkillsPanel(): void {
+    const tab = this.panels.tabs().find(t => t.id === 'skills');
+    const side = tab?.side ?? 'left';
+    this.panels.setActive(side, 'skills');
+    // Reveal the sidebar if it's collapsed.
+    if (side === 'left') this.panels.collapsedLeft.set(false);
+    else this.panels.collapsedRight.set(false);
+  }
+
+  /** Creates a new skill via the editor dialog. */
+  protected newSkill(): void {
+    this.skillEditor.openNew();
+  }
 
   /** Tools attached to this agent via tool-links. */
   protected readonly attachedTools = computed<WorkflowNode[]>(() => {

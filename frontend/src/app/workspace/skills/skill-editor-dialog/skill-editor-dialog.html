@@ -1,0 +1,137 @@
+@if (dialog.visible()) {
+  <div class="phorma-skill-editor" role="presentation" (click)="dialog.close()">
+    <section
+      class="phorma-skill-editor__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Skill editor"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-skill-editor__header">
+        <span class="phorma-skill-editor__icon">
+          <i class="ti ti-books" aria-hidden="true"></i>
+        </span>
+        <div>
+          <h2>{{ dialog.editing() ? 'Edit skill' : 'New skill' }}</h2>
+          <p>
+            A skill is reusable markdown guidance attached to agents — conventions, tool-usage
+            instructions, domain rules. Markdown only; no scripts.
+          </p>
+        </div>
+      </header>
+
+      <div class="phorma-skill-editor__body">
+        <div class="phorma-skill-editor__field">
+          <label class="phorma-skill-editor__label" for="skill-name">Name</label>
+          <input
+            id="skill-name"
+            type="text"
+            class="phorma-skill-editor__input"
+            [value]="name()"
+            (input)="onNameInput($event)"
+            placeholder="e.g. API documentation conventions"
+            maxlength="80"
+          />
+        </div>
+
+        <div class="phorma-skill-editor__field">
+          <label class="phorma-skill-editor__label" for="skill-description">
+            Description <span class="phorma-skill-editor__optional">optional</span>
+          </label>
+          <input
+            id="skill-description"
+            type="text"
+            class="phorma-skill-editor__input"
+            [value]="description()"
+            (input)="onDescriptionInput($event)"
+            placeholder="One line on when to attach this skill"
+            maxlength="200"
+          />
+        </div>
+
+        <div class="phorma-skill-editor__field phorma-skill-editor__field--grow">
+          <label class="phorma-skill-editor__label" for="skill-content">
+            Skill content (markdown)
+            <span class="phorma-skill-editor__label-actions">
+              <button
+                type="button"
+                class="phorma-skill-editor__mini-btn"
+                [disabled]="generating()"
+                (click)="generate()"
+                [title]="content().trim() ? 'Improve this skill with AI' : 'Draft this skill with AI'"
+              >
+                <i
+                  class="ti"
+                  [class.ti-sparkles]="!generating()"
+                  [class.ti-loader-2]="generating()"
+                  [class.phorma-skill-editor__spin]="generating()"
+                  aria-hidden="true"
+                ></i>
+                {{ generating() ? 'Drafting…' : 'AI' }}
+              </button>
+              <button
+                type="button"
+                class="phorma-skill-editor__mini-btn"
+                (click)="togglePreview()"
+                [title]="previewing() ? 'Edit markdown' : 'Preview markdown'"
+              >
+                <i class="ti" [class.ti-eye]="!previewing()" [class.ti-pencil]="previewing()" aria-hidden="true"></i>
+                {{ previewing() ? 'Edit' : 'Preview' }}
+              </button>
+            </span>
+          </label>
+          @if (previewing()) {
+            <div class="phorma-skill-editor__preview selectable" [innerHTML]="previewHtml()"></div>
+          } @else {
+            <textarea
+              id="skill-content"
+              class="phorma-skill-editor__textarea"
+              spellcheck="false"
+              [value]="content()"
+              (input)="onContentInput($event)"
+              placeholder="# When to use this skill&#10;&#10;- Always call the relevant tools first…&#10;- Keep responses concise."
+            ></textarea>
+          }
+          @if (oversized()) {
+            <p class="phorma-skill-editor__warn">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              This skill is very long — it is appended to the agent's prompt on every model call.
+            </p>
+          }
+        </div>
+      </div>
+
+      <footer class="phorma-skill-editor__actions">
+        <label class="phorma-skill-editor__file-btn" title="Import a SKILL.md file">
+          <i class="ti ti-file-import" aria-hidden="true"></i>
+          Import
+          <input type="file" accept=".md,.markdown,text/markdown" (change)="importFile($event)" hidden />
+        </label>
+        <button
+          type="button"
+          class="phorma-skill-editor__file-btn"
+          [disabled]="!canSave()"
+          (click)="exportFile()"
+          title="Export as SKILL.md"
+        >
+          <i class="ti ti-file-export" aria-hidden="true"></i>
+          Export
+        </button>
+        <span class="phorma-skill-editor__spacer"></span>
+        <p-button
+          [text]="true"
+          severity="secondary"
+          size="small"
+          label="Cancel"
+          (onClick)="dialog.close()"
+        />
+        <p-button
+          size="small"
+          [label]="saving() ? 'Saving…' : 'Save skill'"
+          [disabled]="!canSave() || saving()"
+          (onClick)="save()"
+        />
+      </footer>
+    </section>
+  </div>
+}

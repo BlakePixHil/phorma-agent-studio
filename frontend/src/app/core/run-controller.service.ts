@@ -14,6 +14,7 @@ import { ModelTransportService } from './model-transport.service';
 import { ModelPricingService } from './model-pricing.service';
 import { RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
+import { SkillsService } from './skills.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowService } from './workflow.service';
@@ -127,6 +128,7 @@ export class RunControllerService {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
   private readonly pricing = inject(ModelPricingService);
+  private readonly skillsLibrary = inject(SkillsService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -234,6 +236,9 @@ export class RunControllerService {
     // One snapshot serves both the engine and the run-history record — the
     // user can keep editing the canvas while the run executes.
     const graphSnapshot = structuredClone(graph);
+    // Refresh embedded agent skills from the library (EPIC 6) so a run
+    // always executes the latest skill content.
+    this.skillsLibrary.syncAttachedSkills(graphSnapshot);
     const doc = this.workflow.activeDoc();
     this.runHistory.beginRun({
       runId,

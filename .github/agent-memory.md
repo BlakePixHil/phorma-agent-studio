@@ -260,6 +260,17 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 
 <!-- Append new dated learnings below, grouped under the topic headings above (create a new heading if none fits). -->
 
+## Agent Skills (EPIC 6, shipped 2026-07-21)
+
+- 2026-07-21 - Skills are markdown-only fragments embedded BY VALUE in `AgentNodeData.skills` (both type twins). The engine renders them in `renderPrompt` between the interpolated prompt and the capabilities/hand-off sections, VERBATIM (no `{{input}}` interpolation - deliberate; skills are static guidance). Zero cloud/Rust changes needed because skills ride inside the graph.
+- 2026-07-21 - Library-vs-embed freshness: `SkillsService.syncAttachedSkills(graph)` MUTATES a graph clone, refreshing embedded copies by id (library wins; skills deleted from the library keep their snapshot). Hooked at exactly 3 places: `RunControllerService.start` (on the run's graphSnapshot), `CloudService.materializeDefaults` (push), `WorkflowService.exportActiveSpec`. The node data on canvas keeps the stale copy until one of those runs - that's by design, don't "fix" it.
+- 2026-07-21 - IndexedDB is now v6: global `skills` store (keyPath id, NO workflowKey/index - the library is cross-workflow). `SkillsService` warms the library in its constructor so `syncAttachedSkills` can run synchronously at run start.
+- 2026-07-21 - SKILL.md interop (`core/skills.model.ts`): minimal hand-rolled frontmatter parser (name/description scalars only, no YAML dep), first-markdown-heading fallback name, `serializeSkillMd` quotes values containing YAML-special chars via JSON.stringify. Compatible with Anthropic-style SKILL.md files (verified round-trip in browser E2E).
+- 2026-07-21 - Canvas skill badge: `RendererNode.skillCount/skillGlyph/skillFont` set in `graph-to-scene.ts` (resolveIcon('ti ti-books')); drawn in `drawNode` as an accent pill LEFT of the kind badge, and the title clip rect must shrink to `titleClipEnd` (the skill pill's x) or long titles overdraw the pill.
+- 2026-07-21 - New default panel tabs merge into EXISTING users' persisted layouts automatically (`loadTabs` maps over DEFAULT_TABS) - registering `{id:'skills', side:'left', order:2}` needed no migration.
+- 2026-07-21 - `ConfirmDialogService.confirm` takes `tone: 'danger'`, NOT `destructive: true`.
+- 2026-07-21 - Skill count pill deliberately reuses the kind-badge geometry (bh=13, radius 4, 8px Nunito) so the header reads as one badge family.
+
 ## Evals (EPIC 4)
 
 - 2026-07-19 - EVALS shipped: `engine/src/evals.ts` owns suite/case/result types + pure `scoreOutput` (exact/contains/llm-judge; judge failures REJECT so callers record `error` status, never a silent pass/fail; `parseJudgeVerdict` walks balanced braces to survive prose/fences around JSON). `RunSource` now includes `'eval'`. E2E: `engine/test/evals.e2e.mts`.

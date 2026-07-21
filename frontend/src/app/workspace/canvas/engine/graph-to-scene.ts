@@ -108,6 +108,9 @@ export function graphToScene(
 
     const h = SCENE_HEADER_H + SCENE_PAD * 2 + ordered.length * SCENE_ROW_H;
     const icon = resolveIcon?.(node.icon);
+    // Agents with attached skills get a book+count pill in the header (EPIC 6).
+    const skillCount = isAgentNode(node) ? (node.data.skills?.length ?? 0) : 0;
+    const skillIcon = skillCount > 0 ? resolveIcon?.('ti ti-books') : null;
     nodes.push({
       id: node.id,
       x: node.position.x,
@@ -121,6 +124,9 @@ export function graphToScene(
       rows,
       iconGlyph: icon?.glyph,
       iconFont: icon?.font,
+      ...(skillCount > 0
+        ? { skillCount, skillGlyph: skillIcon?.glyph, skillFont: skillIcon?.font }
+        : {}),
     });
   }
 
