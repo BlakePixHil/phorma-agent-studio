@@ -2,10 +2,11 @@ import { Injectable } from '@angular/core';
 
 import type { EvalRunSummary, EvalSuite, RunRecord, UsageLedgerEntry } from '@phorma/engine';
 
+import type { ChatThread } from './assistant-chat.model';
 import type { WorkflowSpec } from './workflow.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -37,6 +38,13 @@ const EVAL_RUNS_BY_WORKFLOW = 'by-workflow';
 
 /** Eval-run retention per suite (newest kept). */
 const EVAL_RUNS_KEEP = 50;
+
+/** Object store holding {@link ChatThread} conversations (keyPath `id`) — EPIC 5. */
+const CHAT_THREADS_STORE = 'chat-threads';
+const CHAT_THREADS_BY_WORKFLOW = 'by-workflow';
+
+/** Chat-thread retention per workflow (newest kept). */
+const CHAT_THREADS_KEEP = 50;
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -219,6 +227,55 @@ export class IndexedDbStorageService {
     await Promise.all(runs.slice(EVAL_RUNS_KEEP).map(run => this.request(store.delete(run.id))));
   }
 
+  // ── Assistant chat threads (EPIC 5) ───────────────────────────────────
+
+  /** All chat threads for a workflow (`null` = unsaved drafts), newest first. */
+  async listChatThreads(workflowId: string | null): Promise<ChatThread[]> {
+    const db = await this.open();
+    const store = db.transaction(CHAT_THREADS_STORE, 'readonly').objectStore(CHAT_THREADS_STORE);
+    const threads = await this.request<ChatThread[]>(
+      store.index(CHAT_THREADS_BY_WORKFLOW).getAll(workflowId ?? 'draft'),
+    );
+    return threads.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async getChatThread(id: string): Promise<ChatThread | undefined> {
+    const db = await this.open();
+    return this.request<ChatThread | undefined>(
+      db.transaction(CHAT_THREADS_STORE, 'readonly').objectStore(CHAT_THREADS_STORE).get(id),
+    );
+  }
+
+  /** Upserts a chat thread and applies per-workflow retention. */
+  async saveChatThread(thread: ChatThread): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(CHAT_THREADS_STORE, 'readwrite')
+        .objectStore(CHAT_THREADS_STORE)
+        .put(toStoredChatThread(thread)),
+    );
+    await this.pruneChatThreads(thread.workflowId);
+  }
+
+  async removeChatThread(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(CHAT_THREADS_STORE, 'readwrite').objectStore(CHAT_THREADS_STORE).delete(id),
+    );
+  }
+
+  /** Deletes this workflow's oldest chat threads beyond {@link CHAT_THREADS_KEEP}. */
+  private async pruneChatThreads(workflowId: string | null): Promise<void> {
+    const threads = await this.listChatThreads(workflowId);
+    if (threads.length <= CHAT_THREADS_KEEP) return;
+    const db = await this.open();
+    const store = db.transaction(CHAT_THREADS_STORE, 'readwrite').objectStore(CHAT_THREADS_STORE);
+    await Promise.all(
+      threads.slice(CHAT_THREADS_KEEP).map(thread => this.request(store.delete(thread.id))),
+    );
+  }
+
   /** Age + row-cap retention for the usage ledger. */
   private async pruneUsage(): Promise<void> {
     const db = await this.open();
@@ -264,6 +321,10 @@ export class IndexedDbStorageService {
           evalRuns.createIndex(EVAL_RUNS_BY_SUITE, 'suiteId');
           evalRuns.createIndex(EVAL_RUNS_BY_WORKFLOW, 'workflowKey');
         }
+        if (!db.objectStoreNames.contains(CHAT_THREADS_STORE)) {
+          const chats = db.createObjectStore(CHAT_THREADS_STORE, { keyPath: 'id' });
+          chats.createIndex(CHAT_THREADS_BY_WORKFLOW, 'workflowKey');
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error('Could not open IndexedDB.'));
@@ -302,4 +363,9 @@ function toStoredEvalSuite(suite: EvalSuite): EvalSuite & { workflowKey: string 
 /** Same null-key workaround as {@link toStoredRun}. */
 function toStoredEvalRun(run: EvalRunSummary): EvalRunSummary & { workflowKey: string } {
   return { ...run, workflowKey: run.workflowId ?? 'draft' };
+}
+
+/** Same null-key workaround as {@link toStoredRun}. */
+function toStoredChatThread(thread: ChatThread): ChatThread & { workflowKey: string } {
+  return { ...thread, workflowKey: thread.workflowId ?? 'draft' };
 }

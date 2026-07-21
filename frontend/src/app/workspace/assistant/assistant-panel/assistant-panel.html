@@ -1,0 +1,90 @@
+<div class="phorma-assist">
+  <!-- ── Panel header ── -->
+  <div class="phorma-assist__header">
+    @if (chat.activeThread(); as thread) {
+      <button
+        type="button"
+        class="phorma-assist__icon-btn"
+        title="All chats"
+        aria-label="All chats"
+        [disabled]="chat.busy()"
+        (click)="chat.closeThread()"
+      >
+        <i class="ti ti-arrow-left" aria-hidden="true"></i>
+      </button>
+      <span class="phorma-assist__title phorma-assist__title--thread" [title]="thread.title">{{ thread.title }}</span>
+    } @else {
+      <span class="phorma-assist__title">Assistant</span>
+      <button
+        type="button"
+        class="phorma-assist__icon-btn"
+        title="New chat"
+        aria-label="New chat"
+        (click)="chat.newThread()"
+      >
+        <i class="ti ti-plus" aria-hidden="true"></i>
+      </button>
+    }
+    <button
+      type="button"
+      class="phorma-assist__icon-btn phorma-assist__expand"
+      title="Expand to full view"
+      aria-label="Expand to full view"
+      (click)="expand()"
+    >
+      <i class="ti ti-arrows-maximize" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <!-- ── Body ── -->
+  @if (chat.activeThread()) {
+    <app-assistant-chat class="phorma-assist__chat" />
+  } @else {
+    <div class="phorma-assist__list-wrap">
+      @if (chat.threads().length > 0) {
+        <ul class="phorma-assist__list">
+          @for (thread of chat.threads(); track thread.id) {
+            <li>
+              <button
+                type="button"
+                class="phorma-assist__list-item"
+                (click)="openThread(thread)"
+              >
+                <i class="ti ti-message-2 phorma-assist__list-icon" aria-hidden="true"></i>
+                <span class="phorma-assist__list-meta">
+                  <span class="phorma-assist__list-title">{{ thread.title }}</span>
+                  <span class="phorma-assist__list-sub">
+                    {{ thread.turns.length }} {{ thread.turns.length === 1 ? 'message' : 'messages' }}
+                    · {{ thread.updatedAt | date: 'MMM d, HH:mm' }}
+                  </span>
+                </span>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-assist__delete"
+                  title="Delete chat"
+                  aria-label="Delete chat"
+                  (click)="deleteThread(thread, $event)"
+                  (keydown.enter)="deleteThread(thread, $event)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </span>
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <div class="phorma-assist__empty">
+          <i class="ti ti-sparkles" aria-hidden="true"></i>
+          <p class="phorma-assist__empty-title">Build with AI</p>
+          <p class="phorma-assist__empty-copy">
+            Ask questions, plan changes, or let the agent build workflows on your canvas.
+          </p>
+          <button type="button" class="phorma-assist__new" (click)="chat.newThread()">
+            <i class="ti ti-plus" aria-hidden="true"></i> New chat
+          </button>
+        </div>
+      }
+    </div>
+  }
+</div>

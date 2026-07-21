@@ -53,6 +53,19 @@
     background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
     color: var(--p-text-color);
   }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
+.phorma-prompt__spin {
+  animation: phorma-prompt-spin 0.9s linear infinite;
+}
+
+@keyframes phorma-prompt-spin {
+  to { transform: rotate(360deg); }
 }
 
 .phorma-prompt__section {

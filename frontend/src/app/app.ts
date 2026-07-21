@@ -27,6 +27,8 @@ import { OnboardingDialog } from './workspace/onboarding/onboarding-dialog/onboa
 import { OnboardingService } from './workspace/onboarding/onboarding.service';
 import { CommandPalette } from './workspace/command-palette/command-palette';
 import { AiReviewBar } from './workspace/command-palette/ai-review-bar';
+import { AssistantPanel } from './workspace/assistant/assistant-panel/assistant-panel';
+import { AssistantDialog } from './workspace/assistant/assistant-dialog/assistant-dialog';
 import { ConfirmDialog } from './shared/confirm-dialog/confirm-dialog';
 import { Toast } from './shared/toast/toast';
 
@@ -59,6 +61,8 @@ import { Toast } from './shared/toast/toast';
     OnboardingDialog,
     CommandPalette,
     AiReviewBar,
+    AssistantPanel,
+    AssistantDialog,
     ConfirmDialog,
     Toast,
   ],

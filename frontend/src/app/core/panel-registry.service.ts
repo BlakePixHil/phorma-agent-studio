@@ -20,6 +20,7 @@ const DEFAULT_TABS: PanelTab[] = [
   { id: 'runs',       label: 'Runs',       icon: 'ti ti-history',    side: 'right', order: 2 },
   { id: 'usage',      label: 'Usage',      icon: 'ti ti-chart-bar',  side: 'right', order: 3 },
   { id: 'evals',      label: 'Evals',      icon: 'ti ti-flask',      side: 'right', order: 4 },
+  { id: 'assistant',  label: 'Assistant',  icon: 'ti ti-sparkles',   side: 'right', order: 5 },
 ];
 
 /**

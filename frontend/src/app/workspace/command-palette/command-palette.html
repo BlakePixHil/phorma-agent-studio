@@ -40,15 +40,27 @@
               </button>
             </div>
 
-            <button
-              type="button"
-              class="phorma-cmdk__submit"
-              [disabled]="busy() || !draft().trim()"
-              (click)="submit()"
-              aria-label="Build workflow"
-            >
-              <i class="ti ti-arrow-up" aria-hidden="true"></i>
-            </button>
+            @if (busy()) {
+              <button
+                type="button"
+                class="phorma-cmdk__submit phorma-cmdk__submit--stop"
+                (click)="stop()"
+                aria-label="Stop"
+                title="Stop"
+              >
+                <i class="ti ti-player-stop" aria-hidden="true"></i>
+              </button>
+            } @else {
+              <button
+                type="button"
+                class="phorma-cmdk__submit"
+                [disabled]="!draft().trim()"
+                (click)="submit()"
+                aria-label="Build workflow"
+              >
+                <i class="ti ti-arrow-up" aria-hidden="true"></i>
+              </button>
+            }
           </div>
         </div>
 
@@ -57,23 +69,28 @@
           @case ('thinking') {
             <div class="phorma-cmdk__status">
               <i class="ti ti-loader-2 phorma-cmdk__spin" aria-hidden="true"></i>
-              Designing your workflow…
+              <span class="phorma-cmdk__shimmer">Designing your workflow…</span>
             </div>
           }
           @case ('applying') {
             <div class="phorma-cmdk__status">
               <i class="ti ti-loader-2 phorma-cmdk__spin" aria-hidden="true"></i>
               @if (builder.progress(); as progress) {
-                Building on canvas — {{ progress.applied }} / {{ progress.total }}
+                <span class="phorma-cmdk__shimmer">Building on canvas — {{ progress.applied }} / {{ progress.total }}</span>
               } @else {
-                Building on canvas…
+                <span class="phorma-cmdk__shimmer">Building on canvas…</span>
               }
             </div>
           }
           @case ('done') {
             <div class="phorma-cmdk__status phorma-cmdk__status--done">
               <i class="ti ti-check" aria-hidden="true"></i>
-              {{ builder.summary() ?? 'Workflow updated.' }}
+              <span class="phorma-cmdk__error-text">{{ builder.summary() ?? 'Workflow updated.' }}</span>
+              @if (lastThreadId()) {
+                <button type="button" class="phorma-cmdk__cta" (click)="continueInChat()">
+                  Continue in chat
+                </button>
+              }
             </div>
           }
           @case ('error') {

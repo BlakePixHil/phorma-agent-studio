@@ -58,12 +58,13 @@ Test suites against a workflow: input cases + expected outputs, scoring by exact
 - *Depends on:* EPIC 1 (run persistence for eval run history).
 - *Shipped:* `engine/src/evals.ts` (suite/case/result types + pure `scoreOutput` with tolerant judge-verdict parsing), `RunSource` extended with `'eval'`. Every case execution is a REAL engine run persisted as a normal RunRecord (flask badge in the Runs panel, full trace, Bring to Canvas). Local suites run in a 3-wide pool via `EvalRunnerService` (bypasses the single-run `RunControllerService`); cloud suites run sequentially against the deployed DO (`POST /trigger` now accepts `source: 'eval'`, new `CloudService.triggerHttp` + poll). Model comparison re-runs the suite per model via `defaultModel` override (local only - cloud specs are materialized at push). IndexedDB v4 adds `eval-suites` + `eval-runs` stores. Evals sidebar panel: suite list → case editor (matcher select, judge model, comparison models) → scored results with judge reasoning and per-case run links. Test: `engine/test/evals.e2e.mts` (30 checks).
 
-### [ ] EPIC 5: Deeper AI-Assisted Building
+### [x] EPIC 5: Deeper AI-Assisted Building — shipped 2026-07-21
 
 We have natural-language workflow generation. Heym adds: **Workflow Analyzer** (AI reviews a workflow + its run history and produces an improvement report), **AI expression/field generation**, and a **migration converter** (paste an n8n/Flowise/Dify workflow, get ours). The converter is a cheap, high-leverage acquisition tool.
 
 - *Pillar:* faster - shortest path from intent to working workflow.
 - *Depends on:* EPIC 1 (analyzer wants run history).
+- *Shipped:* the **Assistant** — a persistent per-workflow chat (sidebar panel tab + expand button → large two-pane dialog) with **Ask / Plan / Agent** modes. Ask streams grounded answers about the canvas (never edits); Plan returns a proposal card (op list + explicit "Apply to canvas" → animated playback + Revert/Keep); Agent is the live tool loop, gated behind a Phorma Cloud subscription (UI + `/api/infer` server-side). Unsubscribed users run Ask/Plan on their default model; a footer model picker overrides the automatic route. Threads persist in IndexedDB v5 (`chat-threads`, 50/workflow retention, reopen/delete). The Ctrl+P palette records each exchange as a thread with a "Continue in chat" CTA. Plus: **Workflow Analyzer** (graph + last 15 run summaries → markdown improvement report as a chat turn), **migration converter** (paste/clipboard n8n·Flowise·Dify JSON → shape-detected in `core/migration/foreign-workflow.ts` → plan proposal, unmapped nodes listed), and **AI field generation** (sparkle button on the Prompt panel generates/improves agent prompts). Key files: `core/assistant-chat.{model,service}.ts`, `core/workflow-analyzer.service.ts`, `core/field-generation.service.ts`, `core/migration/`, `workspace/assistant/`.
 
 ### [ ] EPIC 6: Agent Skills
 

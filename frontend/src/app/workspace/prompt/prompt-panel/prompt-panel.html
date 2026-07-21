@@ -6,6 +6,22 @@
       <button
         type="button"
         class="phorma-prompt__toggle"
+        [disabled]="generating()"
+        (click)="generatePrompt()"
+        [title]="node.data.prompt.trim() ? 'Improve this prompt with AI' : 'Generate a prompt with AI'"
+      >
+        <i
+          class="ti"
+          [class.ti-sparkles]="!generating()"
+          [class.ti-loader-2]="generating()"
+          [class.phorma-prompt__spin]="generating()"
+          aria-hidden="true"
+        ></i>
+        {{ generating() ? 'Drafting…' : 'AI' }}
+      </button>
+      <button
+        type="button"
+        class="phorma-prompt__toggle"
         (click)="togglePreview()"
         [title]="previewing() ? 'Edit markdown' : 'Preview markdown'"
       >

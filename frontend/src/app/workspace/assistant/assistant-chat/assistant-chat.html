@@ -1,0 +1,234 @@
+<div class="phorma-chat" [class.phorma-chat--wide]="wide()">
+  <!-- ── Conversation ── -->
+  <div #scroll class="phorma-chat__scroll">
+    @if (chat.activeThread(); as thread) {
+      @if (thread.turns.length === 0) {
+        <div class="phorma-chat__empty">
+          <i class="ti ti-sparkles" aria-hidden="true"></i>
+          <p class="phorma-chat__empty-title">What would you like to do?</p>
+          <p class="phorma-chat__empty-copy">
+            Ask about your workflow, plan changes, or let the agent build for you.
+          </p>
+        </div>
+      }
+      @for (turn of thread.turns; track turn.id) {
+        @if (turn.role === 'user') {
+          <div class="phorma-chat__turn phorma-chat__turn--user">
+            <div class="phorma-chat__bubble phorma-chat__bubble--user selectable">{{ turn.text }}</div>
+          </div>
+        } @else {
+          <div class="phorma-chat__turn phorma-chat__turn--assistant">
+            @if (turn.status === 'error') {
+              <div class="phorma-chat__bubble phorma-chat__bubble--error selectable">
+                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                <span>{{ turn.error }}</span>
+                @if (chat.creditsExhausted()) {
+                  <button type="button" class="phorma-chat__cta" (click)="openCredits()">
+                    Buy credits
+                  </button>
+                }
+                <button
+                  type="button"
+                  class="phorma-chat__copy"
+                  [title]="copiedTurnId() === turn.id ? 'Copied!' : 'Copy error'"
+                  aria-label="Copy error"
+                  (click)="copyTurn(turn)"
+                >
+                  <i class="ti" [class.ti-copy]="copiedTurnId() !== turn.id" [class.ti-check]="copiedTurnId() === turn.id" aria-hidden="true"></i>
+                </button>
+              </div>
+            } @else {
+              @if (turn.text) {
+                <div class="phorma-chat__bubble phorma-chat__bubble--assistant">
+                  <div class="phorma-chat__md selectable" [innerHTML]="renderMarkdown(turn.text)"></div>
+                  <button
+                    type="button"
+                    class="phorma-chat__copy"
+                    [title]="copiedTurnId() === turn.id ? 'Copied!' : 'Copy response'"
+                    aria-label="Copy response"
+                    (click)="copyTurn(turn)"
+                  >
+                    <i class="ti" [class.ti-copy]="copiedTurnId() !== turn.id" [class.ti-check]="copiedTurnId() === turn.id" aria-hidden="true"></i>
+                  </button>
+                </div>
+              }
+              @if (turn.attachment; as attachment) {
+                @if (attachment.kind === 'plan-proposal') {
+                  <div class="phorma-chat__proposal">
+                    <p class="phorma-chat__proposal-title">
+                      <i class="ti ti-list-check" aria-hidden="true"></i>
+                      Proposed changes · {{ attachment.plan.ops.length }}
+                      {{ attachment.plan.ops.length === 1 ? 'op' : 'ops' }}
+                    </p>
+                    <ul class="phorma-chat__proposal-ops">
+                      @for (line of planOpSummary(turn); track $index) {
+                        <li>{{ line }}</li>
+                      }
+                    </ul>
+                    @if (attachment.appliedAt) {
+                      <p class="phorma-chat__proposal-applied">
+                        <i class="ti ti-check" aria-hidden="true"></i> Applied to canvas
+                      </p>
+                    } @else {
+                      <button
+                        type="button"
+                        class="phorma-chat__apply"
+                        [disabled]="chat.busy()"
+                        (click)="applyProposal(turn)"
+                      >
+                        <i class="ti ti-wand" aria-hidden="true"></i> Apply to canvas
+                      </button>
+                    }
+                  </div>
+                }
+              }
+              @if (costLabel(turn) || modelLabel(turn)) {
+                <span class="phorma-chat__meta">
+                  @if (costLabel(turn)) {
+                    <span class="phorma-chat__cost">{{ costLabel(turn) }}</span>
+                  }
+                  @if (costLabel(turn) && modelLabel(turn)) {
+                    <span class="phorma-chat__dot" aria-hidden="true">·</span>
+                  }
+                  @if (modelLabel(turn)) {
+                    <span class="phorma-chat__model-tag">{{ modelLabel(turn) }}</span>
+                  }
+                </span>
+              }
+            }
+          </div>
+        }
+      }
+
+      <!-- Streaming / activity state -->
+      @if (chat.busy()) {
+        <div class="phorma-chat__turn phorma-chat__turn--assistant">
+          @if (chat.streamingText()) {
+            <div class="phorma-chat__bubble phorma-chat__bubble--assistant">
+              <div class="phorma-chat__md selectable" [innerHTML]="renderMarkdown(chat.streamingText())"></div>
+            </div>
+          } @else if (chat.activity().length > 0) {
+            <div class="phorma-chat__activity">
+              @for (line of chat.activity(); track $index; let last = $last) {
+                <p class="phorma-chat__activity-line">
+                  <i class="ti ti-pencil" aria-hidden="true"></i>
+                  <span [class.phorma-chat__shimmer]="last">{{ line }}</span>
+                </p>
+              }
+            </div>
+          } @else {
+            <div class="phorma-chat__thinking">
+              <i class="ti ti-loader-2 phorma-chat__spin" aria-hidden="true"></i>
+              <span class="phorma-chat__shimmer">Thinking…</span>
+            </div>
+          }
+        </div>
+      }
+    }
+  </div>
+
+  <!-- ── Composer ── -->
+  <div class="phorma-chat__composer">
+    <div class="phorma-chat__input-wrap" [class.phorma-chat__input-wrap--busy]="chat.busy()">
+      <textarea
+        #chatInput
+        class="phorma-chat__input"
+        rows="1"
+        placeholder="Ask, plan, or build…"
+        [value]="draft()"
+        [disabled]="chat.busy()"
+        (input)="draft.set(chatInput.value)"
+        (keydown)="onInputKeydown($event)"
+      ></textarea>
+    </div>
+
+    <div class="phorma-chat__controls">
+      <!-- Mode switch -->
+      <div class="phorma-chat__modes" role="radiogroup" aria-label="Assistant mode">
+        @for (m of modes; track m.id) {
+          <button
+            type="button"
+            class="phorma-chat__mode"
+            [class.phorma-chat__mode--active]="chat.mode() === m.id"
+            [class.phorma-chat__mode--locked]="m.id === 'agent' && agentLocked()"
+            [disabled]="chat.busy()"
+            [title]="m.id === 'agent' && agentLocked()
+              ? 'Agent mode requires a Phorma Cloud subscription'
+              : m.title"
+            (click)="setMode(m.id)"
+          >
+            <i [class]="m.icon" aria-hidden="true"></i>
+            <span>{{ m.label }}</span>
+            @if (m.id === 'agent' && agentLocked()) {
+              <i class="ti ti-lock phorma-chat__lock" aria-hidden="true"></i>
+            }
+          </button>
+        }
+      </div>
+
+      <!-- Model picker -->
+      <div class="phorma-chat__model">
+        <p-select
+          class="phorma-chat__model-select"
+          [options]="providerOptions()"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="providerValue()"
+          (ngModelChange)="onProviderChange($event)"
+          size="small"
+          appendTo="body"
+          ariaLabel="Model provider"
+        />
+        @if (chat.modelOverride(); as override) {
+          <p-select
+            class="phorma-chat__model-select"
+            [options]="modelSuggestions()"
+            [editable]="override.provider !== 'phorma-cloud'"
+            [ngModel]="override.model"
+            (ngModelChange)="onModelChange($event)"
+            size="small"
+            appendTo="body"
+            placeholder="model id"
+            ariaLabel="Model id"
+          />
+        }
+      </div>
+
+      @if (chat.busy()) {
+        <button
+          type="button"
+          class="phorma-chat__send phorma-chat__send--stop"
+          (click)="cancel()"
+          aria-label="Stop"
+          title="Stop"
+        >
+          <i class="ti ti-player-stop" aria-hidden="true"></i>
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="phorma-chat__send"
+          [disabled]="!draft().trim()"
+          (click)="submit()"
+          aria-label="Send"
+          title="Send"
+        >
+          <i class="ti ti-arrow-up" aria-hidden="true"></i>
+        </button>
+      }
+    </div>
+
+    @if (!chat.modelOverride()) {
+      <p class="phorma-chat__hint">{{ autoHint() }}</p>
+    }
+    @if (chat.mode() === 'agent' && agentLocked()) {
+      <p class="phorma-chat__hint phorma-chat__hint--upsell">
+        Agent mode edits the canvas for you —
+        <button type="button" class="phorma-chat__link" (click)="openSubscribe()">
+          subscribe to Phorma Cloud
+        </button>
+        to unlock it.
+      </p>
+    }
+  </div>
+</div>

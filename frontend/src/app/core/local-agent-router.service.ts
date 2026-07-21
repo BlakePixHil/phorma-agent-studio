@@ -118,7 +118,21 @@ export class LocalAgentRouterService {
     if (!source) return { ok: false, error: `Source node '${sourceNodeId}' not found.` };
     if (!target) return { ok: false, error: `Target node '${targetNodeId}' not found.` };
 
-    const pair = this.resolvePortPair(source, target, sourcePortName, targetPortName);
+    let pair = this.resolvePortPair(source, target, sourcePortName, targetPortName);
+    if (!pair) {
+      // Second chance: multi-branch flow nodes (router routes, parallel
+      // branches, aggregator inputs) grow ports on demand — an AI naming a
+      // route that doesn't exist yet means "create that route", exactly
+      // like the + button in the Properties panel.
+      const grewSource = this.ensureBranchPort(source, 'out', sourcePortName);
+      const grewTarget = this.ensureBranchPort(target, 'in', targetPortName);
+      if (grewSource || grewTarget) {
+        const graphNow = this.workflow.graph();
+        const sourceNow = graphNow.nodes.find(node => node.id === sourceNodeId) ?? source;
+        const targetNow = graphNow.nodes.find(node => node.id === targetNodeId) ?? target;
+        pair = this.resolvePortPair(sourceNow, targetNow, sourcePortName, targetPortName);
+      }
+    }
     if (!pair) {
       return {
         ok: false,
@@ -164,29 +178,65 @@ export class LocalAgentRouterService {
     sourcePortName?: string,
     targetPortName?: string,
   ): { out: WorkflowPort; in: WorkflowPort } | null {
+    // Connector ids already used by existing connections, so unnamed picks
+    // can prefer a FREE port (a router's second handoff must not stack on
+    // "Route A" alongside the first).
+    const usedConnectors = new Set(
+      this.workflow.graph().connections.flatMap(conn => [conn.outputId, conn.inputId]),
+    );
     const pick = (
       node: WorkflowNode,
       role: PortRole,
-      name?: string,
+      name: string | undefined,
+      direction: 'out' | 'in',
     ): WorkflowPort | undefined => {
       const candidates = node.ports.filter(port => port.role === role);
       if (name) {
         return candidates.find(port => port.name.toLowerCase() === name.toLowerCase());
       }
-      return candidates[0];
+      const free = candidates.find(
+        port => !usedConnectors.has(`${port.id}-${direction}`),
+      );
+      return free ?? candidates[0];
     };
 
     // Tool link when either endpoint is a tool node.
     if (source.category === 'tool' || target.category === 'tool') {
-      const out = pick(source, 'tools', sourcePortName);
-      const inPort = pick(target, 'tools', targetPortName);
+      const out = pick(source, 'tools', sourcePortName, 'out');
+      const inPort = pick(target, 'tools', targetPortName, 'in');
       if (out && inPort && canConnectPorts('tools', 'tools')) return { out, in: inPort };
       return null;
     }
 
-    const out = pick(source, 'message-out', sourcePortName);
-    const inPort = pick(target, 'message-in', targetPortName);
+    const out = pick(source, 'message-out', sourcePortName, 'out');
+    const inPort = pick(target, 'message-in', targetPortName, 'in');
     if (out && inPort) return { out, in: inPort };
     return null;
+  }
+
+  /**
+   * Adds a named branch port to a multi-branch flow node when the requested
+   * name doesn't exist — routers/parallels grow `message-out` routes,
+   * aggregators grow `message-in` inputs (same mutation as the Properties
+   * panel's + button). Returns true when a port was added.
+   */
+  private ensureBranchPort(
+    node: WorkflowNode,
+    direction: 'out' | 'in',
+    name?: string,
+  ): boolean {
+    if (!name) return false;
+    const role: PortRole =
+      node.kind === 'aggregator' ? 'message-in' : 'message-out';
+    const growable =
+      (direction === 'out' && (node.kind === 'router' || node.kind === 'parallel')) ||
+      (direction === 'in' && node.kind === 'aggregator');
+    if (!growable) return false;
+    if (node.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) return false;
+    this.workflow.updateNodePorts(node.id, [
+      ...node.ports,
+      { id: `${node.id}-p${Date.now().toString(36)}`, name, role },
+    ]);
+    return true;
   }
 }

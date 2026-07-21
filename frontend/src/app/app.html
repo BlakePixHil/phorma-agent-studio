@@ -55,6 +55,12 @@
           <app-evals-panel />
         }
       </ng-template>
+
+      <ng-template sidePanelPane tabId="assistant">
+        @defer (on immediate) {
+          <app-assistant-panel />
+        }
+      </ng-template>
     </app-sidebar>
 
     <!-- ── Right sidebar (z-10) ── -->
@@ -80,6 +86,12 @@
       <ng-template sidePanelPane tabId="evals">
         @defer (on immediate) {
           <app-evals-panel />
+        }
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="assistant">
+        @defer (on immediate) {
+          <app-assistant-panel />
         }
       </ng-template>
 
@@ -118,6 +130,9 @@
 
   <!-- ── Buy Credits (top-up placeholder — payments not wired up yet) ── -->
   <app-credits-dialog />
+
+  <!-- ── AI Assistant (expanded chat dialog — EPIC 5) ── -->
+  <app-assistant-dialog />
 
   <!-- ── First-run onboarding wizard ── -->
   <app-onboarding-dialog />

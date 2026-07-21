@@ -1,16 +1,35 @@
 import { Injectable, inject, signal } from '@angular/core';
 
-import type { ChatMessage, ModelRequest, ToolCall, ToolDefinition } from '@phorma/engine';
+import type {
+  ChatMessage,
+  ModelRequest,
+  ModelUsage,
+  ToolCall,
+  ToolDefinition,
+} from '@phorma/engine';
 
 import { AgentStreamService } from './agent-stream.service';
 import { AiEditSessionService } from './ai-edit-session.service';
+import type {
+  AssistantMode,
+  ChatModelRef,
+  ChatTurnUsage,
+  EditPlan,
+  PlanOp,
+} from './assistant-chat.model';
 import { CanvasStateService } from './canvas-state.service';
 import type { BuilderMode } from './command-palette.service';
 import { LocalAgentRouterService } from './local-agent-router.service';
+import { ModelPricingService } from './model-pricing.service';
 import { ModelTransportService } from './model-transport.service';
 import { PhormaCloudService } from './phorma-cloud.service';
+import { SettingsService } from './settings.service';
 import { WorkflowService } from './workflow.service';
-import { buildAgentSystemPrompt, buildPlanSystemPrompt } from './workflow-builder-prompt';
+import {
+  buildAgentSystemPrompt,
+  buildAskSystemPrompt,
+  buildPlanSystemPrompt,
+} from './workflow-builder-prompt';
 import { findCatalogEntry } from './node-catalog';
 import { isAgentNode, type GraphPosition, type WorkflowGraph } from './workflow.model';
 
@@ -36,28 +55,23 @@ const PLACE_ROWS_PER_COLUMN = 4;
 
 export type BuilderStatus = 'idle' | 'thinking' | 'applying' | 'done' | 'error';
 
-/** One operation in a Plan-mode edit plan (the model's JSON output). */
-interface PlanOp {
-  op: 'add' | 'connect' | 'update' | 'remove' | 'disconnect';
-  // add
-  ref?: string;
-  type?: string;
-  name?: string;
-  prompt?: string;
-  // connect
-  from?: string;
-  to?: string;
-  fromPort?: string;
-  toPort?: string;
-  // update / remove
-  node?: string;
-  // disconnect
-  connection?: string;
+/** True when a model error message means "credits/subscription problem". */
+export function isCreditsError(message: string): boolean {
+  return /\(402\)|credits exhausted|subscription/i.test(message);
 }
 
-interface EditPlan {
-  summary?: string;
-  ops: PlanOp[];
+/** Options shared by the chat-turn methods. */
+export interface ChatTurnOptions {
+  request: string;
+  /** Prior conversation turns (user/assistant text pairs). */
+  history: ChatMessage[];
+  model: ChatModelRef;
+  /** Overrides the default system prompt (used by the analyzer/converter). */
+  system?: string;
+  /** Cumulative streamed text callback (Ask mode). */
+  onText?: (text: string) => void;
+  /** Human-readable activity lines as the agent works (Agent mode). */
+  onActivity?: (line: string) => void;
 }
 
 /**
@@ -80,9 +94,11 @@ export class WorkflowBuilderService {
   private readonly router = inject(LocalAgentRouterService);
   private readonly transport = inject(ModelTransportService);
   private readonly phormaCloud = inject(PhormaCloudService);
+  private readonly settings = inject(SettingsService);
   private readonly session = inject(AiEditSessionService);
   private readonly agentStream = inject(AgentStreamService);
   private readonly canvasState = inject(CanvasStateService);
+  private readonly pricing = inject(ModelPricingService);
 
   readonly status = signal<BuilderStatus>('idle');
   /** Plan-mode playback progress (null outside of applying). */
@@ -96,6 +112,45 @@ export class WorkflowBuilderService {
 
   private cancelled = false;
 
+  /** Accumulated cost of the current/most recent turn (null = unknown). */
+  private turnUsage: ChatTurnUsage | null = null;
+
+  /** Cost of the last completed turn, or null when nothing was reported. */
+  get lastTurnUsage(): ChatTurnUsage | null {
+    return this.turnUsage;
+  }
+
+  /** Resets the turn-usage accumulator (call at turn start). */
+  private resetTurnUsage(): void {
+    this.turnUsage = null;
+  }
+
+  /**
+   * Folds one model-stream usage sample into the turn accumulator, filling
+   * in a pricing-table estimate when the provider reported tokens but no
+   * USD (the EPIC 2 display rule: reported wins, estimates are marked).
+   */
+  private recordUsage(model: ChatModelRef, usage: ModelUsage): void {
+    let costUsd = usage.costUsd;
+    let estimated = usage.costSource === 'estimated';
+    if (costUsd === undefined) {
+      const estimate = this.pricing.estimator()(model.provider, model.model, usage);
+      if (estimate === null) return;
+      costUsd = estimate;
+      estimated = true;
+    }
+    const current = this.turnUsage ?? {
+      costUsd: 0,
+      phormaCloud: model.provider === 'phorma-cloud',
+      estimated: false,
+    };
+    this.turnUsage = {
+      costUsd: current.costUsd + costUsd,
+      phormaCloud: current.phormaCloud || model.provider === 'phorma-cloud',
+      estimated: current.estimated || estimated,
+    };
+  }
+
   get running(): boolean {
     const status = this.status();
     return status === 'thinking' || status === 'applying';
@@ -104,6 +159,11 @@ export class WorkflowBuilderService {
   /** Requests cancellation of the in-flight build (checked between steps). */
   cancel(): void {
     this.cancelled = true;
+  }
+
+  /** True when the most recent turn was stopped by the user. */
+  get wasCancelled(): boolean {
+    return this.cancelled;
   }
 
   /** Resets transient result state (called when the palette reopens). */
@@ -132,10 +192,11 @@ export class WorkflowBuilderService {
     this.session.begin(trimmed);
 
     try {
+      const model = this.resolveModel();
       if (mode === 'plan') {
-        await this.runPlanMode(trimmed, graphBefore);
+        await this.runPlanMode(trimmed, graphBefore, model);
       } else {
-        await this.runAgentMode(trimmed, graphBefore);
+        await this.runAgentMode(trimmed, graphBefore, model);
       }
       this.session.commit();
       this.status.set(this.cancelled ? 'idle' : 'done');
@@ -154,12 +215,169 @@ export class WorkflowBuilderService {
     }
   }
 
-  // ── Plan mode ──────────────────────────────────────────────────────────────
+  // ── Chat-turn API (assistant panel/dialog — EPIC 5) ────────────────────
 
-  private async runPlanMode(request: string, graphBefore: WorkflowGraph): Promise<void> {
+  /**
+   * Resolves the model a turn should run on: an explicit picker choice wins,
+   * else Phorma Cloud's builder model for subscribers, else the user's
+   * default model (Ask/Plan work without a subscription by design).
+   */
+  resolveModel(explicit?: ChatModelRef | null): ChatModelRef {
+    if (explicit) return explicit;
+    if (this.phormaCloud.subscribed()) {
+      return { provider: 'phorma-cloud', model: BUILDER_MODEL };
+    }
+    return this.settings.resolvedDefaultModel();
+  }
+
+  /**
+   * Whether a mode is available for the current account. Agent mode edits
+   * the canvas live and is Phorma Cloud-exclusive (also re-gated server-side
+   * by /api/infer since it always runs on the phorma-cloud provider).
+   */
+  modeAvailable(mode: AssistantMode): boolean {
+    return mode !== 'agent' || this.phormaCloud.subscribed();
+  }
+
+  /**
+   * Ask mode: streams a markdown answer about the current workflow. Never
+   * mutates the canvas. Returns the full answer text.
+   */
+  async runAskTurn(options: ChatTurnOptions): Promise<string> {
+    this.cancelled = false;
+    this.resetTurnUsage();
+    this.status.set('thinking');
+    const graph = this.workflow.graph();
     const modelRequest: ModelRequest = {
-      provider: 'phorma-cloud',
-      model: BUILDER_MODEL,
+      provider: options.model.provider,
+      model: options.model.model,
+      system: options.system ?? buildAskSystemPrompt(graph),
+      messages: [...options.history, { role: 'user', content: options.request }],
+      temperature: 0.4,
+      maxTokens: 4096,
+    };
+    let text = '';
+    try {
+      for await (const chunk of this.transport.create().stream(modelRequest)) {
+        if (this.cancelled) break;
+        if (chunk.type === 'text') {
+          text += chunk.text;
+          options.onText?.(text);
+        } else if (chunk.type === 'usage') {
+          this.recordUsage(options.model, chunk.usage);
+        }
+      }
+    } finally {
+      this.status.set('idle');
+    }
+    return text.trim();
+  }
+
+  /**
+   * Plan mode as a chat turn: asks the model for an edit plan and returns it
+   * WITHOUT applying — chat renders it as a proposal card and the user
+   * applies it explicitly via {@link applyPlan}.
+   */
+  async runPlanTurn(options: ChatTurnOptions): Promise<EditPlan> {
+    this.cancelled = false;
+    this.resetTurnUsage();
+    this.status.set('thinking');
+    const graph = this.workflow.graph();
+    const modelRequest: ModelRequest = {
+      provider: options.model.provider,
+      model: options.model.model,
+      system: options.system ?? buildPlanSystemPrompt(graph),
+      messages: [...options.history, { role: 'user', content: options.request }],
+      temperature: 0.2,
+      maxTokens: 8192,
+    };
+    let text = '';
+    try {
+      for await (const chunk of this.transport.create().stream(modelRequest)) {
+        if (this.cancelled) break;
+        if (chunk.type === 'text') text += chunk.text;
+        else if (chunk.type === 'usage') this.recordUsage(options.model, chunk.usage);
+      }
+    } finally {
+      this.status.set('idle');
+    }
+    if (this.cancelled) return { summary: 'Cancelled.', ops: [] };
+    return this.parsePlan(text);
+  }
+
+  /**
+   * Plays a plan proposal onto the canvas inside an edit transaction (the
+   * Revert/Keep review bar appears after). Free — no model call happens
+   * here. Throws on the first failing op after rolling the graph back.
+   */
+  async applyPlan(plan: EditPlan, request = 'Apply plan'): Promise<void> {
+    if (this.running) throw new Error('A build is already running.');
+    if (plan.ops.length === 0) return;
+    this.cancelled = false;
+    this.error.set(null);
+    this.status.set('applying');
+    this.progress.set({ applied: 0, total: plan.ops.length });
+
+    const graphBefore = this.workflow.graph();
+    this.session.begin(request);
+    try {
+      await this.playbackPlan(plan, graphBefore);
+      this.session.commit();
+      this.status.set(this.cancelled ? 'idle' : 'done');
+    } catch (err) {
+      this.session.rollbackActive();
+      const message = err instanceof Error ? err.message : String(err);
+      this.error.set(message);
+      this.status.set('error');
+      throw err;
+    } finally {
+      this.progress.set(null);
+      this.agentStream.clearAll();
+    }
+  }
+
+  /**
+   * Agent mode as a chat turn: the live tool loop with conversation history.
+   * Runs inside an edit transaction; returns the model's closing summary.
+   */
+  async runAgentTurn(options: ChatTurnOptions): Promise<string> {
+    if (this.running) throw new Error('A build is already running.');
+    this.cancelled = false;
+    this.resetTurnUsage();
+    this.error.set(null);
+    this.status.set('thinking');
+
+    const graphBefore = this.workflow.graph();
+    this.session.begin(options.request);
+    try {
+      const summary = await this.agentLoop(options, graphBefore);
+      this.session.commit();
+      this.status.set(this.cancelled ? 'idle' : 'done');
+      return summary;
+    } catch (err) {
+      this.session.rollbackActive();
+      const message = err instanceof Error ? err.message : String(err);
+      this.creditsExhausted.set(isCreditsError(message));
+      this.error.set(message);
+      this.status.set('error');
+      throw err;
+    } finally {
+      this.progress.set(null);
+      this.agentStream.clearAll();
+      setTimeout(() => void this.phormaCloud.refresh(), 1500);
+    }
+  }
+
+  // ── Plan mode ──────────────────────────────────────────────────────────────────
+
+  private async runPlanMode(
+    request: string,
+    graphBefore: WorkflowGraph,
+    model: ChatModelRef,
+  ): Promise<void> {
+    const modelRequest: ModelRequest = {
+      provider: model.provider,
+      model: model.model,
       system: buildPlanSystemPrompt(graphBefore),
       messages: [{ role: 'user', content: request }],
       temperature: 0.2,
@@ -179,6 +397,16 @@ export class WorkflowBuilderService {
       return;
     }
 
+    await this.playbackPlan(plan, graphBefore);
+    this.summary.set(plan.summary ?? 'Workflow updated.');
+  }
+
+  /**
+   * Plays a validated plan's ops onto the canvas with the animated cadence.
+   * Shared by palette Plan mode (auto-apply) and chat proposals (explicit
+   * Apply). Must run inside an open edit-session transaction.
+   */
+  private async playbackPlan(plan: EditPlan, graphBefore: WorkflowGraph): Promise<void> {
     this.status.set('applying');
     this.progress.set({ applied: 0, total: plan.ops.length });
 
@@ -207,7 +435,6 @@ export class WorkflowBuilderService {
       this.session.record('Auto-arranged the layout');
       this.fitToScreen();
     }
-    this.summary.set(plan.summary ?? 'Workflow updated.');
   }
 
   /** Parses the model's JSON plan, tolerating markdown fences. */
@@ -317,20 +544,44 @@ export class WorkflowBuilderService {
 
   // ── Agent mode ─────────────────────────────────────────────────────────────
 
-  private async runAgentMode(request: string, graphBefore: WorkflowGraph): Promise<void> {
+  private async runAgentMode(
+    request: string,
+    graphBefore: WorkflowGraph,
+    model: ChatModelRef,
+  ): Promise<void> {
+    const summary = await this.agentLoop(
+      { request, history: [], model },
+      graphBefore,
+    );
+    this.summary.set(summary);
+  }
+
+  /**
+   * The live tool loop shared by palette Agent mode and chat Agent turns:
+   * the model calls graph tools round by round until it stops, then its
+   * closing text becomes the summary.
+   */
+  private async agentLoop(
+    options: ChatTurnOptions,
+    graphBefore: WorkflowGraph,
+  ): Promise<string> {
     const startedEmpty = graphBefore.nodes.length === 0;
     const nextPosition = this.makePositioner(graphBefore);
 
-    const messages: ChatMessage[] = [{ role: 'user', content: request }];
+    const messages: ChatMessage[] = [
+      ...options.history,
+      { role: 'user', content: options.request },
+    ];
     const client = this.transport.create();
+    let summary = '';
 
     for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
-      if (this.cancelled) return;
+      if (this.cancelled) break;
 
       const modelRequest: ModelRequest = {
-        provider: 'phorma-cloud',
-        model: BUILDER_MODEL,
-        system: buildAgentSystemPrompt(graphBefore),
+        provider: options.model.provider,
+        model: options.model.model,
+        system: options.system ?? buildAgentSystemPrompt(graphBefore),
         messages,
         tools: this.agentToolDefinitions(),
         temperature: 0.2,
@@ -340,15 +591,16 @@ export class WorkflowBuilderService {
       let text = '';
       const calls: ToolCall[] = [];
       for await (const chunk of client.stream(modelRequest)) {
-        if (this.cancelled) return;
+        if (this.cancelled) break;
         if (chunk.type === 'text') text += chunk.text;
         else if (chunk.type === 'tool-call') calls.push(chunk.call);
+        else if (chunk.type === 'usage') this.recordUsage(options.model, chunk.usage);
       }
-      if (this.cancelled) return;
+      if (this.cancelled) break;
 
       if (calls.length === 0) {
         // Build finished — the model's text is the summary.
-        this.summary.set(text.trim() || 'Workflow updated.');
+        summary = text.trim();
         break;
       }
 
@@ -356,7 +608,8 @@ export class WorkflowBuilderService {
       messages.push({ role: 'assistant-tool-calls', text: text || undefined, calls });
       const results: { id: string; name: string; content: string }[] = [];
       for (const call of calls) {
-        if (this.cancelled) return;
+        if (this.cancelled) break;
+        options.onActivity?.(describeToolCall(call));
         results.push({
           id: call.id,
           name: call.name,
@@ -378,7 +631,7 @@ export class WorkflowBuilderService {
       this.session.record('Auto-arranged the layout');
       this.fitToScreen();
     }
-    if (!this.summary()) this.summary.set('Workflow updated.');
+    return summary || 'Workflow updated.';
   }
 
   /** Tool schemas offered to the model in Agent mode. */
@@ -429,7 +682,7 @@ export class WorkflowBuilderService {
       {
         name: 'connect_nodes',
         description:
-          'Connects two nodes. Handoff vs tool link is derived from the node kinds. Port names are only needed for multi-port flow nodes (e.g. Router "Route A").',
+          'Connects two nodes. Handoff vs tool link is derived from the node kinds. Port names are only needed for multi-port flow nodes; naming a nonexistent port on a router/parallel/aggregator creates it (prefer descriptive route names).',
         parameters: {
           type: 'object',
           properties: {
@@ -573,5 +826,33 @@ export class WorkflowBuilderService {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+/** Human-readable one-liner for an Agent-mode tool call (chat activity). */
+function describeToolCall(call: ToolCall): string {
+  let args: Record<string, unknown> = {};
+  try {
+    args = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {};
+  } catch {
+    // Malformed arguments still deserve an activity line.
+  }
+  const str = (key: string): string =>
+    typeof args[key] === 'string' ? (args[key] as string) : '';
+  switch (call.name) {
+    case 'get_workflow_state':
+      return 'Inspecting the canvas';
+    case 'add_node':
+      return `Adding ${str('name') || str('type') || 'a node'}`;
+    case 'update_node':
+      return `Updating ${str('name') || str('nodeId') || 'a node'}`;
+    case 'remove_node':
+      return `Removing ${str('nodeId') || 'a node'}`;
+    case 'connect_nodes':
+      return `Connecting ${str('sourceNodeId') || '…'} → ${str('targetNodeId') || '…'}`;
+    case 'remove_connection':
+      return 'Removing a connection';
+    default:
+      return call.name;
   }
 }

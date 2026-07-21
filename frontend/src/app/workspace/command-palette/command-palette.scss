@@ -236,7 +236,30 @@
     cursor: default;
     opacity: 0.35;
   }
+  &--stop {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 85%, transparent);
+  }
 }
+
+/* Shimmering status text while the AI is thinking/applying. */
+.phorma-cmdk__shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--p-text-muted-color, rgba(248, 250, 252, 0.6)) 0%,
+    var(--p-text-color, #f8fafc) 50%,
+    var(--p-text-muted-color, rgba(248, 250, 252, 0.6)) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: phorma-cmdk-shimmer 1.4s linear infinite;
+  text-shadow: none;
+}
+
+@keyframes phorma-cmdk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }}
 
 /* ── Status rail / hint under the box ────────────────────────────────────── */
 .phorma-cmdk__hint,

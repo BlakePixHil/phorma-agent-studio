@@ -1,0 +1,121 @@
+@if (dialog.visible()) {
+  <div class="phorma-assistd" role="presentation" (click)="onBackdropClick()">
+    <section
+      class="phorma-assistd__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="AI Assistant"
+      (click)="$event.stopPropagation()"
+    >
+      <!-- ── Left: thread list ── -->
+      <aside class="phorma-assistd__side">
+        <div class="phorma-assistd__side-header">
+          <span class="phorma-assistd__side-title">
+            <i class="ti ti-sparkles" aria-hidden="true"></i> Assistant
+          </span>
+          <button
+            type="button"
+            class="phorma-assistd__icon-btn"
+            title="New chat"
+            aria-label="New chat"
+            [disabled]="chat.busy()"
+            (click)="chat.newThread()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <div class="phorma-assistd__tools">
+          <button
+            type="button"
+            class="phorma-assistd__tool"
+            [disabled]="chat.busy()"
+            title="AI reviews this workflow and its recent runs"
+            (click)="analyze()"
+          >
+            <i class="ti ti-report-search" aria-hidden="true"></i> Analyze workflow
+          </button>
+          <button
+            type="button"
+            class="phorma-assistd__tool"
+            [disabled]="chat.busy()"
+            title="Convert an n8n, Flowise, or Dify export from your clipboard"
+            (click)="importWorkflow()"
+          >
+            <i class="ti ti-file-import" aria-hidden="true"></i> Import workflow
+          </button>
+        </div>
+
+        <div class="phorma-assistd__threads">
+          @if (chat.threads().length > 0) {
+            <ul class="phorma-assistd__list">
+              @for (thread of chat.threads(); track thread.id) {
+                <li>
+                  <button
+                    type="button"
+                    class="phorma-assistd__list-item"
+                    [class.phorma-assistd__list-item--active]="chat.activeThread()?.id === thread.id"
+                    (click)="openThread(thread)"
+                  >
+                    <span class="phorma-assistd__list-meta">
+                      <span class="phorma-assistd__list-title">{{ thread.title }}</span>
+                      <span class="phorma-assistd__list-sub">
+                        {{ thread.updatedAt | date: 'MMM d, HH:mm' }}
+                      </span>
+                    </span>
+                    <span
+                      role="button"
+                      tabindex="0"
+                      class="phorma-assistd__delete"
+                      title="Delete chat"
+                      aria-label="Delete chat"
+                      (click)="deleteThread(thread, $event)"
+                      (keydown.enter)="deleteThread(thread, $event)"
+                    >
+                      <i class="ti ti-trash" aria-hidden="true"></i>
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="phorma-assistd__empty-list">No chats yet for this workflow.</p>
+          }
+        </div>
+      </aside>
+
+      <!-- ── Right: conversation ── -->
+      <div class="phorma-assistd__main">
+        <div class="phorma-assistd__main-header">
+          <span class="phorma-assistd__main-title">
+            {{ chat.activeThread()?.title ?? 'New chat' }}
+          </span>
+          <button
+            type="button"
+            class="phorma-assistd__icon-btn"
+            title="Close"
+            aria-label="Close"
+            [disabled]="chat.busy()"
+            (click)="dialog.close()"
+          >
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </div>
+        @if (chat.activeThread()) {
+          <app-assistant-chat class="phorma-assistd__chat" [wide]="true" />
+        } @else {
+          <div class="phorma-assistd__placeholder">
+            <i class="ti ti-sparkles" aria-hidden="true"></i>
+            <p class="phorma-assistd__placeholder-title">What would you like to do?</p>
+            <p class="phorma-assistd__placeholder-copy">
+              Start a new chat, analyze this workflow, or import one from another tool.
+            </p>
+            <button type="button" class="phorma-assistd__new" (click)="chat.newThread()">
+              <i class="ti ti-plus" aria-hidden="true"></i> New chat
+            </button>
+          </div>
+        }
+      </div>
+    </section>
+  </div>
+}

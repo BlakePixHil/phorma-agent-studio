@@ -5,6 +5,7 @@ import { SelectModule } from 'primeng/select';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
+import { FieldGenerationService } from '../../../core/field-generation.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { SelectionService } from '../../../core/selection.service';
@@ -60,6 +61,7 @@ export class PromptPanel {
   private readonly transport = inject(ModelTransportService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly settingsDialog = inject(SettingsDialogService);
+  protected readonly fieldGen = inject(FieldGenerationService);
 
   /**
    * Provider options: "Application default" first, then explicit providers.
@@ -200,6 +202,23 @@ export class PromptPanel {
 
   protected togglePreview(): void {
     this.previewing.update(value => !value);
+  }
+
+  /** True while the AI is drafting this agent's prompt. */
+  protected readonly generating = computed(
+    () => this.fieldGen.generatingFor() === this.agent()?.id,
+  );
+
+  /** One-shot AI generation/improvement of the agent's system prompt. */
+  protected async generatePrompt(): Promise<void> {
+    const agent = this.agent();
+    if (!agent || this.generating()) return;
+    const prompt = await this.fieldGen.generateAgentPrompt(agent).catch(() => null);
+    // Re-read the selection — it may have changed during generation.
+    const current = this.agent();
+    if (prompt && current?.id === agent.id) {
+      this.workflow.updateNodeData(current.id, { prompt });
+    }
   }
 
   protected onPromptInput(event: Event): void {

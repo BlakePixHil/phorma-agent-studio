@@ -12,6 +12,8 @@ import {
 } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 
+import { AssistantChatService } from '../../core/assistant-chat.service';
+import { AssistantDialogService } from '../assistant/assistant-dialog.service';
 import { CommandPaletteService, type BuilderMode } from '../../core/command-palette.service';
 import { CreditsDialogService } from '../cloud/credits-dialog.service';
 import { PhormaCloudService } from '../../core/phorma-cloud.service';
@@ -41,8 +43,12 @@ export class CommandPalette {
   protected readonly phormaCloud = inject(PhormaCloudService);
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly creditsDialog = inject(CreditsDialogService);
+  private readonly chat = inject(AssistantChatService);
+  private readonly assistantDialog = inject(AssistantDialogService);
 
   protected readonly draft = signal('');
+  /** Thread id of the last recorded exchange (drives "Continue in chat"). */
+  protected readonly lastThreadId = signal<string | null>(null);
 
   private readonly inputRef = viewChild<ElementRef<HTMLTextAreaElement>>('promptInput');
 
@@ -95,15 +101,38 @@ export class CommandPalette {
   protected async submit(): Promise<void> {
     const request = this.draft().trim();
     if (!request || this.busy() || !this.canBuild()) return;
+    this.lastThreadId.set(null);
     await this.builder.run(request, this.palette.mode());
     if (this.builder.status() === 'done') {
       this.draft.set('');
+      // Record the exchange as a chat thread so the user can keep refining
+      // it in the Assistant (panel or expanded dialog).
+      const thread = await this.chat.recordExternalExchange({
+        request,
+        mode: this.palette.mode(),
+        summary: this.builder.summary() ?? 'Workflow updated.',
+        model: this.builder.resolveModel(),
+      });
+      this.lastThreadId.set(thread.id);
       // Let the user read the summary briefly, then get out of the way —
       // the Revert/Keep bar (canvas-anchored) persists after close.
       setTimeout(() => {
         if (this.builder.status() === 'done') this.palette.close();
-      }, 1600);
+      }, 2600);
     }
+  }
+
+  /** Opens the recorded exchange in the Assistant dialog for refinement. */
+  protected continueInChat(): void {
+    const id = this.lastThreadId();
+    if (!id) return;
+    this.palette.close();
+    void this.chat.openThreadById(id).then(() => this.assistantDialog.open());
+  }
+
+  /** Stops the in-flight build without closing the palette. */
+  protected stop(): void {
+    this.builder.cancel();
   }
 
   protected retry(): void {
