@@ -28,7 +28,24 @@
     <!-- Schedule trigger -->
     @if (scheduleData(); as data) {
       <section class="phorma-props__section">
-        <label class="phorma-props__label" for="prop-cron">Cron expression</label>
+        <label class="phorma-props__label">Cron expression</label>
+
+        <!-- Preset buttons -->
+        <div class="phorma-props__presets">
+          @for (preset of cronPresets; track preset.label) {
+            <button
+              type="button"
+              class="phorma-props__preset-btn"
+              [class.phorma-props__preset-btn--active]="selectedPreset() === preset.label"
+              (click)="onCronPreset(preset)"
+              [attr.title]="preset.description"
+            >
+              {{ preset.label }}
+            </button>
+          }
+        </div>
+
+        <!-- Cron text input -->
         <input
           id="prop-cron"
           type="text"
@@ -37,7 +54,34 @@
           (input)="patchData({ cron: inputValue($event) })"
           placeholder="0 9 * * 1-5"
         />
-        <p class="phorma-props__hint">Runs in the cloud deployment. Minute, hour, day, month, weekday.</p>
+
+        <!-- Human-readable description -->
+        @if (cronHumanReadable(); as desc) {
+          <p class="phorma-props__cron-desc">{{ desc }}</p>
+        } @else if (cronInvalid()) {
+          <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid">Invalid cron expression</p>
+        }
+
+        <!-- Field chips -->
+        <div class="phorma-props__cron-fields">
+          @for (fieldDef of cronFieldDefs; track fieldDef.key) {
+            <div class="phorma-props__field-row">
+              <span class="phorma-props__field-label">{{ fieldDef.label }}</span>
+              <div class="phorma-props__chips">
+                @for (opt of fieldDef.options; track opt.value) {
+                  <button
+                    type="button"
+                    class="phorma-props__chip"
+                    [class.phorma-props__chip--active]="isSimpleFieldValue(fieldDef.key, opt.value)"
+                    (click)="onCronFieldChange(fieldDef.key, opt.value)"
+                  >
+                    {{ opt.label }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
       </section>
     }
 

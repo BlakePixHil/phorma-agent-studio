@@ -19,7 +19,9 @@ import { marked } from 'marked';
 import { AssistantChatService } from '../../../core/assistant-chat.service';
 import type { AssistantMode, ChatTurn } from '../../../core/assistant-chat.model';
 import { MigrationImportService } from '../../../core/migration/migration-import.service';
+import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { SettingsService } from '../../../core/settings.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import {
@@ -58,6 +60,8 @@ export class AssistantChat {
   private readonly creditsDialog = inject(CreditsDialogService);
   private readonly importer = inject(MigrationImportService);
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly transport = inject(ModelTransportService);
+  private readonly settings = inject(SettingsService);
 
   /** Wide layout (expanded dialog) vs compact (sidebar panel). */
   readonly wide = input(false);
@@ -83,10 +87,31 @@ export class AssistantChat {
     () => this.chat.modelOverride()?.provider ?? AUTO_OPTION,
   );
 
+  /** Live-fetched LM Studio model ids (empty until loaded). */
+  protected readonly lmstudioModels = signal<string[]>([]);
+  /** True while fetching LM Studio models. */
+  protected readonly loadingLmstudioModels = signal(false);
+  /** Whether the LM Studio server was reachable on the last fetch. */
+  protected readonly lmstudioRunning = signal(true);
+
+  /** Live-fetched Ollama model ids (empty until loaded). */
+  protected readonly ollamaModels = signal<string[]>([]);
+  /** True while fetching Ollama models. */
+  protected readonly loadingOllamaModels = signal(false);
+  /** Whether the Ollama daemon was reachable on the last fetch. */
+  protected readonly ollamaRunning = signal(true);
+
   /** Model suggestions for the explicitly selected provider. */
   protected readonly modelSuggestions = computed(() => {
     const provider = this.chat.modelOverride()?.provider;
-    return provider ? PROVIDER_MODEL_SUGGESTIONS[provider] : [];
+    if (!provider) return [];
+    if (provider === 'lmstudio') {
+      return this.lmstudioModels().length > 0 ? this.lmstudioModels() : PROVIDER_MODEL_SUGGESTIONS['lmstudio'];
+    }
+    if (provider === 'ollama') {
+      return this.ollamaModels().length > 0 ? this.ollamaModels() : PROVIDER_MODEL_SUGGESTIONS['ollama'];
+    }
+    return PROVIDER_MODEL_SUGGESTIONS[provider] ?? [];
   });
 
   /** Hint describing what the automatic route resolves to. */
@@ -122,6 +147,9 @@ export class AssistantChat {
     const provider = value as ModelProviderId;
     const model = PROVIDER_MODEL_SUGGESTIONS[provider][0] ?? '';
     this.chat.modelOverride.set({ provider, model });
+    // Kick off live model fetching for local providers (best-effort).
+    if (provider === 'lmstudio') void this.loadLmstudioModels();
+    else if (provider === 'ollama') void this.loadOllamaModels();
   }
 
   protected onModelChange(model: string): void {
@@ -156,6 +184,11 @@ export class AssistantChat {
 
   protected applyProposal(turn: ChatTurn): void {
     void this.chat.applyProposal(turn);
+  }
+
+  /** Re-runs a user turn in the same mode. */
+  protected reRunTurn(turn: ChatTurn): void {
+    void this.chat.reRunTurn(turn);
   }
 
   /** Copies a turn's full text (or error) to the clipboard. */
@@ -236,5 +269,41 @@ export class AssistantChat {
       const el = this.scrollRef()?.nativeElement;
       if (el) el.scrollTop = el.scrollHeight;
     }, 0);
+  }
+
+  /**
+   * Fetches the list of models available from the local LM Studio server.
+   * Falls back to static suggestions when the server is unreachable.
+   */
+  private async loadLmstudioModels(): Promise<void> {
+    this.loadingLmstudioModels.set(true);
+    try {
+      const { running, models } = await this.transport.listLmstudioModels(this.settings.lmstudioBaseUrl());
+      this.lmstudioRunning.set(running);
+      this.lmstudioModels.set(models);
+    } catch {
+      this.lmstudioRunning.set(false);
+      this.lmstudioModels.set([]);
+    } finally {
+      this.loadingLmstudioModels.set(false);
+    }
+  }
+
+  /**
+   * Fetches the list of models installed in the local Ollama daemon.
+   * Falls back to static suggestions when the daemon is unreachable.
+   */
+  private async loadOllamaModels(): Promise<void> {
+    this.loadingOllamaModels.set(true);
+    try {
+      const { running, models } = await this.transport.listOllamaModels(this.settings.ollamaBaseUrl());
+      this.ollamaRunning.set(running);
+      this.ollamaModels.set(models);
+    } catch {
+      this.ollamaRunning.set(false);
+      this.ollamaModels.set([]);
+    } finally {
+      this.loadingOllamaModels.set(false);
+    }
   }
 }

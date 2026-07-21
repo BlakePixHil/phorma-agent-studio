@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { SelectModule } from 'primeng/select';
+import cronstrue from 'cronstrue';
 
 import { SelectionService } from '../../../core/selection.service';
 import { WorkflowService } from '../../../core/workflow.service';
@@ -29,6 +30,127 @@ import type {
 } from '../../../core/workflow.model';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+// ── Cron editor ─────────────────────────────────────────────────────────────
+
+interface CronFields {
+  minute: string;
+  hour: string;
+  dayOfMonth: string;
+  month: string;
+  dayOfWeek: string;
+}
+
+function parseCron(cron: string): CronFields {
+  const parts = cron.trim().split(/\s+/);
+  return {
+    minute: parts[0] ?? '*',
+    hour: parts[1] ?? '*',
+    dayOfMonth: parts[2] ?? '*',
+    month: parts[3] ?? '*',
+    dayOfWeek: parts[4] ?? '*',
+  };
+}
+
+function buildCron(fields: CronFields): string {
+  return `${fields.minute} ${fields.hour} ${fields.dayOfMonth} ${fields.month} ${fields.dayOfWeek}`;
+}
+
+interface CronFieldOption {
+  value: string;
+  label: string;
+}
+
+interface CronFieldDef {
+  key: keyof CronFields;
+  label: string;
+  options: CronFieldOption[];
+}
+
+const CRON_FIELD_DEFS: CronFieldDef[] = [
+  {
+    key: 'minute',
+    label: 'Minute',
+    options: [
+      { value: '*', label: 'Every' },
+      { value: '0', label: '0' },
+      { value: '15', label: '15' },
+      { value: '30', label: '30' },
+      { value: '45', label: '45' },
+    ],
+  },
+  {
+    key: 'hour',
+    label: 'Hour',
+    options: [
+      { value: '*', label: 'Every' },
+      { value: '0', label: '12am' },
+      { value: '6', label: '6am' },
+      { value: '9', label: '9am' },
+      { value: '12', label: '12pm' },
+      { value: '15', label: '3pm' },
+      { value: '18', label: '6pm' },
+      { value: '21', label: '9pm' },
+    ],
+  },
+  {
+    key: 'dayOfMonth',
+    label: 'Day',
+    options: [
+      { value: '*', label: 'Every' },
+      { value: '1', label: '1st' },
+      { value: '15', label: '15th' },
+    ],
+  },
+  {
+    key: 'month',
+    label: 'Month',
+    options: [
+      { value: '*', label: 'Every' },
+      { value: '1', label: 'Jan' },
+      { value: '2', label: 'Feb' },
+      { value: '3', label: 'Mar' },
+      { value: '4', label: 'Apr' },
+      { value: '5', label: 'May' },
+      { value: '6', label: 'Jun' },
+      { value: '7', label: 'Jul' },
+      { value: '8', label: 'Aug' },
+      { value: '9', label: 'Sep' },
+      { value: '10', label: 'Oct' },
+      { value: '11', label: 'Nov' },
+      { value: '12', label: 'Dec' },
+    ],
+  },
+  {
+    key: 'dayOfWeek',
+    label: 'Weekday',
+    options: [
+      { value: '*', label: 'Every' },
+      { value: '1-5', label: 'Weekdays' },
+      { value: '0,6', label: 'Weekends' },
+      { value: '0', label: 'Sun' },
+      { value: '1', label: 'Mon' },
+      { value: '2', label: 'Tue' },
+      { value: '3', label: 'Wed' },
+      { value: '4', label: 'Thu' },
+      { value: '5', label: 'Fri' },
+      { value: '6', label: 'Sat' },
+    ],
+  },
+];
+
+interface CronPreset {
+  label: string;
+  cron: string;
+  description: string;
+}
+
+const CRON_PRESETS: CronPreset[] = [
+  { label: 'Every hour', cron: '0 * * * *', description: 'At minute 0 of every hour' },
+  { label: 'Daily 9am', cron: '0 9 * * *', description: 'At 9:00 AM every day' },
+  { label: 'Weekdays 9am', cron: '0 9 * * 1-5', description: 'At 9:00 AM, Mon-Fri' },
+  { label: 'Monthly 1st', cron: '0 9 1 * *', description: 'At 9:00 AM on the 1st' },
+];
 
 /**
  * The Properties panel (right side): generic node configuration — name,
@@ -76,6 +198,65 @@ export class PropertiesPanel {
     const node = this.node();
     return node ? (findCatalogEntryByKind(node.kind)?.label ?? node.kind) : '';
   });
+
+  // ── Cron editor state ───────────────────────────────────────────────────────
+
+  protected readonly cronFieldDefs = CRON_FIELD_DEFS;
+  protected readonly cronPresets = CRON_PRESETS;
+
+  /** Parse the cron string into individual fields (reactive). */
+  protected readonly cronFields = computed<CronFields>(() => {
+    const data = this.scheduleData();
+    return parseCron(data?.cron ?? '* * * * *');
+  });
+
+  /** Human-readable description of the cron expression. */
+  protected readonly cronHumanReadable = computed<string | null>(() => {
+    const data = this.scheduleData();
+    if (!data?.cron?.trim()) return null;
+    try {
+      return cronstrue.toString(data.cron);
+    } catch {
+      return null;
+    }
+  });
+
+  /** Whether the cron expression is syntactically valid according to cronstrue. */
+  protected readonly cronInvalid = computed(() => {
+    const data = this.scheduleData();
+    if (!data?.cron?.trim()) return true;
+    try {
+      cronstrue.toString(data.cron);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
+  /** Track which preset is currently selected (by cron string). */
+  protected readonly selectedPreset = computed(() => {
+    const data = this.scheduleData();
+    if (!data) return null;
+    return CRON_PRESETS.find(p => p.cron === data.cron)?.label ?? null;
+  });
+
+  /**
+   * Check if a field's current value is a simple atomic value (not a range,
+   * step, list, or wildcard). Used to decide whether to highlight a chip.
+   */
+  protected isSimpleFieldValue(field: keyof CronFields, value: string): boolean {
+    const fields = this.cronFields();
+    return fields[field] === value;
+  }
+
+  protected onCronFieldChange(field: keyof CronFields, value: string): void {
+    const fields = this.cronFields();
+    this.patchData({ cron: buildCron({ ...fields, [field]: value }) });
+  }
+
+  protected onCronPreset(preset: CronPreset): void {
+    this.patchData({ cron: preset.cron });
+  }
 
   // Narrowed data views for the kind-specific sections.
   protected readonly scheduleData = computed<ScheduleTriggerData | null>(() => {

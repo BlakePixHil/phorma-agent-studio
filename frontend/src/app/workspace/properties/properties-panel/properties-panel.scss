@@ -353,6 +353,110 @@
   opacity: 0.8;
 }
 
+/* ── Cron editor: presets, description, field chips ─────────────────────── */
+
+.phorma-props__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.15rem;
+}
+
+.phorma-props__preset-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &--active {
+    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 14%, transparent);
+    border-color: var(--p-primary-color, #818cf8);
+    color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-props__cron-desc {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+
+  &--invalid {
+    color: var(--phorma-accent-red, #ef4444);
+    opacity: 0.7;
+  }
+}
+
+.phorma-props__cron-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.phorma-props__field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.phorma-props__field-label {
+  flex-shrink: 0;
+  width: 4.2rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-props__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.phorma-props__chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2rem;
+  height: 1.55rem;
+  padding: 0 0.3rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &--active {
+    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 16%, transparent);
+    border-color: var(--p-primary-color, #818cf8);
+    color: var(--p-primary-color, #818cf8);
+    font-weight: 700;
+  }
+}
+
 /* ── OAuth: locked preset URL + one-time setup ──────────────────────────── */
 
 /* Preset-fixed server endpoint: informative, deliberately not an input. */

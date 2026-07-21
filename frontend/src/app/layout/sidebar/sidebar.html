@@ -13,7 +13,7 @@
   <!-- ── Tab strip ──────────────────────────────────────────────────────── -->
   @if (!collapsed()) {
     <div
-      class="phorma-tabstrip flex items-end gap-1 border-b border-white/5 overflow-x-auto px-2 py-1"
+      class="phorma-tabstrip flex items-end gap-1 border-b border-white/5 flex-wrap px-2 py-1"
       cdkDropList
       cdkDropListOrientation="horizontal"
       [cdkDropListData]="sideTabs()"
@@ -21,7 +21,7 @@
     >
       @for (tab of sideTabs(); track tab.id) {
         <div
-          class="phorma-tab group relative flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-sm font-medium whitespace-nowrap transition-colors"
+          class="phorma-tab group relative flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-sm font-medium transition-colors"
           [class.phorma-tab--active]="tab.id === activeTabId()"
           (click)="setActive(tab.id)"
           cdkDrag
@@ -31,7 +31,7 @@
         >
           <div
             *cdkDragPlaceholder
-            class="phorma-tab phorma-tab-placeholder flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium whitespace-nowrap"
+            class="phorma-tab phorma-tab-placeholder flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
           >
             <span>{{ tab.label }}</span>
             <span class="phorma-tab-placeholder-spacer"></span>
