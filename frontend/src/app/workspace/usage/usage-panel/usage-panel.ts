@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
 import { CurrencyPipe, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { UIChart } from 'primeng/chart';
+import { SelectModule } from 'primeng/select';
 
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import {
@@ -27,7 +29,7 @@ const PERIODS: { id: UsagePeriod; label: string }[] = [
 @Component({
   selector: 'app-usage-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DecimalPipe, UIChart],
+  imports: [CurrencyPipe, DecimalPipe, FormsModule, UIChart, SelectModule],
   templateUrl: './usage-panel.html',
   styleUrl: './usage-panel.scss',
 })
@@ -114,9 +116,8 @@ export class UsagePanel {
     this.analytics.daily().some(point => point.credits > 0 || point.usd > 0 || point.runs > 0),
   );
 
-  protected onScopeChange(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
-    this.analytics.scope.set(value === '' ? null : value);
+  protected onScopeChange(value: string | null): void {
+    this.analytics.scope.set(value ?? null);
   }
 
   protected setPeriod(period: UsagePeriod): void {

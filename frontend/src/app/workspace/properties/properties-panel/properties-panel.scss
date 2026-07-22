@@ -37,7 +37,7 @@
 }
 
 .phorma-props__label {
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -56,7 +56,7 @@
   border: 1px solid var(--phorma-card-border);
   background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
   color: var(--p-text-color);
-  font-size: 0.76rem;
+  font-size: 0.928rem;
 
   &:focus {
     outline: none;
@@ -71,7 +71,7 @@
 
 .phorma-props__input--mono {
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
 }
 
 .phorma-props__row {
@@ -86,7 +86,7 @@
 
 .phorma-props__hint {
   margin: 0;
-  font-size: 0.66rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
@@ -95,7 +95,7 @@
   align-items: center;
   gap: 0.4rem;
   margin-top: 0.45rem;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   color: var(--p-text-color);
   cursor: pointer;
 
@@ -120,52 +120,6 @@
   }
 }
 
-.phorma-props__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.7rem;
-  height: 1.7rem;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
-  }
-
-  &:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-}
-
-.phorma-props__add {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.6rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
-  font-size: 0.7rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-color);
-  }
-}
-
 .phorma-props__placeholder {
   display: flex;
   flex-direction: column;
@@ -182,7 +136,7 @@
 
   p {
     margin: 0;
-    font-size: 0.75rem;
+    font-size: 0.857rem;
   }
 
   // Inline variant: rendered beneath the workflow-settings section in the
@@ -203,7 +157,7 @@
   gap: 0.3rem;
   width: 8.5rem;
   flex-shrink: 0;
-  font-size: 0.74rem;
+  font-size: 0.928rem;
   font-weight: 600;
 }
 
@@ -221,7 +175,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -237,27 +191,6 @@
   }
 }
 
-.phorma-props__add-btn {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.6rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
-  font-size: 0.7rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-color);
-  }
-}
-
 /* ── MCP preset status + Advanced group ─────────────────────────────────── */
 .phorma-props__preset-status {
   display: flex;
@@ -269,7 +202,7 @@
   border: 1px solid var(--phorma-card-border);
   background: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 8%, transparent);
   color: var(--p-text-muted-color);
-  font-size: 0.7rem;
+  font-size: 0.928rem;
   line-height: 1.5;
 
   i {
@@ -287,27 +220,6 @@
   }
 }
 
-.phorma-props__link {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--p-primary-color, #818cf8);
-  font-size: 0.7rem;
-  font-weight: 600;
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
-
-  i {
-    font-size: 0.8rem;
-  }
-}
 
 .phorma-props__advanced-toggle {
   align-self: flex-start;
@@ -320,7 +232,7 @@
   border-radius: 0.4rem;
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.7rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -370,7 +282,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -389,7 +301,7 @@
 
 .phorma-props__cron-desc {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   font-weight: 600;
   color: var(--p-text-muted-color);
 
@@ -415,7 +327,7 @@
 .phorma-props__field-label {
   flex-shrink: 0;
   width: 4.2rem;
-  font-size: 0.65rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -439,7 +351,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.65rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -469,7 +381,7 @@
   border: 1px dashed var(--phorma-card-border);
   color: var(--p-text-muted-color);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.7rem;
+  font-size: 0.928rem;
 
   i {
     flex-shrink: 0;
@@ -498,7 +410,7 @@
   align-items: baseline;
   gap: 0.4rem;
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   font-weight: 600;
   color: var(--p-text-color);
 }
@@ -513,7 +425,7 @@
   border-radius: 50%;
   background: color-mix(in srgb, var(--p-primary-color, #818cf8) 18%, transparent);
   color: var(--p-primary-color, #818cf8);
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   font-weight: 700;
 }
 

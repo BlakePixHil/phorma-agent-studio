@@ -21,20 +21,8 @@
   -webkit-backdrop-filter: blur(20px) saturate(200%) brightness(1.04);
   border-bottom: 1px solid var(--phorma-border);
   // No overflow:hidden — it would clip PrimeNG submenu dropdowns.
-
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.06) 0%,
-      transparent 45%,
-      transparent 55%,
-      rgba(255, 255, 255, 0.02) 100%
-    );
-  }
+  // No specular shimmer (::after gradient) — plain frosted glass, matching
+  // the right sidebar, terminal, and status bar for a consistent chrome.
 }
 
 // Interactive controls must opt out of the drag region.
@@ -117,7 +105,7 @@
 
 :host ::ng-deep .phorma-menubar .p-menubar-item-link {
   padding: 0.4rem 1rem;
-  font-size: 0.8125rem;
+  font-size: 0.928rem;
 }
 
 .phorma-run-controls {
@@ -151,7 +139,7 @@
 :host ::ng-deep .phorma-update-button.p-button {
   min-width: 64px;
   padding: 0.25rem 0.75rem;
-  font-size: 0.8125rem;
+  font-size: 0.928rem;
 
   .p-button-icon {
     font-size: 0.875rem;

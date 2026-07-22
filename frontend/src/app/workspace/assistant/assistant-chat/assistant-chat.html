@@ -46,7 +46,7 @@
                 <i class="ti ti-alert-triangle" aria-hidden="true"></i>
                 <span>{{ turn.error }}</span>
                 @if (chat.creditsExhausted()) {
-                  <button type="button" class="phorma-chat__cta" (click)="openCredits()">
+                  <button type="button" pButton severity="secondary" [outlined]="true" (click)="openCredits()">
                     Buy credits
                   </button>
                 }
@@ -94,7 +94,9 @@
                       </p>
                       <button
                         type="button"
-                        class="phorma-chat__apply phorma-chat__apply--reapply"
+                        pButton
+                        severity="secondary"
+                        [outlined]="true"
                         [disabled]="chat.busy()"
                         (click)="applyProposal(turn)"
                       >
@@ -103,7 +105,7 @@
                     } @else {
                       <button
                         type="button"
-                        class="phorma-chat__apply"
+                        pButton
                         [disabled]="chat.busy()"
                         (click)="applyProposal(turn)"
                       >
@@ -255,7 +257,7 @@
     @if (chat.mode() === 'agent' && agentLocked()) {
       <p class="phorma-chat__hint phorma-chat__hint--upsell">
         Agent mode edits the canvas for you —
-        <button type="button" class="phorma-chat__link" (click)="openSubscribe()">
+        <button type="button" pButton [text]="true" (click)="openSubscribe()">
           subscribe to Phorma Cloud
         </button>
         to unlock it.

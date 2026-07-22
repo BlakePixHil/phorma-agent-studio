@@ -73,7 +73,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -141,12 +141,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   font-weight: 600;
 }
 
 .phorma-assistd__list-sub {
-  font-size: 0.64rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
@@ -170,7 +170,7 @@
 
 .phorma-assistd__empty-list {
   margin: 0;
-  font-size: 0.74rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 

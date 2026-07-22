@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
@@ -49,7 +50,7 @@ const MODES: { id: AssistantMode; label: string; icon: string; title: string }[]
 @Component({
   selector: 'app-assistant-chat',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, SelectModule],
+  imports: [FormsModule, ButtonModule, SelectModule],
   templateUrl: './assistant-chat.html',
   styleUrl: './assistant-chat.scss',
 })

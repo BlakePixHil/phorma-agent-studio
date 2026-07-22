@@ -48,19 +48,21 @@
           (onClick)="run()"
         />
       } @else {
-        <button type="button" class="phorma-runs__btn" (click)="runController.pauseOrResume()">
+        <button type="button" pButton severity="secondary" [outlined]="true" (click)="runController.pauseOrResume()">
           <i class="ti" [class.ti-player-pause]="!runController.paused()" [class.ti-player-play]="runController.paused()" aria-hidden="true"></i>
           {{ runController.paused() ? 'Resume' : 'Pause' }}
         </button>
         <button
           type="button"
-          class="phorma-runs__btn"
+          pButton
+          severity="secondary"
+          [outlined]="true"
           [disabled]="!runController.paused()"
           (click)="runController.step()"
         >
           <i class="ti ti-player-skip-forward" aria-hidden="true"></i> Step
         </button>
-        <button type="button" class="phorma-runs__btn phorma-runs__btn--danger" (click)="stop()">
+        <button type="button" pButton severity="danger" [outlined]="true" (click)="stop()">
           <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
         </button>
       }
@@ -103,7 +105,9 @@
         </button>
         <button
           type="button"
-          class="phorma-runs__btn phorma-runs__btn--danger"
+          pButton
+          severity="danger"
+          [outlined]="true"
           (click)="runController.resolveApproval(approval.nodeId, false)"
         >
           <i class="ti ti-thumb-down" aria-hidden="true"></i> Reject
@@ -270,7 +274,9 @@
         <div class="phorma-runs__detail-header">
           <button
             type="button"
-            class="phorma-runs__btn"
+            pButton
+            severity="secondary"
+            [outlined]="true"
             (click)="closeRunDetail()"
           >
             <i class="ti ti-arrow-left" aria-hidden="true"></i> Back

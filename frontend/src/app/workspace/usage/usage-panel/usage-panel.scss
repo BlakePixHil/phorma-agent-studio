@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -60,14 +60,9 @@
   gap: 0.4rem;
 }
 
+/* p-select wrapper: make it full-width to match the old native select. */
 .phorma-usage__select {
   width: 100%;
-  padding: 0.32rem 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-color);
-  font-size: 0.78rem;
 }
 
 .phorma-usage__periods {
@@ -81,7 +76,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.7rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -128,7 +123,7 @@
 }
 
 .phorma-usage__stat-label {
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
@@ -140,19 +135,19 @@
 
 .phorma-usage__empty {
   margin: 0;
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
 .phorma-usage__table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.73rem;
+  font-size: 0.928rem;
 
   th {
     padding: 0.22rem 0.3rem;
     text-align: left;
-    font-size: 0.62rem;
+    font-size: 0.857rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;

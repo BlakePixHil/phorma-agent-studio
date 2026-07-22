@@ -44,15 +44,11 @@
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
-  border-radius: 10px;
-  background: var(--p-hover-background, rgba(255, 255, 255, 0.06));
-  color: var(--p-primary-color, #878fa3);
+  color: var(--p-text-muted-color);
 }
 
 .phorma-confirm__icon--danger {
   color: var(--p-red-400, #fca5a5);
-  background: color-mix(in srgb, var(--p-red-500, #ef4444) 14%, transparent);
 }
 
 .phorma-confirm h2 {

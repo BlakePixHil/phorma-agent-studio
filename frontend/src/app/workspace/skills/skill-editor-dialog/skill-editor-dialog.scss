@@ -46,10 +46,7 @@
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--p-primary-color) 14%, transparent);
-  color: var(--p-primary-color);
+  color: var(--p-text-muted-color);
   font-size: 18px;
 }
 
@@ -92,7 +89,7 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -121,7 +118,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -170,7 +167,7 @@
   resize: vertical;
   line-height: 1.5;
   font-family: var(--phorma-font-mono, ui-monospace, monospace);
-  font-size: 0.78rem;
+  font-size: 0.928rem;
 }
 
 .phorma-skill-editor__preview {
@@ -232,7 +229,7 @@
   align-items: center;
   gap: 0.35rem;
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   color: var(--phorma-accent-amber, #f59e0b);
 }
 
@@ -257,7 +254,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.77rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;

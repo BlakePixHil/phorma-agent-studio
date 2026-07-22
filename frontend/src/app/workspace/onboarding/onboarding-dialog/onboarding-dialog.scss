@@ -68,7 +68,7 @@
   border: 1px solid var(--p-border-color);
   border-radius: 50%;
   background: transparent;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
 
@@ -78,7 +78,7 @@
 }
 
 .phorma-setup__stage-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -124,10 +124,7 @@
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid var(--p-border-color);
-  border-radius: 10px;
-  background: var(--p-hover-background);
-  color: var(--p-primary-color);
+  color: var(--p-text-muted-color);
   font-size: 18px;
 }
 
@@ -167,7 +164,7 @@
   gap: 6px;
   margin: 0;
   color: var(--p-text-muted-color);
-  font-size: 11.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -261,7 +258,7 @@
   }
 
   span {
-    font-size: 11.5px;
+    font-size: 13px;
     line-height: 1.5;
     color: var(--p-text-muted-color);
   }
@@ -364,7 +361,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
   color: var(--p-primary-color);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
 
@@ -379,7 +376,7 @@
 }
 
 .phorma-setup__model-desc {
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--p-text-muted-color);
 }
 
@@ -389,7 +386,7 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
   color: var(--p-text-muted-color);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -432,7 +429,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--p-orange-400, #fb923c) 10%, transparent);
   color: var(--p-orange-400, #fb923c);
-  font-size: 11.5px;
+  font-size: 13px;
   line-height: 1.5;
 
   i {

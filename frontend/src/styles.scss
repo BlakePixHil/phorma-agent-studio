@@ -86,23 +86,25 @@
 }
 
 :root.app-dark {
-  /* Dark theme — Cursor-like deep charcoal */
-  --phorma-canvas-bg:    #0d0e11;
+  /* Dark theme — obsidian with a faint violet undertone (matches phorma-labs.com).
+     Neutral surfaces sit near black with hue pulled toward purple (~275°) at
+     very low chroma, so the shell reads black/purple rather than blue-charcoal. */
+  --phorma-canvas-bg:    #0c0a10;
   /* Glass panels — low opacity so the canvas bleeds through */
-  --phorma-chrome-bg:    rgba(14, 15, 18, 0.45);
+  --phorma-chrome-bg:    rgba(13, 11, 17, 0.45);
   --phorma-border:       rgba(255, 255, 255, 0.08);
   /* Dot grid */
-  --phorma-dot-color:    rgba(180, 185, 210, 0.22);
+  --phorma-dot-color:    rgba(185, 180, 210, 0.22);
   /* Canvas cursor spotlight — very dim white, no colour tint */
   --phorma-spotlight-color: rgba(255, 255, 255, 0.025);
   /* Spotlight card */
-  --phorma-card-bg:      #111114;
+  --phorma-card-bg:      #130f18;
   --phorma-card-border:  rgba(255, 255, 255, 0.05);
   --phorma-card-border-glow: rgba(255, 255, 255, 0.70);
   --phorma-card-fill-glow:   rgba(255, 255, 255, 0.08);
   /* Flow nodes */
-  --phorma-node-bg:             #18191e;
-  --phorma-node-header-bg:      #1e1f25;
+  --phorma-node-bg:             #17131d;
+  --phorma-node-header-bg:      #1d1826;
   --phorma-node-border:         rgba(255, 255, 255, 0.07);
   --phorma-node-border-active:  rgba(255, 255, 255, 0.22);
   --phorma-node-divider:        rgba(255, 255, 255, 0.05);
@@ -128,7 +130,7 @@
   --phorma-wire-color:          rgba(180, 185, 210, 0.25);
   --phorma-wire-hover-color:    var(--p-primary-color, #878fa3);
   /* Glass surface (drag preview, collapse button) */
-  --phorma-glass-bg:            rgba(18, 19, 24, 0.88);
+  --phorma-glass-bg:            rgba(19, 15, 25, 0.88);
   /* Soft elevation shadow for floating chrome — deeper in dark mode. */
   --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.35);
   /* ── Semantic accent tokens ────────────────────────────────────────────
@@ -401,24 +403,11 @@ body::-webkit-scrollbar {
 }
 
 /*
- * Specular shimmer is applied ONLY to the left sidebar. The right panel,
- * terminal, and status bar deliberately omit it so the chrome reads as a
- * consistent set of plain frosted-glass surfaces (only the left "primary"
- * panel gets the glossy highlight).
+ * No specular shimmer on any panel — the left sidebar, right sidebar,
+ * terminal, toolbar, and status bar all use plain frosted-glass surfaces
+ * for a consistent chrome. (Previously only the left sidebar had the
+ * diagonal gradient highlight; removed for visual consistency.)
  */
-.phorma-sidebar--left::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.06) 0%,
-    transparent 45%,
-    transparent 55%,
-    rgba(255, 255, 255, 0.02) 100%
-  );
-}
 
 /* statusbar MUST NOT set position — Tailwind's `absolute` must win.
    No specular shine — same reasoning as the Properties right panel. */
@@ -443,7 +432,7 @@ app-root {
 
 .phorma-type-option {
   font-family: Consolas, 'Cascadia Code', monospace;
-  font-size: 0.75rem;
+  font-size: 0.857rem;
   text-transform: lowercase;
   color: var(--phorma-code-default, var(--p-text-color));
 }

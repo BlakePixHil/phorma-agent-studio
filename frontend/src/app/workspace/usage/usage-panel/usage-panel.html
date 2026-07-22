@@ -19,16 +19,16 @@
       </button>
     </label>
     <div class="phorma-usage__controls">
-      <select
+      <p-select
         class="phorma-usage__select"
-        [value]="analytics.scope() ?? ''"
-        (change)="onScopeChange($event)"
-        aria-label="Workflow scope"
-      >
-        @for (scope of scopes(); track scope.id ?? 'all') {
-          <option [value]="scope.id ?? ''">{{ scope.label }}</option>
-        }
-      </select>
+        [options]="scopes()"
+        optionLabel="label"
+        optionValue="id"
+        [ngModel]="analytics.scope()"
+        (ngModelChange)="onScopeChange($event)"
+        appendTo="body"
+        ariaLabel="Workflow scope"
+      />
       <div class="phorma-usage__periods" role="tablist" aria-label="Period">
         @for (period of periods; track period.id) {
           <button

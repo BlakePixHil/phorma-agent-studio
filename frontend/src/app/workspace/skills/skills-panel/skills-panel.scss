@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -57,7 +57,7 @@
 }
 
 .phorma-skills__empty {
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
@@ -90,6 +90,7 @@
 
   &:hover .phorma-skills__row-actions {
     opacity: 1;
+    width: auto;
   }
 }
 
@@ -109,13 +110,15 @@
 .phorma-skills__list-title {
   font-size: 0.8rem;
   font-weight: 600;
+  /* One-line ellipsis by default; the meta column shrinks on hover so the
+     action buttons never overlap the truncated text. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .phorma-skills__list-sub {
-  font-size: 0.7rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -126,15 +129,19 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   color: var(--p-primary-color);
 }
 
 .phorma-skills__row-actions {
   display: inline-flex;
   gap: 0.1rem;
+  /* Collapse to zero width when hidden so the meta column gets the full row;
+     expand on hover so the buttons appear without overlapping the text. */
+  width: 0;
+  overflow: hidden;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, width 0.15s ease;
 }
 
 .phorma-skills__row-btn {

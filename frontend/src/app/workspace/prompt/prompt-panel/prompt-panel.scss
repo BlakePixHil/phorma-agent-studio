@@ -44,7 +44,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -80,7 +80,7 @@
 }
 
 .phorma-prompt__label {
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -102,7 +102,7 @@
   border: none;
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -134,7 +134,7 @@
   border: 1px solid var(--phorma-card-border);
   background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
   color: var(--p-text-color);
-  font-size: 0.72rem;
+  font-size: 0.928rem;
 
   > .ti {
     color: var(--p-primary-color);
@@ -191,8 +191,9 @@
   background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
   color: var(--p-text-color);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   line-height: 1.55;
+  width: 100%;
 
   &:focus {
     outline: none;
@@ -245,7 +246,7 @@
 
 .phorma-prompt__hint {
   margin: 0;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 
   code {
@@ -300,7 +301,7 @@
   padding: 0.35rem 0.9rem;
   border: none;
   border-radius: 0.4rem;
-  font-size: 0.75rem;
+  font-size: 0.857rem;
   font-weight: 600;
   cursor: pointer;
   color: var(--p-primary-contrast-color);
@@ -319,7 +320,7 @@
   border: 1px solid var(--phorma-card-border);
   background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
   color: var(--p-text-color);
-  font-size: 0.75rem;
+  font-size: 0.928rem;
 
   &:focus {
     outline: none;
@@ -331,7 +332,7 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  font-size: 0.74rem;
+  font-size: 0.928rem;
   font-weight: 600;
   color: var(--p-text-color);
   cursor: pointer;
@@ -353,7 +354,7 @@
 }
 
 .phorma-prompt__inline-label {
-  font-size: 0.7rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
@@ -373,7 +374,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.65rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -405,7 +406,7 @@
     padding: 0.3rem 0.5rem;
     border-radius: 0.5rem;
     background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-    font-size: 0.72rem;
+    font-size: 0.928rem;
     font-weight: 600;
 
     i {
@@ -431,6 +432,6 @@
 
   p {
     margin: 0;
-    font-size: 0.75rem;
+    font-size: 0.857rem;
   }
 }

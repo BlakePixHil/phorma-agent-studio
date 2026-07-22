@@ -111,7 +111,6 @@
             [options]="httpMethods"
             [ngModel]="data.method"
             (ngModelChange)="patchData({ method: $event })"
-            size="small"
             appendTo="body"
           />
           <input
@@ -147,7 +146,6 @@
             optionValue="id"
             [ngModel]="data.transport"
             (ngModelChange)="patchData({ transport: $event })"
-            size="small"
             appendTo="body"
           />
         }
@@ -177,7 +175,7 @@
                   }
                 </span>
               </div>
-              <button type="button" class="phorma-props__link" (click)="openIntegrationSettings()">
+              <button type="button" pButton [text]="true" (click)="openIntegrationSettings()">
                 <i class="ti ti-settings" aria-hidden="true"></i>
                 Configure defaults in Settings › Integrations
               </button>
@@ -246,7 +244,9 @@
                       />
                       <button
                         type="button"
-                        class="phorma-props__btn"
+                        pButton
+                        severity="secondary"
+                        [outlined]="true"
                         [disabled]="mcpSecretDrafts()[field.name] === undefined"
                         (click)="saveSecret(field.name)"
                       >
@@ -255,7 +255,10 @@
                       @if (secretConfigured(field.name)) {
                         <button
                           type="button"
-                          class="phorma-props__icon-btn"
+                          pButton
+                          severity="danger"
+                          [text]="true"
+                          [rounded]="true"
                           (click)="clearSecret(field.name)"
                           title="Remove override (revert to application default)"
                         >
@@ -293,7 +296,10 @@
                       />
                       <button
                         type="button"
-                        class="phorma-props__icon-btn"
+                        pButton
+                        severity="danger"
+                        [text]="true"
+                        [rounded]="true"
                         (click)="removeArg($index)"
                         title="Remove argument"
                       >
@@ -304,7 +310,7 @@
                     <p class="phorma-props__hint">No arguments.</p>
                   }
                 </ul>
-                <button type="button" class="phorma-props__add-btn" (click)="addArg()">
+                <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()">
                   <i class="ti ti-plus" aria-hidden="true"></i> Add argument
                 </button>
               </div>
@@ -334,7 +340,10 @@
                   />
                   <button
                     type="button"
-                    class="phorma-props__icon-btn"
+                    pButton
+                    severity="danger"
+                    [text]="true"
+                    [rounded]="true"
                     (click)="removeArg($index)"
                     title="Remove argument"
                   >
@@ -345,7 +354,7 @@
                 <p class="phorma-props__hint">No arguments.</p>
               }
             </ul>
-            <button type="button" class="phorma-props__add-btn" (click)="addArg()">
+            <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()">
               <i class="ti ti-plus" aria-hidden="true"></i> Add argument
             </button>
           }
@@ -399,7 +408,7 @@
                   <span class="phorma-props__oauth-step-num">1</span>
                   Register a (free) OAuth app on your account — the form is pre-filled:
                 </p>
-                <button type="button" class="phorma-props__btn" (click)="openOAuthRegisterPage()">
+                <button type="button" pButton severity="secondary" [outlined]="true" (click)="openOAuthRegisterPage()">
                   <i class="ti ti-external-link" aria-hidden="true"></i>
                   Open registration page
                 </button>
@@ -414,7 +423,7 @@
                     readonly
                     aria-label="Callback URL to register"
                   />
-                  <button type="button" class="phorma-props__icon-btn" (click)="copyRedirectUri()" title="Copy callback URL">
+                  <button type="button" pButton severity="secondary" [text]="true" [rounded]="true" (click)="copyRedirectUri()" title="Copy callback URL">
                     <i class="ti ti-copy" aria-hidden="true"></i>
                   </button>
                 </div>
@@ -447,7 +456,9 @@
                 }
                 <button
                   type="button"
-                  class="phorma-props__btn"
+                  pButton
+                  severity="secondary"
+                  [outlined]="true"
                   [disabled]="!oauthClientIdDraft().trim()"
                   (click)="saveOAuthClient()"
                 >
@@ -456,7 +467,7 @@
                 </button>
               </div>
             } @else if (oauthSetup() && oauthClientAvailable()) {
-              <button type="button" class="phorma-props__link" (click)="toggleOAuthSetup()">
+              <button type="button" pButton [text]="true" (click)="toggleOAuthSetup()">
                 <i class="ti ti-key" aria-hidden="true"></i>
                 {{ oauthClientConfigured() ? 'OAuth app configured — change credentials' : 'Using a custom OAuth app instead' }}
               </button>
@@ -475,7 +486,10 @@
               @if (oauthConnected()) {
                 <button
                   type="button"
-                  class="phorma-props__icon-btn"
+                  pButton
+                  severity="danger"
+                  [text]="true"
+                  [rounded]="true"
                   (click)="disconnectOAuth()"
                   title="Disconnect (clear stored tokens)"
                 >
@@ -506,7 +520,9 @@
                 />
                 <button
                   type="button"
-                  class="phorma-props__btn"
+                  pButton
+                  severity="secondary"
+                  [outlined]="true"
                   [disabled]="mcpSecretDrafts()[field.name] === undefined"
                   (click)="saveSecret(field.name)"
                 >
@@ -515,7 +531,10 @@
                 @if (secretConfigured(field.name)) {
                   <button
                     type="button"
-                    class="phorma-props__icon-btn"
+                    pButton
+                    severity="danger"
+                    [text]="true"
+                    [rounded]="true"
                     (click)="clearSecret(field.name)"
                     title="Remove stored secret"
                   >
@@ -650,7 +669,10 @@
               />
               <button
                 type="button"
-                class="phorma-props__icon-btn"
+                pButton
+                severity="danger"
+                [text]="true"
+                [rounded]="true"
                 (click)="removePort(selected, port.id)"
                 [disabled]="branch.ports.length <= 2"
                 title="Remove"
@@ -662,7 +684,9 @@
         </ul>
         <button
           type="button"
-          class="phorma-props__add"
+          pButton
+          severity="secondary"
+          [outlined]="true"
           (click)="addBranchPort(selected, branch.role)"
         >
           <i class="ti ti-plus" aria-hidden="true"></i> Add

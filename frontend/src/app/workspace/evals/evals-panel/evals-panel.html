@@ -51,7 +51,7 @@
   } @else if (selectedSuite(); as suite) {
     <!-- ── Suite header ── -->
     <div class="phorma-evals__detail-header">
-      <button type="button" class="phorma-evals__btn" (click)="closeSuite()">
+      <button type="button" pButton severity="secondary" [outlined]="true" (click)="closeSuite()">
         <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
       </button>
       @if (!runner.running()) {
@@ -71,7 +71,7 @@
           />
         }
       } @else {
-        <button type="button" class="phorma-evals__btn phorma-evals__btn--danger" (click)="cancelRun()">
+        <button type="button" pButton severity="danger" [outlined]="true" (click)="cancelRun()">
           <i class="ti ti-player-stop" aria-hidden="true"></i> Cancel
         </button>
         <span class="phorma-evals__progress">
@@ -320,7 +320,7 @@
     } @else if (selectedRun(); as run) {
       <!-- ── Results view ── -->
       <div class="phorma-evals__detail-header phorma-evals__detail-header--sub">
-        <button type="button" class="phorma-evals__btn" (click)="closeRun()">
+        <button type="button" pButton severity="secondary" [outlined]="true" (click)="closeRun()">
           <i class="ti ti-arrow-left" aria-hidden="true"></i> Runs
         </button>
         <span

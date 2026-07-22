@@ -9,6 +9,7 @@ import {
   computed,
   WritableSignal,
   AfterContentInit,
+  OnInit,
   OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -16,7 +17,7 @@ import { CdkDragDrop, CdkDrag, CdkDropList, CdkDragPlaceholder } from '@angular/
 import { TabsModule } from 'primeng/tabs';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
-import { PanelRegistryService, PanelTab } from '../../core/panel-registry.service';
+import { PanelRegistryService, PanelTab, DEFAULT_PANEL_WIDTH } from '../../core/panel-registry.service';
 import { SidePanelPane } from './side-panel-pane.directive';
 
 /**
@@ -35,21 +36,14 @@ import { SidePanelPane } from './side-panel-pane.directive';
   templateUrl: './sidebar.html',
   styleUrl: './sidebar.scss',
 })
-export class Sidebar implements AfterContentInit, OnDestroy {
+export class Sidebar implements OnInit, AfterContentInit, OnDestroy {
   /** Which edge of the workspace this sidebar is docked to. */
   readonly side = input<'left' | 'right'>('left');
 
   protected readonly registry = inject(PanelRegistryService);
 
-  /** Width controlled by the resize handle (px). */
-  protected readonly panelWidth = signal(270);
-
   /** True only while the user is actively dragging the resize handle. */
   protected readonly resizing = signal(false);
-
-  /** Minimum & maximum widths in px. */
-  protected readonly MIN_WIDTH = 190;
-  protected readonly MAX_WIDTH = 600;
 
   /**
    * Collapsed state is stored in the registry so the View menu can also
@@ -66,8 +60,19 @@ export class Sidebar implements AfterContentInit, OnDestroy {
       : this.registry.collapsedRight();
   });
 
+  /**
+   * Width controlled by the resize handle (px). Hydrated from the registry's
+   * persisted width (clamped into range) in `ngOnInit` — the earliest point
+   * where the `side` input is bound — so the user's layout survives restarts.
+   */
+  protected readonly panelWidth = signal(DEFAULT_PANEL_WIDTH);
+
+  /** Minimum & maximum widths in px. */
+  protected readonly MIN_WIDTH = 220;
+  protected readonly MAX_WIDTH = 640;
+
   /** Width before collapsing, restored on expand. */
-  private widthBeforeCollapse = 270;
+  private widthBeforeCollapse = DEFAULT_PANEL_WIDTH;
 
   private resizeFrameId: number | null = null;
   private pendingPanelWidth: number | null = null;
@@ -78,6 +83,16 @@ export class Sidebar implements AfterContentInit, OnDestroy {
 
   /** Map of tabId → projected pane (populated after content init). */
   protected paneMap = new Map<string, SidePanelPane>();
+
+  ngOnInit(): void {
+    // Hydrate the width from the persisted registry value (clamped into
+    // range). Runs after inputs are bound, so `side()` is reliable, and
+    // BEFORE ngAfterContentInit writes the width back to the registry.
+    const saved = this.side() === 'left' ? this.registry.leftWidth() : this.registry.rightWidth();
+    const clamped = Math.min(this.MAX_WIDTH, Math.max(this.MIN_WIDTH, saved || DEFAULT_PANEL_WIDTH));
+    this.panelWidth.set(clamped);
+    this.widthBeforeCollapse = clamped;
+  }
 
   ngAfterContentInit(): void {
     this.registry.setPanelWidth(this.side(), this.panelWidth());

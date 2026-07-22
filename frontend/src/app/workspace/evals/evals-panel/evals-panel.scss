@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -33,38 +33,8 @@
 
 .phorma-evals__empty,
 .phorma-evals__hint {
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
-}
-
-.phorma-evals__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.36rem 0.6rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
-  font-size: 0.77rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  &--danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
-  }
 }
 
 .phorma-evals__icon-btn {
@@ -201,7 +171,7 @@
 }
 
 .phorma-evals__list-sub {
-  font-size: 0.7rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
@@ -239,13 +209,13 @@
 
 .phorma-evals__detail-time {
   margin-left: auto;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
 .phorma-evals__progress {
   margin-left: auto;
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   font-weight: 700;
   color: var(--p-text-muted-color);
 }
@@ -258,7 +228,7 @@
   border: 1px solid color-mix(in srgb, var(--phorma-accent-red, #ef4444) 45%, transparent);
   background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 10%, transparent);
   color: var(--phorma-accent-red, #ef4444);
-  font-size: 0.66rem;
+  font-size: 0.928rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   white-space: nowrap;
@@ -278,7 +248,7 @@
   border: 1px solid color-mix(in srgb, var(--p-primary-color) 45%, transparent);
   background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
   color: var(--p-primary-color, #818cf8);
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -350,7 +320,7 @@
 }
 
 .phorma-evals__result-sub {
-  font-size: 0.69rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 }
 
@@ -367,13 +337,13 @@
 
 .phorma-evals__result-error {
   margin: 0;
-  font-size: 0.74rem;
+  font-size: 0.928rem;
   color: var(--phorma-accent-red, #ef4444);
 }
 
 .phorma-evals__result-reasoning {
   margin: 0;
-  font-size: 0.74rem;
+  font-size: 0.928rem;
   font-style: italic;
   color: var(--p-text-muted-color);
 }
@@ -385,7 +355,7 @@
   padding: 0.4rem 0.5rem;
   border-radius: 0.45rem;
   background: color-mix(in srgb, var(--p-content-background) 80%, transparent);
-  font-size: 0.72rem;
+  font-size: 0.928rem;
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;

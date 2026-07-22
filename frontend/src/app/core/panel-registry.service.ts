@@ -11,6 +11,9 @@ export interface PanelTab {
   order: number;
 }
 
+/** Default width for each side panel (px) when no saved width exists. */
+export const DEFAULT_PANEL_WIDTH = 320;
+
 /** Default tab layout — used when resetting panels */
 const DEFAULT_TABS: PanelTab[] = [
   { id: 'agents',     label: 'Agents',     icon: 'ti ti-robot',      side: 'left',  order: 0 },
@@ -35,8 +38,10 @@ export class PanelRegistryService {
 
   private readonly _activeLeft  = signal<string>(loadLayout('activeLeft', 'agents'));
   private readonly _activeRight = signal<string>(loadLayout('activeRight', 'prompt'));
-  private readonly _leftWidth = signal(loadLayout('leftWidth', 270));
-  private readonly _rightWidth = signal(loadLayout('rightWidth', 270));
+  // Default panel width. Roomier than the original 270 so panels are readable
+  // out-of-the-box; a saved value always wins via loadLayout.
+  private readonly _leftWidth = signal(loadLayout('leftWidth', DEFAULT_PANEL_WIDTH));
+  private readonly _rightWidth = signal(loadLayout('rightWidth', DEFAULT_PANEL_WIDTH));
 
   /** Whether each side is collapsed */
   readonly collapsedLeft  = signal(loadLayout('collapsedLeft', false));
@@ -184,8 +189,8 @@ export class PanelRegistryService {
     this._tabs.set([...DEFAULT_TABS]);
     this._activeLeft.set('agents');
     this._activeRight.set('prompt');
-    this._leftWidth.set(270);
-    this._rightWidth.set(270);
+    this._leftWidth.set(DEFAULT_PANEL_WIDTH);
+    this._rightWidth.set(DEFAULT_PANEL_WIDTH);
     this.collapsedLeft.set(false);
     this.collapsedRight.set(false);
   }

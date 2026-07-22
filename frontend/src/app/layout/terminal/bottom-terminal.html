@@ -31,14 +31,14 @@
               <i [class]="channel.icon"></i>
               <span>{{ channel.label }}</span>
               @if (channel.id === 'problems' && terminal.errorCount() > 0) {
-                <span class="rounded-full bg-red-500/20 px-1.5 text-[10px] text-red-300">
+                <span class="rounded-full bg-red-500/20 px-1.5 text-xs text-red-300">
                   {{ terminal.errorCount() }}
                 </span>
               }
             </button>
           }
         </div>
-        <span class="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--p-text-muted-color)]">
+        <span class="rounded-full border border-white/10 px-2 py-0.5 text-xs uppercase tracking-wide text-[var(--p-text-muted-color)]">
           {{ statusLabel() }}
         </span>
         <p-button

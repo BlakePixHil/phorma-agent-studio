@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { SelectModule } from 'primeng/select';
+import { TextareaModule } from 'primeng/textarea';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
@@ -53,7 +54,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-prompt-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, SelectModule],
+  imports: [FormsModule, SelectModule, TextareaModule],
   templateUrl: './prompt-panel.html',
   styleUrl: './prompt-panel.scss',
 })

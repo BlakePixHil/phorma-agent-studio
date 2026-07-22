@@ -8,6 +8,7 @@ import {
   untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import cronstrue from 'cronstrue';
 
@@ -160,7 +161,7 @@ const CRON_PRESETS: CronPreset[] = [
 @Component({
   selector: 'app-properties-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, SelectModule],
+  imports: [FormsModule, ButtonModule, SelectModule],
   templateUrl: './properties-panel.html',
   styleUrl: './properties-panel.scss',
 })

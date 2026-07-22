@@ -1269,27 +1269,18 @@ export class CanvasGraphRenderer {
     ctx.lineTo(n.x + n.w, n.y + HEADER_H);
     ctx.stroke();
 
-    // Accent icon chip.
+    // Node icon — bare glyph in muted text color (no chip background/border).
     const chip = 20;
     const chipX = n.x + 8;
     const chipY = n.y + (HEADER_H - chip) / 2;
-    ctx.save();
-    ctx.globalAlpha = 0.18;
-    ctx.fillStyle = n.accent;
-    this.roundRect(ctx, chipX, chipY, chip, chip, 5);
-    ctx.fill();
-    ctx.globalAlpha = 0.4;
-    ctx.strokeStyle = n.accent;
-    ctx.lineWidth = 1 / this.sc;
-    this.roundRect(ctx, chipX, chipY, chip, chip, 5);
-    ctx.stroke();
-    ctx.restore();
     if (n.iconGlyph && n.iconFont) {
-      ctx.fillStyle = n.accent;
+      ctx.fillStyle = this.theme.rowText;
+      ctx.globalAlpha = 0.55;
       ctx.font = `12px ${n.iconFont}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(n.iconGlyph, chipX + chip / 2, chipY + chip / 2 + 0.5);
+      ctx.globalAlpha = 1;
       ctx.textAlign = 'left';
     }
 

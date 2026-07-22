@@ -32,7 +32,7 @@
     border: 1px solid var(--phorma-card-border);
     background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
     color: var(--p-text-color);
-    font-size: 0.78rem;
+    font-size: 0.928rem;
 
     &:focus {
       outline: none;
@@ -62,7 +62,7 @@
   border: 1px solid var(--phorma-card-border);
   background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
   color: var(--p-text-muted-color);
-  font-size: 0.66rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -133,7 +133,7 @@
   align-items: center;
   gap: 0.4rem;
   margin-bottom: 0.4rem;
-  font-size: 0.62rem;
+  font-size: 0.857rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -149,7 +149,7 @@
 
 .phorma-palette__subheading {
   margin: 0.5rem 0 0.35rem 0.15rem;
-  font-size: 0.58rem;
+  font-size: 0.857rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -269,7 +269,7 @@
 }
 
 .phorma-palette__label {
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 600;
   text-align: center;
   line-height: 1.2;
@@ -278,6 +278,6 @@
 .phorma-palette__empty {
   margin-top: 1rem;
   text-align: center;
-  font-size: 0.75rem;
+  font-size: 0.857rem;
   color: var(--p-text-muted-color);
 }

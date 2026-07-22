@@ -26,7 +26,7 @@
 }
 
 .phorma-runs__label {
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -43,12 +43,16 @@
   border: 1px solid color-mix(in srgb, var(--p-primary-color) 50%, transparent);
   background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
   color: var(--p-primary-color, #818cf8);
-  font-size: 0.6rem;
+  font-size: 0.857rem;
   letter-spacing: 0.04em;
 }
 
 .phorma-runs__input {
   resize: vertical;
+  /* Give the auto-resizing textarea a stable floor so it never collapses to a
+     sliver when the panel reopens or the input is cleared. */
+  min-height: 4.5rem;
+  max-height: 14rem;
   font-size: 0.84rem;
   line-height: 1.5;
 }
@@ -68,7 +72,7 @@
   border: 1px solid var(--phorma-card-border);
   background: transparent;
   color: var(--p-text-muted-color);
-  font-size: 0.77rem;
+  font-size: 0.928rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -81,11 +85,6 @@
   &:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-  }
-
-  &--danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
   }
 
   &--approve {
@@ -101,7 +100,7 @@
 
 .phorma-runs__phase {
   margin-left: auto;
-  font-size: 0.69rem;
+  font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -113,7 +112,7 @@
   align-items: center;
   gap: 0.35rem;
   margin-top: 0.4rem;
-  font-size: 0.73rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 
   i {
@@ -139,7 +138,7 @@
   border: 1px solid color-mix(in srgb, var(--p-primary-color) 45%, transparent);
   background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
   color: var(--p-primary-color, #818cf8);
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   font-weight: 600;
 
   i {
@@ -267,7 +266,7 @@
   border-radius: 999px;
   background: var(--phorma-accent-green, #34d399);
   color: #052e1c;
-  font-size: 0.58rem;
+  font-size: 0.857rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -284,7 +283,7 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
 
   i {
@@ -326,7 +325,7 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.76rem;
+  font-size: 0.928rem;
 
   strong {
     text-transform: capitalize;
@@ -380,14 +379,14 @@
   margin-left: auto;
   padding: 0.1rem 0.4rem;
   border-radius: 0.4rem;
-  font-size: 0.68rem;
+  font-size: 0.928rem;
   background: color-mix(in srgb, var(--phorma-port-tools, #fbbf24) 14%, transparent);
   color: var(--p-text-color);
 }
 
 .phorma-runs__wait-input {
   font-family: var(--phorma-font-mono, monospace);
-  font-size: 0.72rem;
+  font-size: 0.928rem;
 }
 
 .phorma-runs__trace {
@@ -450,7 +449,7 @@
 
 .phorma-runs__entry-time {
   flex-shrink: 0;
-  font-size: 0.66rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
 }
@@ -488,12 +487,12 @@
 }
 
 .phorma-runs__group-title {
-  font-size: 0.76rem;
+  font-size: 0.928rem;
   font-weight: 700;
 }
 
 .phorma-runs__group-count {
-  font-size: 0.66rem;
+  font-size: 0.928rem;
   font-weight: 600;
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
@@ -567,7 +566,7 @@
   border-radius: 0.5rem;
   background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.74rem;
+  font-size: 0.928rem;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
