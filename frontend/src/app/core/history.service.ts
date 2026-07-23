@@ -56,6 +56,8 @@ export class HistoryService {
   private isApplying = false;
   /** Last observed document id — used to reset history on tab switch. */
   private trackedDocId: string | null = null;
+  /** Forces the next observed user edit to start a fresh undo step. */
+  private boundaryPending = false;
 
   constructor() {
     effect(() => {
@@ -70,6 +72,7 @@ export class HistoryService {
         this.redoStack.set([]);
         this.trackedGraph = current;
         this.lastPushAt = 0;
+        this.boundaryPending = false;
         return;
       }
 
@@ -95,17 +98,30 @@ export class HistoryService {
       this.trackedGraph = current;
 
       const now = Date.now();
-      if (now - this.lastPushAt < COALESCE_MS && this.undoStack().length > 0) {
+      if (
+        !this.boundaryPending &&
+        now - this.lastPushAt < COALESCE_MS &&
+        this.undoStack().length > 0
+      ) {
         // Coalesce: a burst of rapid edits collapses to a single undo step
         // pointing back to the pre-burst graph.
         this.undoStack.update(stack => [...stack.slice(0, -1), this.clone(previous)]);
       } else {
         this.undoStack.update(stack => [...stack, this.clone(previous)].slice(-MAX_HISTORY));
       }
+      this.boundaryPending = false;
       this.lastPushAt = now;
       // Any new user edit clears the redo stack.
       this.redoStack.set([]);
     });
+  }
+
+  /**
+   * Makes the next graph mutation an explicit one-shot undo boundary. Use
+   * before atomic graph replacements that must not merge with a prior edit.
+   */
+  boundaryOnce(): void {
+    this.boundaryPending = true;
   }
 
   /** Restores the previous graph state, pushing the current state onto redo. */
@@ -123,6 +139,7 @@ export class HistoryService {
     this.workflow.replaceGraph(this.clone(previous));
     this.trackedGraph = previous;
     this.lastPushAt = 0;
+    this.boundaryPending = false;
   }
 
   /** Re-applies a previously undone state, pushing the current state onto undo. */
@@ -140,6 +157,7 @@ export class HistoryService {
     this.workflow.replaceGraph(this.clone(next));
     this.trackedGraph = next;
     this.lastPushAt = 0;
+    this.boundaryPending = false;
   }
 
   private clone(graph: WorkflowGraph): WorkflowGraph {

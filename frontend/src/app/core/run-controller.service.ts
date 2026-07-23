@@ -14,7 +14,6 @@ import { ModelTransportService } from './model-transport.service';
 import { ModelPricingService } from './model-pricing.service';
 import { RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
-import { SkillsService } from './skills.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowService } from './workflow.service';
@@ -71,10 +70,14 @@ export interface TraceEntry {
    * but count as one logical step in the group header.
    */
   kind: 'tool-call' | 'tool-result' | 'event';
+  /** Root-to-leaf Execute Workflow scope for nested trace grouping. */
+  scope?: RunEvent['scope'];
 }
 
 /** A pending human approval, surfaced in the Runs panel. */
 export interface PendingApproval {
+  /** Engine identity for this exact gate occurrence. */
+  requestId: string;
   nodeId: string;
   nodeName: string;
   message: string;
@@ -128,7 +131,6 @@ export class RunControllerService {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
   private readonly pricing = inject(ModelPricingService);
-  private readonly skillsLibrary = inject(SkillsService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -183,7 +185,7 @@ export class RunControllerService {
    * resolutions for REMOTE runs over the WebSocket. Local runs create their
    * own pending entries via the engine callback and ignore this.
    */
-  remoteApprovalSender: ((nodeId: string, approved: boolean) => void) | null = null;
+  remoteApprovalSender: ((requestId: string, approved: boolean) => void) | null = null;
 
   /**
    * Set by CloudService while a monitor is connected: delivers external
@@ -218,7 +220,8 @@ export class RunControllerService {
   /** Starts a run of the active workflow. */
   start(): void {
     if (this.running()) return;
-    const graph = this.workflow.graph();
+    const portableSpec = this.workflow.exportActiveSpec();
+    const graph = portableSpec?.graph ?? this.workflow.graph();
     if (graph.nodes.length === 0) {
       this.toast.warning('Nothing to run', 'Drop some agents onto the canvas first.');
       return;
@@ -236,15 +239,19 @@ export class RunControllerService {
     // One snapshot serves both the engine and the run-history record — the
     // user can keep editing the canvas while the run executes.
     const graphSnapshot = structuredClone(graph);
-    // Refresh embedded agent skills from the library (EPIC 6) so a run
-    // always executes the latest skill content.
-    this.skillsLibrary.syncAttachedSkills(graphSnapshot);
     const doc = this.workflow.activeDoc();
+    // The complete portable registry is captured once. No run callback reads
+    // the mutable workflow library, so edits made while running cannot alter
+    // a later child frame.
+    const subWorkflows = portableSpec?.subWorkflows
+      ? structuredClone(portableSpec.subWorkflows)
+      : undefined;
     this.runHistory.beginRun({
       runId,
       workflowId: doc?.workflowId ?? null,
       workflowName: doc?.name ?? 'Untitled Workflow',
       graph: graphSnapshot,
+      subWorkflows,
     });
 
     const handle = startRun({
@@ -253,7 +260,15 @@ export class RunControllerService {
       input: this.runInput().trim(),
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
-      maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
+      maxExecutions:
+        graph.nodes.some(node => node.kind === 'for-each') ||
+        Object.values(subWorkflows ?? {}).some(workflow =>
+          workflow.graph.nodes.some(node => node.kind === 'for-each'),
+        )
+          ? 2000
+          : undefined,
+      subWorkflows,
+      maxSubWorkflowDepth: this.phormaCloud.subWorkflowDepth(),
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
       lmstudioBaseUrl: this.settings.lmstudioBaseUrl(),
@@ -266,7 +281,7 @@ export class RunControllerService {
       maxToolRounds: this.settings.maxToolRounds(),
       // Workflow-level timeout (Properties panel → Workflow settings).
       runTimeoutMs: (() => {
-        const minutes = this.workflow.activeDoc()?.settings.timeoutMinutes;
+        const minutes = portableSpec?.settings?.timeoutMinutes;
         return typeof minutes === 'number' && minutes > 0 ? minutes * 60_000 : undefined;
       })(),
       // Context-window lookup for automatic context compression.
@@ -278,13 +293,16 @@ export class RunControllerService {
         this.runHistory.record(event);
         this.apply(event);
       },
-      requestApproval: (nodeId, message, payload) =>
+      requestApproval: (nodeId, message, payload, requestId) =>
         new Promise<boolean>(resolve => {
+          const scopedNode = Object.values(subWorkflows ?? {})
+            .flatMap(workflow => workflow.graph.nodes)
+            .find(node => node.id === nodeId);
           const nodeName =
-            this.workflow.graph().nodes.find(node => node.id === nodeId)?.name ?? nodeId;
+            graphSnapshot.nodes.find(node => node.id === nodeId)?.name ?? scopedNode?.name ?? nodeId;
           this.pendingApprovals.update(list => [
             ...list,
-            { nodeId, nodeName, message, payload, resolve },
+            { requestId, nodeId, nodeName, message, payload, resolve },
           ]);
         }),
       waitForEvent: (nodeId, correlationKey, message, payload, timeoutMs) =>
@@ -382,6 +400,7 @@ export class RunControllerService {
     const states = new Map<string, RunNodeState>();
     const thinking = new Map<string, { text: string; streaming: boolean }>();
     for (const event of record.events) {
+      if ('scope' in event && event.scope?.length) continue;
       switch (event.type) {
         case 'node-started':
           states.set(event.nodeId, 'thinking');
@@ -429,10 +448,10 @@ export class RunControllerService {
   }
 
   /** Resolves a pending approval from the Runs panel. */
-  resolveApproval(nodeId: string, approved: boolean): void {
-    const approval = this.pendingApprovals().find(item => item.nodeId === nodeId);
+  resolveApproval(requestId: string, approved: boolean): void {
+    const approval = this.pendingApprovals().find(item => item.requestId === requestId);
     if (!approval) return;
-    this.pendingApprovals.update(list => list.filter(item => item.nodeId !== nodeId));
+    this.pendingApprovals.update(list => list.filter(item => item.requestId !== requestId));
     approval.resolve(approved);
   }
 
@@ -490,8 +509,12 @@ export class RunControllerService {
           ? { ...event, usage: withEstimatedCost(event.usage, event.provider, event.model ?? '', this.pricing.estimator()) }
           : event;
       const desc = describeRunEvent(traced, id => this.nodeName(id), { formatCost: this.formatTraceCost });
-      if (desc) this.pushTrace(desc.icon, desc.label, desc.detail, desc.tone, desc.kind);
+      if (desc) this.pushTrace(desc.icon, desc.label, desc.detail, desc.tone, desc.kind, event.scope);
     }
+
+    // Interior child events still contribute usage above, but their node ids
+    // belong to another graph and must not animate the parent canvas.
+    const scoped = !!event.scope?.length;
 
     switch (event.type) {
       case 'run-started':
@@ -505,17 +528,20 @@ export class RunControllerService {
         break;
 
       case 'node-started':
+        if (scoped) break;
         this.setNodeState(event.nodeId, 'thinking');
         this.agentStream.markEditing(event.nodeId);
         this.console('run', 'info', `→ ${event.nodeName}`);
         break;
 
       case 'node-token':
+        if (scoped) break;
         this.streamedChars.update(count => count + event.token.length);
         this.appendStreaming(event.nodeId, event.token);
         break;
 
       case 'node-thinking':
+        if (scoped) break;
         this.appendThinking(event.nodeId, event.token);
         break;
 
@@ -544,6 +570,7 @@ export class RunControllerService {
       }
 
       case 'node-completed':
+        if (scoped) break;
         this.flushStreaming(event.nodeId);
         this.finishThinking(event.nodeId);
         this.setNodeState(event.nodeId, 'done');
@@ -551,6 +578,7 @@ export class RunControllerService {
         break;
 
       case 'node-failed':
+        if (scoped) break;
         this.flushStreaming(event.nodeId);
         this.finishThinking(event.nodeId);
         this.setNodeState(event.nodeId, 'error');
@@ -588,6 +616,7 @@ export class RunControllerService {
         break;
 
       case 'handoff': {
+        if (scoped) break;
         this.pulseEdge(event.connectionId);
         const from = this.nodeName(event.fromNodeId);
         const to = this.nodeName(event.toNodeId);
@@ -597,6 +626,7 @@ export class RunControllerService {
       }
 
       case 'tool-call': {
+        if (scoped) break;
         // Light up the tool-link edge and the tool node while it executes.
         const edge = this.toolLinkConnection(event.nodeId, event.toolNodeId);
         if (edge) this.pulseEdge(edge);
@@ -606,39 +636,45 @@ export class RunControllerService {
       }
 
       case 'tool-result':
+        if (scoped) break;
         if (event.toolNodeId) this.setNodeState(event.toolNodeId, event.isError ? 'error' : 'done');
         this.console('tools', event.isError ? 'error' : 'info', `${event.name} → ${firstLine(event.result)}`);
         break;
 
       case 'approval-required':
         this.terminal.setPhase('waiting-approval');
-        this.setNodeState(event.nodeId, 'waiting-approval');
+        if (!scoped) this.setNodeState(event.nodeId, 'waiting-approval');
         this.console('run', 'warning', `Approval required: ${event.message}`);
         // Remote runs: the engine callback lives in the cloud, so synthesize
         // the pending entry here and resolve it over the monitor socket.
         if (
           this.remoteApprovalSender &&
-          !this.pendingApprovals().some(item => item.nodeId === event.nodeId)
+          !this.pendingApprovals().some(item => item.requestId === event.requestId)
         ) {
           const send = this.remoteApprovalSender;
           this.pendingApprovals.update(list => [
             ...list,
             {
+              requestId: event.requestId,
               nodeId: event.nodeId,
               nodeName: this.nodeName(event.nodeId),
               message: event.message,
               payload: event.payload,
-              resolve: approved => send(event.nodeId, approved),
+              resolve: approved => send(event.requestId, approved),
             },
           ]);
         }
         break;
 
       case 'approval-resolved':
-        this.terminal.setPhase('running');
-        this.setNodeState(event.nodeId, event.approved ? 'done' : 'idle');
+        if (!scoped) this.setNodeState(event.nodeId, event.approved ? 'done' : 'idle');
         // Remote monitors may still hold a synthetic pending card — clear it.
-        this.pendingApprovals.update(list => list.filter(item => item.nodeId !== event.nodeId));
+        this.pendingApprovals.update(list =>
+          list.filter(item => item.requestId !== event.requestId),
+        );
+        this.terminal.setPhase(
+          this.pendingApprovals().length > 0 ? 'waiting-approval' : 'running',
+        );
         break;
 
       case 'loop-started':
@@ -658,7 +694,7 @@ export class RunControllerService {
 
       case 'wait-started':
         this.terminal.setPhase('waiting-event');
-        this.setNodeState(event.nodeId, 'waiting-event');
+        if (!scoped) this.setNodeState(event.nodeId, 'waiting-event');
         this.console('run', 'warning', `Waiting for event "${event.correlationKey}": ${event.message}`);
         // Remote runs: the engine callback lives in the cloud — synthesize a
         // pending card whose resolver ships the event over the monitor socket.
@@ -683,10 +719,25 @@ export class RunControllerService {
 
       case 'wait-resolved':
         this.terminal.setPhase('running');
-        this.setNodeState(event.nodeId, 'done');
+        if (!scoped) this.setNodeState(event.nodeId, 'done');
         // Remote monitors may hold no local resolver — just clear any card.
         this.pendingWaits.update(list => list.filter(item => item.nodeId !== event.nodeId));
         this.console('run', 'info', `Event "${event.correlationKey}" arrived — resuming.`);
+        break;
+
+      case 'subworkflow-started':
+        if (!scoped) this.setNodeState(event.nodeId, 'thinking');
+        this.console('run', 'info', `${event.nodeName}: running ${event.workflowName}.`);
+        break;
+
+      case 'subworkflow-completed':
+        if (!scoped) this.setNodeState(event.nodeId, 'done');
+        this.console('run', 'success', `${event.nodeName}: ${event.workflowName} completed.`);
+        break;
+
+      case 'subworkflow-failed':
+        if (!scoped) this.setNodeState(event.nodeId, 'error');
+        this.console('problems', 'error', `${event.nodeName}: ${event.workflowName} failed. ${event.error}`);
         break;
 
       case 'run-paused':
@@ -819,12 +870,13 @@ export class RunControllerService {
     detail: string | undefined,
     tone: TraceEntry['tone'],
     kind: TraceEntry['kind'] = 'event',
+    scope?: RunEvent['scope'],
   ): void {
     this.traceCounter += 1;
     this.trace.update(entries => {
       const next = [
         ...entries,
-        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone, kind },
+        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone, kind, scope },
       ];
       return next.length > MAX_TRACE_ENTRIES ? next.slice(next.length - MAX_TRACE_ENTRIES) : next;
     });

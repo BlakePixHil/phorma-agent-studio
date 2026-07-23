@@ -68,7 +68,7 @@ export interface TestHarnessApi {
    * auto-layout. Replaces the current graph. Returns key → nodeId.
    */
   buildWorkflow(spec: TestWorkflowSpec): Record<string, string>;
-  /** Adds an "On error" out-port to an agent and wires `errorPortId` (EPIC 3). */
+  /** Adds an "On error" out-port to an agent or Execute Workflow node. */
   enableErrorBranch(nodeId: string): string;
   /** Merges a patch into a node's kind-specific data. */
   updateNodeData(nodeId: string, patch: object): void;
@@ -102,9 +102,9 @@ export interface TestHarnessApi {
   /** Per-node canvas ring states (nodeId → idle/thinking/done/error/…). */
   nodeStates(): Record<string, string>;
   /** Pending human approvals. */
-  approvals(): { nodeId: string; nodeName: string; message: string }[];
+  approvals(): { requestId: string; nodeId: string; nodeName: string; message: string }[];
   /** Resolves a pending approval. */
-  approve(nodeId: string, approved: boolean): void;
+  approve(requestId: string, approved: boolean): void;
   /** Suspended Wait-for-Event nodes. */
   waits(): { nodeId: string; nodeName: string; correlationKey: string }[];
   /** Delivers an external event to a suspended Wait-for-Event node. */
@@ -220,12 +220,13 @@ export class TestHarnessService {
 
       approvals: () =>
         this.runs.pendingApprovals().map(item => ({
+          requestId: item.requestId,
           nodeId: item.nodeId,
           nodeName: item.nodeName,
           message: item.message,
         })),
 
-      approve: zoned((nodeId, approved) => this.runs.resolveApproval(nodeId, approved)),
+      approve: zoned((requestId, approved) => this.runs.resolveApproval(requestId, approved)),
 
       waits: () =>
         this.runs.pendingWaits().map(item => ({
@@ -362,11 +363,11 @@ export class TestHarnessService {
     return ids;
   }
 
-  /** Mirrors the Prompt panel's "On-error output" toggle (EPIC 3). */
+  /** Mirrors the Agent/Execute Workflow "On-error output" toggle. */
   private enableErrorBranch(nodeId: string): string {
     const node = this.requireNode(nodeId);
-    if (node.kind !== 'agent') {
-      throw new Error(`enableErrorBranch: "${node.name}" is not an agent.`);
+    if (node.kind !== 'agent' && node.kind !== 'execute-workflow') {
+      throw new Error(`enableErrorBranch: "${node.name}" does not support an error branch.`);
     }
     const existing = (node.data as { errorPortId?: string }).errorPortId;
     if (existing && node.ports.some(port => port.id === existing)) return existing;

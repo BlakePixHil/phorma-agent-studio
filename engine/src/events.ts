@@ -10,6 +10,18 @@
 import type { ModelUsage } from './model.js';
 import type { RunSource } from './run-record.js';
 
+/** One nested workflow frame in a root-to-leaf event scope path. */
+export interface RunScope {
+  /** Execute Workflow node that opened this frame. */
+  nodeId: string;
+  workflowId: string;
+  workflowName: string;
+  /** Deterministic identity of this specific Execute Workflow occurrence. */
+  frameId: string;
+  /** Top-level workflow is depth 0; its first child is depth 1. */
+  depth: number;
+}
+
 export type RunNodeState =
   | 'idle'
   | 'queued'
@@ -19,7 +31,7 @@ export type RunNodeState =
   | 'done'
   | 'error';
 
-export type RunEvent =
+type RunEventPayload =
   | { type: 'run-started'; runId: string; input: string; source?: RunSource; at: number }
   | { type: 'node-started'; runId: string; nodeId: string; nodeName: string; at: number }
   | { type: 'node-token'; runId: string; nodeId: string; token: string }
@@ -37,8 +49,8 @@ export type RunEvent =
   | { type: 'handoff'; runId: string; connectionId: string; fromNodeId: string; toNodeId: string; payload: string; at: number }
   | { type: 'tool-call'; runId: string; nodeId: string; toolNodeId: string; name: string; arguments: string; at: number }
   | { type: 'tool-result'; runId: string; nodeId: string; toolNodeId: string; name: string; result: string; isError: boolean; at: number }
-  | { type: 'approval-required'; runId: string; nodeId: string; message: string; payload: string; at: number }
-  | { type: 'approval-resolved'; runId: string; nodeId: string; approved: boolean; at: number }
+  | { type: 'approval-required'; runId: string; requestId: string; nodeId: string; message: string; payload: string; at: number }
+  | { type: 'approval-resolved'; runId: string; requestId: string; nodeId: string; approved: boolean; at: number }
   // ForEach loop lifecycle: one loop-started, one loop-iteration per item,
   // one loop-completed (with per-item failure summary) per loop execution.
   | { type: 'loop-started'; runId: string; nodeId: string; nodeName: string; total: number; at: number }
@@ -48,11 +60,22 @@ export type RunEvent =
   // correlation key arrives (webhook, e-sign callback, manual injection).
   | { type: 'wait-started'; runId: string; nodeId: string; nodeName: string; correlationKey: string; message: string; payload: string; at: number }
   | { type: 'wait-resolved'; runId: string; nodeId: string; correlationKey: string; eventPayload: string; at: number }
+  // Nested workflow lifecycle. Child interior events carry the full scope
+  // path while these events describe the boundary at the current frame.
+  | { type: 'subworkflow-started'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; input: string; at: number }
+  | { type: 'subworkflow-completed'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; output: string; at: number }
+  | { type: 'subworkflow-failed'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; error: string; at: number }
   | { type: 'run-paused'; runId: string; nodeId?: string; at: number }
   | { type: 'run-resumed'; runId: string; at: number }
   | { type: 'run-completed'; runId: string; output: string; at: number }
   | { type: 'run-failed'; runId: string; error: string; at: number }
   | { type: 'run-stopped'; runId: string; at: number };
+
+/**
+ * Every event can identify the nested frame that emitted it. The path is
+ * ordered from the top-level Execute Workflow node to the immediate frame.
+ */
+export type RunEvent = RunEventPayload & { scope?: RunScope[] };
 
 export type RunEventType = RunEvent['type'];
 

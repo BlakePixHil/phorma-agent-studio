@@ -16,6 +16,7 @@ import {
   findNodeForConnector,
   portBaseId,
   WORKFLOW_SPEC_VERSION,
+  type EmbeddedWorkflow,
   type GraphPosition,
   type WorkflowConnection,
   type WorkflowGraph,
@@ -35,6 +36,10 @@ export interface OpenWorkflowDoc {
   graph: WorkflowGraph;
   /** Workflow-level execution settings (timeout, …). */
   settings: WorkflowSettings;
+  /** Portable fallback registry for Execute Workflow targets. */
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
+  /** Historical run tabs keep their captured registry ahead of the live library. */
+  preferEmbeddedWorkflows?: boolean;
   /** True when the draft has edits not yet saved to the library. */
   dirty: boolean;
   /** Historical preview tabs are immutable and cannot be saved over the library. */
@@ -188,6 +193,7 @@ export class WorkflowService {
       description: spec.description ?? '',
       graph: structuredClone(spec.graph),
       settings: spec.settings ? { ...spec.settings } : {},
+      subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
       dirty: false,
     };
   }
@@ -304,7 +310,7 @@ export class WorkflowService {
       this.updateDoc(doc.docId, { name });
     }
 
-    const spec: WorkflowSpec = {
+    const baseSpec: WorkflowSpec = {
       version: WORKFLOW_SPEC_VERSION,
       id: doc.workflowId ?? `wf-${Date.now().toString(36)}`,
       name: name.trim() || 'Untitled Workflow',
@@ -313,6 +319,11 @@ export class WorkflowService {
       settings: Object.keys(doc.settings).length > 0 ? { ...doc.settings } : undefined,
       savedAt: new Date().toISOString(),
     };
+    const spec = this.withEmbeddedClosure(
+      baseSpec,
+      doc.subWorkflows,
+      doc.preferEmbeddedWorkflows,
+    );
 
     try {
       await this.storage.saveWorkflow(spec);
@@ -325,13 +336,46 @@ export class WorkflowService {
       spec,
       ...specs.filter(item => item.id !== spec.id),
     ]);
-    this.updateDoc(doc.docId, { workflowId: spec.id, dirty: false });
+    this.updateDoc(doc.docId, {
+      workflowId: spec.id,
+      subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
+      dirty: false,
+    });
     try {
       await this.versions.recordSave(spec, trigger);
     } catch {
       this.toast.warning('Version history unavailable', 'The workflow was saved, but its history snapshot could not be written.');
     }
     return spec;
+  }
+
+  /**
+   * Saves a newly-created spec into the workflow library without opening it
+   * or changing the active tab. This is the persistence rail used by future
+   * graph extraction and other background workflow-creation features.
+   */
+  async saveNewSpecToLibrary(spec: WorkflowSpec): Promise<WorkflowSpec | null> {
+    const id = this.libraryState().some(item => item.id === spec.id)
+      ? `wf-${Date.now().toString(36)}`
+      : spec.id;
+    const next = this.withEmbeddedClosure(
+      {
+        ...structuredClone(spec),
+        id,
+        version: WORKFLOW_SPEC_VERSION,
+        savedAt: new Date().toISOString(),
+      },
+      spec.subWorkflows,
+    );
+    try {
+      await this.storage.saveWorkflow(next);
+      this.libraryState.update(specs => [next, ...specs.filter(item => item.id !== next.id)]);
+      await this.versions.recordSave(next, 'manual').catch(() => undefined);
+      return next;
+    } catch {
+      this.toast.error('Save failed', 'The workflow could not be written to storage.');
+      return null;
+    }
   }
 
   /** Deletes a saved workflow from the library (open tabs become unsaved). */
@@ -419,7 +463,7 @@ export class WorkflowService {
     // Exported specs travel without the studio's skill library — refresh
     // the embedded skill copies so the file carries current content.
     this.skillsLibrary.syncAttachedSkills(graph);
-    return {
+    const spec: WorkflowSpec = {
       version: WORKFLOW_SPEC_VERSION,
       id: doc.workflowId ?? `wf-${Date.now().toString(36)}`,
       name: doc.name,
@@ -428,6 +472,15 @@ export class WorkflowService {
       settings: Object.keys(doc.settings).length > 0 ? { ...doc.settings } : undefined,
       savedAt: new Date().toISOString(),
     };
+    const portable = this.withEmbeddedClosure(
+      spec,
+      doc.subWorkflows,
+      doc.preferEmbeddedWorkflows,
+    );
+    for (const embedded of Object.values(portable.subWorkflows ?? {})) {
+      this.skillsLibrary.syncAttachedSkills(embedded.graph);
+    }
+    return portable;
   }
 
   /** Opens an imported spec (from a `.phorma.json` file) as a new tab. */
@@ -440,6 +493,7 @@ export class WorkflowService {
       description: spec.description ?? '',
       graph: structuredClone(spec.graph),
       settings: spec.settings ? { ...spec.settings } : {},
+      subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
       dirty: true,
     };
     this.docsState.update(docs => [...docs, doc]);
@@ -452,7 +506,11 @@ export class WorkflowService {
    * never saved) since the run, so the run's own graph is the only faithful
    * record of what actually executed.
    */
-  openRunSnapshot(graph: WorkflowGraph, runLabel: string): void {
+  openRunSnapshot(
+    graph: WorkflowGraph,
+    runLabel: string,
+    subWorkflows?: Record<string, EmbeddedWorkflow>,
+  ): void {
     docCounter += 1;
     const doc: OpenWorkflowDoc = {
       docId: `doc-${docCounter}`,
@@ -461,6 +519,8 @@ export class WorkflowService {
       description: '',
       graph: structuredClone(graph),
       settings: {},
+      subWorkflows: subWorkflows ? structuredClone(subWorkflows) : undefined,
+      preferEmbeddedWorkflows: true,
       dirty: false,
     };
     this.docsState.update(docs => [...docs, doc]);
@@ -478,6 +538,24 @@ export class WorkflowService {
       description: spec.description ?? '',
       graph: structuredClone(spec.graph),
       settings: spec.settings ? { ...spec.settings } : {},
+      subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
+      dirty: false,
+      readOnly: true,
+    };
+    this.docsState.update(docs => [...docs, doc]);
+    this.activeDocIdState.set(doc.docId);
+  }
+
+  /** Opens an embedded Execute Workflow target as an immutable snapshot tab. */
+  openEmbeddedSnapshot(workflow: EmbeddedWorkflow): void {
+    docCounter += 1;
+    const doc: OpenWorkflowDoc = {
+      docId: `doc-${docCounter}`,
+      workflowId: null,
+      name: `${workflow.name} - embedded snapshot`,
+      description: workflow.description ?? '',
+      graph: structuredClone(workflow.graph),
+      settings: workflow.settings ? { ...workflow.settings } : {},
       dirty: false,
       readOnly: true,
     };
@@ -514,6 +592,7 @@ export class WorkflowService {
             description: restored.description ?? '',
             graph: structuredClone(restored.graph),
             settings: restored.settings ? { ...restored.settings } : {},
+            subWorkflows: restored.subWorkflows ? structuredClone(restored.subWorkflows) : undefined,
             dirty: false,
           }
         : doc,
@@ -654,6 +733,62 @@ export class WorkflowService {
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
+
+  /**
+   * Builds the flat transitive Execute Workflow registry. Resolution is
+   * library-first, then falls back to snapshots already carried by the
+   * source spec. A visited set makes self and mutual recursion portable.
+   */
+  private withEmbeddedClosure(
+    root: WorkflowSpec,
+    existing?: Record<string, EmbeddedWorkflow>,
+    preferExisting = false,
+  ): WorkflowSpec {
+    const closure: Record<string, EmbeddedWorkflow> = {};
+    const visited = new Set<string>();
+
+    const visit = (workflowId: string, fallback?: Record<string, EmbeddedWorkflow>): void => {
+      if (!workflowId || visited.has(workflowId)) return;
+      visited.add(workflowId);
+
+      const librarySpec = this.libraryState().find(item => item.id === workflowId);
+      const embedded = fallback?.[workflowId] ?? existing?.[workflowId];
+      const source = workflowId === root.id
+        ? root
+        : preferExisting
+          ? embedded ?? librarySpec
+          : librarySpec ?? embedded;
+      if (!source) return;
+
+      closure[workflowId] = {
+        id: source.id,
+        name: source.name,
+        description: source.description,
+        graph: structuredClone(source.graph),
+        settings: source.settings ? { ...source.settings } : undefined,
+      };
+      const nextFallback: Record<string, EmbeddedWorkflow> | undefined =
+        'subWorkflows' in source
+          ? (source.subWorkflows as Record<string, EmbeddedWorkflow> | undefined)
+          : fallback;
+      for (const node of source.graph.nodes) {
+        if (node.kind !== 'execute-workflow') continue;
+        const targetId = (node.data as { workflowId?: string }).workflowId?.trim();
+        if (targetId) visit(targetId, nextFallback);
+      }
+    };
+
+    for (const node of root.graph.nodes) {
+      if (node.kind !== 'execute-workflow') continue;
+      const targetId = (node.data as { workflowId?: string }).workflowId?.trim();
+      if (targetId) visit(targetId, existing);
+    }
+
+    return {
+      ...root,
+      subWorkflows: Object.keys(closure).length > 0 ? closure : undefined,
+    };
+  }
 
   private mutateGraph(mutate: (graph: WorkflowGraph) => WorkflowGraph): void {
     const doc = this.activeDoc();

@@ -18,10 +18,10 @@
  * the engine package.
  */
 
-import type { RunEvent } from './events.js';
+import type { RunEvent, RunScope } from './events.js';
 import type { ModelUsage } from './model.js';
 import { withEstimatedCost, type CostEstimator } from './pricing.js';
-import type { WorkflowGraph } from './types.js';
+import type { EmbeddedWorkflow, WorkflowGraph } from './types.js';
 
 /**
  * What initiated a run. `resume` = journal replay after host eviction.
@@ -58,7 +58,7 @@ export interface RunRecordUsage {
   phormaCloudCostUsd?: number;
   /** True when any portion of `costUsd` is a pricing-table estimate. */
   estimated?: boolean;
-  /** nodeId → rollup. Immune to the event-log cap. */
+  /** Scope-aware node identity -> rollup. Top-level keys remain plain node ids. */
   byNode?: Record<string, RunUsageBucket>;
   /** `provider:model` key -> rollup. */
   byModel?: Record<string, RunUsageBucket>;
@@ -101,6 +101,8 @@ export interface NodeOutputTextEvent {
   /** Cumulative streamed output text for this node execution. */
   text: string;
   at: number;
+  /** Nested frame path, when emitted inside a sub-workflow. */
+  scope?: RunScope[];
 }
 
 /** Coalesced replacement for the per-token `node-thinking` stream. */
@@ -111,6 +113,8 @@ export interface NodeThinkingTextEvent {
   /** Cumulative reasoning text for this node execution. */
   text: string;
   at: number;
+  /** Nested frame path, when emitted inside a sub-workflow. */
+  scope?: RunScope[];
 }
 
 /**
@@ -127,7 +131,72 @@ export interface RunRecord {
   summary: RunRecordSummary;
   /** The graph as it was when the run started (users edit canvases). */
   graph: WorkflowGraph;
+  /** Flat by-value registry captured with the root graph, when available. */
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
   events: RunLogEvent[];
+}
+
+/** Versioned payload stored in legacy graph-only persistence columns. */
+export interface RunSnapshotEnvelope {
+  format: 'phorma-run-snapshot';
+  version: 1;
+  graph: WorkflowGraph;
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
+}
+
+export interface RunSnapshot {
+  graph: WorkflowGraph;
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
+}
+
+/** Encodes a portable run snapshot for a graph-only persistence column. */
+export function encodeRunSnapshot(
+  graph: WorkflowGraph,
+  subWorkflows?: Record<string, EmbeddedWorkflow>,
+): string {
+  const envelope: RunSnapshotEnvelope = {
+    format: 'phorma-run-snapshot',
+    version: 1,
+    graph,
+    subWorkflows,
+  };
+  return JSON.stringify(envelope);
+}
+
+/**
+ * Parses the versioned envelope and historical rows containing a raw graph.
+ * Throws for malformed values so persistence callers can skip corrupt rows.
+ */
+export function decodeRunSnapshot(value: string | unknown): RunSnapshot {
+  const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!parsed || typeof parsed !== 'object') throw new Error('Invalid run snapshot.');
+
+  const candidate = parsed as Partial<RunSnapshotEnvelope> & Partial<WorkflowGraph>;
+  if (candidate.format === 'phorma-run-snapshot') {
+    if (candidate.version !== 1 || !isWorkflowGraph(candidate.graph)) {
+      throw new Error('Unsupported run snapshot envelope.');
+    }
+    if (
+      candidate.subWorkflows !== undefined &&
+      (!candidate.subWorkflows ||
+        typeof candidate.subWorkflows !== 'object' ||
+        Array.isArray(candidate.subWorkflows))
+    ) {
+      throw new Error('Invalid embedded workflow registry.');
+    }
+    return {
+      graph: candidate.graph,
+      subWorkflows: candidate.subWorkflows,
+    };
+  }
+  if (isWorkflowGraph(parsed)) return { graph: parsed };
+  throw new Error('Invalid run snapshot graph.');
+}
+
+function isWorkflowGraph(value: unknown): value is WorkflowGraph {
+  if (!value || typeof value !== 'object') return false;
+  const graph = value as Partial<WorkflowGraph>;
+  return Array.isArray(graph.nodes) && Array.isArray(graph.connections);
 }
 
 /**
@@ -172,6 +241,8 @@ export interface RunRecorderMeta {
   environment: RunEnvironment;
   /** Graph snapshot taken at start (the recorder does not clone it). */
   graph: WorkflowGraph;
+  /** Registry snapshot captured at start (the recorder does not clone it). */
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
   /**
    * Optional pricing hook: estimates USD for usage samples whose provider
    * didn't report cost (see pricing.ts). Reported costs always win.
@@ -215,6 +286,8 @@ const ALWAYS_RECORD = new Set<RunLogEvent['type']>([
   'run-stopped',
   'node-completed',
   'node-failed',
+  'subworkflow-completed',
+  'subworkflow-failed',
 ]);
 
 /**
@@ -223,9 +296,9 @@ const ALWAYS_RECORD = new Set<RunLogEvent['type']>([
  */
 export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
   const events: RunLogEvent[] = [];
-  /** nodeId → index into `events` of its coalesced output-text entry. */
+  /** scoped node key -> index into `events` of its coalesced output entry. */
   const outputIndex = new Map<string, number>();
-  /** nodeId → index into `events` of its coalesced thinking-text entry. */
+  /** scoped node key -> index into `events` of its coalesced thinking entry. */
   const thinkingIndex = new Map<string, number>();
 
   const summary: RunRecordSummary = {
@@ -255,14 +328,22 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
     events.push(event);
   }
 
+  /** Distinguishes identical node ids used by different nested frames. */
+  function scopedNodeKey(nodeId: string, scope?: RunScope[]): string {
+    if (!scope?.length) return nodeId;
+    return `${scope[scope.length - 1].frameId}/${nodeId}`;
+  }
+
   /** Appends cumulative text to a coalesced per-node entry (in place). */
   function coalesce(
     index: Map<string, number>,
     type: 'node-output-text' | 'node-thinking-text',
     nodeId: string,
     token: string,
+    scope?: RunScope[],
   ): void {
-    const existing = index.get(nodeId);
+    const key = scopedNodeKey(nodeId, scope);
+    const existing = index.get(key);
     if (existing !== undefined) {
       const entry = events[existing] as NodeOutputTextEvent | NodeThinkingTextEvent;
       if (entry.text.length >= MAX_PAYLOAD_CHARS) {
@@ -276,8 +357,8 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
       markTruncated();
       return;
     }
-    index.set(nodeId, events.length);
-    events.push({ type, runId: meta.runId, nodeId, text: token, at: Date.now() });
+    index.set(key, events.length);
+    events.push({ type, runId: meta.runId, nodeId, text: token, at: Date.now(), scope });
   }
 
   function addToBucket(
@@ -303,7 +384,13 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
     if (usage.costSource !== 'reported') bucket.estimated = true;
   }
 
-  function addUsage(nodeId: string, provider: string, model: string, raw: ModelUsage): void {
+  function addUsage(
+    nodeId: string,
+    scope: RunScope[] | undefined,
+    provider: string,
+    model: string,
+    raw: ModelUsage,
+  ): void {
     const usage = withEstimatedCost(raw, provider, model, meta.estimateCost);
     const current = summary.usage;
     current.inputTokens += usage.inputTokens ?? 0;
@@ -313,17 +400,17 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
       current.phormaCloudCostUsd = (current.phormaCloudCostUsd ?? 0) + (usage.costUsd ?? 0);
     }
     if (usage.costSource !== 'reported') current.estimated = true;
-    addToBucket((current.byNode ??= {}), nodeId, provider, model, usage);
+    addToBucket((current.byNode ??= {}), scopedNodeKey(nodeId, scope), provider, model, usage);
     addToBucket((current.byModel ??= {}), `${provider}:${model}`, provider, model, usage);
   }
 
   function record(event: RunEvent): void {
     switch (event.type) {
       case 'node-token':
-        coalesce(outputIndex, 'node-output-text', event.nodeId, event.token);
+        coalesce(outputIndex, 'node-output-text', event.nodeId, event.token, event.scope);
         return;
       case 'node-thinking':
-        coalesce(thinkingIndex, 'node-thinking-text', event.nodeId, event.token);
+        coalesce(thinkingIndex, 'node-thinking-text', event.nodeId, event.token, event.scope);
         return;
       case 'run-started':
         summary.input = event.input;
@@ -332,12 +419,12 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
         return;
       case 'node-started':
         // A re-executing node (cycles, loops) starts a fresh text stream.
-        outputIndex.delete(event.nodeId);
-        thinkingIndex.delete(event.nodeId);
+        outputIndex.delete(scopedNodeKey(event.nodeId, event.scope));
+        thinkingIndex.delete(scopedNodeKey(event.nodeId, event.scope));
         push(event);
         return;
       case 'node-usage': {
-        addUsage(event.nodeId, event.provider, event.model ?? '', event.usage);
+        addUsage(event.nodeId, event.scope, event.provider, event.model ?? '', event.usage);
         const usage = withEstimatedCost(event.usage, event.provider, event.model ?? '', meta.estimateCost);
         push(usage === event.usage ? event : { ...event, usage });
         return;
@@ -364,6 +451,18 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
         const { text, clipped } = clip(event.result);
         if (clipped) markTruncated();
         push({ ...event, result: text });
+        return;
+      }
+      case 'subworkflow-started': {
+        const { text, clipped } = clip(event.input);
+        if (clipped) markTruncated();
+        push({ ...event, input: text });
+        return;
+      }
+      case 'subworkflow-completed': {
+        const { text, clipped } = clip(event.output);
+        if (clipped) markTruncated();
+        push({ ...event, output: text });
         return;
       }
       case 'run-completed': {
@@ -407,6 +506,7 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
     snapshot: () => ({
       summary: { ...summary, usage: cloneUsage(summary.usage) },
       graph: meta.graph,
+      subWorkflows: meta.subWorkflows,
       events: [...events],
     }),
     summary: () => ({ ...summary, usage: cloneUsage(summary.usage) }),

@@ -46,4 +46,22 @@ describe('workflow diff', () => {
     );
     expect(changes.map(change => change.kind)).toEqual(['removed', 'added']);
   });
+
+  it('treats embedded workflow registry edits as semantic changes', () => {
+    const a = spec([node('a', 'Agent', 'Prompt')]);
+    const b = {
+      ...structuredClone(a),
+      subWorkflows: {
+        child: {
+          id: 'child',
+          name: 'Child',
+          graph: { nodes: [node('c', 'Child Agent', 'Prompt')], connections: [] },
+        },
+      },
+    };
+    expect(diffWorkflowSpecs(a, b).map(change => change.text)).toContain(
+      'Changed embedded workflow registry',
+    );
+    expect(workflowSpecsEqual(a, b)).toBeFalse();
+  });
 });

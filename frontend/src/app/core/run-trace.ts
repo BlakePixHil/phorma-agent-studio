@@ -153,6 +153,30 @@ export function describeRunEvent(
         tone: 'success',
         kind: 'event',
       };
+    case 'subworkflow-started':
+      return {
+        icon: 'ti ti-stack-2',
+        label: `${event.nodeName} started ${event.workflowName}`,
+        detail: event.input || undefined,
+        tone: 'info',
+        kind: 'event',
+      };
+    case 'subworkflow-completed':
+      return {
+        icon: 'ti ti-stack-2',
+        label: `${event.workflowName} completed`,
+        detail: event.output || undefined,
+        tone: 'success',
+        kind: 'event',
+      };
+    case 'subworkflow-failed':
+      return {
+        icon: 'ti ti-stack-2',
+        label: `${event.workflowName} failed`,
+        detail: event.error,
+        tone: 'error',
+        kind: 'event',
+      };
     case 'run-completed':
       return { icon: 'ti ti-flag-check', label: 'Run completed', detail: event.output || undefined, tone: 'success', kind: 'event' };
     case 'run-failed':
@@ -182,6 +206,7 @@ export function traceFromRunLog(
     entries.push({
       id: entries.length + 1,
       at: 'at' in event ? event.at : Date.now(),
+      scope: event.scope,
       ...desc,
     });
   }

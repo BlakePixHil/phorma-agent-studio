@@ -32,6 +32,14 @@ function describeNode(node: WorkflowNode): string {
   if (isAgentNode(node) && node.data.skills?.length) {
     parts.push(`skills: [${node.data.skills.map(skill => `"${skill.name}"`).join(', ')}]`);
   }
+  if (node.kind === 'execute-workflow') {
+    const data = node.data as { workflowId?: string; workflowName?: string };
+    parts.push(
+      data.workflowId
+        ? `target-workflow: id=${data.workflowId} name="${data.workflowName ?? data.workflowId}"`
+        : 'target-workflow: (not configured)',
+    );
+  }
   return parts.join(' | ');
 }
 

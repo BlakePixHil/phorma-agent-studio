@@ -35,6 +35,7 @@ export type WorkflowNodeKind =
   | 'approval-gate'
   | 'for-each'
   | 'wait-event'
+  | 'execute-workflow'
   | 'error-handler';
 
 /** Category accent colors (hex) shared by the canvas renderer and minimap. */
@@ -317,6 +318,16 @@ export interface WaitEventNodeData {
   timeoutHours?: number;
 }
 
+/** Configuration for an `execute-workflow` flow node. */
+export interface ExecuteWorkflowNodeData {
+  /** Id of the workflow resolved from the library or embedded registry. */
+  workflowId?: string;
+  /** Snapshot name used for readable traces when the target is unavailable. */
+  workflowName?: string;
+  /** Connected output used when nested execution fails. */
+  errorPortId?: string;
+}
+
 /**
  * Union of all kind-specific node configuration. Narrow via `node.kind`
  * (e.g. `isAgentNode(node)`); nodes without configuration carry `{}`.
@@ -332,6 +343,7 @@ export type WorkflowNodeData =
   | ApprovalGateData
   | ForEachNodeData
   | WaitEventNodeData
+  | ExecuteWorkflowNodeData
   | Record<string, never>;
 
 // ── Nodes, connections, graph ────────────────────────────────────────────────
@@ -393,6 +405,19 @@ export interface WorkflowSettings {
 }
 
 /**
+ * A workflow embedded by value for nested execution. Embedded workflows do
+ * not recursively own registries; `WorkflowSpec.subWorkflows` is one flat,
+ * cycle-safe registry containing the full transitive closure.
+ */
+export interface EmbeddedWorkflow {
+  id: string;
+  name: string;
+  description?: string;
+  graph: WorkflowGraph;
+  settings?: WorkflowSettings;
+}
+
+/**
  * The portable workflow document — persisted to IndexedDB, exported as
  * `.phorma.json`, and shipped to the cloud runtime on deploy.
  */
@@ -404,6 +429,8 @@ export interface WorkflowSpec {
   graph: WorkflowGraph;
   /** Workflow-level execution settings (timeout, …). */
   settings?: WorkflowSettings;
+  /** Flat by-value registry used by `execute-workflow` nodes. */
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
   /** ISO timestamp of the last save. */
   savedAt: string;
 }

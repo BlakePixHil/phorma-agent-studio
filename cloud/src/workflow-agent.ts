@@ -13,13 +13,13 @@
  *   POST /events     — deliver an external event to a suspended Wait-for-Event
  *                      node: { correlationKey, payload? } → { ok, delivered }.
  *                      This is the webhook target for e-sign callbacks etc.
- *   POST /approvals  — resolve a pending approval: { nodeId, approved }
+ *   POST /approvals  — resolve a pending approval: { requestId, approved }
  *   GET  /status     — { name, hasWorkflow, running, savedAt, pendingWaits }
  *   GET  /runs       — run history: { runs: RunRecordSummary[], activeRunId }
  *   GET  /runs/{id}  — one full RunRecord (summary + graph + event log)
  *   GET  /usage      — usage ledger: { usage: UsageLedgerEntry[] } (?since=ms)
  *   WS   connect     — receive RunEvents; send control frames:
- *                      { type: 'approval', nodeId, approved }
+ *                      { type: 'approval', requestId, approved }
  *                      { type: 'event', correlationKey, payload? }
  *                      { type: 'trigger', input }
  *                      { type: 'stop' }
@@ -49,6 +49,8 @@ import {
   startRun,
   webSearchToolDefinition,
   createRunRecorder,
+  decodeRunSnapshot,
+  encodeRunSnapshot,
   type JournalEntry,
   type ModelProviderId,
   type ResolvedTool,
@@ -136,7 +138,7 @@ interface WorkflowAgentState {
 
 /** Control frames the studio may send over the WebSocket. */
 type ControlFrame =
-  | { type: 'approval'; nodeId: string; approved: boolean }
+  | { type: 'approval'; requestId: string; approved: boolean }
   | { type: 'event'; correlationKey: string; payload?: string }
   | { type: 'trigger'; input?: string }
   | { type: 'stop' };
@@ -230,7 +232,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   private handle: RunHandle | null = null;
   private runCounter = 0;
-  /** Pending approval resolvers, keyed by node id. */
+  /** Pending approval resolvers, keyed by exact engine request id. */
   private readonly approvals = new Map<string, (approved: boolean) => void>();
   /**
    * Suspended Wait-for-Event resolvers, keyed by correlation key. The run
@@ -313,13 +315,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
     if (request.method === 'POST' && path.endsWith('/approvals')) {
       const body = (await request.json().catch(() => ({}))) as {
-        nodeId?: string;
+        requestId?: string;
         approved?: boolean;
       };
-      if (!body.nodeId) return json({ error: 'nodeId is required.' }, 400);
-      const resolve = this.approvals.get(body.nodeId);
+      if (!body.requestId) return json({ error: 'requestId is required.' }, 400);
+      const resolve = this.approvals.get(body.requestId);
       if (!resolve) return json({ ok: true, delivered: false });
-      this.approvals.delete(body.nodeId);
+      this.approvals.delete(body.requestId);
       resolve(body.approved === true);
       return json({ ok: true, delivered: true });
     }
@@ -401,9 +403,9 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
     switch (frame.type) {
       case 'approval': {
-        const resolve = this.approvals.get(frame.nodeId);
+        const resolve = this.approvals.get(frame.requestId);
         if (resolve) {
-          this.approvals.delete(frame.nodeId);
+          this.approvals.delete(frame.requestId);
           resolve(frame.approved);
         }
         break;
@@ -569,8 +571,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // Snapshot the spec graph as the user authored it (hosted provider
       // mapping is an execution detail, not what "Bring to Canvas" shows).
       graph: structuredClone(spec.graph),
+      subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
     });
-    const recordGraphJson = JSON.stringify(spec.graph);
+    // Keep the existing graph column, but store a versioned portable envelope.
+    // Old rows containing a raw graph remain readable through decodeRunSnapshot.
+    const recordGraphJson = encodeRunSnapshot(spec.graph, spec.subWorkflows);
     this.recorder = recorder;
     if (resuming) {
       this.sql`DELETE FROM run_events WHERE run_id = ${runId}`;
@@ -607,10 +612,21 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // relayed, persisted ONCE when the run settles (never from event replay).
     const runUsage: RunUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
 
-    // Hosted: everything runs through OpenRouter on the tenant's key.
+    // Hosted: everything runs through OpenRouter on the tenant's key,
+    // including every embedded sub-workflow. Mapping clones each authored
+    // graph so provider rewrites never change the uploaded spec or history.
     // BYO: provider keys come from the worker's env secrets, as always.
-    const graph = this.hosted ? this.mapGraphToOpenRouter(spec.graph) : spec.graph;
-    if (typeof graph === 'string') return { ok: false, error: graph, status: 422 };
+    let graph = spec.graph;
+    let subWorkflows = spec.subWorkflows;
+    if (this.hosted) {
+      const mapped = this.mapSpecToOpenRouter(spec);
+      if (typeof mapped === 'string') return { ok: false, error: mapped, status: 422 };
+      graph = mapped.graph;
+      subWorkflows = mapped.subWorkflows;
+    }
+    const maxSubWorkflowDepth = tenant
+      ? tierLimits(tenant.tier).subWorkflowDepth
+      : 2;
 
     // Workflow-level timeout: the engine enforces the deadline in-process; a
     // durable alarm additionally wakes an evicted DO so a suspended run still
@@ -637,8 +653,12 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       input,
       source: recordedSource,
       // Batch workflows (ForEach) legitimately execute far more nodes than
-      // the default anti-runaway budget allows.
-      maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
+      // the default anti-runaway budget allows. Embedded graphs share the
+      // parent run's execution counter, so they must participate in the scan.
+      maxExecutions: this.hasForEach(graph, subWorkflows) ? 2000 : undefined,
+      subWorkflows,
+      resolveWorkflow: workflowId => subWorkflows?.[workflowId],
+      maxSubWorkflowDepth,
       runTimeoutMs,
       journal,
       model,
@@ -682,9 +702,9 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         }
         this.relay(event);
       },
-      requestApproval: (nodeId) =>
+      requestApproval: (_nodeId, _message, _payload, requestId) =>
         new Promise<boolean>(resolve => {
-          this.approvals.set(nodeId, resolve);
+          this.approvals.set(requestId, resolve);
         }),
       waitForEvent: (_nodeId, correlationKey, _message, _payload, timeoutMs) =>
         new Promise<string>((resolve, reject) => {
@@ -806,6 +826,41 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     return mapped;
   }
 
+  /** Maps the parent and every embedded graph without mutating the spec. */
+  private mapSpecToOpenRouter(
+    spec: WorkflowSpec,
+  ):
+    | {
+        graph: WorkflowSpec['graph'];
+        subWorkflows: WorkflowSpec['subWorkflows'];
+      }
+    | string {
+    const graph = this.mapGraphToOpenRouter(spec.graph);
+    if (typeof graph === 'string') return graph;
+
+    if (!spec.subWorkflows) return { graph, subWorkflows: undefined };
+    const subWorkflows: NonNullable<WorkflowSpec['subWorkflows']> = {};
+    for (const [workflowId, workflow] of Object.entries(spec.subWorkflows)) {
+      const mappedGraph = this.mapGraphToOpenRouter(workflow.graph);
+      if (typeof mappedGraph === 'string') {
+        return `Sub-workflow "${workflow.name}" (${workflowId}): ${mappedGraph}`;
+      }
+      subWorkflows[workflowId] = { ...workflow, graph: mappedGraph };
+    }
+    return { graph, subWorkflows };
+  }
+
+  /** True when any graph sharing this run's execution budget contains ForEach. */
+  private hasForEach(
+    graph: WorkflowSpec['graph'],
+    subWorkflows: WorkflowSpec['subWorkflows'],
+  ): boolean {
+    if (graph.nodes.some(node => node.kind === 'for-each')) return true;
+    return Object.values(subWorkflows ?? {}).some(workflow =>
+      workflow.graph.nodes.some(node => node.kind === 'for-each'),
+    );
+  }
+
   // ── Run history (EPIC 1) ───────────────────────────────────────────────────
 
   /** Upserts a run's summary row (called at node boundaries + settle). */
@@ -874,14 +929,19 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     if (rows.length === 0) return null;
     try {
       const summary = JSON.parse(rows[0].summary) as RunRecordSummary;
-      const graph = JSON.parse(rows[0].graph) as WorkflowSpec['graph'];
+      const snapshot = decodeRunSnapshot(rows[0].graph);
       const events: RunLogEvent[] = [];
       for (const row of this.sql<{ event: string }>`
         SELECT event FROM run_events WHERE run_id = ${runId} ORDER BY seq ASC
       `) {
         events.push(JSON.parse(row.event) as RunLogEvent);
       }
-      return { summary, graph, events };
+      return {
+        summary,
+        graph: snapshot.graph,
+        subWorkflows: snapshot.subWorkflows,
+        events,
+      };
     } catch {
       return null;
     }

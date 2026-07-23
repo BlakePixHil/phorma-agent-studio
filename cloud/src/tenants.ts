@@ -49,6 +49,8 @@ export interface TierLimits {
   concurrentRuns: number;
   /** Max active cron schedules per workflow. */
   schedulesPerWorkflow: number;
+  /** Maximum nested Execute Workflow frame depth. */
+  subWorkflowDepth: number;
 }
 
 // Base rate: 125 credits ≈ $1 of real inference ($0.008/credit) with NO bonus
@@ -66,9 +68,9 @@ export interface TierLimits {
 // enterprise tier that is provisioned per-deal (no fixed limits here —
 // unknown tiers fall back to starter until provisioned properly).
 export const TIERS: Record<string, TierLimits> = {
-  starter: { monthlyCredits: 1000, monthlyCostUsd: 4, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1 },
-  pro: { monthlyCredits: 3000, monthlyCostUsd: 12.6, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5 },
-  team: { monthlyCredits: 10000, monthlyCostUsd: 44, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20 },
+  starter: { monthlyCredits: 1000, monthlyCostUsd: 4, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1, subWorkflowDepth: 5 },
+  pro: { monthlyCredits: 3000, monthlyCostUsd: 12.6, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5, subWorkflowDepth: 8 },
+  team: { monthlyCredits: 10000, monthlyCostUsd: 44, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20, subWorkflowDepth: 10 },
 };
 
 export function tierLimits(tier: string): TierLimits {

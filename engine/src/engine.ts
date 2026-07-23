@@ -20,7 +20,7 @@
  *  - Cycles are permitted but bounded by an execution budget.
  */
 
-import type { RunEvent, RunEventSink } from './events.js';
+import type { RunEvent, RunEventSink, RunScope } from './events.js';
 import type { RunSource } from './run-record.js';
 import { RunGate, RunStoppedError } from './gate.js';
 import {
@@ -36,6 +36,8 @@ import {
   nodeForConnector,
   portBaseId,
   type AgentNodeData,
+  type EmbeddedWorkflow,
+  type ExecuteWorkflowNodeData,
   type ForEachNodeData,
   type ModelProviderId,
   type WaitEventNodeData,
@@ -62,6 +64,10 @@ const COMPRESSION_THRESHOLD = 0.8;
 const COMPRESSION_KEEP_TAIL_PAIRS = 2;
 /** Character cap for the transcript handed to the summarizer. */
 const COMPRESSION_TRANSCRIPT_MAX_CHARS = 24_000;
+/** Default nested frame depth available to every host. */
+export const DEFAULT_MAX_SUB_WORKFLOW_DEPTH = 2;
+/** Absolute engine ceiling, including enterprise/custom host overrides. */
+export const MAX_SUB_WORKFLOW_DEPTH = 25;
 
 /** Thrown when a node exceeds its configured `timeoutSec`. */
 export class NodeTimeoutError extends Error {
@@ -161,6 +167,19 @@ export interface RunOptions {
    */
   maxExecutions?: number;
   /**
+   * Flat by-value registry for Execute Workflow targets. A host resolver is
+   * consulted first, then this portable snapshot registry is used as the
+   * fallback.
+   */
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
+  /** Resolves a current workflow by id. Return undefined to use the registry fallback. */
+  resolveWorkflow?: (workflowId: string) => EmbeddedWorkflow | undefined;
+  /**
+   * Deepest nested workflow frame allowed. Defaults to 2 and is always
+   * clamped to the hard engine ceiling of 25. The top-level graph is depth 0.
+   */
+  maxSubWorkflowDepth?: number;
+  /**
    * Workflow-level timeout in milliseconds. When the run's cumulative
    * RUNNING time (paused time doesn't count) exceeds this, the run stops
    * and fails with a timeout error. 0/absent = no limit. The studio wires
@@ -183,9 +202,16 @@ export interface RunOptions {
   /**
    * Asks a human to approve. Resolves `true` (approved) or `false`
    * (rejected). The studio wires this to the Runs panel; the cloud runtime
-   * wires it to a webhook/WebSocket reply.
+   * wires it to a webhook/WebSocket reply. `requestId` uniquely identifies
+   * this deterministic node occurrence, including its nested frame. Existing
+   * hosts may ignore the added argument while migrating.
    */
-  requestApproval(nodeId: string, message: string, payload: string): Promise<boolean>;
+  requestApproval(
+    nodeId: string,
+    message: string,
+    payload: string,
+    requestId: string,
+  ): Promise<boolean>;
   /**
    * Suspends until an external event with the given correlation key arrives
    * (webhook callback, e-sign completion, manual injection from the Runs
@@ -237,7 +263,9 @@ export interface JournalEntry {
  * executions instantly — no model calls, no tool side effects, no duplicate
  * approval prompts — until execution reaches the first un-journaled node,
  * where real execution resumes. This is how deployed runs survive Durable
- * Object eviction while suspended on approvals or external events.
+ * Object eviction while suspended on approvals or external events. Completed
+ * Execute Workflow wrappers re-enter their child frame so child journals can
+ * reconstruct scoped trace events without repeating completed side effects.
  */
 export interface RunJournal {
   /** Returns the recorded result for a key, or undefined. */
@@ -259,6 +287,16 @@ function fnv1a(value: string): string {
 const TRIGGER_KINDS = new Set(['manual-trigger', 'schedule-trigger', 'webhook-trigger']);
 const TOOL_KINDS = new Set(['http-tool', 'web-search-tool', 'mcp-tool']);
 
+interface SharedExecutionState {
+  executions: number;
+  maxExecutions: number;
+}
+
+interface WorkflowFrame {
+  scope: RunScope[];
+  journalPrefix: string;
+}
+
 /** Starts a run. Events flow through `options.emit`; control via the handle. */
 export function startRun(options: RunOptions): RunHandle {
   const gate = new RunGate();
@@ -275,15 +313,18 @@ export function startRun(options: RunOptions): RunHandle {
 }
 
 class WorkflowRun {
-  private executions = 0;
   /** Collected inputs per aggregator node id (port base id → payload). */
   private readonly aggregations = new Map<string, Map<string, string>>();
   /** Terminal outputs (payloads that reached nodes with no outgoing handoff). */
   private readonly terminalOutputs: string[] = [];
-  /** Effective node-execution budget for this run. */
-  private maxExecutions: number;
   /** Occurrence counters per (node, payload-hash) for journal keys. */
   private readonly journalCounts = new Map<string, number>();
+  /** Shared across the top-level run and every nested frame. */
+  private readonly executionState: SharedExecutionState;
+  /** Root-to-current nested frame path. Empty for the top-level workflow. */
+  private readonly scope: RunScope[];
+  /** Stable prefix that isolates nested journal keys. */
+  private readonly journalPrefix: string;
   /** True when the workflow-level timeout stopped the run. */
   private timedOut = false;
   /** Workflow-timeout bookkeeping (paused time doesn't count). */
@@ -295,8 +336,18 @@ class WorkflowRun {
     private readonly options: RunOptions,
     /** Mutable: the error handler swaps in a fresh gate after a stop/timeout. */
     private gate: RunGate,
+    frame?: WorkflowFrame,
+    executionState?: SharedExecutionState,
   ) {
-    this.maxExecutions = Math.max(1, options.maxExecutions ?? MAX_NODE_EXECUTIONS);
+    this.scope = frame?.scope ?? [];
+    this.journalPrefix = frame?.journalPrefix ?? '';
+    this.executionState = executionState ?? {
+      executions: 0,
+      maxExecutions: Math.max(1, options.maxExecutions ?? MAX_NODE_EXECUTIONS),
+    };
+    // Only the top-level frame owns the pause-aware workflow timer and run
+    // lifecycle. Child frames share its gate and therefore its deadline.
+    if (frame) return;
     gate.onPauseChange = (paused, nodeId) => {
       // A paused run's clock freezes: bank the running time on pause and
       // re-arm the deadline timer with the remaining budget on resume.
@@ -389,6 +440,16 @@ class WorkflowRun {
     }
   }
 
+  /** Executes one child frame without creating a second run lifecycle. */
+  private async executeFrame(input: string): Promise<string> {
+    const start = this.startNode();
+    if (!start) {
+      throw new Error('No trigger node found in the referenced sub-workflow.');
+    }
+    await this.executeNode(start, input);
+    return this.terminalOutputs.join('\n\n---\n\n');
+  }
+
   /**
    * Executes the workflow's Error Handler subtree (if any) with a JSON error
    * payload. Swallows every failure — the handler is best-effort and the run
@@ -405,7 +466,8 @@ class WorkflowRun {
       2,
     );
     // Grant headroom in case the run died on the execution budget itself.
-    this.maxExecutions = this.executions + ERROR_HANDLER_BUDGET_BONUS;
+    this.executionState.maxExecutions =
+      this.executionState.executions + ERROR_HANDLER_BUDGET_BONUS;
     const previousGate = this.gate;
     try {
       // The gate may be stopped (workflow timeout) — handler execution still
@@ -428,12 +490,12 @@ class WorkflowRun {
     );
   }
 
-  /** Deterministic journal key for this execution of `node` with `payload`. */
-  private nextJournalKey(node: WorkflowNode, payload: string): string {
+  /** Deterministic identity and journal key for this node occurrence. */
+  private nextExecutionKey(node: WorkflowNode, payload: string): string {
     const base = `${node.id}|${fnv1a(payload)}`;
     const occurrence = this.journalCounts.get(base) ?? 0;
     this.journalCounts.set(base, occurrence + 1);
-    return `${base}|${occurrence}`;
+    return `${this.journalPrefix}${base}|${occurrence}`;
   }
 
   /**
@@ -444,10 +506,10 @@ class WorkflowRun {
   private async executeNode(node: WorkflowNode, payload: string, sink?: string[]): Promise<void> {
     await this.gate.checkpoint(node.id);
 
-    this.executions += 1;
-    if (this.executions > this.maxExecutions) {
+    this.executionState.executions += 1;
+    if (this.executionState.executions > this.executionState.maxExecutions) {
       throw new Error(
-        `Run exceeded the execution budget (${this.maxExecutions} node executions). ` +
+        `Run exceeded the execution budget (${this.executionState.maxExecutions} node executions). ` +
           'Check the workflow for an unbounded loop, or raise the budget for batch runs.',
       );
     }
@@ -455,13 +517,23 @@ class WorkflowRun {
     const { runId, journal } = this.options;
     this.emit({ type: 'node-started', runId, nodeId: node.id, nodeName: node.name, at: Date.now() });
 
-    // Replay: a journaled result short-circuits the node body entirely —
-    // no model/tool calls, no approval prompts, no waits. The occurrence
-    // counter keeps repeated executions of the same node+payload distinct.
-    const journalKey = journal ? this.nextJournalKey(node, payload) : null;
+    // Replay normally short-circuits the node body entirely: no model/tool
+    // calls, approval prompts, or waits. Successful Execute Workflow wrappers
+    // are the exception because their child journals must replay to rebuild
+    // nested lifecycle and scoped trace events.
+    const executionKey = this.nextExecutionKey(node, payload);
+    const journalKey = journal ? executionKey : null;
     if (journal && journalKey) {
       const cached = journal.lookup(journalKey);
-      if (cached) {
+      const errorPortId = node.kind === 'execute-workflow' ? this.errorRoutePortId(node) : null;
+      const cachedErrorRoute =
+        !!errorPortId && cached?.viaPortIds?.includes(errorPortId) === true;
+      // A successful Execute Workflow wrapper cannot replay as an opaque
+      // cached node. Re-enter its child frame using this wrapper key as the
+      // namespace so child journals rebuild scoped trace events while every
+      // completed child side effect remains skipped. Routed child failures
+      // stay opaque because their failed interior node was not journaled.
+      if (cached && (node.kind !== 'execute-workflow' || cachedErrorRoute)) {
         this.emit({
           type: 'node-completed',
           runId,
@@ -483,7 +555,7 @@ class WorkflowRun {
     try {
       let result: { output: string; viaPortIds?: Set<string> } | null;
       try {
-        result = await this.runNodeBody(node, payload, sink);
+        result = await this.runNodeBody(node, payload, sink, executionKey);
       } catch (error) {
         // Error branch: an agent with a connected "On error" out-port routes
         // its OWN failure onward instead of failing the run. Scoped to the
@@ -569,8 +641,8 @@ class WorkflowRun {
    * semantics so mistakes stay loud.
    */
   private errorRoutePortId(node: WorkflowNode): string | null {
-    if (!isAgentNode(node)) return null;
-    const errorPortId = (node.data as AgentNodeData).errorPortId;
+    if (!isAgentNode(node) && node.kind !== 'execute-workflow') return null;
+    const errorPortId = (node.data as AgentNodeData | ExecuteWorkflowNodeData).errorPortId;
     if (!errorPortId) return null;
     if (!node.ports.some(port => port.id === errorPortId && port.role === 'message-out')) {
       return null;
@@ -590,6 +662,7 @@ class WorkflowRun {
     node: WorkflowNode,
     payload: string,
     sink?: string[],
+    executionKey?: string,
   ): Promise<{ output: string; viaPortIds?: Set<string> } | null> {
     if (TRIGGER_KINDS.has(node.kind)) {
       return { output: payload };
@@ -620,11 +693,30 @@ class WorkflowRun {
         // when all inputs have arrived (see followHandoffs).
         return { output: payload };
       case 'approval-gate':
-        return this.runApprovalGate(node, payload);
+        return this.runApprovalGate(
+          node,
+          payload,
+          executionKey ?? this.nextExecutionKey(node, payload),
+        );
       case 'for-each':
         return this.runForEach(node, payload);
       case 'wait-event':
         return this.runWaitEvent(node, payload);
+      case 'execute-workflow': {
+        const output = await this.runSubWorkflow(
+          node,
+          payload,
+          executionKey ?? this.nextExecutionKey(node, payload),
+        );
+        const errorPortId = (node.data as ExecuteWorkflowNodeData).errorPortId;
+        if (errorPortId && node.ports.some(port => port.id === errorPortId)) {
+          const regular = node.ports
+            .filter(port => port.role === 'message-out' && port.id !== errorPortId)
+            .map(port => port.id);
+          return { output, viaPortIds: new Set(regular) };
+        }
+        return { output };
+      }
       default:
         if (TOOL_KINDS.has(node.kind)) {
           // Tool nodes are capabilities, not flow steps. Reaching one via a
@@ -1030,6 +1122,7 @@ class WorkflowRun {
   private async runApprovalGate(
     node: WorkflowNode,
     payload: string,
+    executionKey: string,
   ): Promise<{ output: string; viaPortIds: Set<string> }> {
     const data = node.data as { message?: string };
     const message =
@@ -1037,21 +1130,24 @@ class WorkflowRun {
         ? data.message
         : `Approve the work arriving at "${node.name}"?`;
 
+    const requestId = `approval:${executionKey}`;
     this.emit({
       type: 'approval-required',
       runId: this.options.runId,
+      requestId,
       nodeId: node.id,
       message,
       payload,
       at: Date.now(),
     });
 
-    const approved = await this.options.requestApproval(node.id, message, payload);
+    const approved = await this.options.requestApproval(node.id, message, payload, requestId);
     if (this.gate.stopped) throw new RunStoppedError();
 
     this.emit({
       type: 'approval-resolved',
       runId: this.options.runId,
+      requestId,
       nodeId: node.id,
       approved,
       at: Date.now(),
@@ -1229,6 +1325,103 @@ class WorkflowRun {
     return { output: mergePayloads(payload, eventPayload) };
   }
 
+  /**
+   * Execute Workflow opens a child interpreter frame inside this run. The
+   * child shares the gate, callbacks, model/tool hosts, timeout, journal,
+   * and global execution counter. Only its graph, terminal sink, aggregation
+   * state, scope path, and journal namespace are frame-local.
+   */
+  private async runSubWorkflow(
+    node: WorkflowNode,
+    payload: string,
+    frameId: string,
+  ): Promise<string> {
+    const data = node.data as ExecuteWorkflowNodeData;
+    const workflowId = data.workflowId?.trim();
+    if (!workflowId) {
+      throw new Error(`Execute Workflow "${node.name}" has no target workflow configured.`);
+    }
+
+    const resolved =
+      this.options.resolveWorkflow?.(workflowId) ?? this.options.subWorkflows?.[workflowId];
+    const workflowName = resolved?.name || data.workflowName?.trim() || workflowId;
+    if (!resolved) {
+      throw new Error(
+        `Execute Workflow "${node.name}" could not resolve workflow "${workflowName}" (${workflowId}).`,
+      );
+    }
+
+    const depth = this.scope.length + 1;
+    const configuredLimit = this.options.maxSubWorkflowDepth ?? DEFAULT_MAX_SUB_WORKFLOW_DEPTH;
+    const numericLimit = Number.isNaN(configuredLimit)
+      ? DEFAULT_MAX_SUB_WORKFLOW_DEPTH
+      : Math.floor(configuredLimit);
+    const maxDepth = Math.max(0, Math.min(numericLimit, MAX_SUB_WORKFLOW_DEPTH));
+    if (depth > maxDepth) {
+      throw new Error(
+        `Sub-workflow depth limit (${maxDepth}) reached while executing "${workflowName}". ` +
+          'Reduce recursive nesting or use a plan with a higher limit.',
+      );
+    }
+
+    this.emit({
+      type: 'subworkflow-started',
+      runId: this.options.runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      workflowId: resolved.id,
+      workflowName,
+      depth,
+      input: payload,
+      at: Date.now(),
+    });
+
+    const childScope = [
+      ...this.scope,
+      { nodeId: node.id, workflowId: resolved.id, workflowName, frameId, depth },
+    ];
+    const child = new WorkflowRun(
+      { ...this.options, graph: resolved.graph, startNodeId: undefined },
+      this.gate,
+      {
+        scope: childScope,
+        journalPrefix: `${frameId}/`,
+      },
+      this.executionState,
+    );
+
+    try {
+      const output = await child.executeFrame(payload);
+      this.emit({
+        type: 'subworkflow-completed',
+        runId: this.options.runId,
+        nodeId: node.id,
+        nodeName: node.name,
+        workflowId: resolved.id,
+        workflowName,
+        depth,
+        output,
+        at: Date.now(),
+      });
+      return output;
+    } catch (error) {
+      if (error instanceof RunStoppedError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: 'subworkflow-failed',
+        runId: this.options.runId,
+        nodeId: node.id,
+        nodeName: node.name,
+        workflowId: resolved.id,
+        workflowName,
+        depth,
+        error: message,
+        at: Date.now(),
+      });
+      throw error;
+    }
+  }
+
   // ── Flow ───────────────────────────────────────────────────────────────────
 
   /**
@@ -1358,7 +1551,7 @@ class WorkflowRun {
 
   private emit(event: RunEvent): void {
     try {
-      this.options.emit(event);
+      this.options.emit(this.scope.length > 0 ? { ...event, scope: [...this.scope] } : event);
     } catch {
       // Event sinks must never break a run.
     }

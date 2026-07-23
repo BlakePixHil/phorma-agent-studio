@@ -286,15 +286,21 @@ export class CloudService {
    */
   private materializeDefaults(spec: WorkflowSpec): WorkflowSpec {
     const resolved = structuredClone(spec);
-    // Deployed runs can't reach the studio's skill library — refresh the
-    // embedded skill copies now so the cloud executes current content.
-    this.skillsLibrary.syncAttachedSkills(resolved.graph);
-    for (const node of resolved.graph.nodes) {
-      if (!isAgentNode(node)) continue;
-      if (!node.data.provider || !node.data.model) {
-        node.data.provider = this.settings.defaultProvider();
-        node.data.model = this.settings.defaultModel();
-        node.data.temperature ??= this.settings.defaultTemperature();
+    const graphs = [
+      resolved.graph,
+      ...Object.values(resolved.subWorkflows ?? {}).map(workflow => workflow.graph),
+    ];
+    for (const graph of graphs) {
+      // Deployed runs can't reach the studio libraries. Refresh skills and
+      // materialize inherited models in every graph in the embedded closure.
+      this.skillsLibrary.syncAttachedSkills(graph);
+      for (const node of graph.nodes) {
+        if (!isAgentNode(node)) continue;
+        if (!node.data.provider || !node.data.model) {
+          node.data.provider = this.settings.defaultProvider();
+          node.data.model = this.settings.defaultModel();
+          node.data.temperature ??= this.settings.defaultTemperature();
+        }
       }
     }
     return resolved;
@@ -416,8 +422,8 @@ export class CloudService {
 
     socket.onopen = () => {
       this.connection.set('connected');
-      this.runController.remoteApprovalSender = (nodeId, approved) =>
-        this.approveRemote(nodeId, approved);
+      this.runController.remoteApprovalSender = (requestId, approved) =>
+        this.approveRemote(requestId, approved);
       this.runController.remoteEventSender = (correlationKey, payload) =>
         this.sendEventRemote(correlationKey, payload);
       this.terminal.append('run', 'success', `Cloud monitor connected (${targetName}).`);
@@ -495,8 +501,8 @@ export class CloudService {
     this.send({ type: 'stop' });
   }
 
-  approveRemote(nodeId: string, approved: boolean): void {
-    this.send({ type: 'approval', nodeId, approved });
+  approveRemote(requestId: string, approved: boolean): void {
+    this.send({ type: 'approval', requestId, approved });
   }
 
   /** Delivers an external event to a suspended Wait-for-Event node remotely. */

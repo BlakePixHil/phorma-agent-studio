@@ -70,6 +70,16 @@ export interface WaitEventNodeData {
   timeoutHours?: number;
 }
 
+/** Configuration for an `execute-workflow` flow node. */
+export interface ExecuteWorkflowNodeData {
+  /** Id of the workflow resolved from the host or embedded registry. */
+  workflowId?: string;
+  /** Snapshot name used for readable traces when the target is unavailable. */
+  workflowName?: string;
+  /** Connected output used when nested execution fails. */
+  errorPortId?: string;
+}
+
 /**
  * Retry policy for an agent's model calls. Transient failures (429, 5xx,
  * network drops, timeouts) are retried BY DEFAULT (one retry, 1s backoff);
@@ -189,6 +199,19 @@ export interface WorkflowSettings {
 }
 
 /**
+ * A workflow embedded by value for nested execution. Embedded workflows do
+ * not recursively own registries; `WorkflowSpec.subWorkflows` is one flat,
+ * cycle-safe registry containing the full transitive closure.
+ */
+export interface EmbeddedWorkflow {
+  id: string;
+  name: string;
+  description?: string;
+  graph: WorkflowGraph;
+  settings?: WorkflowSettings;
+}
+
+/**
  * The portable workflow document — what the studio exports as
  * `.phorma.json` and pushes to the cloud runtime on deploy.
  */
@@ -200,6 +223,8 @@ export interface WorkflowSpec {
   graph: WorkflowGraph;
   /** Workflow-level execution settings (timeout, …). */
   settings?: WorkflowSettings;
+  /** Flat by-value registry used by `execute-workflow` nodes. */
+  subWorkflows?: Record<string, EmbeddedWorkflow>;
   /** ISO timestamp of the last save. */
   savedAt: string;
 }

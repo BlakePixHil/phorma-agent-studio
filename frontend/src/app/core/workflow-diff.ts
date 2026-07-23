@@ -15,6 +15,9 @@ export function diffWorkflowSpecs(base: WorkflowSpec, target: WorkflowSpec): Wor
   if (base.name !== target.name) changed(entries, `Renamed workflow from "${base.name}" to "${target.name}"`);
   if ((base.description ?? '') !== (target.description ?? '')) changed(entries, 'Changed workflow description');
   if (!equal(base.settings ?? {}, target.settings ?? {})) changed(entries, 'Changed workflow settings');
+  if (!equal(base.subWorkflows ?? {}, target.subWorkflows ?? {})) {
+    changed(entries, 'Changed embedded workflow registry');
+  }
 
   const baseNodes = new Map(base.graph.nodes.map(node => [node.id, node]));
   const targetNodes = new Map(target.graph.nodes.map(node => [node.id, node]));

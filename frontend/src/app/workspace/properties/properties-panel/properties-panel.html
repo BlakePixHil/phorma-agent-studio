@@ -651,6 +651,60 @@
       </section>
     }
 
+    <!-- Execute Workflow -->
+    @if (executeWorkflowData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-sub-workflow">Workflow</label>
+        <p-select
+          inputId="prop-sub-workflow"
+          [options]="workflowOptions()"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.workflowId ?? null"
+          (ngModelChange)="selectWorkflow($event)"
+          placeholder="Choose a saved workflow"
+          appendTo="body"
+          [filter]="true"
+          filterBy="label"
+        />
+        <p class="phorma-props__hint">
+          The Task input starts the selected workflow. Its terminal result leaves through Result.
+          Self-reference is allowed and stops at your plan depth limit.
+        </p>
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [outlined]="true"
+          [disabled]="!data.workflowId"
+          (click)="openTargetWorkflow()"
+        >
+          <i class="ti ti-external-link" aria-hidden="true"></i>
+          {{ targetIsEmbeddedOnly() ? 'Open Embedded Snapshot' : 'Open Workflow' }}
+        </button>
+        @if (targetIsEmbeddedOnly()) {
+          <p class="phorma-props__hint">This target exists only in the portable embedded registry and opens read-only.</p>
+        }
+        <label class="phorma-props__check">
+          <input
+            type="checkbox"
+            [checked]="hasExecuteWorkflowErrorBranch()"
+            (change)="toggleExecuteWorkflowErrorBranch($any($event.target).checked)"
+          />
+          On-error output
+        </label>
+        @if (hasExecuteWorkflowErrorBranch()) {
+          <p class="phorma-props__hint">
+            Child failures route through the <strong>On error</strong> port instead of failing the run.
+          </p>
+        }
+        <p class="phorma-props__depth-hint">
+          <i class="ti ti-layers-subtract" aria-hidden="true"></i>
+          {{ subWorkflowDepthHint() }}
+        </p>
+      </section>
+    }
+
     <!-- Branch ports (router routes / parallel branches / aggregator inputs) -->
     @if (editableOutPorts(); as branch) {
       <section class="phorma-props__section">

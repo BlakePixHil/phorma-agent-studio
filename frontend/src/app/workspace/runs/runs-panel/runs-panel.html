@@ -85,7 +85,7 @@
   </section>
 
   <!-- Pending approvals -->
-  @for (approval of runController.pendingApprovals(); track approval.nodeId) {
+  @for (approval of runController.pendingApprovals(); track approval.requestId) {
     <section class="phorma-runs__approval">
       <header>
         <i class="ti ti-user-check" aria-hidden="true"></i>
@@ -99,7 +99,7 @@
         <button
           type="button"
           class="phorma-runs__btn phorma-runs__btn--approve"
-          (click)="runController.resolveApproval(approval.nodeId, true)"
+          (click)="runController.resolveApproval(approval.requestId, true)"
         >
           <i class="ti ti-thumb-up" aria-hidden="true"></i> Approve
         </button>
@@ -108,7 +108,7 @@
           pButton
           severity="danger"
           [outlined]="true"
-          (click)="runController.resolveApproval(approval.nodeId, false)"
+          (click)="runController.resolveApproval(approval.requestId, false)"
         >
           <i class="ti ti-thumb-down" aria-hidden="true"></i> Reject
         </button>
@@ -150,16 +150,16 @@
     @if (traceGroups().length > 0) {
       <ol class="phorma-runs__trace">
         @for (group of traceGroups(); track group.key) {
-          @if (group.grouped && groupStepCount(group) > 1) {
+          @if (group.grouped && (group.noun === 'event' || groupStepCount(group) > 1)) {
             <li
               class="phorma-runs__group"
               [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)"
             >
               <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
-                <i class="ti ti-stack-2 phorma-runs__group-icon" aria-hidden="true"></i>
-                <span class="phorma-runs__group-title">Tool activity</span>
+                <i class="{{ group.icon ?? 'ti ti-stack-2' }} phorma-runs__group-icon" aria-hidden="true"></i>
+                <span class="phorma-runs__group-title">{{ group.title ?? 'Activity' }}</span>
                 <span class="phorma-runs__group-count">
-                  {{ groupStepCount(group) }} {{ groupStepCount(group) === 1 ? 'call' : 'calls' }}
+                  {{ groupCountLabel(group) }}
                 </span>
                 <i
                   class="ti phorma-runs__group-chevron"
@@ -314,16 +314,16 @@
         </div>
         <ol class="phorma-runs__trace">
           @for (group of selectedTraceGroups(); track group.key) {
-            @if (group.grouped && groupStepCount(group) > 1) {
+            @if (group.grouped && (group.noun === 'event' || groupStepCount(group) > 1)) {
               <li
                 class="phorma-runs__group"
                 [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)"
               >
                 <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
-                  <i class="ti ti-stack-2 phorma-runs__group-icon" aria-hidden="true"></i>
-                  <span class="phorma-runs__group-title">Tool activity</span>
+                  <i class="{{ group.icon ?? 'ti ti-stack-2' }} phorma-runs__group-icon" aria-hidden="true"></i>
+                  <span class="phorma-runs__group-title">{{ group.title ?? 'Activity' }}</span>
                   <span class="phorma-runs__group-count">
-                    {{ groupStepCount(group) }} {{ groupStepCount(group) === 1 ? 'call' : 'calls' }}
+                    {{ groupCountLabel(group) }}
                   </span>
                   <i
                     class="ti phorma-runs__group-chevron"

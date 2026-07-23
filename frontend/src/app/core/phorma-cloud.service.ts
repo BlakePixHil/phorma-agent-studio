@@ -39,6 +39,13 @@ const TIER_MONTHLY_CREDITS: Record<string, number> = {
   team: 10000,
 };
 
+/** Nested workflow depth per plan. Free and BYO runs use 2. */
+const TIER_SUB_WORKFLOW_DEPTH: Record<string, number> = {
+  starter: 5,
+  pro: 8,
+  team: 10,
+};
+
 /**
  * Marketing names for tier ids — the raw id is a D1 string (`team`, not
  * "Teams"). Unknown ids (e.g. a custom enterprise tier) title-case through.
@@ -110,6 +117,17 @@ export class PhormaCloudService {
 
   /** Subscription is active and the account can run workflows. */
   readonly subscribed = computed(() => this.profile()?.status === 'active');
+
+  /**
+    * Effective nested workflow frame depth. Unknown active custom tiers match
+    * the hosted starter fallback (5) until custom limits are provisioned.
+    * Inactive, missing, or malformed profiles use the Free limit of 2.
+   */
+  readonly subWorkflowDepth = computed(() => {
+    const profile = this.profile();
+    if (profile?.status !== 'active' || !profile.tier) return 2;
+    return Math.min(25, Math.max(2, TIER_SUB_WORKFLOW_DEPTH[profile.tier] ?? 5));
+  });
 
   /** 0–1 fraction of the monthly run allowance used (null without quota). */
   readonly runsFraction = computed(() => {

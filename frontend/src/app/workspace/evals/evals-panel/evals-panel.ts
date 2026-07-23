@@ -31,6 +31,7 @@ import { WorkflowService } from '../../../core/workflow.service';
 import {
   MODEL_PROVIDERS,
   PROVIDER_MODEL_SUGGESTIONS,
+  type EmbeddedWorkflow,
   type ModelProviderId,
   type WorkflowGraph,
 } from '../../../core/workflow.model';
@@ -361,6 +362,7 @@ export class EvalsPanel {
     this.workflow.openRunSnapshot(
       record.graph as WorkflowGraph,
       `${this.caseName(run, result)} — eval run`,
+      record.subWorkflows as unknown as Record<string, EmbeddedWorkflow> | undefined,
     );
     this.runController.loadHistoricalRun(record);
   }

@@ -80,11 +80,11 @@ Every save = a version; diff any version against current; one-click revert. Dist
 - *Pillar:* simpler - trust and safety for non-technical operators editing production workflows.
 - *Shipped:* full-spec snapshots in IndexedDB v7 (`workflow-versions`, 100 non-deployed versions/workflow with deployed snapshots pinned), manual-save boundaries plus 30-minute autosave coalescing and no-op suppression, and successful cloud pushes tagged as deployed. A bespoke Version History dialog (Workflows row action + File menu) provides semantic structural diffs against current (nodes, prompts/models/config, connections, workflow settings, collapsed position changes), read-only canvas previews, and confirmed one-click restore that preserves the pre-restore state as a safety version. Undo/redo remains a separate in-session stack. Key files: `core/workflow-versions.{model,service}.ts`, `core/workflow-diff.ts`, `workspace/workflows/version-history-dialog/`. Test: `core/workflow-diff.spec.ts` plus browser E2E for save/history/diff/preview/restore/autosave coalescing.
 
-### [ ] EPIC 8: Sub-Workflows
+### [x] EPIC 8: Sub-Workflows - shipped 2026-07-23
 
 An "Execute Workflow" node calling another workflow, plus "extract selection to sub-workflow". Enables reuse and keeps big canvases legible.
 
-- *Consideration:* needs engine support for nested specs and depth limits (heym caps at 5); works in both local and DO contexts since it's pure spec interpretation.
+- *Shipped:* the **Execute Workflow** flow node runs saved workflows as nested frames inside the same parent run, with scoped/collapsible trace activity, shared debugger controls, replay-safe journals, distinct approval identities, parent usage rollups, error-branch support, local eval support, and portable historical run snapshots. Referenced workflows are embedded as a flat cycle-safe transitive registry in exported/deployed specs while local runs take an immutable library-first snapshot, preserving local-to-cloud parity and allowing bounded self/mutual recursion. Depth limits are Free/BYO 2, Starter 5, Pro 8, Teams 10, with a hard engine ceiling of 25 for custom enterprise limits. The canvas context menu can **Extract to Sub-Workflow**: it validates a single flow boundary, carries tool links (cloning shared tools), saves the child, atomically replaces the selection with an Execute Workflow node, and remains one undo step. Tests: `engine/test/subworkflows.e2e.mts` plus `core/subworkflow-extract.spec.ts`.
 
 ### [ ] EPIC 9: Published Endpoints / Portal
 

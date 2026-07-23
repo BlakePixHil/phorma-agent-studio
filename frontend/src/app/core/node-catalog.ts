@@ -330,6 +330,21 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     defaultData: () => ({ correlationKey: '', message: '' }),
   },
   {
+    id: 'flow-execute-workflow',
+    label: 'Execute Workflow',
+    description: 'Runs another saved workflow and returns its result.',
+    icon: 'ti ti-stack-2',
+    category: 'flow',
+    kind: 'execute-workflow',
+    keywords: ['workflow', 'sub-workflow', 'nested', 'call', 'reuse'],
+    defaultName: 'Execute Workflow',
+    ports: [
+      { name: 'Task', role: 'message-in' },
+      { name: 'Result', role: 'message-out' },
+    ],
+    defaultData: () => ({}),
+  },
+  {
     id: 'flow-error-handler',
     label: 'Error Handler',
     description: 'Runs its subtree when the workflow fails — notify, clean up, escalate.',

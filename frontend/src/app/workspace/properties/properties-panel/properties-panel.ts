@@ -19,8 +19,10 @@ import { SettingsService } from '../../../core/settings.service';
 import { McpOAuthService } from '../../../core/mcp-oauth.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
+import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import type {
   ApprovalGateData,
+  ExecuteWorkflowNodeData,
   ForEachNodeData,
   HttpToolData,
   McpToolData,
@@ -172,6 +174,7 @@ export class PropertiesPanel {
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly toast = inject(ToastService);
   private readonly oauth = inject(McpOAuthService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   protected readonly httpMethods = [...HTTP_METHODS];
   protected readonly mcpTransports = [
@@ -288,6 +291,102 @@ export class PropertiesPanel {
     const node = this.node();
     return node?.kind === 'wait-event' ? (node.data as WaitEventNodeData) : null;
   });
+  protected readonly executeWorkflowData = computed<ExecuteWorkflowNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'execute-workflow' ? (node.data as ExecuteWorkflowNodeData) : null;
+  });
+
+  protected readonly workflowOptions = computed(() => {
+    const data = this.executeWorkflowData();
+    const embedded = this.workflow.activeDoc()?.subWorkflows ?? {};
+    const saved = this.workflow.library();
+    const options = new Map(
+      saved.map(spec => [spec.id, { id: spec.id, label: spec.name, embeddedOnly: false }]),
+    );
+    for (const target of Object.values(embedded)) {
+      if (!options.has(target.id)) {
+        options.set(target.id, {
+          id: target.id,
+          label: `${target.name} (embedded snapshot)`,
+          embeddedOnly: true,
+        });
+      }
+    }
+    // Preserve a configured target even if an older imported document did
+    // not carry its embedded body. This makes the unresolved state explicit.
+    if (data?.workflowId && !options.has(data.workflowId)) {
+      options.set(data.workflowId, {
+        id: data.workflowId,
+        label: `${data.workflowName ?? data.workflowId} (unavailable)`,
+        embeddedOnly: true,
+      });
+    }
+    return [...options.values()];
+  });
+
+  protected readonly targetIsEmbeddedOnly = computed(() => {
+    const workflowId = this.executeWorkflowData()?.workflowId;
+    return !!workflowId &&
+      !this.workflow.library().some(spec => spec.id === workflowId) &&
+      !!this.workflow.activeDoc()?.subWorkflows?.[workflowId];
+  });
+
+  protected readonly subWorkflowDepthHint = computed(() => {
+    const profile = this.phormaCloud.profile();
+    const plan = profile?.status === 'active' ? tierLabel(profile.tier) : 'Free';
+    return `${plan} allows ${this.phormaCloud.subWorkflowDepth()} nested workflow levels.`;
+  });
+
+  protected selectWorkflow(workflowId: string | null): void {
+    const target = this.workflow.library().find(spec => spec.id === workflowId) ??
+      (workflowId ? this.workflow.activeDoc()?.subWorkflows?.[workflowId] : undefined);
+    this.patchData({
+      workflowId: target?.id,
+      workflowName: target?.name,
+    });
+  }
+
+  protected openTargetWorkflow(): void {
+    const workflowId = this.executeWorkflowData()?.workflowId;
+    if (!workflowId) return;
+    if (this.workflow.library().some(spec => spec.id === workflowId)) {
+      this.workflow.openWorkflow(workflowId);
+      return;
+    }
+    const embedded = this.workflow.activeDoc()?.subWorkflows?.[workflowId];
+    if (embedded) this.workflow.openEmbeddedSnapshot(embedded);
+    else this.toast.warning('Workflow unavailable', 'This target is not saved or embedded in the active workflow.');
+  }
+
+  protected readonly hasExecuteWorkflowErrorBranch = computed(() => {
+    const node = this.node();
+    const errorPortId = this.executeWorkflowData()?.errorPortId;
+    return !!errorPortId && !!node?.ports.some(port => port.id === errorPortId);
+  });
+
+  protected toggleExecuteWorkflowErrorBranch(enabled: boolean): void {
+    const node = this.node();
+    if (!node || node.kind !== 'execute-workflow') return;
+    const data = node.data as ExecuteWorkflowNodeData;
+    if (enabled) {
+      if (this.hasExecuteWorkflowErrorBranch()) return;
+      const port = {
+        id: `${node.id}-err${Date.now().toString(36)}`,
+        name: 'On error',
+        role: 'message-out' as const,
+      };
+      this.workflow.updateNodePorts(node.id, [...node.ports, port]);
+      this.workflow.updateNodeData(node.id, { errorPortId: port.id });
+      return;
+    }
+    this.workflow.updateNodeData(node.id, { errorPortId: undefined });
+    if (data.errorPortId) {
+      this.workflow.updateNodePorts(
+        node.id,
+        node.ports.filter(port => port.id !== data.errorPortId),
+      );
+    }
+  }
 
   /** The MCP preset that seeded the selected node, if any. */
   protected readonly mcpPreset = computed(() => {

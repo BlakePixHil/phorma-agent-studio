@@ -6,8 +6,14 @@
  *
  * Run: npx -y tsx run-record.e2e.mts
  */
-import { createRunRecorder, startRun } from '../src/index.js';
+import {
+  createRunRecorder,
+  decodeRunSnapshot,
+  encodeRunSnapshot,
+  startRun,
+} from '../src/index.js';
 import type {
+  EmbeddedWorkflow,
   ModelChunk,
   ModelRequest,
   RunLogEvent,
@@ -82,6 +88,13 @@ const model = {
 
 console.log('E2E: run recorder over a real engine run');
 {
+  const childRegistry: Record<string, EmbeddedWorkflow> = {
+    child: {
+      id: 'child',
+      name: 'Child Workflow',
+      graph: { nodes: [structuredClone(graph.nodes[0])], connections: [] },
+    },
+  };
   const recorder = createRunRecorder({
     runId: 'rec-1',
     workflowId: 'wf-test',
@@ -89,6 +102,7 @@ console.log('E2E: run recorder over a real engine run');
     source: 'manual',
     environment: 'local',
     graph: structuredClone(graph),
+    subWorkflows: childRegistry,
   });
 
   check('recorder starts unsettled and running', !recorder.settled && recorder.summary().status === 'running');
@@ -115,6 +129,10 @@ console.log('E2E: run recorder over a real engine run');
   check('usage summed across both agents', summary.usage.inputTokens === 20 && summary.usage.outputTokens === 6);
   check('cost summed', Math.abs(summary.usage.costUsd - 0.002) < 1e-9);
   check('nodeCount from graph snapshot', summary.nodeCount === 3);
+  check(
+    'embedded sub-workflow registry retained',
+    record.subWorkflows?.child?.graph.nodes[0]?.id === 'trig',
+  );
   check('no raw node-token events in the log', !types.includes('node-token' as never));
   const outputTexts = record.events.filter(
     (event): event is Extract<RunLogEvent, { type: 'node-output-text' }> =>
@@ -131,6 +149,24 @@ console.log('E2E: run recorder over a real engine run');
     `got: ${summary.output}`,
   );
   check('record survives JSON round-trip', JSON.stringify(JSON.parse(JSON.stringify(record))) === JSON.stringify(record));
+}
+
+console.log('E2E: cloud graph-column snapshot compatibility');
+{
+  const registry: Record<string, EmbeddedWorkflow> = {
+    child: {
+      id: 'child',
+      name: 'Child Workflow',
+      graph: { nodes: [structuredClone(graph.nodes[1])], connections: [] },
+    },
+  };
+  const envelope = decodeRunSnapshot(encodeRunSnapshot(graph, registry));
+  check('versioned snapshot envelope restores root graph', envelope.graph.nodes.length === 3);
+  check('versioned snapshot envelope restores registry', envelope.subWorkflows?.child?.name === 'Child Workflow');
+
+  const legacy = decodeRunSnapshot(JSON.stringify(graph));
+  check('legacy raw graph row still parses', legacy.graph.connections.length === 2);
+  check('legacy raw graph has no invented registry', legacy.subWorkflows === undefined);
 }
 
 console.log('E2E: payload clipping + truncation flag');

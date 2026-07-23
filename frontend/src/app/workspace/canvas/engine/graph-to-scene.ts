@@ -1,4 +1,4 @@
-import { NODE_CATEGORY_COLORS, isAgentNode } from '../../../core/workflow.model';
+import { NODE_CATEGORY_COLORS, isAgentNode, type ExecuteWorkflowNodeData } from '../../../core/workflow.model';
 import type { WorkflowGraph, WorkflowNode, WorkflowPort } from '../../../core/workflow.model';
 import type { RendererEdge, RendererNode, RendererPort } from './canvas-graph-renderer';
 
@@ -33,10 +33,12 @@ function portColorRaw(role: WorkflowPort['role'], isErrorPort = false): string {
     : 'var(--phorma-port-message, #94a3b8)';
 }
 
-/** Whether a port is the node's "On error" branch (agents) or the Error Handler's out-port. */
+/** Whether a port is an "On error" branch or the Error Handler's out-port. */
 function isErrorPortOf(node: WorkflowNode, port: WorkflowPort): boolean {
   if (node.kind === 'error-handler') return port.role === 'message-out';
-  return isAgentNode(node) && node.data.errorPortId === port.id;
+  if (isAgentNode(node)) return node.data.errorPortId === port.id;
+  return node.kind === 'execute-workflow' &&
+    (node.data as ExecuteWorkflowNodeData).errorPortId === port.id;
 }
 
 /** Truncates display text to at most `max` characters, appending an ellipsis. */
@@ -51,6 +53,10 @@ function truncateLabel(text: string, max = 24): string {
  */
 function nodeSubtitle(node: WorkflowNode): string | null {
   if (isAgentNode(node)) return truncateLabel(node.data.model ?? 'Default', 18);
+  if (node.kind === 'execute-workflow') {
+    const data = node.data as ExecuteWorkflowNodeData;
+    return truncateLabel(data.workflowName?.trim() || 'Choose workflow', 18);
+  }
   return null;
 }
 

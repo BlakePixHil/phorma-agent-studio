@@ -28,6 +28,9 @@ import { RunControllerService } from '../../core/run-controller.service';
 import { NODE_CATALOG, NODE_CATEGORY_SECTIONS, PHORMA_NODE_MIME, findMcpPreset } from '../../core/node-catalog';
 import { ToastService } from '../../shared/toast/toast.service';
 import { McpOAuthService } from '../../core/mcp-oauth.service';
+import { HistoryService } from '../../core/history.service';
+import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
+import { extractSubWorkflow } from '../../core/subworkflow-extract';
 import { CanvasGraphRenderer, type RendererTheme } from './engine/canvas-graph-renderer';
 import { graphToScene } from './engine/graph-to-scene';
 import { ThinkingOverlay } from './thinking-overlay/thinking-overlay';
@@ -237,6 +240,8 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   private readonly toast = inject(ToastService);
   private readonly settings = inject(SettingsService);
   private readonly oauth = inject(McpOAuthService);
+  private readonly history = inject(HistoryService);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   @ViewChild('cv', { static: true }) private cvRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('mini') private miniRef?: ElementRef<HTMLCanvasElement>;
@@ -571,6 +576,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
    */
   protected readonly contextMenuItems = computed<MenuItem[]>(() => {
     const nodeId = this.contextNodeId();
+    const readOnly = !!this.workflow.activeDoc()?.readOnly;
     const nodeItems: MenuItem[] = nodeId
       ? [
           {
@@ -583,8 +589,15 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
             command: () => this.runController.toggleBreakpoint(nodeId),
           },
           {
+            label: 'Extract to Sub-Workflow',
+            icon: 'ti ti-stack-push',
+            disabled: readOnly,
+            command: () => void this.extractContextSelection(nodeId),
+          },
+          {
             label: 'Delete Node',
             icon: 'ti ti-trash',
+            disabled: readOnly,
             command: () => {
               this.removeNode(nodeId);
               this.selection.clear();
@@ -598,6 +611,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       {
         label: 'Add',
         icon: 'ti ti-plus',
+        disabled: readOnly,
         items: NODE_CATEGORY_SECTIONS.map(section => ({
           label: section.label,
           items: NODE_CATALOG.filter(entry => entry.category === section.category).map(entry => ({
@@ -608,7 +622,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
         })),
       },
       { separator: true },
-      { label: 'Arrange Nodes', icon: 'ti ti-layout-distribute-horizontal', command: () => this.selection.arrangeNodes() },
+      { label: 'Arrange Nodes', icon: 'ti ti-layout-distribute-horizontal', disabled: readOnly, command: () => this.selection.arrangeNodes() },
     ];
   });
 
@@ -1274,6 +1288,84 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
     this.contextWorld = this.engine.screenToWorld(e.clientX, e.clientY);
     const hit = this.engine.hitTestNode(this.contextWorld.x, this.contextWorld.y);
     this.contextNodeId.set(hit?.id ?? null);
+  }
+
+  /** Extracts the current multi-selection, or only the right-clicked node. */
+  private async extractContextSelection(contextNodeId: string): Promise<void> {
+    if (this.workflow.activeDoc()?.readOnly) return;
+    const currentSelection = this.selection.selectedNodeIds();
+    const selectedIds = currentSelection.has(contextNodeId)
+      ? new Set(currentSelection)
+      : new Set([contextNodeId]);
+
+    const name = await this.confirmDialog.prompt(
+      {
+        title: 'Extract to Sub-Workflow',
+        message: 'Name the reusable workflow created from this selection.',
+        confirmLabel: 'Extract',
+        cancelLabel: 'Cancel',
+      },
+      {
+        initialValue: 'Extracted Workflow',
+        placeholder: 'Extracted Workflow',
+        label: 'Workflow name',
+        maxLength: 80,
+      },
+    );
+    if (name === null) return;
+
+    const sourceDocId = this.workflow.activeDoc()?.docId;
+    const sourceGraph = this.graph();
+    if (!sourceDocId) return;
+    const stamp = Date.now().toString(36);
+    const workflowId = `wf-${stamp}`;
+    const extraction = extractSubWorkflow(sourceGraph, selectedIds, {
+      workflowId,
+      workflowName: name,
+      savedAt: new Date().toISOString(),
+      subWorkflows: this.workflow.exportActiveSpec()?.subWorkflows,
+    });
+    if (!extraction.ok) {
+      this.toast.error('Cannot extract selection', extraction.error);
+      return;
+    }
+
+    const saved = await this.workflow.saveNewSpecToLibrary(extraction.value.childSpec);
+    if (!saved) return;
+
+    // Saving the child is asynchronous. Never apply a replacement computed
+    // from stale source state if the user switched tabs or edited the graph
+    // while IndexedDB/version history was being written.
+    const currentDoc = this.workflow.activeDoc();
+    if (currentDoc?.docId !== sourceDocId || currentDoc.graph !== sourceGraph) {
+      this.toast.warning(
+        'Parent workflow changed',
+        `Saved "${saved.name}", but left the parent untouched because its source changed during extraction.`,
+      );
+      return;
+    }
+
+    const replacement = extraction.value.replacementNode;
+    const parentGraph = saved.id === workflowId
+      ? extraction.value.parentGraph
+      : {
+          ...extraction.value.parentGraph,
+          nodes: extraction.value.parentGraph.nodes.map(node =>
+            node.id === replacement.id
+              ? {
+                  ...node,
+                  data: { ...node.data, workflowId: saved.id, workflowName: saved.name },
+                }
+              : node,
+          ),
+        };
+    this.history.boundaryOnce();
+    this.workflow.replaceGraph(parentGraph);
+    this.selection.setNodes([replacement.id]);
+    this.toast.success(
+      'Sub-workflow extracted',
+      `Saved "${saved.name}" and replaced ${extraction.value.movedNodeIds.length} selected node${extraction.value.movedNodeIds.length === 1 ? '' : 's'}.`,
+    );
   }
 
   /** Adds a catalog node at the last right-click position (context menu). */

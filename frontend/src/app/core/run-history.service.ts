@@ -7,6 +7,7 @@ import {
   type RunRecord,
   type RunRecorder,
   type RunRecordSummary,
+  type EmbeddedWorkflow,
   type WorkflowGraph,
 } from '@phorma/engine';
 
@@ -63,6 +64,7 @@ export class RunHistoryService {
     workflowId: string | null;
     workflowName: string;
     graph: WorkflowGraph;
+    subWorkflows?: Record<string, EmbeddedWorkflow>;
   }): void {
     this.recorder = createRunRecorder({
       ...meta,

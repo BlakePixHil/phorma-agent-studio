@@ -10,7 +10,7 @@ import { RunHistoryService } from '../../../core/run-history.service';
 import { traceFromRunLog } from '../../../core/run-trace';
 import { TerminalOutputService } from '../../../core/terminal-output.service';
 import { WorkflowService } from '../../../core/workflow.service';
-import type { WorkflowGraph } from '../../../core/workflow.model';
+import type { EmbeddedWorkflow, WorkflowGraph } from '../../../core/workflow.model';
 import { ButtonModule } from 'primeng/button';
 import { Textarea } from 'primeng/textarea';
 
@@ -25,6 +25,10 @@ export interface TraceGroup {
   /** True when this run should render as a collapsible container. */
   grouped: boolean;
   entries: TraceEntry[];
+  /** Group header content. */
+  title?: string;
+  icon?: string;
+  noun?: string;
 }
 
 /**
@@ -34,15 +38,34 @@ export interface TraceGroup {
 function foldTraceGroups(entries: TraceEntry[]): TraceGroup[] {
   const groups: TraceGroup[] = [];
   let bucket: TraceEntry[] | null = null;
+  let scopeKey: string | null = null;
   for (const entry of entries) {
-    if (entry.kind === 'tool-call' || entry.kind === 'tool-result') {
-      if (!bucket) {
+    const frame = entry.scope?.[0];
+    const nextScopeKey = frame ? `${frame.nodeId}:${frame.workflowId}` : null;
+    if (frame) {
+      if (!bucket || scopeKey !== nextScopeKey) {
         bucket = [];
-        groups.push({ key: `g${entry.id}`, grouped: true, entries: bucket });
+        scopeKey = nextScopeKey;
+        groups.push({
+          key: `s${entry.id}`,
+          grouped: true,
+          entries: bucket,
+          title: frame.workflowName,
+          icon: 'ti ti-stack-2',
+          noun: 'event',
+        });
       }
+      bucket.push(entry);
+    } else if (entry.kind === 'tool-call' || entry.kind === 'tool-result') {
+      if (!bucket || scopeKey !== null) {
+        bucket = [];
+        groups.push({ key: `g${entry.id}`, grouped: true, entries: bucket, title: 'Tool activity', icon: 'ti ti-tool', noun: 'call' });
+      }
+      scopeKey = null;
       bucket.push(entry);
     } else {
       bucket = null;
+      scopeKey = null;
       groups.push({ key: `e${entry.id}`, grouped: false, entries: [entry] });
     }
   }
@@ -233,6 +256,7 @@ export class RunsPanel {
     this.workflow.openRunSnapshot(
       record.graph as WorkflowGraph,
       `${record.summary.workflowName} — run ${startedAt.toLocaleTimeString()}`,
+      record.subWorkflows as unknown as Record<string, EmbeddedWorkflow> | undefined,
     );
     this.runController.loadHistoricalRun(record);
     this.selectedRun.set(null);
@@ -285,8 +309,15 @@ export class RunsPanel {
    * "max tool calls" setting). Falls back to entry count if calls are absent.
    */
   protected groupStepCount(group: TraceGroup): number {
+    if (group.noun === 'event') return group.entries.length;
     const calls = group.entries.filter(entry => entry.kind === 'tool-call').length;
     return calls || group.entries.length;
+  }
+
+  protected groupCountLabel(group: TraceGroup): string {
+    const count = this.groupStepCount(group);
+    const noun = group.noun ?? 'call';
+    return `${count} ${count === 1 ? noun : `${noun}s`}`;
   }
 
   protected onInput(event: Event): void {

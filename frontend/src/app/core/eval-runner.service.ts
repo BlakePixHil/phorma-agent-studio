@@ -12,7 +12,7 @@ import {
   type EvalScore,
   type EvalSuite,
   type RunHandle,
-  type WorkflowGraph,
+  type WorkflowSpec,
 } from '@phorma/engine';
 
 import { CloudService } from './cloud.service';
@@ -23,6 +23,7 @@ import { RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowService } from './workflow.service';
+import { PhormaCloudService } from './phorma-cloud.service';
 
 /** Local case executions in flight at once. */
 const LOCAL_CONCURRENCY = 3;
@@ -40,6 +41,13 @@ export interface EvalCaseProgress {
   caseId: string;
   model?: string;
   status: 'pending' | 'running' | 'scoring' | 'passed' | 'failed' | 'error';
+}
+
+interface LocalEvalSnapshot {
+  spec: WorkflowSpec;
+  maxSubWorkflowDepth: number;
+  runTimeoutMs?: number;
+  maxExecutions?: number;
 }
 
 /**
@@ -69,6 +77,7 @@ export class EvalRunnerService {
   private readonly runHistory = inject(RunHistoryService);
   private readonly evals = inject(EvalService);
   private readonly cloud = inject(CloudService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   private cancelled = false;
   private readonly liveHandles = new Set<RunHandle>();
@@ -94,6 +103,27 @@ export class EvalRunnerService {
   ): Promise<EvalRunSummary | null> {
     if (this.running() || suite.cases.length === 0) return null;
     this.cancelled = false;
+
+    // Capture one complete portable spec before any case starts. Every local
+    // case and model-comparison pass shares this immutable graph/registry, so
+    // edits to the canvas or library cannot leak into a suite in progress.
+    const portable = this.workflow.exportActiveSpec();
+    if (!portable) return null;
+    const spec = structuredClone(portable);
+    const graphs = [
+      spec.graph,
+      ...Object.values(spec.subWorkflows ?? {}).map(workflow => workflow.graph),
+    ];
+    const localSnapshot: LocalEvalSnapshot = {
+      spec,
+      maxSubWorkflowDepth: this.phormaCloud.subWorkflowDepth(),
+      runTimeoutMs: timeoutMs(spec.settings?.timeoutMinutes),
+      maxExecutions: graphs.some(graph =>
+        graph.nodes.some(node => node.kind === 'for-each'),
+      )
+        ? 2000
+        : undefined,
+    };
 
     // Local model-comparison passes; cloud always runs a single default pass.
     const passes: (EvalModelRef | undefined)[] =
@@ -125,11 +155,10 @@ export class EvalRunnerService {
     await this.evals.saveRun(run);
 
     try {
-      const graph = structuredClone(this.workflow.graph());
       for (const pass of passes) {
         if (this.cancelled) break;
         if (environment === 'local') {
-          await this.runLocalPass(suite, run, graph, pass);
+          await this.runLocalPass(suite, run, localSnapshot, pass);
         } else {
           await this.runCloudPass(suite, run);
         }
@@ -156,7 +185,7 @@ export class EvalRunnerService {
   private async runLocalPass(
     suite: EvalSuite,
     run: EvalRunSummary,
-    graph: WorkflowGraph,
+    snapshot: LocalEvalSnapshot,
     pass: EvalModelRef | undefined,
   ): Promise<void> {
     const queue = [...suite.cases];
@@ -164,7 +193,7 @@ export class EvalRunnerService {
       for (;;) {
         const testCase = queue.shift();
         if (!testCase || this.cancelled) return;
-        const result = await this.runLocalCase(suite, testCase, graph, pass);
+        const result = await this.runLocalCase(suite, testCase, snapshot, pass);
         run.results.push(result);
         this.setProgress(testCase.id, pass, result.status);
         // Checkpoint at case boundaries so a crash leaves partial results.
@@ -177,7 +206,7 @@ export class EvalRunnerService {
   private async runLocalCase(
     suite: EvalSuite,
     testCase: EvalCase,
-    graph: WorkflowGraph,
+    snapshot: LocalEvalSnapshot,
     pass: EvalModelRef | undefined,
   ): Promise<EvalCaseResult> {
     const model = pass ? evalModelLabel(pass) : undefined;
@@ -185,7 +214,7 @@ export class EvalRunnerService {
     this.runCounter += 1;
     const runId = `run-${Date.now().toString(36)}-eval${this.runCounter}`;
     const doc = this.workflow.activeDoc();
-    const graphSnapshot = structuredClone(graph);
+    const graphSnapshot = structuredClone(snapshot.spec.graph);
     const recorder = createRunRecorder({
       runId,
       workflowId: suite.workflowId,
@@ -193,6 +222,7 @@ export class EvalRunnerService {
       source: 'eval',
       environment: 'local',
       graph: graphSnapshot,
+      subWorkflows: snapshot.spec.subWorkflows,
       estimateCost: this.pricing.estimator(),
     });
     const startedAt = Date.now();
@@ -202,7 +232,9 @@ export class EvalRunnerService {
       graph: graphSnapshot,
       input: testCase.input,
       source: 'eval',
-      maxExecutions: graph.nodes.some(node => node.kind === 'for-each') ? 2000 : undefined,
+      maxExecutions: snapshot.maxExecutions,
+      subWorkflows: snapshot.spec.subWorkflows,
+      maxSubWorkflowDepth: snapshot.maxSubWorkflowDepth,
       model: this.transport.create(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
       lmstudioBaseUrl: this.settings.lmstudioBaseUrl(),
@@ -213,7 +245,7 @@ export class EvalRunnerService {
         temperature: this.settings.defaultTemperature(),
       },
       maxToolRounds: this.settings.maxToolRounds(),
-      runTimeoutMs: this.workflowTimeoutMs(),
+      runTimeoutMs: snapshot.runTimeoutMs,
       contextWindow: this.pricing.contextWindowLookup(),
       tools: this.toolHost,
       emit: event => recorder.record(event),
@@ -412,6 +444,10 @@ function progressKey(caseId: string, model: string | undefined): string {
 
 function clip(text: string): string {
   return text.length > RESULT_OUTPUT_CAP ? `${text.slice(0, RESULT_OUTPUT_CAP)}…` : text;
+}
+
+function timeoutMs(minutes: number | undefined): number | undefined {
+  return typeof minutes === 'number' && minutes > 0 ? minutes * 60_000 : undefined;
 }
 
 function sleep(ms: number): Promise<void> {
