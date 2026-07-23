@@ -16,8 +16,10 @@
 @import '@tabler/icons-webfont/dist/tabler-icons.css';
 
 /* Tell Tailwind that dark mode is driven by the `.app-dark` class (matches the
-   PrimeNG darkModeSelector configured in app.config.ts). */
-@custom-variant dark (&:where(.app-dark, .app-dark *, .app-solarized, .app-solarized *));
+   PrimeNG darkModeSelector configured in app.config.ts). Every dark-family
+   theme mode carries `app-dark` plus its own class, so this one selector
+   covers them all. */
+@custom-variant dark (&:where(.app-dark, .app-dark *));
 
 /* ----------------------------------------------------------------------------
    Design tokens — premium monochrome palette
@@ -202,6 +204,164 @@
   --phorma-accent-amber-soft:   rgba(181, 137, 0, 0.20);
   --phorma-accent-red:          #dc322f;
   --phorma-accent-red-soft:     rgba(220, 50, 47, 0.20);
+  color-scheme: dark;
+}
+
+:root.app-charcoal {
+  /* Charcoal — flat warm-neutral graphite. A pure neutral ramp with no hue
+     tint, so the editor reads like a machined graphite tool. Slightly lighter
+     and warmer than the default obsidian dark. */
+  --phorma-canvas-bg:    #17161a;
+  --phorma-chrome-bg:    rgba(23, 22, 26, 0.55);
+  --phorma-border:       rgba(255, 255, 255, 0.08);
+  --phorma-dot-color:    rgba(210, 205, 195, 0.16);
+  --phorma-spotlight-color: rgba(255, 255, 255, 0.03);
+  --phorma-card-bg:      #1e1d22;
+  --phorma-card-border:  rgba(255, 255, 255, 0.06);
+  --phorma-card-border-glow: rgba(255, 255, 255, 0.55);
+  --phorma-card-fill-glow:   rgba(255, 255, 255, 0.05);
+  --phorma-node-bg:             #1e1d22;
+  --phorma-node-header-bg:      #242329;
+  --phorma-node-border:         rgba(255, 255, 255, 0.07);
+  --phorma-node-border-active:  rgba(255, 255, 255, 0.22);
+  --phorma-node-divider:        rgba(255, 255, 255, 0.06);
+  --phorma-node-shadow:         0 2px 12px rgba(0,0,0,0.55);
+  --phorma-node-shadow-active:  0 4px 24px rgba(0,0,0,0.72);
+  --phorma-node-icon-bg:        rgba(255, 255, 255, 0.06);
+  --phorma-node-badge-bg:       rgba(255, 255, 255, 0.06);
+  --phorma-node-badge-color:    rgba(255, 255, 255, 0.40);
+  --phorma-node-row-hover:      rgba(255, 255, 255, 0.03);
+  --phorma-code-default:        rgba(200, 196, 188, 0.78);
+  --phorma-code-string:         #8fbc8f;
+  --phorma-code-boolean:        #c586c0;
+  --phorma-code-number:         #f0a45d;
+  --phorma-code-nullish:        #c586c0;
+  --phorma-code-function:       #dcdcaa;
+  --phorma-code-object:         #9cdcfe;
+  --phorma-code-type:           #4ec9b0;
+  --phorma-connector-bg:        rgba(255, 255, 255, 0.12);
+  --phorma-connector-border:    rgba(255, 255, 255, 0.18);
+  --phorma-connector-hover:     var(--p-primary-color, #a09b92);
+  --phorma-connector-active:    var(--p-primary-color, #a09b92);
+  --phorma-wire-color:          rgba(200, 196, 188, 0.24);
+  --phorma-wire-hover-color:    var(--p-primary-color, #a09b92);
+  --phorma-glass-bg:            rgba(30, 29, 34, 0.88);
+  --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.38);
+  --phorma-accent-blue:         #7aa2f7;
+  --phorma-accent-blue-soft:    rgba(122, 162, 247, 0.18);
+  --phorma-accent-blue-ring:    rgba(122, 162, 247, 0.50);
+  --phorma-accent-green:        #4ade80;
+  --phorma-accent-green-hover:  #22c55e;
+  --phorma-accent-green-contrast: #052e16;
+  --phorma-accent-amber:        #fbbf24;
+  --phorma-accent-amber-soft:   rgba(251, 191, 36, 0.18);
+  --phorma-accent-red:          #f87171;
+  --phorma-accent-red-soft:     rgba(248, 113, 113, 0.18);
+  color-scheme: dark;
+}
+
+:root.app-midnight {
+  /* Midnight — deep blue-tinted dark. Surfaces pull toward indigo/navy for a
+     cooler night-sky feel. Code accents brighten to stay legible on the
+     deep navy canvas. */
+  --phorma-canvas-bg:    #0b1020;
+  --phorma-chrome-bg:    rgba(11, 16, 32, 0.55);
+  --phorma-border:       rgba(148, 178, 255, 0.10);
+  --phorma-dot-color:    rgba(148, 178, 255, 0.14);
+  --phorma-spotlight-color: rgba(148, 178, 255, 0.04);
+  --phorma-card-bg:      #121a30;
+  --phorma-card-border:  rgba(148, 178, 255, 0.10);
+  --phorma-card-border-glow: rgba(122, 162, 247, 0.50);
+  --phorma-card-fill-glow:   rgba(122, 162, 247, 0.05);
+  --phorma-node-bg:             #121a30;
+  --phorma-node-header-bg:      #182242;
+  --phorma-node-border:         rgba(148, 178, 255, 0.12);
+  --phorma-node-border-active:  rgba(122, 162, 247, 0.35);
+  --phorma-node-divider:        rgba(148, 178, 255, 0.08);
+  --phorma-node-shadow:         0 2px 12px rgba(0,0,0,0.55);
+  --phorma-node-shadow-active:  0 4px 24px rgba(0,0,0,0.75);
+  --phorma-node-icon-bg:        rgba(148, 178, 255, 0.08);
+  --phorma-node-badge-bg:       rgba(148, 178, 255, 0.08);
+  --phorma-node-badge-color:    rgba(190, 208, 255, 0.45);
+  --phorma-node-row-hover:      rgba(148, 178, 255, 0.05);
+  --phorma-code-default:        rgba(190, 208, 255, 0.72);
+  --phorma-code-string:         #89d185;
+  --phorma-code-boolean:        #c586c0;
+  --phorma-code-number:         #f0a45d;
+  --phorma-code-nullish:        #c586c0;
+  --phorma-code-function:       #dcdcaa;
+  --phorma-code-object:         #9cdcfe;
+  --phorma-code-type:           #4ec9b0;
+  --phorma-connector-bg:        rgba(148, 178, 255, 0.14);
+  --phorma-connector-border:    rgba(148, 178, 255, 0.22);
+  --phorma-connector-hover:     var(--p-primary-color, #7aa2f7);
+  --phorma-connector-active:    var(--p-primary-color, #7aa2f7);
+  --phorma-wire-color:          rgba(148, 178, 255, 0.26);
+  --phorma-wire-hover-color:    var(--p-primary-color, #7aa2f7);
+  --phorma-glass-bg:            rgba(18, 26, 48, 0.88);
+  --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.42);
+  --phorma-accent-blue:         #7aa2f7;
+  --phorma-accent-blue-soft:    rgba(122, 162, 247, 0.20);
+  --phorma-accent-blue-ring:    rgba(122, 162, 247, 0.50);
+  --phorma-accent-green:        #4ade80;
+  --phorma-accent-green-hover:  #22c55e;
+  --phorma-accent-green-contrast: #052e16;
+  --phorma-accent-amber:        #fbbf24;
+  --phorma-accent-amber-soft:   rgba(251, 191, 36, 0.18);
+  --phorma-accent-red:          #f87171;
+  --phorma-accent-red-soft:     rgba(248, 113, 113, 0.18);
+  color-scheme: dark;
+}
+
+:root.app-nord {
+  /* Nord — arctic, north-bluish palette (nordtheme.com). Polar Night surfaces
+     (#2e3440 → #4c566a), Snow Storm text, Frost accents. Muted and calm. */
+  --phorma-canvas-bg:    #2e3440;
+  --phorma-chrome-bg:    rgba(46, 52, 64, 0.55);
+  --phorma-border:       rgba(216, 222, 233, 0.08);
+  --phorma-dot-color:    rgba(216, 222, 233, 0.14);
+  --phorma-spotlight-color: rgba(136, 192, 208, 0.04);
+  --phorma-card-bg:      #3b4252;
+  --phorma-card-border:  rgba(216, 222, 233, 0.08);
+  --phorma-card-border-glow: rgba(136, 192, 208, 0.50);
+  --phorma-card-fill-glow:   rgba(136, 192, 208, 0.05);
+  --phorma-node-bg:             #3b4252;
+  --phorma-node-header-bg:      #434c5e;
+  --phorma-node-border:         rgba(216, 222, 233, 0.10);
+  --phorma-node-border-active:  rgba(136, 192, 208, 0.38);
+  --phorma-node-divider:        rgba(216, 222, 233, 0.07);
+  --phorma-node-shadow:         0 2px 12px rgba(0,0,0,0.45);
+  --phorma-node-shadow-active:  0 4px 24px rgba(0,0,0,0.60);
+  --phorma-node-icon-bg:        rgba(216, 222, 233, 0.07);
+  --phorma-node-badge-bg:       rgba(216, 222, 233, 0.07);
+  --phorma-node-badge-color:    rgba(216, 222, 233, 0.45);
+  --phorma-node-row-hover:      rgba(216, 222, 233, 0.05);
+  --phorma-code-default:        #d8dee9;
+  --phorma-code-string:         #a3be8c;
+  --phorma-code-boolean:        #81a1c1;
+  --phorma-code-number:         #b48ead;
+  --phorma-code-nullish:        #81a1c1;
+  --phorma-code-function:       #88c0d0;
+  --phorma-code-object:         #d8dee9;
+  --phorma-code-type:           #8fbcbb;
+  --phorma-connector-bg:        rgba(216, 222, 233, 0.14);
+  --phorma-connector-border:    rgba(216, 222, 233, 0.22);
+  --phorma-connector-hover:     var(--p-primary-color, #88c0d0);
+  --phorma-connector-active:    var(--p-primary-color, #88c0d0);
+  --phorma-wire-color:          rgba(216, 222, 233, 0.24);
+  --phorma-wire-hover-color:    var(--p-primary-color, #88c0d0);
+  --phorma-glass-bg:            rgba(59, 66, 82, 0.88);
+  --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.35);
+  --phorma-accent-blue:         #81a1c1;
+  --phorma-accent-blue-soft:    rgba(129, 161, 193, 0.20);
+  --phorma-accent-blue-ring:    rgba(129, 161, 193, 0.50);
+  --phorma-accent-green:        #a3be8c;
+  --phorma-accent-green-hover:  #8fbc8a;
+  --phorma-accent-green-contrast: #2e3440;
+  --phorma-accent-amber:        #ebcb8b;
+  --phorma-accent-amber-soft:   rgba(235, 203, 139, 0.18);
+  --phorma-accent-red:          #bf616a;
+  --phorma-accent-red-soft:     rgba(191, 97, 106, 0.20);
   color-scheme: dark;
 }
 

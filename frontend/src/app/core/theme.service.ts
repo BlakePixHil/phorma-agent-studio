@@ -6,27 +6,38 @@ import {
   type ThemePalette,
   type ThemePaletteId,
 } from './theme-palettes';
+import {
+  DEFAULT_THEME_MODE,
+  THEME_MODES,
+  type ThemeMode,
+  type ThemeModeDef,
+} from './theme-modes';
 
 const STORAGE_KEY = 'phorma-theme';
 const PALETTE_KEY = 'phorma-palette';
-const DARK_CLASS = 'app-dark';
-const SOLARIZED_CLASS = 'app-solarized';
 
-export type ThemeMode = 'light' | 'dark' | 'solarized-dark';
+/** Every theme class the service manages on `<html>` (union of all modes). */
+const ALL_THEME_CLASSES: readonly string[] = [
+  ...new Set(Object.values(THEME_MODES).flatMap(mode => mode.classes)),
+];
+
+export type { ThemeMode, ThemeModeDef } from './theme-modes';
 
 /**
- * Manages the light/dark/solarized-dark theme and the primary colour palette.
+ * Manages the editor theme mode and the primary accent palette.
  *
- * - Light/dark is toggled by adding `.app-dark` to the document root.
- * - Solarized Dark adds both `.app-dark` and `.app-solarized` so it inherits
- *   PrimeNG's dark mode tokens while applying Solarized-specific chrome vars.
- * - The primary palette is applied to PrimeNG at runtime via
- *   `updatePrimaryPalette()` (the preset is seeded with the default palette in
+ * - The theme mode is the surface/background theme (canvas, chrome, nodes).
+ *   It is applied by swapping a set of classes on `<html>`; dark-family
+ *   modes include `app-dark` so PrimeNG's Aura dark tokens apply, and their
+ *   own `:root.<class>` block in `styles.scss` overrides the `--phorma-*`
+ *   surface tokens. Modes are data-driven from `theme-modes.ts` — adding a
+ *   theme is one registry entry + one CSS block.
+ * - The accent palette is applied to PrimeNG at runtime via
+ *   `updatePrimaryPalette()` (the preset is seeded with the saved palette in
  *   `app.config.ts` so first paint is correct before Angular boots).
  *
  * Both pieces of state are persisted to localStorage and re-applied on load,
- * which gives the settings panel a single service to talk to when the user
- * picks a new accent colour.
+ * which gives the settings panel a single service to talk to.
  */
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
@@ -36,6 +47,11 @@ export class ThemeService {
   /** Current theme mode as a reactive signal. */
   readonly mode = this._mode.asReadonly();
 
+  /** The active theme mode definition (label, classes, swatch, dark flag). */
+  get modeDef(): ThemeModeDef {
+    return THEME_MODES[this._mode()];
+  }
+
   /** Currently active primary palette as a reactive signal. */
   readonly palette = this._palette.asReadonly();
 
@@ -44,18 +60,9 @@ export class ThemeService {
     this.applyPalette(this._palette());
   }
 
-  /** Cycles through light → dark → solarized-dark → light. */
-  toggle(): void {
-    const cycle: Record<ThemeMode, ThemeMode> = {
-      light: 'dark',
-      dark: 'solarized-dark',
-      'solarized-dark': 'light',
-    };
-    this.setMode(cycle[this._mode()]);
-  }
-
   /** Explicitly sets the theme mode. */
   setMode(mode: ThemeMode): void {
+    if (!THEME_MODES[mode]) return;
     this._mode.set(mode);
     this.applyMode(mode);
     try {
@@ -78,10 +85,13 @@ export class ThemeService {
     }
   }
 
+  /** Swaps the active theme classes on `<html>` for the given mode. */
   private applyMode(mode: ThemeMode): void {
     const root = document.documentElement;
-    root.classList.toggle(DARK_CLASS, mode === 'dark' || mode === 'solarized-dark');
-    root.classList.toggle(SOLARIZED_CLASS, mode === 'solarized-dark');
+    const active = new Set(THEME_MODES[mode]?.classes ?? []);
+    for (const cls of ALL_THEME_CLASSES) {
+      root.classList.toggle(cls, active.has(cls));
+    }
   }
 
   private applyPalette(palette: ThemePalette): void {
@@ -93,14 +103,14 @@ export class ThemeService {
   private readInitialMode(): ThemeMode {
     try {
       const stored = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-      if (stored === 'light' || stored === 'dark' || stored === 'solarized-dark') {
+      if (stored && stored in THEME_MODES) {
         return stored;
       }
     } catch {
       // Ignore storage errors.
     }
     // Default to dark for the native desktop aesthetic.
-    return 'dark';
+    return DEFAULT_THEME_MODE;
   }
 
   private readInitialPalette(): ThemePalette {

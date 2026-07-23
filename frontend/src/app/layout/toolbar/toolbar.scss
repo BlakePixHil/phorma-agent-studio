@@ -91,16 +91,28 @@
   border-radius: 4px;
 }
 
-// Brand-mark root item: looks like an icon button (no label, hover highlight).
+// Brand-mark root item: a plain logo icon (no label, no menu, no hover/
+// active highlight since it is not interactive).
 :host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child .phorma-brand-item {
   padding: 0.25rem;
   border-radius: 4px;
-  transition: background 0.15s ease;
 }
 
-:host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child.p-menubar-item-active .phorma-brand-item,
-:host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child .p-menubar-item-content:hover .phorma-brand-item {
-  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+// The brand item has no command and is not interactive — strip every
+// interactive affordance (cursor, hover/active/focus background, text shift).
+// Use !important to beat PrimeNG's menubar hover rule, which is more specific.
+:host ::ng-deep .phorma-menubar .p-menubar-root-list > .p-menubar-item:first-child.p-menubar-item > .p-menubar-item-content {
+  cursor: default;
+
+  &,
+  &:hover,
+  &:focus,
+  &:focus-visible,
+  &.p-menubar-item-active,
+  .p-menubar-item-active > & {
+    background: transparent !important;
+    color: inherit !important;
+  }
 }
 
 :host ::ng-deep .phorma-menubar .p-menubar-item-link {

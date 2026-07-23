@@ -31,11 +31,11 @@ export class CanvasStateService {
   readonly gridVisible = signal(loadLayout('gridVisible', true));
 
   /**
-   * Whether node dragging snaps to the grid. Off by default; toggled via
+   * Whether node dragging snaps to the grid. On by default; toggled via
    * the View menu, a hotkey, or the toolbar icon button. Persisted across
    * sessions via localStorage.
    */
-  readonly gridSnap = signal(loadLayout('gridSnap', false));
+  readonly gridSnap = signal(loadLayout('gridSnap', true));
 
   /**
    * Whether the canvas minimap is visible. Toggled via the View menu.

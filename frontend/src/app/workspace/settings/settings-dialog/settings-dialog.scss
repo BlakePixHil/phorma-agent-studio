@@ -532,6 +532,165 @@
   }
 }
 
+/* ── Minimap anchor picker (corner buttons) ──────────────────────────────── */
+.phorma-settings__anchors {
+  display: flex;
+  gap: 8px;
+}
+
+.phorma-settings__anchor {
+  display: inline-flex;
+  padding: 5px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  }
+
+  &--active,
+  &--active:hover {
+    border-color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  }
+}
+
+/* Mini canvas frame; the docked minimap sits in one corner. */
+.phorma-settings__anchor-canvas {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 38px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+}
+
+.phorma-settings__anchor-map {
+  position: absolute;
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid var(--p-primary-color);
+  background: color-mix(in srgb, var(--p-primary-color) 35%, transparent);
+
+  &--top-left     { top: 3px; left: 3px; }
+  &--top-right    { top: 3px; right: 3px; }
+  &--bottom-left  { bottom: 3px; left: 3px; }
+  &--bottom-right { bottom: 3px; right: 3px; }
+}
+
+/* ── Theme mode picker (swatch cards) ────────────────────────────────────── */
+.phorma-settings__themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.phorma-settings__theme {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--p-border-color);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  }
+
+  &--active,
+  &--active:hover {
+    border-color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  }
+}
+
+.phorma-settings__theme-preview {
+  position: relative;
+  display: block;
+  height: 76px;
+  border: 1px solid;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.phorma-settings__theme-node {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  width: 72%;
+  border: 1px solid;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.phorma-settings__theme-node-header {
+  display: block;
+  padding: 5px 7px;
+}
+
+.phorma-settings__theme-node-title {
+  display: block;
+  width: 55%;
+  height: 5px;
+  border-radius: 999px;
+  opacity: 0.85;
+}
+
+.phorma-settings__theme-node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 7px;
+}
+
+.phorma-settings__theme-node-line {
+  display: block;
+  width: 90%;
+  height: 4px;
+  border-radius: 999px;
+  opacity: 0.35;
+
+  &--short {
+    width: 60%;
+  }
+}
+
+.phorma-settings__theme-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.phorma-settings__theme-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--p-text-color);
+  font-size: 12px;
+  font-weight: 600;
+
+  i {
+    font-size: 13px;
+    color: var(--p-primary-color);
+  }
+}
+
+.phorma-settings__theme-desc {
+  color: var(--p-text-muted-color);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 /* ── Card containers (integrations, account, secrets share one shape) ──── */
 .phorma-settings__integration,
 .phorma-settings__account,

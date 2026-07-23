@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 
-import { CanvasStateService, MINIMAP_ANCHORS, type MinimapAnchor } from './canvas-state.service';
+import { CanvasStateService } from './canvas-state.service';
 import { BEDROCK_REGIONS } from './workflow.model';
 import { SettingsService } from './settings.service';
-import { ThemeService, type ThemeMode } from './theme.service';
+import { ThemeService } from './theme.service';
 import { OnboardingService } from '../workspace/onboarding/onboarding.service';
 
 /**
@@ -55,7 +55,9 @@ export interface SettingDef {
 /** Ids of bespoke section templates implemented by the settings dialog. */
 export type SettingsCustomTemplate =
   | 'api-keys'
+  | 'theme-picker'
   | 'palette-picker'
+  | 'minimap-anchor'
   | 'default-model'
   | 'integrations'
   | 'cloud-provider'
@@ -157,24 +159,9 @@ export class SettingsRegistryService {
         {
           id: 'theme',
           label: 'Theme',
-          settings: [
-            {
-              id: 'theme-mode',
-              label: 'Color mode',
-              description: 'Light, dark, or Solarized Dark interface theme.',
-              keywords: ['dark', 'light', 'solarized', 'theme'],
-              control: {
-                type: 'select',
-                options: [
-                  { value: 'dark', label: 'Dark' },
-                  { value: 'light', label: 'Light' },
-                  { value: 'solarized-dark', label: 'Solarized Dark' },
-                ],
-              },
-              get: () => this.theme.mode(),
-              set: value => this.theme.setMode(value as ThemeMode),
-            },
-          ],
+          settings: [],
+          customTemplate: 'theme-picker',
+          keywords: ['dark', 'light', 'charcoal', 'midnight', 'solarized', 'nord', 'theme', 'background'],
         },
         {
           id: 'accent',
@@ -186,23 +173,9 @@ export class SettingsRegistryService {
         {
           id: 'minimap-layout',
           label: 'Minimap',
-          settings: [
-            {
-              id: 'minimap-anchor',
-              label: 'Minimap position',
-              description: 'Which corner of the canvas the minimap docks to.',
-              keywords: ['minimap', 'corner', 'anchor'],
-              control: {
-                type: 'select',
-                options: MINIMAP_ANCHORS.map(anchor => ({
-                  value: anchor,
-                  label: anchor.replace('-', ' '),
-                })),
-              },
-              get: () => this.canvas.minimapAnchor(),
-              set: value => this.canvas.minimapAnchor.set(value as MinimapAnchor),
-            },
-          ],
+          settings: [],
+          customTemplate: 'minimap-anchor',
+          keywords: ['minimap', 'corner', 'anchor', 'position'],
         },
       ],
     },

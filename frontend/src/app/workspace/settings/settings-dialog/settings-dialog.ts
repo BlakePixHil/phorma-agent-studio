@@ -32,8 +32,10 @@ import {
 } from '../../../core/settings-registry';
 import { TauriService } from '../../../core/tauri.service';
 import { ThemeService } from '../../../core/theme.service';
+import { CanvasStateService, MINIMAP_ANCHORS, type MinimapAnchor } from '../../../core/canvas-state.service';
 import { UsageAnalyticsService } from '../../../core/usage-analytics.service';
 import { THEME_PALETTES, type ThemePalette, type ThemePaletteId } from '../../../core/theme-palettes';
+import { THEME_MODE_LIST, type ThemeMode, type ThemeModeDef } from '../../../core/theme-modes';
 import { MCP_PRESETS, type McpPreset } from '../../../core/node-catalog';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
@@ -75,6 +77,7 @@ export class SettingsDialog {
   protected readonly registry = inject(SettingsRegistryService);
   protected readonly settings = inject(SettingsService);
   protected readonly theme = inject(ThemeService);
+  protected readonly canvas = inject(CanvasStateService);
   protected readonly creditsDialog = inject(CreditsDialogService);
   protected readonly usageAnalytics = inject(UsageAnalyticsService);
   private readonly tauri = inject(TauriService);
@@ -181,6 +184,24 @@ export class SettingsDialog {
 
   private providerLabel(provider: ModelProviderId): string | undefined {
     return this.keyedProviders.find(p => p.id === provider)?.label;
+  }
+
+  // ── Minimap anchor picker (custom template) ─────────────────────────────
+
+  /** Corner options for the minimap dock position, with display labels. */
+  protected readonly minimapAnchors: { value: MinimapAnchor; label: string }[] =
+    MINIMAP_ANCHORS.map(anchor => ({
+      value: anchor,
+      label: anchor.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    }));
+
+  // ── Theme mode picker (custom template) ─────────────────────────────────
+
+  /** All theme modes, rendered as swatch cards. */
+  protected readonly themeModes: ThemeModeDef[] = THEME_MODE_LIST;
+
+  protected pickTheme(id: ThemeMode): void {
+    this.theme.setMode(id);
   }
 
   // ── Palette picker (custom template) ────────────────────────────────────

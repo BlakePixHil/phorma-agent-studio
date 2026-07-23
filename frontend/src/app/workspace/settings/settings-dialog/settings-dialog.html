@@ -159,6 +159,101 @@
 
                 <!-- Bespoke sections -->
                 @switch (section.customTemplate) {
+                  @case ('minimap-anchor') {
+                    <div class="phorma-settings__setting" id="minimap-anchor">
+                      <div class="phorma-settings__setting-text">
+                        <span class="phorma-settings__setting-label">Minimap position</span>
+                        <p class="phorma-settings__setting-desc">Which corner of the canvas the minimap docks to.</p>
+                      </div>
+                      <div
+                        class="phorma-settings__anchors"
+                        role="radiogroup"
+                        aria-label="Minimap position"
+                      >
+                        @for (anchor of minimapAnchors; track anchor.value) {
+                          <button
+                            type="button"
+                            role="radio"
+                            class="phorma-settings__anchor"
+                            [class.phorma-settings__anchor--active]="anchor.value === canvas.minimapAnchor()"
+                            [attr.aria-checked]="anchor.value === canvas.minimapAnchor()"
+                            [attr.aria-label]="anchor.label"
+                            [pTooltip]="anchor.label"
+                            tooltipPosition="top"
+                            (click)="canvas.minimapAnchor.set(anchor.value)"
+                          >
+                            <!-- Mini canvas frame with the minimap docked in
+                                 the corner this option represents. -->
+                            <span class="phorma-settings__anchor-canvas">
+                              <span
+                                class="phorma-settings__anchor-map"
+                                [class]="'phorma-settings__anchor-map--' + anchor.value"
+                              ></span>
+                            </span>
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+
+                  @case ('theme-picker') {
+                    <div class="phorma-settings__themes">
+                      @for (mode of themeModes; track mode.id) {
+                        <button
+                          type="button"
+                          class="phorma-settings__theme"
+                          [class.phorma-settings__theme--active]="mode.id === theme.mode()"
+                          (click)="pickTheme(mode.id)"
+                          [attr.aria-pressed]="mode.id === theme.mode()"
+                          [attr.aria-label]="mode.label + ' theme'"
+                        >
+                          <!-- Mini canvas preview: node card floating over a
+                               dotted canvas, painted from the theme's tokens. -->
+                          <span
+                            class="phorma-settings__theme-preview"
+                            [style.background]="mode.swatch.canvas"
+                            [style.border-color]="mode.swatch.border"
+                          >
+                            <span
+                              class="phorma-settings__theme-node"
+                              [style.background]="mode.swatch.node"
+                              [style.border-color]="mode.swatch.border"
+                            >
+                              <span
+                                class="phorma-settings__theme-node-header"
+                                [style.background]="mode.swatch.nodeHeader"
+                              >
+                                <span
+                                  class="phorma-settings__theme-node-title"
+                                  [style.background]="mode.swatch.text"
+                                ></span>
+                              </span>
+                              <span class="phorma-settings__theme-node-body">
+                                <span
+                                  class="phorma-settings__theme-node-line"
+                                  [style.background]="mode.swatch.text"
+                                ></span>
+                                <span
+                                  class="phorma-settings__theme-node-line phorma-settings__theme-node-line--short"
+                                  [style.background]="mode.swatch.text"
+                                ></span>
+                              </span>
+                            </span>
+                          </span>
+                          <span class="phorma-settings__theme-meta">
+                            <span class="phorma-settings__theme-label">
+                              {{ mode.label }}
+                              @if (mode.id === theme.mode()) {
+                                <i class="ti ti-check" aria-hidden="true"></i>
+                              }
+                            </span>
+                            <span class="phorma-settings__theme-desc">{{ mode.description }}</span>
+                          </span>
+                        </button>
+                      }
+                    </div>
+                  }
+
                   @case ('api-keys') {
                     <p class="phorma-settings__note">
                       <i

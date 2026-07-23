@@ -5,7 +5,8 @@ import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 import type { MenuItem } from 'primeng/api';
 import { ClerkService, ClerkUserButtonComponent } from 'ngx-clerk';
-import { ThemeService } from '../../core/theme.service';
+import { ThemeService, type ThemeMode } from '../../core/theme.service';
+import { THEME_MODES } from '../../core/theme-modes';
 import { CanvasStateService } from '../../core/canvas-state.service';
 import { PanelRegistryService } from '../../core/panel-registry.service';
 import { WorkflowService } from '../../core/workflow.service';
@@ -93,6 +94,11 @@ export class Toolbar {
     this.clerk.openSignIn();
   }
 
+  /** Opens Clerk's account (user profile) window. */
+  protected openAccount(): void {
+    this.clerk.openUserProfile();
+  }
+
   constructor() {
     // Sync Clerk's component theme with Phorma's light/dark mode. Clerk's
     // appearance prop accepts a `variables` map of color tokens; we map the
@@ -105,23 +111,29 @@ export class Toolbar {
   }
 
   /**
-   * Builds a Clerk `appearance` object for the given theme mode. The color
-   * values mirror Phorma's design tokens (see styles.scss) so Clerk's
-   * prebuilt components blend into the toolbar and modal overlays.
+   * Builds a Clerk `appearance` object for the active theme mode. The colour
+   * values mirror each theme's surface tokens (see `theme-modes.ts` swatches
+   * and `styles.scss`) so Clerk's prebuilt components blend into the toolbar
+   * and modal overlays. Light gets the clean light surfaces; every
+   * dark-family theme reuses its own panel/canvas/text tokens.
    */
-  private clerkAppearanceFor(mode: 'light' | 'dark' | 'solarized-dark') {
-    const dark = mode === 'dark' || mode === 'solarized-dark';
-    const solarized = mode === 'solarized-dark';
+  private clerkAppearanceFor(mode: ThemeMode) {
+    const def = THEME_MODES[mode] ?? THEME_MODES.dark;
+    const { dark, swatch } = def;
+    const hover = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
+    const inputBg = dark ? swatch.canvas : '#f7f8fa';
+    const textSecondary = dark ? 'rgba(230,230,230,0.6)' : 'rgba(26,26,26,0.6)';
+    const border = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)';
     return {
       variables: {
-        colorBackground: solarized ? '#073642' : dark ? '#111114' : '#ffffff',
-        colorBackgroundHover: solarized ? 'rgba(131,148,150,0.10)' : dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-        colorInputBackground: solarized ? '#002b36' : dark ? '#18191e' : '#f7f8fa',
-        colorInputText: solarized ? '#93a1a1' : dark ? '#e6e6e6' : '#1a1a1a',
-        colorText: solarized ? '#93a1a1' : dark ? '#e6e6e6' : '#1a1a1a',
-        colorTextSecondary: solarized ? 'rgba(147,161,161,0.6)' : dark ? 'rgba(230,230,230,0.6)' : 'rgba(26,26,26,0.6)',
-        colorBorder: solarized ? 'rgba(131,148,150,0.15)' : dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)',
-        colorPrimary: solarized ? '#268bd2' : dark ? '#878fa3' : '#67708a',
+        colorBackground: dark ? swatch.panel : '#ffffff',
+        colorBackgroundHover: hover,
+        colorInputBackground: inputBg,
+        colorInputText: swatch.text,
+        colorText: swatch.text,
+        colorTextSecondary: textSecondary,
+        colorBorder: border,
+        colorPrimary: dark ? '#878fa3' : '#67708a',
         colorPrimaryForeground: '#ffffff',
         borderRadius: '0.5rem',
         fontFamily:
@@ -130,26 +142,26 @@ export class Toolbar {
       elements: dark
         ? {
             socialButtonsBlockButton: {
-              backgroundColor: solarized ? '#002b36' : '#18191e',
-              borderColor: solarized ? 'rgba(131,148,150,0.15)' : 'rgba(255,255,255,0.08)',
-              color: solarized ? '#93a1a1' : '#e6e6e6',
+              backgroundColor: swatch.canvas,
+              borderColor: border,
+              color: swatch.text,
               '&:hover': {
-                backgroundColor: solarized ? 'rgba(131,148,150,0.10)' : 'rgba(255,255,255,0.06)',
-                color: solarized ? '#93a1a1' : '#e6e6e6',
+                backgroundColor: hover,
+                color: swatch.text,
               },
             },
             socialButtonsBlockButtonText: {
-              color: solarized ? '#93a1a1' : '#e6e6e6',
+              color: swatch.text,
             },
             userButtonPopoverActionButton: {
-              color: solarized ? '#93a1a1' : '#e6e6e6',
+              color: swatch.text,
               '&:hover': {
-                color: solarized ? '#93a1a1' : '#e6e6e6',
-                backgroundColor: solarized ? 'rgba(131,148,150,0.10)' : 'rgba(255,255,255,0.06)',
+                color: swatch.text,
+                backgroundColor: hover,
               },
             },
             userButtonPopoverActionButtonIcon: {
-              color: solarized ? '#93a1a1' : '#e6e6e6',
+              color: swatch.text,
             },
           }
         : {},
@@ -162,13 +174,6 @@ export class Toolbar {
   protected readonly canReset = this.runController.canReset;
 
   // ── Right-cluster icon computeds (signals keep OnPush templates in sync) ─
-  protected readonly themeIcon = computed(() => {
-    switch (this.theme.mode()) {
-      case 'solarized-dark': return 'ti ti-sunset';
-      case 'dark': return 'ti ti-sun';
-      default: return 'ti ti-moon';
-    }
-  });
   protected readonly gridSnapTooltip = computed(() =>
     this.canvasState.gridSnap() ? 'Disable grid snapping' : 'Enable grid snapping',
   );
@@ -322,20 +327,10 @@ export class Toolbar {
 
   protected readonly menuItems = computed<MenuItem[]>(() => [
     {
-      // Brand-mark menu: the Phorma logo opens a small app menu.
-      // `label` is unused (the #item template renders the logo image for
-      // items with `brand: true`); it's here so PrimeNG treats it as a
-      // root item with a submenu.
+      // Brand mark: the Phorma logo renders as a plain icon (no menu).
+      // The #item template swaps the label for the logo when `brand` is set.
       label: '',
       brand: true,
-      items: [
-        {
-          label: 'Settings',
-          icon: 'ti ti-settings',
-          shortcut: 'Ctrl+,',
-          command: () => this.settingsDialog.open(),
-        },
-      ],
     },
     {
       label: 'File',
@@ -347,15 +342,16 @@ export class Toolbar {
           command: () => this.workflow.newWorkflow(),
         },
         {
+          label: 'Open Workflow',
+          icon: 'ti ti-folder-open',
+          items: this.savedWorkflowItems(),
+        },
+        { separator: true },
+        {
           label: 'Build with AI',
           icon: 'ti ti-sparkles',
           shortcut: 'Ctrl+P',
           command: () => this.commandPalette.open(),
-        },
-        {
-          label: 'Open Workflow',
-          icon: 'ti ti-folder-open',
-          items: this.savedWorkflowItems(),
         },
         { separator: true },
         {
@@ -365,7 +361,7 @@ export class Toolbar {
           command: () => void this.saveWorkflow(),
         },
         {
-          label: 'Version History…',
+          label: 'Version History',
           icon: 'ti ti-history',
           disabled: !this.workflow.activeDoc()?.workflowId,
           command: () => {
@@ -375,12 +371,36 @@ export class Toolbar {
         },
         { separator: true },
         {
-          label: 'Import…',
+          label: 'Preferences',
+          icon: 'ti ti-adjustments',
+          items: [
+            {
+              label: 'Settings',
+              icon: 'ti ti-settings',
+              shortcut: 'Ctrl+,',
+              command: () => this.settingsDialog.open(),
+            },
+            this.isSignedIn()
+              ? {
+                  label: 'Account',
+                  icon: 'ti ti-user-circle',
+                  command: () => this.openAccount(),
+                }
+              : {
+                  label: 'Sign-in',
+                  icon: 'ti ti-login',
+                  command: () => this.openSignIn(),
+                },
+          ],
+        },
+        { separator: true },
+        {
+          label: 'Import',
           icon: 'ti ti-file-import',
           command: () => void this.importWorkflow(),
         },
         {
-          label: 'Export…',
+          label: 'Export',
           icon: 'ti ti-file-export',
           command: () => void this.exportWorkflow(),
         },
@@ -499,11 +519,6 @@ export class Toolbar {
           icon: 'ti ti-magnet',
           shortcut: 'Alt+G',
           command: () => this.toggleGridSnap(),
-        },
-        {
-          label: 'Toggle Theme',
-          icon: 'ti ti-brightness-half',
-          command: () => this.theme.toggle(),
         },
         { separator: true },
         {
