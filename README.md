@@ -81,6 +81,49 @@ npm run build
 Debugger controls: **F5** run · **F6** pause/resume · **F10** step ·
 **Shift+F5** stop · right-click a node → **Toggle Breakpoint**.
 
+## Publish a release (installers + auto-updater)
+
+The entire release is driven by ONE version bump and ONE push. CI does the
+building, signing, GitHub Release, and R2 sync.
+
+```powershell
+# 0. Start from a clean tree on main (commit or stash everything first)
+git status
+
+# 1. Bump the version everywhere (all package.json files, Cargo.toml,
+#    tauri.conf.json), commit, and create the vX.Y.Z tag:
+node scripts/release.mjs 0.2.0-beta.6
+#    (add --dry-run to preview without committing)
+
+# 2. Push the commit AND the tag — the tag is what triggers CI:
+git push origin main v0.2.0-beta.6
+
+# 3. Watch the "Release" workflow (takes ~15–20 min):
+gh run watch
+```
+
+What CI does (`.github/workflows/release.yml`):
+
+1. Builds signed installers for Windows, macOS (arm64 + x64), and Linux via
+   `tauri-action`, using the `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]` secrets.
+2. Publishes a GitHub Release for the tag (marked prerelease if the version
+   contains a `-`, e.g. `-beta.6`).
+3. `publish-r2` job syncs installers, `.sig` files, and manifests into the
+   `phorma-releases` R2 bucket (`stable/{version}/…`, `stable/latest.json`,
+   `stable/releases.json`) — this is what the in-app updater and the download
+   site consume.
+
+Rules to avoid breaking it:
+
+- **Never bump versions by hand** — `scripts/release.mjs` keeps all six
+  manifests in sync; a mismatch breaks the updater.
+- **Always push the tag** (`git push origin main vX.Y.Z`). Pushing only
+  `main` does nothing — CI triggers on `v*` tags.
+- **Never re-use or move a tag.** If a release fails, fix the issue and cut
+  a new patch/beta version.
+- If the R2 sync job fails, re-run just that job from the GitHub Actions UI —
+  the GitHub Release assets are already there.
+
 ## Deploy to the cloud (your Cloudflare account)
 
 One-time setup in `cloud/`:
