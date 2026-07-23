@@ -90,6 +90,11 @@ building, signing, GitHub Release, and R2 sync.
 # 0. Start from a clean tree on main (commit or stash everything first)
 git status
 
+# 0.5. PRE-FLIGHT: run the PRODUCTION frontend build locally. Dev serve and
+#      tsc do not check Angular budgets — CI has failed on a budget error
+#      that `ng serve` never surfaced.
+cd frontend; npm run build; cd ..
+
 # 1. Bump the version everywhere (all package.json files, Cargo.toml,
 #    tauri.conf.json), commit, and create the vX.Y.Z tag:
 node scripts/release.mjs 0.2.0-beta.6
@@ -123,6 +128,9 @@ Rules to avoid breaking it:
   a new patch/beta version.
 - If the R2 sync job fails, re-run just that job from the GitHub Actions UI —
   the GitHub Release assets are already there.
+- If the build itself fails, delete the dead tag
+  (`git push origin :refs/tags/vX.Y.Z; git tag -d vX.Y.Z`), fix, and cut the
+  next version. Also delete any draft/partial GitHub Release for that tag.
 
 ## Deploy to the cloud (your Cloudflare account)
 
