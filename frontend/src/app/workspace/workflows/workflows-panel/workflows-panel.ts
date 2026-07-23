@@ -7,6 +7,7 @@ import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dia
 import { ToastService } from '../../../shared/toast/toast.service';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from '../../../core/workflow-templates';
 import type { WorkflowSpec } from '../../../core/workflow.model';
+import { VersionHistoryDialogService } from '../version-history-dialog.service';
 
 /**
  * The Workflows panel (left side): the saved workflow library plus the
@@ -26,12 +27,18 @@ export class WorkflowsPanel {
   private readonly settings = inject(SettingsService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly toast = inject(ToastService);
+  private readonly versionHistory = inject(VersionHistoryDialogService);
 
   /** Built-in template gallery (registry-driven). */
   protected readonly templates = WORKFLOW_TEMPLATES;
 
   protected open(spec: WorkflowSpec): void {
     this.workflow.openWorkflow(spec.id);
+  }
+
+  protected openHistory(event: Event, spec: WorkflowSpec): void {
+    event.stopPropagation();
+    this.versionHistory.open(spec.id);
   }
 
   /** Opens a template as a fresh unsaved workflow tab. */

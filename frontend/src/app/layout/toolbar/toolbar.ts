@@ -22,6 +22,7 @@ import { SettingsDialogService } from '../../workspace/settings/settings-dialog.
 import { CommandPaletteService } from '../../core/command-palette.service';
 import { UpdateService } from '../../core/update.service';
 import { ToastService } from '../../shared/toast/toast.service';
+import { VersionHistoryDialogService } from '../../workspace/workflows/version-history-dialog.service';
 
 /**
  * Sleek top application toolbar.
@@ -59,6 +60,7 @@ export class Toolbar {
   private readonly clipboard = inject(ClipboardService);
   private readonly selection = inject(SelectionService);
   private readonly toast = inject(ToastService);
+  private readonly versionHistory = inject(VersionHistoryDialogService);
 
   /** Current Clerk user (null until Clerk loads / when signed out). */
   protected readonly clerkUser = toSignal(this.clerk.user$, { initialValue: null });
@@ -362,6 +364,15 @@ export class Toolbar {
           icon: 'ti ti-device-floppy',
           shortcut: 'Ctrl+S',
           command: () => void this.saveWorkflow(),
+        },
+        {
+          label: 'Version History…',
+          icon: 'ti ti-history',
+          disabled: !this.workflow.activeDoc()?.workflowId,
+          command: () => {
+            const workflowId = this.workflow.activeDoc()?.workflowId;
+            if (workflowId) this.versionHistory.open(workflowId);
+          },
         },
         { separator: true },
         {

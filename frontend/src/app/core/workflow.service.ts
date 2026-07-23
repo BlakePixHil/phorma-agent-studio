@@ -7,6 +7,8 @@ import { buildNodeFromCatalog, findCatalogEntry } from './node-catalog';
 import { loadLayout, saveLayout } from './layout-storage';
 import { ToastService } from '../shared/toast/toast.service';
 import { ConfirmDialogService } from '../shared/confirm-dialog/confirm-dialog.service';
+import { WorkflowVersionsService } from './workflow-versions.service';
+import type { WorkflowVersion, WorkflowVersionTrigger } from './workflow-versions.model';
 import {
   canConnectPorts,
   edgeKindForPorts,
@@ -35,6 +37,8 @@ export interface OpenWorkflowDoc {
   settings: WorkflowSettings;
   /** True when the draft has edits not yet saved to the library. */
   dirty: boolean;
+  /** Historical preview tabs are immutable and cannot be saved over the library. */
+  readOnly?: boolean;
 }
 
 /** Shape persisted to layout storage for tab-session restore. */
@@ -60,6 +64,7 @@ export class WorkflowService {
   private readonly skillsLibrary = inject(SkillsService);
   private readonly toast = inject(ToastService);
   private readonly confirmDialog = inject(ConfirmDialogService);
+  private readonly versions = inject(WorkflowVersionsService);
 
   /** Debounce handle for the autosave effect. */
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -130,7 +135,7 @@ export class WorkflowService {
           current.workflowId !== null &&
           current.dirty
         ) {
-          void this.saveActive();
+          void this.saveActive('autosave');
         }
       }, 2000);
     });
@@ -267,9 +272,13 @@ export class WorkflowService {
   }
 
   /** Saves the active document into the library (upsert by workflow id). */
-  async saveActive(): Promise<WorkflowSpec | null> {
+  async saveActive(trigger: Exclude<WorkflowVersionTrigger, 'deploy' | 'restore'> = 'manual'): Promise<WorkflowSpec | null> {
     const doc = this.activeDoc();
     if (!doc) return null;
+    if (doc.readOnly) {
+      this.toast.warning('Preview is read-only', 'Restore this version to make it the current editable workflow.');
+      return null;
+    }
 
     // A brand-new draft that still carries the default name prompts the user
     // to name it before its first save. Subsequent saves reuse the chosen
@@ -317,6 +326,11 @@ export class WorkflowService {
       ...specs.filter(item => item.id !== spec.id),
     ]);
     this.updateDoc(doc.docId, { workflowId: spec.id, dirty: false });
+    try {
+      await this.versions.recordSave(spec, trigger);
+    } catch {
+      this.toast.warning('Version history unavailable', 'The workflow was saved, but its history snapshot could not be written.');
+    }
     return spec;
   }
 
@@ -329,6 +343,7 @@ export class WorkflowService {
       return;
     }
     this.libraryState.update(specs => specs.filter(item => item.id !== workflowId));
+    await this.versions.deleteForWorkflow(workflowId).catch(() => undefined);
     this.docsState.update(docs =>
       docs.map(doc =>
         doc.workflowId === workflowId ? { ...doc, workflowId: null, dirty: true } : doc,
@@ -339,7 +354,7 @@ export class WorkflowService {
   /** Renames the active workflow (marks it dirty). */
   renameActive(name: string): void {
     const doc = this.activeDoc();
-    if (!doc || doc.name === name) return;
+    if (!doc || doc.readOnly || doc.name === name) return;
     this.updateDoc(doc.docId, { name, dirty: true });
   }
 
@@ -371,20 +386,21 @@ export class WorkflowService {
         doc.workflowId === workflowId ? { ...doc, name: trimmed } : doc,
       ),
     );
+    await this.versions.recordSave(next, 'manual').catch(() => undefined);
     return trimmed;
   }
 
   /** Updates the active workflow's description (marks it dirty). */
   describeActive(description: string): void {
     const doc = this.activeDoc();
-    if (!doc || doc.description === description) return;
+    if (!doc || doc.readOnly || doc.description === description) return;
     this.updateDoc(doc.docId, { description, dirty: true });
   }
 
   /** Merges a patch into the active workflow's execution settings. */
   updateSettings(patch: Partial<WorkflowSettings>): void {
     const doc = this.activeDoc();
-    if (!doc) return;
+    if (!doc || doc.readOnly) return;
     const settings = { ...doc.settings, ...patch };
     // Drop cleared values so empty settings serialize as absent.
     for (const key of Object.keys(settings) as (keyof WorkflowSettings)[]) {
@@ -449,6 +465,60 @@ export class WorkflowService {
     };
     this.docsState.update(docs => [...docs, doc]);
     this.activeDocIdState.set(doc.docId);
+  }
+
+  /** Opens a historical version as a detached snapshot tab. */
+  openVersionSnapshot(spec: WorkflowSpec): void {
+    docCounter += 1;
+    const savedAt = new Date(spec.savedAt).toLocaleString();
+    const doc: OpenWorkflowDoc = {
+      docId: `doc-${docCounter}`,
+      workflowId: null,
+      name: `${spec.name} - version ${savedAt}`,
+      description: spec.description ?? '',
+      graph: structuredClone(spec.graph),
+      settings: spec.settings ? { ...spec.settings } : {},
+      dirty: false,
+      readOnly: true,
+    };
+    this.docsState.update(docs => [...docs, doc]);
+    this.activeDocIdState.set(doc.docId);
+  }
+
+  /** Restores a historical snapshot as the workflow's new current version. */
+  async restoreVersion(version: WorkflowVersion): Promise<boolean> {
+    const current = this.libraryState().find(item => item.id === version.workflowId);
+    if (!current) return false;
+
+    // Preserve the pre-restore state as a safety point before replacing it.
+    await this.versions.recordSave(current, 'manual').catch(() => undefined);
+    const restored: WorkflowSpec = {
+      ...structuredClone(version.spec),
+      id: version.workflowId,
+      savedAt: new Date().toISOString(),
+    };
+    try {
+      await this.storage.saveWorkflow(restored);
+      await this.versions.recordSave(restored, 'restore');
+    } catch {
+      this.toast.error('Restore failed', 'The selected workflow version could not be restored.');
+      return false;
+    }
+
+    this.libraryState.update(specs => [restored, ...specs.filter(item => item.id !== restored.id)]);
+    this.docsState.update(docs => docs.map(doc =>
+      doc.workflowId === restored.id
+        ? {
+            ...doc,
+            name: restored.name,
+            description: restored.description ?? '',
+            graph: structuredClone(restored.graph),
+            settings: restored.settings ? { ...restored.settings } : {},
+            dirty: false,
+          }
+        : doc,
+    ));
+    return true;
   }
 
   // ── Graph mutations (active document) ──────────────────────────────────────
@@ -587,7 +657,7 @@ export class WorkflowService {
 
   private mutateGraph(mutate: (graph: WorkflowGraph) => WorkflowGraph): void {
     const doc = this.activeDoc();
-    if (!doc) return;
+    if (!doc || doc.readOnly) return;
     const next = mutate(doc.graph);
     if (next === doc.graph) return;
     this.updateDoc(doc.docId, { graph: next, dirty: true });

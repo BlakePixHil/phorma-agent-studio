@@ -73,11 +73,12 @@ Portable capability bundles (a `SKILL.md` + optional scripts) attachable to agen
 - *Pillar:* powerful; rides the same ecosystem wave as MCP.
 - *Shipped:* markdown-only skills. `AgentSkill {id, name, description?, content}` embedded BY VALUE in `AgentNodeData.skills` (both type twins) so specs stay portable and the cloud DO needs no library access; the engine's `renderPrompt` appends `# Skill: {name}` sections (verbatim, no interpolation) before the capabilities/hand-off sections — zero cloud/ or Rust changes. Global library in IndexedDB v6 (`skills` store) via `SkillsService`, with `syncAttachedSkills` refreshing embedded copies at run start, cloud push, and export (library wins; deleted skills keep their snapshot). UI: Skills left-sidebar panel (list, used-by count, import/export/duplicate/delete), bespoke skill editor dialog (markdown + sanitized preview, AI one-shot drafting via `FieldGenerationService.generateSkill`, SKILL.md import/export with Anthropic-style frontmatter), attach chips + picker in the Prompt panel, and a book+count header badge on agent nodes on the canvas. `summarizeGraph` mentions attached skills for Ask/Plan/Analyzer. Test: `engine/test/skills.e2e.mts` (17 checks).
 
-### [ ] EPIC 7: Workflow Versioning (Edit History)
+### [x] EPIC 7: Workflow Versioning (Edit History) - shipped 2026-07-23
 
 Every save = a version; diff any version against current; one-click revert. Distinct from undo/redo (`history.service.ts`) - this survives sessions. Cheap to build on portable JSON specs.
 
 - *Pillar:* simpler - trust and safety for non-technical operators editing production workflows.
+- *Shipped:* full-spec snapshots in IndexedDB v7 (`workflow-versions`, 100 non-deployed versions/workflow with deployed snapshots pinned), manual-save boundaries plus 30-minute autosave coalescing and no-op suppression, and successful cloud pushes tagged as deployed. A bespoke Version History dialog (Workflows row action + File menu) provides semantic structural diffs against current (nodes, prompts/models/config, connections, workflow settings, collapsed position changes), read-only canvas previews, and confirmed one-click restore that preserves the pre-restore state as a safety version. Undo/redo remains a separate in-session stack. Key files: `core/workflow-versions.{model,service}.ts`, `core/workflow-diff.ts`, `workspace/workflows/version-history-dialog/`. Test: `core/workflow-diff.spec.ts` plus browser E2E for save/history/diff/preview/restore/autosave coalescing.
 
 ### [ ] EPIC 8: Sub-Workflows
 

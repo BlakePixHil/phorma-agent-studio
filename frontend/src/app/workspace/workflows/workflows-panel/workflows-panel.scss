@@ -63,6 +63,7 @@
       color: var(--p-primary-color, #818cf8);
     }
 
+    .phorma-workflows__history,
     .phorma-workflows__rename,
     .phorma-workflows__delete {
       opacity: 1;
@@ -91,6 +92,7 @@
   color: var(--p-text-muted-color);
 }
 
+.phorma-workflows__history,
 .phorma-workflows__rename,
 .phorma-workflows__delete {
   display: inline-flex;
@@ -108,6 +110,7 @@
   transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
+.phorma-workflows__history:hover,
 .phorma-workflows__rename:hover {
   background: color-mix(in srgb, var(--p-primary-color, #818cf8) 14%, transparent);
   color: var(--p-primary-color, #818cf8);

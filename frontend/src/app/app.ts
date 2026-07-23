@@ -31,6 +31,7 @@ import { AssistantPanel } from './workspace/assistant/assistant-panel/assistant-
 import { AssistantDialog } from './workspace/assistant/assistant-dialog/assistant-dialog';
 import { SkillsPanel } from './workspace/skills/skills-panel/skills-panel';
 import { SkillEditorDialog } from './workspace/skills/skill-editor-dialog/skill-editor-dialog';
+import { VersionHistoryDialog } from './workspace/workflows/version-history-dialog/version-history-dialog';
 import { ConfirmDialog } from './shared/confirm-dialog/confirm-dialog';
 import { Toast } from './shared/toast/toast';
 
@@ -67,6 +68,7 @@ import { Toast } from './shared/toast/toast';
     AssistantDialog,
     SkillsPanel,
     SkillEditorDialog,
+    VersionHistoryDialog,
     ConfirmDialog,
     Toast,
   ],

@@ -33,6 +33,15 @@
             </span>
             <button
               type="button"
+              class="phorma-workflows__history"
+              aria-label="View version history"
+              title="Version history"
+              (click)="openHistory($event, spec)"
+            >
+              <i class="ti ti-history" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
               class="phorma-workflows__rename"
               aria-label="Rename workflow"
               title="Rename"

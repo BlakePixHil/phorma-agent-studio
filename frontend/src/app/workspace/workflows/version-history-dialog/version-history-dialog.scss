@@ -1,0 +1,68 @@
+:host { display: contents; }
+
+.phorma-versions {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px;
+  background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+}
+
+.phorma-versions__card {
+  width: min(900px, 100%); height: min(640px, calc(100vh - 48px)); display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid var(--p-border-color, rgba(255,255,255,.12));
+  border-radius: 10px; background: var(--p-content-background, rgba(20,22,30,.95));
+  box-shadow: 0 24px 60px rgba(0,0,0,.4); color: var(--p-text-color, #f8fafc); overflow: hidden;
+}
+
+.phorma-versions__header { display: flex; gap: 14px; align-items: flex-start; padding: 20px; border-bottom: 1px solid var(--p-border-color); }
+.phorma-versions__header > div { flex: 1; }
+.phorma-versions__icon { display: grid; width: 36px; height: 36px; place-items: center; font-size: 18px; color: var(--p-primary-color); }
+h2, h3 { margin: 0; }
+h2 { font-size: 15px; font-weight: 700; }
+.phorma-versions__header p, .phorma-versions__diff-header p { margin: 5px 0 0; color: var(--p-text-muted-color); font-size: 12px; }
+.phorma-versions__close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--p-text-muted-color); cursor: pointer; }
+.phorma-versions__close:hover { background: color-mix(in srgb, var(--p-text-color) 7%, transparent); color: var(--p-text-color); }
+
+.phorma-versions__body { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
+.phorma-versions__timeline { overflow: auto; padding: 10px; border-right: 1px solid var(--p-border-color); }
+.phorma-versions__version { width: 100%; display: flex; align-items: center; gap: 9px; padding: 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.phorma-versions__version:hover { background: color-mix(in srgb, var(--p-primary-color) 7%, transparent); }
+.phorma-versions__version--selected { border-color: color-mix(in srgb, var(--p-primary-color) 45%, transparent); background: color-mix(in srgb, var(--p-primary-color) 11%, transparent); }
+.phorma-versions__version-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--phorma-ver-color, var(--p-primary-color)) 14%, transparent); color: var(--phorma-ver-color, var(--p-primary-color)); }
+
+/* Per-trigger color coding: saved=emerald, autosave=sky-blue, deploy=cyan, restore=amber. */
+.phorma-versions__version[data-trigger='manual']   { --phorma-ver-color: #34d399; }
+.phorma-versions__version[data-trigger='autosave'] { --phorma-ver-color: #38bdf8; }
+.phorma-versions__version[data-trigger='deploy']   { --phorma-ver-color: #22d3ee; }
+.phorma-versions__version[data-trigger='restore']  { --phorma-ver-color: #fbbf24; }
+.phorma-versions__version-meta { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; font-size: 11px; color: var(--p-text-muted-color); }
+.phorma-versions__version-title { font-size: 12px; font-weight: 650; color: var(--p-text-color); }
+.phorma-versions__current, .phorma-versions__count { padding: 2px 6px; border-radius: 999px; background: color-mix(in srgb, var(--p-primary-color) 14%, transparent); color: var(--p-primary-color); font-size: 10px; font-weight: 700; }
+
+.phorma-versions__diff { min-width: 0; overflow: auto; padding: 18px; display: flex; flex-direction: column; }
+.phorma-versions__diff--empty { overflow: hidden; }
+.phorma-versions__diff-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 14px; }
+.phorma-versions__diff-header h3 { font-size: 13px; }
+.phorma-versions__changes { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.phorma-versions__changes li { display: flex; gap: 9px; align-items: flex-start; padding: 9px 10px; border: 1px solid var(--p-border-color); border-radius: 7px; background: color-mix(in srgb, var(--p-text-color) 3%, transparent); font-size: 12px; line-height: 1.45; }
+.phorma-versions__changes li i { margin-top: 2px; }
+.phorma-versions__changes li[data-kind='added'] i { color: var(--phorma-accent-green, #34d399); }
+.phorma-versions__changes li[data-kind='removed'] i { color: var(--phorma-accent-red, #ef4444); }
+.phorma-versions__changes li[data-kind='changed'] i { color: var(--phorma-accent-amber, #fbbf24); }
+.phorma-versions__changes li[data-kind='moved'] i { color: var(--p-primary-color); }
+.phorma-versions__empty { display: flex; align-items: center; gap: 7px; padding: 14px 8px; color: var(--p-text-muted-color); font-size: 12px; line-height: 1.5; }
+.phorma-versions__empty--large { flex: 1; min-height: 0; justify-content: center; flex-direction: column; text-align: center; }
+.phorma-versions__empty--large i { font-size: 24px; color: var(--p-text-muted-color); }
+.phorma-versions__spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.phorma-versions__actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--p-border-color); }
+
+/* PrimeNG v20 primary buttons have an opaque ::before overlay at z-index:0
+   that paints on top of in-flow children (both bare text nodes and static
+   <i> icons). Lifting the label and icon above the overlay fixes both. */
+.phorma-versions__btn-label { position: relative; z-index: 1; }
+.phorma-versions__actions button > i { position: relative; z-index: 1; }
+
+@media (max-width: 680px) {
+  .phorma-versions__body { grid-template-columns: 1fr; grid-template-rows: 190px minmax(0, 1fr); }
+  .phorma-versions__timeline { border-right: 0; border-bottom: 1px solid var(--p-border-color); }
+}

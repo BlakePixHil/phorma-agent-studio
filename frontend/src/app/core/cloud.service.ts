@@ -7,6 +7,7 @@ import type { RunEvent, RunRecord, RunRecordSummary, UsageLedgerEntry } from '@p
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
 import { SkillsService } from './skills.service';
+import { WorkflowVersionsService } from './workflow-versions.service';
 import { TauriService } from './tauri.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { WorkflowService } from './workflow.service';
@@ -39,6 +40,7 @@ export class CloudService {
   private readonly toast = inject(ToastService);
   private readonly settings = inject(SettingsService);
   private readonly skillsLibrary = inject(SkillsService);
+  private readonly versions = inject(WorkflowVersionsService);
   private readonly clerk = inject(ClerkService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
@@ -299,6 +301,10 @@ export class CloudService {
   }
 
   async pushWorkflow(): Promise<void> {
+    if (this.workflow.activeDoc()?.readOnly) {
+      this.toast.warning('Preview is read-only', 'Restore this version before pushing it to the cloud.');
+      return;
+    }
     const rawSpec = this.workflow.exportActiveSpec();
     if (!rawSpec) return;
     const spec = this.materializeDefaults(rawSpec);
@@ -318,6 +324,7 @@ export class CloudService {
         const detail = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(detail?.error ?? `HTTP ${response.status}`);
       }
+      await this.versions.recordDeploy(rawSpec).catch(() => undefined);
       this.toast.success('Workflow pushed', `"${spec.name}" is live in the cloud.`);
     } catch (error) {
       this.toast.error('Push failed', error instanceof Error ? error.message : String(error));

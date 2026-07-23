@@ -1,0 +1,69 @@
+@if (dialog.visible()) {
+  <div class="phorma-versions" role="presentation" (click)="dialog.close()">
+    <section class="phorma-versions__card" role="dialog" aria-modal="true" aria-label="Workflow version history" (click)="$event.stopPropagation()">
+      <header class="phorma-versions__header">
+        <span class="phorma-versions__icon"><i class="ti ti-history" aria-hidden="true"></i></span>
+        <div>
+          <h2>Version history</h2>
+          <p>{{ current()?.name ?? 'Workflow' }} - saved edits that survive restarts.</p>
+        </div>
+        <button type="button" class="phorma-versions__close" aria-label="Close" (click)="dialog.close()">
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="phorma-versions__body">
+        <aside class="phorma-versions__timeline" aria-label="Saved versions">
+          @if (versions.loading()) {
+            <div class="phorma-versions__empty"><i class="ti ti-loader-2 phorma-versions__spin"></i> Loading history...</div>
+          } @else if (versions.versions().length === 0) {
+            <div class="phorma-versions__empty"><i class="ti ti-clock-off"></i> No versions yet. Save this workflow to create one.</div>
+          } @else {
+            @for (version of versions.versions(); track version.id; let first = $first) {
+              <button type="button" class="phorma-versions__version" [class.phorma-versions__version--selected]="selected().id === version.id" [attr.data-trigger]="triggerClass(version)" (click)="select(version)">
+                <span class="phorma-versions__version-icon"><i [class]="triggerIcon(version)" aria-hidden="true"></i></span>
+                <span class="phorma-versions__version-meta">
+                  <span class="phorma-versions__version-title">{{ triggerLabel(version) }}</span>
+                  <span>{{ version.savedAt | date: 'MMM d, y, h:mm a' }}</span>
+                </span>
+                @if (first) { <span class="phorma-versions__current">Latest</span> }
+              </button>
+            }
+          }
+        </aside>
+
+        <section class="phorma-versions__diff" [class.phorma-versions__diff--empty]="selected() && diff().length === 0" aria-label="Changes compared with current workflow">
+          @if (selected(); as version) {
+            <div class="phorma-versions__diff-header">
+              <div>
+                <h3>Compared with current</h3>
+                <p>Snapshot from {{ version.savedAt | date: 'medium' }}</p>
+              </div>
+              <span class="phorma-versions__count">{{ diff().length }} changes</span>
+            </div>
+            @if (diff().length === 0) {
+              <div class="phorma-versions__empty phorma-versions__empty--large">
+                <i class="ti ti-circle-check" aria-hidden="true"></i>
+                <strong>This is the current workflow</strong>
+                <span>No structural differences found.</span>
+              </div>
+            } @else {
+              <ul class="phorma-versions__changes">
+                @for (change of diff(); track $index) {
+                  <li [attr.data-kind]="change.kind"><i [class]="change.icon" aria-hidden="true"></i><span>{{ change.text }}</span></li>
+                }
+              </ul>
+            }
+          } @else {
+            <div class="phorma-versions__empty phorma-versions__empty--large"><i class="ti ti-history"></i>Select a version to inspect it.</div>
+          }
+        </section>
+      </div>
+
+      <footer class="phorma-versions__actions">
+        <button pButton severity="secondary" [outlined]="true" [disabled]="!selected()" (click)="preview()"><i class="ti ti-eye"></i> <span class="phorma-versions__btn-label">Preview on canvas</span></button>
+        <button pButton [disabled]="!selected() || diff().length === 0" (click)="restore()"><i class="ti ti-restore"></i> <span class="phorma-versions__btn-label">Restore this version</span></button>
+      </footer>
+    </section>
+  </div>
+}

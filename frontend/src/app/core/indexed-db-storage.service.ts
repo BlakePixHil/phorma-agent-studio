@@ -5,9 +5,10 @@ import type { EvalRunSummary, EvalSuite, RunRecord, UsageLedgerEntry } from '@ph
 import type { ChatThread } from './assistant-chat.model';
 import type { SkillDef } from './skills.model';
 import type { WorkflowSpec } from './workflow.model';
+import { WORKFLOW_VERSIONS_KEEP, type WorkflowVersion } from './workflow-versions.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -52,6 +53,11 @@ const CHAT_THREADS_KEEP = 50;
  * The skill library is GLOBAL (cross-workflow), so there is no workflow index.
  */
 const SKILLS_STORE = 'skills';
+
+/** Full workflow snapshots used by persistent edit history (EPIC 7). */
+const WORKFLOW_VERSIONS_STORE = 'workflow-versions';
+const WORKFLOW_VERSIONS_BY_WORKFLOW = 'by-workflow';
+const WORKFLOW_VERSIONS_BY_SAVED = 'by-saved';
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -297,6 +303,46 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Workflow versions (EPIC 7) ────────────────────────────────────────
+
+  /** All versions for a workflow, newest first. */
+  async listWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+    const db = await this.open();
+    const store = db
+      .transaction(WORKFLOW_VERSIONS_STORE, 'readonly')
+      .objectStore(WORKFLOW_VERSIONS_STORE);
+    const versions = await this.request<WorkflowVersion[]>(
+      store.index(WORKFLOW_VERSIONS_BY_WORKFLOW).getAll(workflowId),
+    );
+    return versions.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  }
+
+  async saveWorkflowVersion(version: WorkflowVersion): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(WORKFLOW_VERSIONS_STORE, 'readwrite')
+        .objectStore(WORKFLOW_VERSIONS_STORE)
+        .put(version),
+    );
+    await this.pruneWorkflowVersions(version.workflowId);
+  }
+
+  async removeWorkflowVersion(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(WORKFLOW_VERSIONS_STORE, 'readwrite').objectStore(WORKFLOW_VERSIONS_STORE).delete(id),
+    );
+  }
+
+  async removeWorkflowVersions(workflowId: string): Promise<void> {
+    const versions = await this.listWorkflowVersions(workflowId);
+    if (versions.length === 0) return;
+    const db = await this.open();
+    const store = db.transaction(WORKFLOW_VERSIONS_STORE, 'readwrite').objectStore(WORKFLOW_VERSIONS_STORE);
+    await Promise.all(versions.map(version => this.request(store.delete(version.id))));
+  }
+
   /** Deletes this workflow's oldest chat threads beyond {@link CHAT_THREADS_KEEP}. */
   private async pruneChatThreads(workflowId: string | null): Promise<void> {
     const threads = await this.listChatThreads(workflowId);
@@ -322,6 +368,16 @@ export class IndexedDbStorageService {
         .slice(USAGE_MAX_ROWS),
     ];
     await Promise.all(doomed.map(row => this.request(store.delete(row.runId))));
+  }
+
+  /** Keeps the newest non-deployed snapshots; deployed snapshots are pinned. */
+  private async pruneWorkflowVersions(workflowId: string): Promise<void> {
+    const versions = await this.listWorkflowVersions(workflowId);
+    const doomed = versions.filter(version => !version.deployed).slice(WORKFLOW_VERSIONS_KEEP);
+    if (doomed.length === 0) return;
+    const db = await this.open();
+    const store = db.transaction(WORKFLOW_VERSIONS_STORE, 'readwrite').objectStore(WORKFLOW_VERSIONS_STORE);
+    await Promise.all(doomed.map(version => this.request(store.delete(version.id))));
   }
 
   private open(): Promise<IDBDatabase> {
@@ -359,6 +415,11 @@ export class IndexedDbStorageService {
         }
         if (!db.objectStoreNames.contains(SKILLS_STORE)) {
           db.createObjectStore(SKILLS_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(WORKFLOW_VERSIONS_STORE)) {
+          const versions = db.createObjectStore(WORKFLOW_VERSIONS_STORE, { keyPath: 'id' });
+          versions.createIndex(WORKFLOW_VERSIONS_BY_WORKFLOW, 'workflowId');
+          versions.createIndex(WORKFLOW_VERSIONS_BY_SAVED, 'savedAt');
         }
       };
       request.onsuccess = () => resolve(request.result);
