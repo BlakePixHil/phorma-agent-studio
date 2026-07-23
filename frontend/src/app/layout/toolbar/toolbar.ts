@@ -109,52 +109,47 @@ export class Toolbar {
    * values mirror Phorma's design tokens (see styles.scss) so Clerk's
    * prebuilt components blend into the toolbar and modal overlays.
    */
-  private clerkAppearanceFor(mode: 'light' | 'dark') {
-    const dark = mode === 'dark';
+  private clerkAppearanceFor(mode: 'light' | 'dark' | 'solarized-dark') {
+    const dark = mode === 'dark' || mode === 'solarized-dark';
+    const solarized = mode === 'solarized-dark';
     return {
       variables: {
-        colorBackground: dark ? '#111114' : '#ffffff',
-        colorBackgroundHover: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-        colorInputBackground: dark ? '#18191e' : '#f7f8fa',
-        colorInputText: dark ? '#e6e6e6' : '#1a1a1a',
-        colorText: dark ? '#e6e6e6' : '#1a1a1a',
-        colorTextSecondary: dark ? 'rgba(230,230,230,0.6)' : 'rgba(26,26,26,0.6)',
-        colorBorder: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)',
-        colorPrimary: dark ? '#878fa3' : '#67708a',
+        colorBackground: solarized ? '#073642' : dark ? '#111114' : '#ffffff',
+        colorBackgroundHover: solarized ? 'rgba(131,148,150,0.10)' : dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+        colorInputBackground: solarized ? '#002b36' : dark ? '#18191e' : '#f7f8fa',
+        colorInputText: solarized ? '#93a1a1' : dark ? '#e6e6e6' : '#1a1a1a',
+        colorText: solarized ? '#93a1a1' : dark ? '#e6e6e6' : '#1a1a1a',
+        colorTextSecondary: solarized ? 'rgba(147,161,161,0.6)' : dark ? 'rgba(230,230,230,0.6)' : 'rgba(26,26,26,0.6)',
+        colorBorder: solarized ? 'rgba(131,148,150,0.15)' : dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)',
+        colorPrimary: solarized ? '#268bd2' : dark ? '#878fa3' : '#67708a',
         colorPrimaryForeground: '#ffffff',
         borderRadius: '0.5rem',
         fontFamily:
           'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       },
-      // Social (OAuth) buttons don't have dedicated color variables, so we
-      // style them via `elements` to keep the "Continue with Google" label
-      // readable in dark mode (default is black text on a dark button).
-      // The UserButton popover action buttons (Manage account / Sign out)
-      // also default to black text on a dark card, so we force readable
-      // colors via the `userButtonPopoverActionButton` element keys.
       elements: dark
         ? {
             socialButtonsBlockButton: {
-              backgroundColor: '#18191e',
-              borderColor: 'rgba(255,255,255,0.08)',
-              color: '#e6e6e6',
+              backgroundColor: solarized ? '#002b36' : '#18191e',
+              borderColor: solarized ? 'rgba(131,148,150,0.15)' : 'rgba(255,255,255,0.08)',
+              color: solarized ? '#93a1a1' : '#e6e6e6',
               '&:hover': {
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                color: '#e6e6e6',
+                backgroundColor: solarized ? 'rgba(131,148,150,0.10)' : 'rgba(255,255,255,0.06)',
+                color: solarized ? '#93a1a1' : '#e6e6e6',
               },
             },
             socialButtonsBlockButtonText: {
-              color: '#e6e6e6',
+              color: solarized ? '#93a1a1' : '#e6e6e6',
             },
             userButtonPopoverActionButton: {
-              color: '#e6e6e6',
+              color: solarized ? '#93a1a1' : '#e6e6e6',
               '&:hover': {
-                color: '#e6e6e6',
-                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: solarized ? '#93a1a1' : '#e6e6e6',
+                backgroundColor: solarized ? 'rgba(131,148,150,0.10)' : 'rgba(255,255,255,0.06)',
               },
             },
             userButtonPopoverActionButtonIcon: {
-              color: '#e6e6e6',
+              color: solarized ? '#93a1a1' : '#e6e6e6',
             },
           }
         : {},
@@ -167,9 +162,13 @@ export class Toolbar {
   protected readonly canReset = this.runController.canReset;
 
   // ── Right-cluster icon computeds (signals keep OnPush templates in sync) ─
-  protected readonly themeIcon = computed(() =>
-    this.theme.mode() === 'dark' ? 'ti ti-sun' : 'ti ti-moon',
-  );
+  protected readonly themeIcon = computed(() => {
+    switch (this.theme.mode()) {
+      case 'solarized-dark': return 'ti ti-sunset';
+      case 'dark': return 'ti ti-sun';
+      default: return 'ti ti-moon';
+    }
+  });
   protected readonly gridSnapTooltip = computed(() =>
     this.canvasState.gridSnap() ? 'Disable grid snapping' : 'Enable grid snapping',
   );

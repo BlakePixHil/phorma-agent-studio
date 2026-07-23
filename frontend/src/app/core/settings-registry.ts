@@ -161,13 +161,14 @@ export class SettingsRegistryService {
             {
               id: 'theme-mode',
               label: 'Color mode',
-              description: 'Light or dark interface theme.',
-              keywords: ['dark', 'light', 'theme'],
+              description: 'Light, dark, or Solarized Dark interface theme.',
+              keywords: ['dark', 'light', 'solarized', 'theme'],
               control: {
                 type: 'select',
                 options: [
                   { value: 'dark', label: 'Dark' },
                   { value: 'light', label: 'Light' },
+                  { value: 'solarized-dark', label: 'Solarized Dark' },
                 ],
               },
               get: () => this.theme.mode(),

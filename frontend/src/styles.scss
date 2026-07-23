@@ -17,7 +17,7 @@
 
 /* Tell Tailwind that dark mode is driven by the `.app-dark` class (matches the
    PrimeNG darkModeSelector configured in app.config.ts). */
-@custom-variant dark (&:where(.app-dark, .app-dark *));
+@custom-variant dark (&:where(.app-dark, .app-dark *, .app-solarized, .app-solarized *));
 
 /* ----------------------------------------------------------------------------
    Design tokens — premium monochrome palette
@@ -148,6 +148,60 @@
   --phorma-accent-amber-soft:   rgba(251, 191, 36, 0.18);
   --phorma-accent-red:          #f87171;
   --phorma-accent-red-soft:     rgba(248, 113, 113, 0.18);
+  color-scheme: dark;
+}
+
+:root.app-solarized {
+  /* Solarized Dark — classic Ethan Schoonover palette.
+     Canvas uses Base03 (#002b36), chrome uses Base02 (#073642), with the
+     signature Solarized blue (#268bd2) as the primary accent. Code syntax
+     colours follow the Solarized scheme for a cohesive IDE-like feel. */
+  --phorma-canvas-bg:    #002b36;
+  --phorma-chrome-bg:    rgba(0, 43, 54, 0.55);
+  --phorma-border:       rgba(131, 148, 150, 0.15);
+  --phorma-dot-color:    rgba(131, 148, 150, 0.18);
+  --phorma-spotlight-color: rgba(38, 139, 210, 0.04);
+  --phorma-card-bg:      #073642;
+  --phorma-card-border:  rgba(131, 148, 150, 0.12);
+  --phorma-card-border-glow: rgba(38, 139, 210, 0.55);
+  --phorma-card-fill-glow:   rgba(38, 139, 210, 0.06);
+  --phorma-node-bg:             #073642;
+  --phorma-node-header-bg:      #0a3e4a;
+  --phorma-node-border:         rgba(131, 148, 150, 0.14);
+  --phorma-node-border-active:  rgba(38, 139, 210, 0.35);
+  --phorma-node-divider:        rgba(131, 148, 150, 0.08);
+  --phorma-node-shadow:         0 2px 12px rgba(0,0,0,0.55);
+  --phorma-node-shadow-active:  0 4px 24px rgba(0,0,0,0.75);
+  --phorma-node-icon-bg:        rgba(131, 148, 150, 0.10);
+  --phorma-node-badge-bg:       rgba(131, 148, 150, 0.10);
+  --phorma-node-badge-color:    rgba(147, 161, 161, 0.50);
+  --phorma-node-row-hover:      rgba(131, 148, 150, 0.05);
+  --phorma-code-default:        #93a1a1;
+  --phorma-code-string:         #2aa198;
+  --phorma-code-boolean:        #d33682;
+  --phorma-code-number:         #b58900;
+  --phorma-code-nullish:        #d33682;
+  --phorma-code-function:       #268bd2;
+  --phorma-code-object:         #839496;
+  --phorma-code-type:           #6c71c4;
+  --phorma-connector-bg:        rgba(131, 148, 150, 0.15);
+  --phorma-connector-border:    rgba(131, 148, 150, 0.22);
+  --phorma-connector-hover:     var(--p-primary-color, #268bd2);
+  --phorma-connector-active:    var(--p-primary-color, #268bd2);
+  --phorma-wire-color:          rgba(147, 161, 161, 0.28);
+  --phorma-wire-hover-color:    var(--p-primary-color, #268bd2);
+  --phorma-glass-bg:            rgba(7, 54, 66, 0.88);
+  --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.40);
+  --phorma-accent-blue:         #268bd2;
+  --phorma-accent-blue-soft:    rgba(38, 139, 210, 0.20);
+  --phorma-accent-blue-ring:    rgba(38, 139, 210, 0.50);
+  --phorma-accent-green:        #859900;
+  --phorma-accent-green-hover:  #6c7a00;
+  --phorma-accent-green-contrast: #fdf6e3;
+  --phorma-accent-amber:        #b58900;
+  --phorma-accent-amber-soft:   rgba(181, 137, 0, 0.20);
+  --phorma-accent-red:          #dc322f;
+  --phorma-accent-red-soft:     rgba(220, 50, 47, 0.20);
   color-scheme: dark;
 }
 
@@ -639,6 +693,7 @@ app-root {
  * inconsistent — the light-mode 500/600/700 ramp with white text should be
  * the defacto appearance in both themes. These overrides pin the dark-mode
  * CSS variables back to the light-mode values for every filled severity.
+ * Applied to both `.app-dark` and `.app-solarized`.
  */
 .app-dark {
   --p-button-primary-background: var(--p-primary-500);

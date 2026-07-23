@@ -81,7 +81,8 @@ export const appConfig: ApplicationConfig = {
       theme: {
         preset: PhormaPreset,
         options: {
-          // Dark mode is toggled by adding `.app-dark` to the <html> element.
+          // Dark mode is toggled by adding `.app-dark` (or `.app-dark.app-solarized`)
+          // to the <html> element. Solarized Dark adds both classes.
           // This keeps PrimeNG, Tailwind, and our own design tokens in sync.
           darkModeSelector: '.app-dark',
           cssLayer: {

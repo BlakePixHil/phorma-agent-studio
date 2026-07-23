@@ -10,13 +10,16 @@ import {
 const STORAGE_KEY = 'phorma-theme';
 const PALETTE_KEY = 'phorma-palette';
 const DARK_CLASS = 'app-dark';
+const SOLARIZED_CLASS = 'app-solarized';
 
-export type ThemeMode = 'light' | 'dark';
+export type ThemeMode = 'light' | 'dark' | 'solarized-dark';
 
 /**
- * Manages the light/dark theme and the primary colour palette.
+ * Manages the light/dark/solarized-dark theme and the primary colour palette.
  *
  * - Light/dark is toggled by adding `.app-dark` to the document root.
+ * - Solarized Dark adds both `.app-dark` and `.app-solarized` so it inherits
+ *   PrimeNG's dark mode tokens while applying Solarized-specific chrome vars.
  * - The primary palette is applied to PrimeNG at runtime via
  *   `updatePrimaryPalette()` (the preset is seeded with the default palette in
  *   `app.config.ts` so first paint is correct before Angular boots).
@@ -41,9 +44,14 @@ export class ThemeService {
     this.applyPalette(this._palette());
   }
 
-  /** Switches between light and dark mode. */
+  /** Cycles through light → dark → solarized-dark → light. */
   toggle(): void {
-    this.setMode(this._mode() === 'dark' ? 'light' : 'dark');
+    const cycle: Record<ThemeMode, ThemeMode> = {
+      light: 'dark',
+      dark: 'solarized-dark',
+      'solarized-dark': 'light',
+    };
+    this.setMode(cycle[this._mode()]);
   }
 
   /** Explicitly sets the theme mode. */
@@ -72,7 +80,8 @@ export class ThemeService {
 
   private applyMode(mode: ThemeMode): void {
     const root = document.documentElement;
-    root.classList.toggle(DARK_CLASS, mode === 'dark');
+    root.classList.toggle(DARK_CLASS, mode === 'dark' || mode === 'solarized-dark');
+    root.classList.toggle(SOLARIZED_CLASS, mode === 'solarized-dark');
   }
 
   private applyPalette(palette: ThemePalette): void {
@@ -84,7 +93,7 @@ export class ThemeService {
   private readInitialMode(): ThemeMode {
     try {
       const stored = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-      if (stored === 'light' || stored === 'dark') {
+      if (stored === 'light' || stored === 'dark' || stored === 'solarized-dark') {
         return stored;
       }
     } catch {
