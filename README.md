@@ -97,11 +97,11 @@ cd frontend; npm run build; cd ..
 
 # 1. Bump the version everywhere (all package.json files, Cargo.toml,
 #    tauri.conf.json), commit, and create the vX.Y.Z tag:
-node scripts/release.mjs 0.2.0-beta.6
+node scripts/release.mjs 0.2.0-beta.7
 #    (add --dry-run to preview without committing)
 
 # 2. Push the commit AND the tag — the tag is what triggers CI:
-git push origin main v0.2.0-beta.6
+git push origin main v0.2.0-beta.7
 
 # 3. Watch the "Release" workflow (takes ~15–20 min):
 gh run watch
