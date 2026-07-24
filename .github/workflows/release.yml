@@ -111,6 +111,10 @@ jobs:
           #   APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          # Pin the Tauri project dir — auto-detection has crawled into mcp/
+          # on Linux runners and resolved beforeBuildCommand's ../frontend to
+          # mcp/frontend, killing the build.
+          projectPath: backend
           tagName: ${{ github.ref_name }}
           releaseName: 'Phorma Agent Studio ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download. The app will auto-update if already installed.'
