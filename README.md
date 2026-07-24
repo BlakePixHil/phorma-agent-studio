@@ -128,9 +128,14 @@ Rules to avoid breaking it:
   a new patch/beta version.
 - If the R2 sync job fails, re-run just that job from the GitHub Actions UI —
   the GitHub Release assets are already there.
-- If the build itself fails, delete the dead tag
-  (`git push origin :refs/tags/vX.Y.Z; git tag -d vX.Y.Z`), fix, and cut the
-  next version. Also delete any draft/partial GitHub Release for that tag.
+- If the build itself fails, clean up with
+  `gh release delete vX.Y.Z --yes --cleanup-tag` (removes any partial GitHub
+  Release AND the remote tag), then `git tag -d vX.Y.Z` locally, fix, and cut
+  the next version.
+- The workflow pins `projectPath: backend` for `tauri-action` — don't remove
+  it. Without it, auto-detection has wandered into `mcp/` on Linux runners
+  and resolved `beforeBuildCommand`'s `../frontend` to the nonexistent
+  `mcp/frontend`.
 
 ## Deploy to the cloud (your Cloudflare account)
 
