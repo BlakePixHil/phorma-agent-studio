@@ -330,6 +330,21 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     defaultData: () => ({ correlationKey: '', message: '' }),
   },
   {
+    id: 'flow-ask-user',
+    label: 'Ask User',
+    description: 'Pauses the run and asks the user a free-text question.',
+    icon: 'ti ti-message-question',
+    category: 'flow',
+    kind: 'ask-user',
+    keywords: ['ask', 'question', 'input', 'human', 'prompt', 'clarify', 'response', 'hitl'],
+    defaultName: 'Ask User',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Answered', role: 'message-out' },
+    ],
+    defaultData: () => ({ question: '', responseKey: 'userResponse' }),
+  },
+  {
     id: 'flow-execute-workflow',
     label: 'Execute Workflow',
     description: 'Runs another saved workflow and returns its result.',

@@ -109,6 +109,10 @@ export interface TestHarnessApi {
   waits(): { nodeId: string; nodeName: string; correlationKey: string }[];
   /** Delivers an external event to a suspended Wait-for-Event node. */
   sendEvent(nodeId: string, payload: string): void;
+  /** Suspended Ask-User nodes awaiting a free-text answer. */
+  questions(): { requestId: string; nodeId: string; nodeName: string; question: string }[];
+  /** Answers a suspended Ask-User node, resuming the run. */
+  answerQuestion(requestId: string, response: string): void;
 }
 
 declare global {
@@ -236,6 +240,18 @@ export class TestHarnessService {
         })),
 
       sendEvent: zoned((nodeId, payload) => this.runs.resolveWait(nodeId, payload)),
+
+      questions: () =>
+        this.runs.pendingQuestions().map(item => ({
+          requestId: item.requestId,
+          nodeId: item.nodeId,
+          nodeName: item.nodeName,
+          question: item.question,
+        })),
+
+      answerQuestion: zoned((requestId, response) =>
+        this.runs.resolveQuestion(requestId, response),
+      ),
     };
   }
 
@@ -311,8 +327,8 @@ export class TestHarnessService {
     if (!outPort || !inPort) {
       throw new Error(
         `No compatible ports between "${from.name}" and "${to.name}". ` +
-          `Source ports: ${from.ports.map(p => `${p.name} (${p.role})`).join(', ')}; ` +
-          `target ports: ${to.ports.map(p => `${p.name} (${p.role})`).join(', ')}.`,
+        `Source ports: ${from.ports.map(p => `${p.name} (${p.role})`).join(', ')}; ` +
+        `target ports: ${to.ports.map(p => `${p.name} (${p.role})`).join(', ')}.`,
       );
     }
 
@@ -320,7 +336,7 @@ export class TestHarnessService {
     if (!connection) {
       throw new Error(
         `Connection rejected: "${from.name}".${outPort.name} → "${to.name}".${inPort.name} ` +
-          '(incompatible roles or duplicate edge).',
+        '(incompatible roles or duplicate edge).',
       );
     }
     return connection.id;

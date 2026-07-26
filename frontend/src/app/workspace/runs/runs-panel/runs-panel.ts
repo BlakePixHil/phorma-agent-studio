@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  signal,
+  viewChildren,
+} from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 
 import type { RunRecord, RunRecordSummary, RunRecordUsage } from '@phorma/engine';
@@ -106,6 +115,19 @@ export class RunsPanel {
       this.workflow.activeDoc();
       void this.refreshHistory();
     });
+
+    // The "Answer" toast action asks this panel to take focus for one
+    // question; consume the request so it fires exactly once.
+    effect(() => {
+      const requestId = this.runController.focusQuestionId();
+      if (!requestId) return;
+      const box = this.answerBoxes().find(
+        ref => ref.nativeElement.dataset['requestId'] === requestId,
+      );
+      if (!box) return;
+      box.nativeElement.focus();
+      this.runController.focusQuestionId.set(null);
+    });
   }
 
   /** Trace entry ids the user has expanded. */
@@ -120,6 +142,9 @@ export class RunsPanel {
 
   /** Draft event payloads per suspended wait node (manual injection). */
   protected readonly waitDrafts = signal<Record<string, string>>({});
+
+  /** Answer boxes for pending Ask-User cards, keyed by request id. */
+  private readonly answerBoxes = viewChildren<ElementRef<HTMLTextAreaElement>>('answerBox');
 
   /** Cumulative run usage (tokens + cost when the provider reports it). */
   protected readonly usage = this.runController.runUsage;
@@ -359,6 +384,22 @@ export class RunsPanel {
       return next;
     });
     this.runController.resolveWait(nodeId, payload.trim());
+  }
+
+  protected questionDraft(requestId: string): string {
+    return this.runController.questionDrafts()[requestId] || '';
+  }
+
+  protected onQuestionDraft(requestId: string, event: Event): void {
+    const value = (event.target as HTMLTextAreaElement | null)?.value ?? '';
+    this.runController.setQuestionDraft(requestId, value);
+  }
+
+  /** Submits the typed answer to a suspended Ask-User node. */
+  protected submitAnswer(requestId: string): void {
+    const response = this.questionDraft(requestId).trim();
+    if (!response) return;
+    this.runController.resolveQuestion(requestId, response);
   }
 
   protected toggleExpanded(id: number): void {

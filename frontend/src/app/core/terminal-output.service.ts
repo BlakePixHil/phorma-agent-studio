@@ -20,6 +20,7 @@ export type RunPhase =
   | 'paused'
   | 'waiting-approval'
   | 'waiting-event'
+  | 'waiting-input'
   | 'completed'
   | 'failed'
   | 'stopped';

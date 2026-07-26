@@ -14,6 +14,7 @@
  *                      node: { correlationKey, payload? } → { ok, delivered }.
  *                      This is the webhook target for e-sign callbacks etc.
  *   POST /approvals  — resolve a pending approval: { requestId, approved }
+ *   POST /questions  — answer a pending Ask-User node: { requestId, response }
  *   GET  /status     — { name, hasWorkflow, running, savedAt, pendingWaits }
  *   GET  /runs       — run history: { runs: RunRecordSummary[], activeRunId }
  *   GET  /runs/{id}  — one full RunRecord (summary + graph + event log)
@@ -21,6 +22,7 @@
  *   WS   connect     — receive RunEvents; send control frames:
  *                      { type: 'approval', requestId, approved }
  *                      { type: 'event', correlationKey, payload? }
+ *                      { type: 'question', requestId, response }
  *                      { type: 'trigger', input }
  *                      { type: 'stop' }
  *
@@ -140,6 +142,7 @@ interface WorkflowAgentState {
 type ControlFrame =
   | { type: 'approval'; requestId: string; approved: boolean }
   | { type: 'event'; correlationKey: string; payload?: string }
+  | { type: 'question'; requestId: string; response: string }
   | { type: 'trigger'; input?: string }
   | { type: 'stop' };
 
@@ -234,6 +237,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private runCounter = 0;
   /** Pending approval resolvers, keyed by exact engine request id. */
   private readonly approvals = new Map<string, (approved: boolean) => void>();
+  /** Pending Ask-User resolvers, keyed by exact engine request id. */
+  private readonly questions = new Map<string, (response: string) => void>();
   /**
    * Suspended Wait-for-Event resolvers, keyed by correlation key. The run
    * itself survives eviction via the journal + activeRun resume path; these
@@ -326,6 +331,19 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       return json({ ok: true, delivered: true });
     }
 
+    if (request.method === 'POST' && path.endsWith('/questions')) {
+      const body = (await request.json().catch(() => ({}))) as {
+        requestId?: string;
+        response?: string;
+      };
+      if (!body.requestId) return json({ error: 'requestId is required.' }, 400);
+      const resolve = this.questions.get(body.requestId);
+      if (!resolve) return json({ ok: true, delivered: false });
+      this.questions.delete(body.requestId);
+      resolve(typeof body.response === 'string' ? body.response : '');
+      return json({ ok: true, delivered: true });
+    }
+
     {
       // GET /runs/{runId} — one full RunRecord.
       const match = request.method === 'GET' ? /\/runs\/([^/]+)$/.exec(path) : null;
@@ -410,6 +428,14 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         }
         break;
       }
+      case 'question': {
+        const resolve = this.questions.get(frame.requestId);
+        if (resolve) {
+          this.questions.delete(frame.requestId);
+          resolve(frame.response ?? '');
+        }
+        break;
+      }
       case 'event':
         if (frame.correlationKey?.trim()) {
           this.deliverEvent(frame.correlationKey.trim(), frame.payload ?? '');
@@ -431,11 +457,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         break;
       case 'stop':
         this.handle?.stop();
-        // A run suspended on an approval or external event is awaiting a
-        // host promise, not the gate — unblock those so the run can unwind
-        // (RunStoppedError is thrown at the next gate check).
+        // A run suspended on an approval, question, or external event is
+        // awaiting a host promise, not the gate — unblock those so the run
+        // can unwind (RunStoppedError is thrown at the next gate check).
         for (const resolve of this.approvals.values()) resolve(false);
         this.approvals.clear();
+        for (const resolve of this.questions.values()) resolve('');
+        this.questions.clear();
         for (const waiter of this.waits.values()) waiter.resolve('');
         this.waits.clear();
         break;
@@ -706,6 +734,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         new Promise<boolean>(resolve => {
           this.approvals.set(requestId, resolve);
         }),
+      requestInput: (_nodeId, _question, _payload, requestId) =>
+        new Promise<string>(resolve => {
+          this.questions.set(requestId, resolve);
+        }),
       waitForEvent: (_nodeId, correlationKey, _message, _payload, timeoutMs) =>
         new Promise<string>((resolve, reject) => {
           // An event may have raced ahead of the waiter (webhook fired while
@@ -739,6 +771,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // Reject anything still waiting so promises don't dangle.
       for (const resolve of this.approvals.values()) resolve(false);
       this.approvals.clear();
+      for (const resolve of this.questions.values()) resolve('');
+      this.questions.clear();
       for (const waiter of this.waits.values()) waiter.resolve('');
       this.waits.clear();
       this.earlyEvents.clear();

@@ -28,6 +28,7 @@ export type RunNodeState =
   | 'thinking'
   | 'waiting-approval'
   | 'waiting-event'
+  | 'waiting-input'
   | 'done'
   | 'error';
 
@@ -51,6 +52,11 @@ type RunEventPayload =
   | { type: 'tool-result'; runId: string; nodeId: string; toolNodeId: string; name: string; result: string; isError: boolean; at: number }
   | { type: 'approval-required'; runId: string; requestId: string; nodeId: string; message: string; payload: string; at: number }
   | { type: 'approval-resolved'; runId: string; requestId: string; nodeId: string; approved: boolean; at: number }
+  // Ask User: the run suspends and surfaces a question to a human, who
+  // types a free-text response that is merged into the payload for the
+  // downstream agent.
+  | { type: 'ask-required'; runId: string; requestId: string; nodeId: string; nodeName: string; question: string; payload: string; at: number }
+  | { type: 'ask-resolved'; runId: string; requestId: string; nodeId: string; response: string; at: number }
   // ForEach loop lifecycle: one loop-started, one loop-iteration per item,
   // one loop-completed (with per-item failure summary) per loop execution.
   | { type: 'loop-started'; runId: string; nodeId: string; nodeName: string; total: number; at: number }
