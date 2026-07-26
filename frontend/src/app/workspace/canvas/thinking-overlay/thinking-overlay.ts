@@ -9,6 +9,9 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 
 /**
  * A collapsible "thinking" overlay anchored to a single canvas node.
@@ -61,7 +64,7 @@ import {
           aria-label="Model reasoning"
           (scroll)="atTop.set(body.scrollTop === 0)"
         >
-          <pre class="phorma-thinking-text">{{ text() }}</pre>
+          <div class="phorma-thinking-md" [innerHTML]="renderedText()"></div>
           @if (!atTop()) {
             <div class="phorma-thinking-fade" aria-hidden="true"></div>
           }
@@ -167,14 +170,61 @@ import {
         backdrop-filter: blur(6px);
         scrollbar-width: thin;
       }
-      .phorma-thinking-text {
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: inherit;
-        font-size: inherit;
-        line-height: inherit;
-        color: inherit;
+      .phorma-thinking-md {
+        :first-child {
+          margin-top: 0;
+        }
+        :last-child {
+          margin-bottom: 0;
+        }
+        p,
+        ul,
+        ol {
+          margin: 0.3rem 0;
+        }
+        ul,
+        ol {
+          padding-left: 1rem;
+        }
+        li {
+          margin: 0.12rem 0;
+        }
+        h1,
+        h2,
+        h3,
+        h4 {
+          margin: 0.45rem 0 0.2rem;
+          font-size: 0.74rem;
+          font-weight: 700;
+          color: var(--phorma-thinking-fg-bright);
+        }
+        code {
+          padding: 0.05rem 0.28rem;
+          border-radius: 0.3rem;
+          background: color-mix(in srgb, var(--phorma-thinking-fg) 10%, transparent);
+          font-size: 0.66rem;
+        }
+        pre {
+          margin: 0.3rem 0;
+          padding: 0.4rem;
+          border-radius: 0.4rem;
+          background: color-mix(in srgb, var(--phorma-thinking-fg) 7%, transparent);
+          overflow-x: auto;
+
+          code {
+            padding: 0;
+            background: none;
+          }
+        }
+        a {
+          color: var(--phorma-thinking-fg-bright);
+          text-decoration: underline;
+        }
+        blockquote {
+          margin: 0.3rem 0;
+          padding-left: 0.5rem;
+          border-left: 2px solid var(--phorma-thinking-border);
+        }
       }
       .phorma-thinking-fade {
         position: absolute;
@@ -207,6 +257,7 @@ export class ThinkingOverlay {
   readonly streaming = input.required<boolean>();
 
   private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly sanitizer = inject(DomSanitizer);
 
   /** Local expanded state (user toggled the body open). */
   readonly expanded = signal(false);
@@ -217,6 +268,12 @@ export class ThinkingOverlay {
 
   protected readonly hasText = computed(() => this.text().length > 0);
   protected readonly bodyId = computed(() => `phorma-thinking-${this.nodeId()}`);
+
+  /** Sanitized markdown rendering of the reasoning text. */
+  protected readonly renderedText = computed<SafeHtml>(() => {
+    const raw = marked.parse(this.text(), { async: false });
+    return this.sanitizer.bypassSecurityTrustHtml(DOMPurify.sanitize(raw));
+  });
 
   constructor() {
     // Position the host element every time the screen-space inputs change.

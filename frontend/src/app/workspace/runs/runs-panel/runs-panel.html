@@ -111,7 +111,7 @@
       <i class="ti ti-message-question" aria-hidden="true"></i>
       <strong>{{ question.nodeName }}</strong>
     </header>
-    <p class="phorma-runs__approval-message">{{ question.question }}</p>
+    <div class="phorma-runs__approval-message" [innerHTML]="renderMarkdown(question.question)"></div>
     <textarea #answerBox class="phorma-runs__input phorma-runs__wait-input" rows="3" placeholder="Type your answer…"
       [attr.data-request-id]="question.requestId" [value]="questionDraft(question.requestId)"
       (input)="onQuestionDraft(question.requestId, $event)" (keydown.control.enter)="submitAnswer(question.requestId)"

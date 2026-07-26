@@ -803,7 +803,11 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       // Bump the overlay transform tick so they re-project from the live
       // pan/zoom. Only run inside Angular's zone when there are overlays to
       // reposition (avoids CD thrash on every idle frame).
-      if (this.runController.nodeThinking().size > 0 || this.hasMcpWarnings()) {
+      if (
+        this.runController.nodeThinking().size > 0 ||
+        this.runController.pendingQuestions().length > 0 ||
+        this.hasMcpWarnings()
+      ) {
         this.zone.run(() => this.transformTick.update(v => v + 1));
       }
     };
