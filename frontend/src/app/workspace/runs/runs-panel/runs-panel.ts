@@ -9,6 +9,9 @@ import {
   viewChildren,
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 
 import type { RunRecord, RunRecordSummary, RunRecordUsage } from '@phorma/engine';
 
@@ -103,6 +106,7 @@ interface HistoryRow {
 })
 export class RunsPanel {
   protected readonly runController = inject(RunControllerService);
+  private readonly domSanitizer = inject(DomSanitizer);
   protected readonly terminal = inject(TerminalOutputService);
   protected readonly cloud = inject(CloudService);
   private readonly phormaCloud = inject(PhormaCloudService);
@@ -388,6 +392,12 @@ export class RunsPanel {
 
   protected questionDraft(requestId: string): string {
     return this.runController.questionDrafts()[requestId] || '';
+  }
+
+  /** Sanitized markdown rendering for a pending Ask-User question. */
+  protected renderMarkdown(text: string): SafeHtml {
+    const raw = marked.parse(text, { async: false });
+    return this.domSanitizer.bypassSecurityTrustHtml(DOMPurify.sanitize(raw));
   }
 
   protected onQuestionDraft(requestId: string, event: Event): void {

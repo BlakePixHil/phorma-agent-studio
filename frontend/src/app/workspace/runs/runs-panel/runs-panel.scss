@@ -361,6 +361,39 @@
   margin: 0;
   font-size: 0.78rem;
   color: var(--p-text-muted-color);
+
+  :first-child { margin-top: 0; }
+  :last-child { margin-bottom: 0; }
+  p, ul, ol { margin: 0.3rem 0; }
+  ul, ol { padding-left: 1.1rem; }
+  li { margin: 0.12rem 0; }
+  h1, h2, h3, h4 {
+    margin: 0.45rem 0 0.2rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--p-text-color);
+  }
+  code {
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.3rem;
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    font-size: 0.72rem;
+  }
+  pre {
+    margin: 0.3rem 0;
+    padding: 0.45rem;
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    overflow-x: auto;
+
+    code { padding: 0; background: none; }
+  }
+  a { color: var(--p-text-color); text-decoration: underline; }
+  blockquote {
+    margin: 0.3rem 0;
+    padding-left: 0.5rem;
+    border-left: 2px solid var(--phorma-port-tools, #fbbf24);
+  }
 }
 
 .phorma-runs__approval-actions {

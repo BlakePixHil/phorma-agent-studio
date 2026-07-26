@@ -34,6 +34,7 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 
 ## UI / Styling
 
+- 2026-07-26 — Canvas overlays (ThinkingOverlay, AskUserOverlay, MCP warnings) reposition via `transformTick` bumped in `engine.onAfterDraw`, gated on overlays existing. When adding a NEW overlay type, add its presence check to the gate in `graph-canvas.ts` (`nodeThinking().size > 0 || pendingQuestions().length > 0 || hasMcpWarnings()`) or the overlay won't track pan/zoom. Overlay bodies render sanitized markdown via `marked` + `DOMPurify` + `DomSanitizer.bypassSecurityTrustHtml` — same pattern as assistant-chat.
 - 2026-07-03 — Icons are **Tabler-only** (`ti ti-*`). `primeicons` is removed; PrimeNG components that render built-in icons (select chevrons, toast close, submenu arrows, checkboxes) need icon templates/`pt` overrides — audit when adding a new PrimeNG component.
 - 2026-07-03 — Specular shimmer (`::after` gradient) was originally on the LEFT panel only. Right panel, terminal, status bar were plain glass. The single hairline divider is drawn by the resize handle, not a panel border (avoid double lines). REMOVED 2026-07-22: the left sidebar and toolbar shimmer `::after` gradients were stripped so ALL chrome panels (toolbar, both sidebars, terminal, status bar) are now plain frosted glass for consistency.
 - 2026-07-03 — Angular templates do not support arrow functions in event bindings — use a component method.
