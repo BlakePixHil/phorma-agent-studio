@@ -1,0 +1,26 @@
+{
+  "format": "todo4vcode-shared-tasks",
+  "version": "1.0.0",
+  "tasks": [
+    {
+      "id": "beez9ku8w",
+      "text": "Agents Window - Agent mode",
+      "description": "We need to fix the agent mode in the chat window, when in agent mode, currently the app handles it by \"thinking\" then the chat clears and it builds on the canvas. Instead we need to have an interactive chat session where the agent says it's building then has a response. The changes are applied to the canvas, the chat is still open and interactive.",
+      "priority": "Must",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1785066956913,
+      "order": 1000
+    },
+    {
+      "id": "ojoihn1gs",
+      "text": "Agent Window - Better tools",
+      "description": "I asked the agent to create an Eval for me but instead it applied a node to the canvas. Agents need to be able to interact with all of the Studio. If I ask the agent to modify a prompt it should modify that specific prompt. If I ask it to run my workflow it should be able to do that and so on.",
+      "priority": "Must",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1785067035332,
+      "order": 2000
+    }
+  ]
+}

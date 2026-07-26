@@ -1,2 +1,4 @@
 {
+    "todo4vcode.sharedTasks.path": ".todo4vcode/shared-tasks.json",
+    "todo4vcode.sharedTasks.enabled": true
 }
