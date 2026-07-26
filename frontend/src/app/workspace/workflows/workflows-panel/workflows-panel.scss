@@ -36,13 +36,13 @@
 .phorma-workflows__item {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   width: 100%;
   padding: 0.45rem 0.55rem;
-  border-radius: 0.6rem;
+  border-radius: 0.55rem;
   border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  background: transparent;
   color: var(--p-text-color);
   font: inherit;
   text-align: left;
@@ -50,23 +50,22 @@
   transition: background 0.15s ease, border-color 0.15s ease;
 
   > i {
+    margin-top: 0.1rem;
     font-size: 0.95rem;
     color: var(--p-text-muted-color);
     flex-shrink: 0;
   }
 
   &:hover {
-    background: color-mix(in srgb, var(--p-primary-color) 9%, transparent);
-    border-color: color-mix(in srgb, var(--p-primary-color) 40%, transparent);
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
 
     > i {
-      color: var(--p-primary-color, #818cf8);
+      color: var(--p-text-color);
     }
 
-    .phorma-workflows__history,
-    .phorma-workflows__rename,
-    .phorma-workflows__delete {
+    .phorma-workflows__row-actions {
       opacity: 1;
+      width: auto;
     }
   }
 }
@@ -80,45 +79,54 @@
 }
 
 .phorma-workflows__name {
-  font-size: 0.928rem;
+  font-size: 0.8rem;
   font-weight: 600;
+  /* One-line ellipsis by default; the meta column shrinks on hover so the
+     action buttons never overlap the truncated text. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .phorma-workflows__date {
-  font-size: 0.857rem;
+  font-size: 0.928rem;
   color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.phorma-workflows__history,
-.phorma-workflows__rename,
-.phorma-workflows__delete {
+.phorma-workflows__row-actions {
+  display: inline-flex;
+  gap: 0.1rem;
+  /* Collapse to zero width when hidden so the meta column gets the full row;
+     expand on hover so the buttons appear without overlapping the text. */
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, width 0.15s ease;
+}
+
+.phorma-workflows__row-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: 0.45rem;
-  background: transparent;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 0.35rem;
   color: var(--p-text-muted-color);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
+  transition: background 0.15s ease, color 0.15s ease;
 
-.phorma-workflows__history:hover,
-.phorma-workflows__rename:hover {
-  background: color-mix(in srgb, var(--p-primary-color, #818cf8) 14%, transparent);
-  color: var(--p-primary-color, #818cf8);
-}
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
 
-.phorma-workflows__delete:hover {
-  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-  color: var(--phorma-accent-red, #ef4444);
+  &--danger:hover {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    color: var(--phorma-accent-red, #ef4444);
+  }
 }
 
 .phorma-workflows__placeholder {

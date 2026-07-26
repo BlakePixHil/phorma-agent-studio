@@ -43,7 +43,7 @@
             @if (busy()) {
               <button
                 type="button"
-                class="phorma-cmdk__submit phorma-cmdk__submit--stop"
+                class="phorma-cmdk__submit phorma-cmdk__submit--stop phorma-btn-shimmer"
                 (click)="stop()"
                 aria-label="Stop"
                 title="Stop"
@@ -53,7 +53,7 @@
             } @else {
               <button
                 type="button"
-                class="phorma-cmdk__submit"
+                class="phorma-cmdk__submit phorma-btn-shimmer"
                 [disabled]="!draft().trim()"
                 (click)="submit()"
                 aria-label="Build workflow"

@@ -230,7 +230,7 @@
       @if (chat.busy()) {
         <button
           type="button"
-          class="phorma-chat__send phorma-chat__send--stop"
+          class="phorma-chat__send phorma-chat__send--stop phorma-btn-shimmer"
           (click)="cancel()"
           aria-label="Stop"
           title="Stop"
@@ -240,7 +240,7 @@
       } @else {
         <button
           type="button"
-          class="phorma-chat__send"
+          class="phorma-chat__send phorma-btn-shimmer"
           [disabled]="!draft().trim()"
           (click)="submit()"
           aria-label="Send"

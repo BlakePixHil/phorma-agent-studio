@@ -917,4 +917,63 @@ app-root {
   --p-button-help-active-color: #ffffff;
 }
 
+/* ----------------------------------------------------------------------------
+   Hand-rolled coloured button shimmer — matches the PrimeNG sheen recipe
+   ---------------------------------------------------------------------------- */
+
+/*
+ * Several buttons in the app are hand-rolled plain <button> elements (not
+ * PrimeNG p-button) so they can carry custom accent colours and shapes:
+ *   - Assistant "New chat" (dialog + panel + tab)
+ *   - Assistant chat send / stop
+ *   - Command palette submit / stop
+ *   - AI review "Keep" primary pill
+ *   - Prompt panel subscribe button
+ *
+ * The PrimeNG filled-button sheen recipe above only targets `.p-button`, so
+ * these hand-rolled buttons would otherwise read as flat coloured rectangles
+ * next to their PrimeNG siblings. `.phorma-btn-shimmer` is the shared class
+ * that paints the same top-to-bottom white-to-transparent gradient overlay
+ * (via ::before) and forces white text, so every coloured button in the app
+ * shares one consistent specular-highlight language.
+ *
+ * Usage: add `phorma-btn-shimmer` to any filled coloured button that sets its
+ * own `background` to a saturated accent. The class only paints the sheen and
+ * text colour — sizing, radius, and the background colour itself stay on the
+ * component's own class.
+ */
+.phorma-btn-shimmer {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* Offset down 1px so the top rim stays the solid base colour. */
+    transform: translateY(1px);
+    border-radius: inherit;
+    /* Inherit the button's background colour so the sheen tracks hover/active
+       variants defined on the component class, then overlay a soft
+       white-to-transparent gradient for the specular highlight. */
+    background-color: inherit;
+    background-image: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.15),
+      rgba(255, 255, 255, 0)
+    );
+    pointer-events: none;
+    z-index: 0;
+    transition: background-color 0.2s ease;
+  }
+
+  /* Lift icon + label content above the sheen overlay. */
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
 
