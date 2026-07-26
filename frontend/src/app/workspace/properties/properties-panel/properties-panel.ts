@@ -22,6 +22,7 @@ import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import type {
   ApprovalGateData,
+  AskUserNodeData,
   ExecuteWorkflowNodeData,
   ForEachNodeData,
   HttpToolData,
@@ -290,6 +291,10 @@ export class PropertiesPanel {
   protected readonly waitEventData = computed<WaitEventNodeData | null>(() => {
     const node = this.node();
     return node?.kind === 'wait-event' ? (node.data as WaitEventNodeData) : null;
+  });
+  protected readonly askUserData = computed<AskUserNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'ask-user' ? (node.data as AskUserNodeData) : null;
   });
   protected readonly executeWorkflowData = computed<ExecuteWorkflowNodeData | null>(() => {
     const node = this.node();

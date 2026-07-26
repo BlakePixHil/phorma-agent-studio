@@ -12,6 +12,7 @@ import {
 import { AgentStreamService } from './agent-stream.service';
 import { ModelTransportService } from './model-transport.service';
 import { ModelPricingService } from './model-pricing.service';
+import { PanelRegistryService } from './panel-registry.service';
 import { RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
 import { TerminalOutputService } from './terminal-output.service';
@@ -96,6 +97,18 @@ export interface PendingWait {
   resolve: (eventPayload: string) => void;
 }
 
+/** A suspended Ask-User node, surfaced in the Runs panel. */
+export interface PendingQuestion {
+  /** Engine identity for this exact ask occurrence. */
+  requestId: string;
+  nodeId: string;
+  nodeName: string;
+  question: string;
+  payload: string;
+  /** Delivers the user's free-text response. */
+  resolve: (response: string) => void;
+}
+
 /** How long a handoff edge stays lit after the pulse (ms). */
 const EDGE_PULSE_MS = 1400;
 /** Trace buffer cap. */
@@ -127,6 +140,7 @@ export class RunControllerService {
   private readonly agentStream = inject(AgentStreamService);
   private readonly toolHost = inject(ToolHostService);
   private readonly toast = inject(ToastService);
+  private readonly panels = inject(PanelRegistryService);
   private readonly creditsDialog = inject(CreditsDialogService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
@@ -136,6 +150,8 @@ export class RunControllerService {
   private traceCounter = 0;
   private runCounter = 0;
   private readonly edgeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Toast ids raised for pending questions, so they can be dismissed on answer. */
+  private readonly questionToasts = new Map<string, number>();
 
   // ── Reactive state the UI consumes ─────────────────────────────────────────
 
@@ -151,6 +167,20 @@ export class RunControllerService {
   readonly pendingApprovals = signal<PendingApproval[]>([]);
   /** Wait-for-Event nodes awaiting an external event. */
   readonly pendingWaits = signal<PendingWait[]>([]);
+  /** Ask-User nodes awaiting a free-text response. */
+  readonly pendingQuestions = signal<PendingQuestion[]>([]);
+  /**
+   * Draft answers per pending Ask-User request id. Owned here (not by the
+   * Runs panel) because the same question is answerable from two surfaces —
+   * the inline canvas overlay and the Runs panel card — and both must edit
+   * and submit the same text.
+   */
+  readonly questionDrafts = signal<Record<string, string>>({});
+  /**
+   * Request id whose Runs-panel answer box should take focus, set by the
+   * "Answer" toast action. The panel clears it once focus lands.
+   */
+  readonly focusQuestionId = signal<string | null>(null);
   /** Task input used for the next run (bound to the Runs panel textarea). */
   readonly runInput = signal('');
   /** Total streamed characters this run (cheap progress proxy). */
@@ -194,6 +224,13 @@ export class RunControllerService {
    */
   remoteEventSender: ((correlationKey: string, payload: string) => void) | null = null;
 
+  /**
+   * Set by CloudService while a monitor is connected: routes Ask-User
+   * responses for REMOTE runs over the WebSocket. Local runs create their
+   * own pending entries via the engine callback and ignore this.
+   */
+  remoteQuestionSender: ((requestId: string, response: string) => void) | null = null;
+
   readonly running = computed(() => {
     const phase = this.terminal.phase();
     return (
@@ -201,7 +238,8 @@ export class RunControllerService {
       phase === 'running' ||
       phase === 'paused' ||
       phase === 'waiting-approval' ||
-      phase === 'waiting-event'
+      phase === 'waiting-event' ||
+      phase === 'waiting-input'
     );
   });
   readonly paused = computed(() => this.terminal.phase() === 'paused');
@@ -262,9 +300,9 @@ export class RunControllerService {
       // the default anti-runaway budget allows.
       maxExecutions:
         graph.nodes.some(node => node.kind === 'for-each') ||
-        Object.values(subWorkflows ?? {}).some(workflow =>
-          workflow.graph.nodes.some(node => node.kind === 'for-each'),
-        )
+          Object.values(subWorkflows ?? {}).some(workflow =>
+            workflow.graph.nodes.some(node => node.kind === 'for-each'),
+          )
           ? 2000
           : undefined,
       subWorkflows,
@@ -338,6 +376,20 @@ export class RunControllerService {
             },
           ]);
         }),
+      requestInput: (nodeId, question, payload, requestId) =>
+        new Promise<string>(resolve => {
+          const scopedNode = Object.values(subWorkflows ?? {})
+            .flatMap(workflow => workflow.graph.nodes)
+            .find(node => node.id === nodeId);
+          const nodeName =
+            this.workflow.graph().nodes.find(node => node.id === nodeId)?.name ??
+            scopedNode?.name ??
+            nodeId;
+          this.pendingQuestions.update(list => [
+            ...list,
+            { requestId, nodeId, nodeName, question, payload, resolve },
+          ]);
+        }),
     });
     for (const nodeId of this.breakpoints()) handle.gate.breakpoints.add(nodeId);
     this.handle = handle;
@@ -359,11 +411,13 @@ export class RunControllerService {
   stop(): void {
     if (!this.handle) return;
     this.handle.stop();
-    // Unblock any pending approvals/waits so the run can unwind.
+    // Unblock any pending approvals/waits/questions so the run can unwind.
     for (const approval of this.pendingApprovals()) approval.resolve(false);
     this.pendingApprovals.set([]);
     for (const wait of this.pendingWaits()) wait.resolve('');
     this.pendingWaits.set([]);
+    for (const question of this.pendingQuestions()) question.resolve('');
+    this.clearQuestions();
   }
 
   /**
@@ -464,6 +518,74 @@ export class RunControllerService {
     if (!wait) return;
     this.pendingWaits.update(list => list.filter(item => item.nodeId !== nodeId));
     wait.resolve(eventPayload);
+  }
+
+  /** Submits a user's free-text response to a suspended Ask-User node. */
+  resolveQuestion(requestId: string, response: string): void {
+    const question = this.pendingQuestions().find(item => item.requestId === requestId);
+    if (!question) return;
+    this.pendingQuestions.update(list => list.filter(item => item.requestId !== requestId));
+    this.clearQuestionDraft(requestId);
+    question.resolve(response);
+  }
+
+  /** Records in-progress answer text for a pending Ask-User node. */
+  setQuestionDraft(requestId: string, text: string): void {
+    this.questionDrafts.update(drafts => ({ ...drafts, [requestId]: text }));
+  }
+
+  private clearQuestionDraft(requestId: string): void {
+    this.questionDrafts.update(drafts => {
+      if (!(requestId in drafts)) return drafts;
+      const next = { ...drafts };
+      delete next[requestId];
+      return next;
+    });
+    if (this.focusQuestionId() === requestId) this.focusQuestionId.set(null);
+    this.dismissQuestionToast(requestId);
+  }
+
+  /** Drops every pending question card along with its draft + focus state. */
+  private clearQuestions(): void {
+    this.pendingQuestions.set([]);
+    this.questionDrafts.set({});
+    this.focusQuestionId.set(null);
+    for (const id of this.questionToasts.values()) this.toast.dismiss(id);
+    this.questionToasts.clear();
+  }
+
+  /**
+   * Makes a suspended question impossible to miss: reveals the Runs pane and
+   * raises a persistent toast whose action focuses that question's answer box.
+   * The canvas overlay is the primary surface, but it only exists for nodes on
+   * the active graph — sub-workflow nodes are answerable in the panel only.
+   */
+  private announceQuestion(requestId: string, nodeName: string, question: string): void {
+    this.revealRunsPane();
+    if (this.questionToasts.has(requestId)) return;
+    const id = this.toast.warning(`${nodeName} needs an answer`, firstLine(question), {
+      label: 'Answer',
+      onClick: () => {
+        this.revealRunsPane();
+        this.focusQuestionId.set(requestId);
+      },
+    });
+    this.questionToasts.set(requestId, id);
+  }
+
+  private dismissQuestionToast(requestId: string): void {
+    const id = this.questionToasts.get(requestId);
+    if (id === undefined) return;
+    this.questionToasts.delete(requestId);
+    this.toast.dismiss(id);
+  }
+
+  /** Opens the sidebar on whichever side hosts the Runs tab and activates it. */
+  private revealRunsPane(): void {
+    const side = this.panels.tabs().find(tab => tab.id === 'runs')?.side ?? 'right';
+    this.panels.setActive(side, 'runs');
+    if (side === 'right') this.panels.expandRight();
+    else this.panels.expandLeft();
   }
 
   /** Toggles a breakpoint on a node (context menu). */
@@ -673,7 +795,11 @@ export class RunControllerService {
           list.filter(item => item.requestId !== event.requestId),
         );
         this.terminal.setPhase(
-          this.pendingApprovals().length > 0 ? 'waiting-approval' : 'running',
+          this.pendingApprovals().length > 0
+            ? 'waiting-approval'
+            : this.pendingQuestions().length > 0
+              ? 'waiting-input'
+              : 'running',
         );
         break;
 
@@ -723,6 +849,48 @@ export class RunControllerService {
         // Remote monitors may hold no local resolver — just clear any card.
         this.pendingWaits.update(list => list.filter(item => item.nodeId !== event.nodeId));
         this.console('run', 'info', `Event "${event.correlationKey}" arrived — resuming.`);
+        break;
+
+      case 'ask-required':
+        this.terminal.setPhase('waiting-input');
+        if (!scoped) this.setNodeState(event.nodeId, 'waiting-input');
+        this.console('run', 'warning', `Question: ${event.question}`);
+        // Remote runs: the engine callback lives in the cloud, so synthesize
+        // the pending entry here and resolve it over the monitor socket.
+        if (
+          this.remoteQuestionSender &&
+          !this.pendingQuestions().some(item => item.requestId === event.requestId)
+        ) {
+          const send = this.remoteQuestionSender;
+          this.pendingQuestions.update(list => [
+            ...list,
+            {
+              requestId: event.requestId,
+              nodeId: event.nodeId,
+              nodeName: this.nodeName(event.nodeId),
+              question: event.question,
+              payload: event.payload,
+              resolve: response => send(event.requestId, response),
+            },
+          ]);
+        }
+        this.announceQuestion(event.requestId, this.nodeName(event.nodeId), event.question);
+        break;
+
+      case 'ask-resolved':
+        if (!scoped) this.setNodeState(event.nodeId, 'done');
+        // Remote monitors may still hold a synthetic pending card — clear it.
+        this.pendingQuestions.update(list =>
+          list.filter(item => item.requestId !== event.requestId),
+        );
+        this.dismissQuestionToast(event.requestId);
+        this.terminal.setPhase(
+          this.pendingApprovals().length > 0
+            ? 'waiting-approval'
+            : this.pendingQuestions().length > 0
+              ? 'waiting-input'
+              : 'running',
+        );
         break;
 
       case 'subworkflow-started':
@@ -919,6 +1087,7 @@ export class RunControllerService {
     this.activeEdges.set(new Set());
     this.pendingApprovals.set([]);
     this.pendingWaits.set([]);
+    this.clearQuestions();
     this.streamedChars.set(0);
     this.streamBuffers.clear();
     this.nodeThinking.set(new Map());
@@ -934,6 +1103,8 @@ export class RunControllerService {
     this.pendingApprovals.set([]);
     for (const wait of this.pendingWaits()) wait.resolve('');
     this.pendingWaits.set([]);
+    for (const question of this.pendingQuestions()) question.resolve('');
+    this.clearQuestions();
     // If the run spent Phorma Cloud credits, pull a fresh quota so the account
     // chip / Settings bar reflect the new balance without waiting for the next
     // dialog open. Backend metering settles via waitUntil, so a short delay

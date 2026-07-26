@@ -1,19 +1,14 @@
 <div class="phorma-runs">
   <!-- Viewing a past run ("Bring to Canvas") -->
   @if (runController.viewingHistoricalRunId(); as historicalId) {
-    <div class="phorma-runs__history-banner">
-      <i class="ti ti-history" aria-hidden="true"></i>
-      <span>Viewing a past run</span>
-      <button
-        type="button"
-        class="phorma-runs__history-banner-close"
-        title="Dismiss"
-        aria-label="Stop viewing past run"
-        (click)="runController.stopViewingHistoricalRun()"
-      >
-        <i class="ti ti-x" aria-hidden="true"></i>
-      </button>
-    </div>
+  <div class="phorma-runs__history-banner">
+    <i class="ti ti-history" aria-hidden="true"></i>
+    <span>Viewing a past run</span>
+    <button type="button" class="phorma-runs__history-banner-close" title="Dismiss" aria-label="Stop viewing past run"
+      (click)="runController.stopViewingHistoricalRun()">
+      <i class="ti ti-x" aria-hidden="true"></i>
+    </button>
+  </div>
   }
 
   <!-- Task input + run controls -->
@@ -21,333 +16,275 @@
     <label class="phorma-runs__label" for="run-input">
       Task
       @if (cloud.connected()) {
-        <span class="phorma-runs__cloud-badge" title="Runs target the deployed cloud instance">
-          <i class="ti ti-cloud" aria-hidden="true"></i> cloud
-        </span>
+      <span class="phorma-runs__cloud-badge" title="Runs target the deployed cloud instance">
+        <i class="ti ti-cloud" aria-hidden="true"></i> cloud
+      </span>
       }
     </label>
-    <textarea
-      pTextarea
-      id="run-input"
-      class="phorma-runs__input"
-      rows="3"
-      [fluid]="true"
-      [autoResize]="true"
-      placeholder="What should this workflow do?"
-      [value]="runController.runInput()"
-      (input)="onInput($event)"
-      [disabled]="runController.running()"
-    ></textarea>
+    <textarea pTextarea id="run-input" class="phorma-runs__input" rows="3" [fluid]="true" [autoResize]="true"
+      placeholder="What should this workflow do?" [value]="runController.runInput()" (input)="onInput($event)"
+      [disabled]="runController.running()"></textarea>
     <div class="phorma-runs__controls">
       @if (!runController.running()) {
-        <p-button
-          severity="success"
-          size="small"
-          icon="ti ti-player-play"
-          label="Run"
-          (onClick)="run()"
-        />
+      <p-button severity="success" size="small" icon="ti ti-player-play" label="Run" (onClick)="run()" />
       } @else {
-        <button type="button" pButton severity="secondary" [outlined]="true" (click)="runController.pauseOrResume()">
-          <i class="ti" [class.ti-player-pause]="!runController.paused()" [class.ti-player-play]="runController.paused()" aria-hidden="true"></i>
-          {{ runController.paused() ? 'Resume' : 'Pause' }}
-        </button>
-        <button
-          type="button"
-          pButton
-          severity="secondary"
-          [outlined]="true"
-          [disabled]="!runController.paused()"
-          (click)="runController.step()"
-        >
-          <i class="ti ti-player-skip-forward" aria-hidden="true"></i> Step
-        </button>
-        <button type="button" pButton severity="danger" [outlined]="true" (click)="stop()">
-          <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
-        </button>
+      <button type="button" pButton severity="secondary" [outlined]="true" (click)="runController.pauseOrResume()">
+        <i class="ti" [class.ti-player-pause]="!runController.paused()" [class.ti-player-play]="runController.paused()"
+          aria-hidden="true"></i>
+        {{ runController.paused() ? 'Resume' : 'Pause' }}
+      </button>
+      <button type="button" pButton severity="secondary" [outlined]="true" [disabled]="!runController.paused()"
+        (click)="runController.step()">
+        <i class="ti ti-player-skip-forward" aria-hidden="true"></i> Step
+      </button>
+      <button type="button" pButton severity="danger" [outlined]="true" (click)="stop()">
+        <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+      </button>
       }
       <span class="phorma-runs__phase">{{ terminal.phase() }}</span>
     </div>
     @if (usage(); as u) {
-      @if (u.inputTokens > 0 || u.outputTokens > 0) {
-        <div class="phorma-runs__usage" title="Tokens used by this run (in / out)">
-          <i class="ti ti-coins" aria-hidden="true"></i>
-          <span>{{ u.inputTokens | number }} in · {{ u.outputTokens | number }} out</span>
-          @if (usageCredits(); as credits) {
-            <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
-          }
-          @if (usageByoUsd() > 0) {
-            <span class="phorma-runs__usage-cost">{{ usageByoUsd() | currency: 'USD' : 'symbol' : '1.4-4' }}{{ u.estimated ? ' (est.)' : '' }}</span>
-          }
-        </div>
+    @if (u.inputTokens > 0 || u.outputTokens > 0) {
+    <div class="phorma-runs__usage" title="Tokens used by this run (in / out)">
+      <i class="ti ti-coins" aria-hidden="true"></i>
+      <span>{{ u.inputTokens | number }} in · {{ u.outputTokens | number }} out</span>
+      @if (usageCredits(); as credits) {
+      <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
       }
+      @if (usageByoUsd() > 0) {
+      <span class="phorma-runs__usage-cost">{{ usageByoUsd() | currency: 'USD' : 'symbol' : '1.4-4' }}{{ u.estimated ? '
+        (est.)' : '' }}</span>
+      }
+    </div>
+    }
     }
   </section>
 
   <!-- Pending approvals -->
   @for (approval of runController.pendingApprovals(); track approval.requestId) {
-    <section class="phorma-runs__approval">
-      <header>
-        <i class="ti ti-user-check" aria-hidden="true"></i>
-        <strong>{{ approval.nodeName }}</strong>
-      </header>
-      <p class="phorma-runs__approval-message">{{ approval.message }}</p>
-      @if (approval.payload) {
-        <pre class="phorma-runs__payload selectable">{{ approval.payload }}</pre>
-      }
-      <div class="phorma-runs__approval-actions">
-        <button
-          type="button"
-          class="phorma-runs__btn phorma-runs__btn--approve"
-          (click)="runController.resolveApproval(approval.requestId, true)"
-        >
-          <i class="ti ti-thumb-up" aria-hidden="true"></i> Approve
-        </button>
-        <button
-          type="button"
-          pButton
-          severity="danger"
-          [outlined]="true"
-          (click)="runController.resolveApproval(approval.requestId, false)"
-        >
-          <i class="ti ti-thumb-down" aria-hidden="true"></i> Reject
-        </button>
-      </div>
-    </section>
+  <section class="phorma-runs__approval">
+    <header>
+      <i class="ti ti-user-check" aria-hidden="true"></i>
+      <strong>{{ approval.nodeName }}</strong>
+    </header>
+    <p class="phorma-runs__approval-message">{{ approval.message }}</p>
+    @if (approval.payload) {
+    <pre class="phorma-runs__payload selectable">{{ approval.payload }}</pre>
+    }
+    <div class="phorma-runs__approval-actions">
+      <button type="button" class="phorma-runs__btn phorma-runs__btn--approve"
+        (click)="runController.resolveApproval(approval.requestId, true)">
+        <i class="ti ti-thumb-up" aria-hidden="true"></i> Approve
+      </button>
+      <button type="button" pButton severity="danger" [outlined]="true"
+        (click)="runController.resolveApproval(approval.requestId, false)">
+        <i class="ti ti-thumb-down" aria-hidden="true"></i> Reject
+      </button>
+    </div>
+  </section>
   }
 
   <!-- Suspended waits (external events) -->
   @for (wait of runController.pendingWaits(); track wait.nodeId) {
-    <section class="phorma-runs__approval phorma-runs__wait">
-      <header>
-        <i class="ti ti-hourglass-high" aria-hidden="true"></i>
-        <strong>{{ wait.nodeName }}</strong>
-        <code class="phorma-runs__wait-key" title="Correlation key">{{ wait.correlationKey }}</code>
-      </header>
-      <p class="phorma-runs__approval-message">{{ wait.message }}</p>
-      <textarea
-        class="phorma-runs__input phorma-runs__wait-input"
-        rows="2"
-        placeholder='Event payload (JSON or text) — e.g. {"signedPdfUrl": "…"}'
-        [value]="waitDraft(wait.nodeId)"
-        (input)="onWaitDraft(wait.nodeId, $event)"
-      ></textarea>
-      <div class="phorma-runs__approval-actions">
-        <button
-          type="button"
-          class="phorma-runs__btn phorma-runs__btn--approve"
-          (click)="injectEvent(wait.nodeId)"
-        >
-          <i class="ti ti-bolt" aria-hidden="true"></i> Deliver event
-        </button>
-      </div>
-    </section>
+  <section class="phorma-runs__approval phorma-runs__wait">
+    <header>
+      <i class="ti ti-hourglass-high" aria-hidden="true"></i>
+      <strong>{{ wait.nodeName }}</strong>
+      <code class="phorma-runs__wait-key" title="Correlation key">{{ wait.correlationKey }}</code>
+    </header>
+    <p class="phorma-runs__approval-message">{{ wait.message }}</p>
+    <textarea class="phorma-runs__input phorma-runs__wait-input" rows="2"
+      placeholder='Event payload (JSON or text) — e.g. {"signedPdfUrl": "…"}' [value]="waitDraft(wait.nodeId)"
+      (input)="onWaitDraft(wait.nodeId, $event)"></textarea>
+    <div class="phorma-runs__approval-actions">
+      <button type="button" class="phorma-runs__btn phorma-runs__btn--approve" (click)="injectEvent(wait.nodeId)">
+        <i class="ti ti-bolt" aria-hidden="true"></i> Deliver event
+      </button>
+    </div>
+  </section>
+  }
+
+  <!-- Pending questions (Ask User) -->
+  @for (question of runController.pendingQuestions(); track question.requestId) {
+  <section class="phorma-runs__approval phorma-runs__wait">
+    <header>
+      <i class="ti ti-message-question" aria-hidden="true"></i>
+      <strong>{{ question.nodeName }}</strong>
+    </header>
+    <p class="phorma-runs__approval-message">{{ question.question }}</p>
+    <textarea #answerBox class="phorma-runs__input phorma-runs__wait-input" rows="3" placeholder="Type your answer…"
+      [attr.data-request-id]="question.requestId" [value]="questionDraft(question.requestId)"
+      (input)="onQuestionDraft(question.requestId, $event)" (keydown.control.enter)="submitAnswer(question.requestId)"
+      (keydown.meta.enter)="submitAnswer(question.requestId)"></textarea>
+    <div class="phorma-runs__approval-actions">
+      <button type="button" class="phorma-runs__btn phorma-runs__btn--approve"
+        [disabled]="!questionDraft(question.requestId).trim()" (click)="submitAnswer(question.requestId)">
+        <i class="ti ti-send" aria-hidden="true"></i> Submit answer
+      </button>
+    </div>
+  </section>
   }
 
   <!-- Trace timeline -->
   <section class="phorma-runs__section phorma-runs__section--grow">
     <label class="phorma-runs__label">Trace</label>
     @if (traceGroups().length > 0) {
-      <ol class="phorma-runs__trace">
-        @for (group of traceGroups(); track group.key) {
-          @if (group.grouped && (group.noun === 'event' || groupStepCount(group) > 1)) {
-            <li
-              class="phorma-runs__group"
-              [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)"
-            >
-              <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
-                <i class="{{ group.icon ?? 'ti ti-stack-2' }} phorma-runs__group-icon" aria-hidden="true"></i>
-                <span class="phorma-runs__group-title">{{ group.title ?? 'Activity' }}</span>
-                <span class="phorma-runs__group-count">
-                  {{ groupCountLabel(group) }}
-                </span>
-                <i
-                  class="ti phorma-runs__group-chevron"
-                  [class.ti-chevron-down]="!isGroupCollapsed(group.key)"
-                  [class.ti-chevron-right]="isGroupCollapsed(group.key)"
-                  aria-hidden="true"
-                ></i>
-              </button>
-              @if (!isGroupCollapsed(group.key)) {
-                <ol class="phorma-runs__group-entries">
-                  @for (entry of group.entries; track entry.id) {
-                    <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
-                  }
-                </ol>
-              }
-            </li>
-          } @else {
-            @for (entry of group.entries; track entry.id) {
-              <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
-            }
+    <ol class="phorma-runs__trace">
+      @for (group of traceGroups(); track group.key) {
+      @if (group.grouped && (group.noun === 'event' || groupStepCount(group) > 1)) {
+      <li class="phorma-runs__group" [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)">
+        <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
+          <i class="{{ group.icon ?? 'ti ti-stack-2' }} phorma-runs__group-icon" aria-hidden="true"></i>
+          <span class="phorma-runs__group-title">{{ group.title ?? 'Activity' }}</span>
+          <span class="phorma-runs__group-count">
+            {{ groupCountLabel(group) }}
+          </span>
+          <i class="ti phorma-runs__group-chevron" [class.ti-chevron-down]="!isGroupCollapsed(group.key)"
+            [class.ti-chevron-right]="isGroupCollapsed(group.key)" aria-hidden="true"></i>
+        </button>
+        @if (!isGroupCollapsed(group.key)) {
+        <ol class="phorma-runs__group-entries">
+          @for (entry of group.entries; track entry.id) {
+          <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
           }
+        </ol>
         }
-      </ol>
+      </li>
+      } @else {
+      @for (entry of group.entries; track entry.id) {
+      <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
+      }
+      }
+      }
+    </ol>
     } @else {
-      <p class="phorma-runs__empty">No run yet. Enter a task and press Run.</p>
+    <p class="phorma-runs__empty">No run yet. Enter a task and press Run.</p>
     }
   </section>
 
   <!-- Run history -->
   <section class="phorma-runs__section">
     @if (!selectedRun()) {
-      <label class="phorma-runs__label">
-        History
-        <button
-          type="button"
-          class="phorma-runs__history-refresh"
-          title="Refresh run history"
-          aria-label="Refresh run history"
-          [disabled]="historyLoading()"
-          (click)="refreshHistory()"
-        >
-          <i
-            class="ti ti-refresh"
-            [class.phorma-runs__history-refresh--spinning]="historyLoading()"
-            aria-hidden="true"
-          ></i>
-        </button>
-      </label>
-      @if (historyRows().length > 0) {
-        <ul class="phorma-runs__history">
-          @for (row of historyRows(); track row.summary.id) {
-            <li>
-              <button
-                type="button"
-                class="phorma-runs__history-item"
-                [class.phorma-runs__history-item--live]="row.live"
-                (click)="openRun(row)"
-              >
-                <i
-                  class="{{ statusIcon(row.summary) }} phorma-runs__history-status phorma-runs__history-status--{{ row.summary.status }}"
-                  aria-hidden="true"
-                ></i>
-                <span class="phorma-runs__history-meta">
-                  <span class="phorma-runs__history-title">
-                    {{ row.summary.input || row.summary.workflowName }}
-                    @if (row.live) {
-                      <span class="phorma-runs__live-badge">live</span>
-                    }
-                  </span>
-                  <span class="phorma-runs__history-sub">
-                    <i class="{{ sourceIcon(row.summary) }}" aria-hidden="true" [title]="row.summary.source"></i>
-                    @if (row.summary.environment === 'cloud') {
-                      <i class="ti ti-cloud" aria-hidden="true" title="Cloud run"></i>
-                    }
-                    <time>{{ row.summary.startedAt | date: 'MMM d, HH:mm:ss' }}</time>
-                    @if (duration(row.summary); as dur) {
-                      <span>· {{ dur }}</span>
-                    }
-                    @if (costParts(row.summary.usage); as cost) {
-                      @if (cost.credits; as credits) {
-                        <span>· {{ credits | number }} cr</span>
-                      }
-                      @if (cost.usd; as usd) {
-                        <span>· {{ usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ cost.estimated ? ' (est.)' : '' }}</span>
-                      }
-                    }
-                  </span>
-                </span>
-                @if (row.summary.environment === 'local') {
-                  <span
-                    role="button"
-                    tabindex="0"
-                    class="phorma-runs__history-delete"
-                    title="Delete run"
-                    aria-label="Delete run"
-                    (click)="deleteRun(row, $event)"
-                    (keydown.enter)="deleteRun(row, $event)"
-                  >
-                    <i class="ti ti-trash" aria-hidden="true"></i>
-                  </span>
-                }
-              </button>
-            </li>
-          }
-        </ul>
-      } @else {
-        <p class="phorma-runs__empty">No runs recorded yet for this workflow.</p>
-      }
-    } @else {
-      <!-- Run detail -->
-      @if (selectedRun(); as record) {
-        <div class="phorma-runs__detail-header">
-          <button
-            type="button"
-            pButton
-            severity="secondary"
-            [outlined]="true"
-            (click)="closeRunDetail()"
-          >
-            <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
-          </button>
-          <p-button
-            size="small"
-            icon="ti ti-layout-grid-add"
-            label="Bring to Canvas"
-            (onClick)="bringToCanvas(record)"
-          />
-        </div>
-        <div class="phorma-runs__detail-summary">
-          <span class="phorma-runs__detail-row">
-            <i class="{{ statusIcon(record.summary) }} phorma-runs__history-status phorma-runs__history-status--{{ record.summary.status }}" aria-hidden="true"></i>
-            <strong>{{ record.summary.status }}</strong>
-            <time>{{ record.summary.startedAt | date: 'MMM d, y HH:mm:ss' }}</time>
-            @if (duration(record.summary); as dur) {
-              <span>· {{ dur }}</span>
-            }
-          </span>
-          @if (record.summary.usage.inputTokens > 0 || record.summary.usage.outputTokens > 0) {
-            <span class="phorma-runs__detail-row phorma-runs__usage">
-              <i class="ti ti-coins" aria-hidden="true"></i>
-              <span>{{ record.summary.usage.inputTokens | number }} in · {{ record.summary.usage.outputTokens | number }} out</span>
-              @if (costParts(record.summary.usage); as cost) {
-                @if (cost.credits; as credits) {
-                  <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
-                }
-                @if (cost.usd; as usd) {
-                  <span class="phorma-runs__usage-cost">{{ usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ cost.estimated ? ' (est.)' : '' }}</span>
-                }
+    <label class="phorma-runs__label">
+      History
+      <button type="button" class="phorma-runs__history-refresh" title="Refresh run history"
+        aria-label="Refresh run history" [disabled]="historyLoading()" (click)="refreshHistory()">
+        <i class="ti ti-refresh" [class.phorma-runs__history-refresh--spinning]="historyLoading()"
+          aria-hidden="true"></i>
+      </button>
+    </label>
+    @if (historyRows().length > 0) {
+    <ul class="phorma-runs__history">
+      @for (row of historyRows(); track row.summary.id) {
+      <li>
+        <button type="button" class="phorma-runs__history-item" [class.phorma-runs__history-item--live]="row.live"
+          (click)="openRun(row)">
+          <i class="{{ statusIcon(row.summary) }} phorma-runs__history-status phorma-runs__history-status--{{ row.summary.status }}"
+            aria-hidden="true"></i>
+          <span class="phorma-runs__history-meta">
+            <span class="phorma-runs__history-title">
+              {{ row.summary.input || row.summary.workflowName }}
+              @if (row.live) {
+              <span class="phorma-runs__live-badge">live</span>
               }
             </span>
-          }
-        </div>
-        <ol class="phorma-runs__trace">
-          @for (group of selectedTraceGroups(); track group.key) {
-            @if (group.grouped && (group.noun === 'event' || groupStepCount(group) > 1)) {
-              <li
-                class="phorma-runs__group"
-                [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)"
-              >
-                <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
-                  <i class="{{ group.icon ?? 'ti ti-stack-2' }} phorma-runs__group-icon" aria-hidden="true"></i>
-                  <span class="phorma-runs__group-title">{{ group.title ?? 'Activity' }}</span>
-                  <span class="phorma-runs__group-count">
-                    {{ groupCountLabel(group) }}
-                  </span>
-                  <i
-                    class="ti phorma-runs__group-chevron"
-                    [class.ti-chevron-down]="!isGroupCollapsed(group.key)"
-                    [class.ti-chevron-right]="isGroupCollapsed(group.key)"
-                    aria-hidden="true"
-                  ></i>
-                </button>
-                @if (!isGroupCollapsed(group.key)) {
-                  <ol class="phorma-runs__group-entries">
-                    @for (entry of group.entries; track entry.id) {
-                      <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
-                    }
-                  </ol>
-                }
-              </li>
-            } @else {
-              @for (entry of group.entries; track entry.id) {
-                <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
+            <span class="phorma-runs__history-sub">
+              <i class="{{ sourceIcon(row.summary) }}" aria-hidden="true" [title]="row.summary.source"></i>
+              @if (row.summary.environment === 'cloud') {
+              <i class="ti ti-cloud" aria-hidden="true" title="Cloud run"></i>
               }
-            }
+              <time>{{ row.summary.startedAt | date: 'MMM d, HH:mm:ss' }}</time>
+              @if (duration(row.summary); as dur) {
+              <span>· {{ dur }}</span>
+              }
+              @if (costParts(row.summary.usage); as cost) {
+              @if (cost.credits; as credits) {
+              <span>· {{ credits | number }} cr</span>
+              }
+              @if (cost.usd; as usd) {
+              <span>· {{ usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ cost.estimated ? ' (est.)' : '' }}</span>
+              }
+              }
+            </span>
+          </span>
+          @if (row.summary.environment === 'local') {
+          <span role="button" tabindex="0" class="phorma-runs__history-delete" title="Delete run"
+            aria-label="Delete run" (click)="deleteRun(row, $event)" (keydown.enter)="deleteRun(row, $event)">
+            <i class="ti ti-trash" aria-hidden="true"></i>
+          </span>
+          }
+        </button>
+      </li>
+      }
+    </ul>
+    } @else {
+    <p class="phorma-runs__empty">No runs recorded yet for this workflow.</p>
+    }
+    } @else {
+    <!-- Run detail -->
+    @if (selectedRun(); as record) {
+    <div class="phorma-runs__detail-header">
+      <button type="button" pButton severity="secondary" [outlined]="true" (click)="closeRunDetail()">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+      </button>
+      <p-button size="small" icon="ti ti-layout-grid-add" label="Bring to Canvas" (onClick)="bringToCanvas(record)" />
+    </div>
+    <div class="phorma-runs__detail-summary">
+      <span class="phorma-runs__detail-row">
+        <i class="{{ statusIcon(record.summary) }} phorma-runs__history-status phorma-runs__history-status--{{ record.summary.status }}"
+          aria-hidden="true"></i>
+        <strong>{{ record.summary.status }}</strong>
+        <time>{{ record.summary.startedAt | date: 'MMM d, y HH:mm:ss' }}</time>
+        @if (duration(record.summary); as dur) {
+        <span>· {{ dur }}</span>
+        }
+      </span>
+      @if (record.summary.usage.inputTokens > 0 || record.summary.usage.outputTokens > 0) {
+      <span class="phorma-runs__detail-row phorma-runs__usage">
+        <i class="ti ti-coins" aria-hidden="true"></i>
+        <span>{{ record.summary.usage.inputTokens | number }} in · {{ record.summary.usage.outputTokens | number }}
+          out</span>
+        @if (costParts(record.summary.usage); as cost) {
+        @if (cost.credits; as credits) {
+        <span class="phorma-runs__usage-cost">{{ credits | number }} {{ credits === 1 ? 'credit' : 'credits' }}</span>
+        }
+        @if (cost.usd; as usd) {
+        <span class="phorma-runs__usage-cost">{{ usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ cost.estimated ? '
+          (est.)' : '' }}</span>
+        }
+        }
+      </span>
+      }
+    </div>
+    <ol class="phorma-runs__trace">
+      @for (group of selectedTraceGroups(); track group.key) {
+      @if (group.grouped && (group.noun === 'event' || groupStepCount(group) > 1)) {
+      <li class="phorma-runs__group" [class.phorma-runs__group--collapsed]="isGroupCollapsed(group.key)">
+        <button type="button" class="phorma-runs__group-header" (click)="toggleGroup(group.key)">
+          <i class="{{ group.icon ?? 'ti ti-stack-2' }} phorma-runs__group-icon" aria-hidden="true"></i>
+          <span class="phorma-runs__group-title">{{ group.title ?? 'Activity' }}</span>
+          <span class="phorma-runs__group-count">
+            {{ groupCountLabel(group) }}
+          </span>
+          <i class="ti phorma-runs__group-chevron" [class.ti-chevron-down]="!isGroupCollapsed(group.key)"
+            [class.ti-chevron-right]="isGroupCollapsed(group.key)" aria-hidden="true"></i>
+        </button>
+        @if (!isGroupCollapsed(group.key)) {
+        <ol class="phorma-runs__group-entries">
+          @for (entry of group.entries; track entry.id) {
+          <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
           }
         </ol>
+        }
+      </li>
+      } @else {
+      @for (entry of group.entries; track entry.id) {
+      <ng-container *ngTemplateOutlet="entryTpl; context: { $implicit: entry }"></ng-container>
       }
+      }
+      }
+    </ol>
+    }
     }
   </section>
 </div>
@@ -355,35 +292,23 @@
 <!-- A single trace entry: toggle row + expandable payload with copy button. -->
 <ng-template #entryTpl let-entry>
   <li class="phorma-runs__entry phorma-runs__entry--{{ entry.tone }}">
-    <button
-      type="button"
-      class="phorma-runs__entry-row"
-      [class.phorma-runs__entry-row--expandable]="!!entry.detail"
-      (click)="entry.detail && toggleExpanded(entry.id)"
-    >
+    <button type="button" class="phorma-runs__entry-row" [class.phorma-runs__entry-row--expandable]="!!entry.detail"
+      (click)="entry.detail && toggleExpanded(entry.id)">
       <i class="{{ entry.icon }}" aria-hidden="true"></i>
       <span class="phorma-runs__entry-label">{{ entry.label }}</span>
       <time class="phorma-runs__entry-time">{{ entry.at | date: 'HH:mm:ss' }}</time>
     </button>
     @if (entry.detail && expanded().has(entry.id)) {
-      <div class="phorma-runs__payload-wrap">
-        <button
-          type="button"
-          class="phorma-runs__copy"
-          [class.phorma-runs__copy--done]="copiedId() === entry.id"
-          [title]="copiedId() === entry.id ? 'Copied' : 'Copy'"
-          [attr.aria-label]="copiedId() === entry.id ? 'Copied' : 'Copy to clipboard'"
-          (click)="copyDetail(entry, $event)"
-        >
-          <i
-            class="ti"
-            [class.ti-copy]="copiedId() !== entry.id"
-            [class.ti-check]="copiedId() === entry.id"
-            aria-hidden="true"
-          ></i>
-        </button>
-        <pre class="phorma-runs__payload selectable">{{ entry.detail }}</pre>
-      </div>
+    <div class="phorma-runs__payload-wrap">
+      <button type="button" class="phorma-runs__copy" [class.phorma-runs__copy--done]="copiedId() === entry.id"
+        [title]="copiedId() === entry.id ? 'Copied' : 'Copy'"
+        [attr.aria-label]="copiedId() === entry.id ? 'Copied' : 'Copy to clipboard'"
+        (click)="copyDetail(entry, $event)">
+        <i class="ti" [class.ti-copy]="copiedId() !== entry.id" [class.ti-check]="copiedId() === entry.id"
+          aria-hidden="true"></i>
+      </button>
+      <pre class="phorma-runs__payload selectable">{{ entry.detail }}</pre>
+    </div>
     }
   </li>
 </ng-template>

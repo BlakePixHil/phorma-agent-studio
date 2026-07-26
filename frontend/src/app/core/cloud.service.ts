@@ -426,6 +426,8 @@ export class CloudService {
         this.approveRemote(requestId, approved);
       this.runController.remoteEventSender = (correlationKey, payload) =>
         this.sendEventRemote(correlationKey, payload);
+      this.runController.remoteQuestionSender = (requestId, response) =>
+        this.answerQuestionRemote(requestId, response);
       this.terminal.append('run', 'success', `Cloud monitor connected (${targetName}).`);
     };
     socket.onmessage = message => {
@@ -460,6 +462,7 @@ export class CloudService {
     this.connection.set('disconnected');
     this.runController.remoteApprovalSender = null;
     this.runController.remoteEventSender = null;
+    this.runController.remoteQuestionSender = null;
     socket?.close();
   }
 
@@ -503,6 +506,11 @@ export class CloudService {
 
   approveRemote(requestId: string, approved: boolean): void {
     this.send({ type: 'approval', requestId, approved });
+  }
+
+  /** Answers a suspended Ask-User node over the WebSocket monitor. */
+  answerQuestionRemote(requestId: string, response: string): void {
+    this.send({ type: 'question', requestId, response });
   }
 
   /** Delivers an external event to a suspended Wait-for-Event node remotely. */

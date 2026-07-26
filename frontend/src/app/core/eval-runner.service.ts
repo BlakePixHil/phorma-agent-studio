@@ -252,6 +252,9 @@ export class EvalRunnerService {
       // Evals are unattended: approval gates auto-approve, external-event
       // waits fail the case immediately (a suite can't wait for a webhook).
       requestApproval: async () => true,
+      requestInput: async () => {
+        throw new Error('Eval runs cannot ask the user for input.');
+      },
       waitForEvent: async () => {
         throw new Error('Eval runs cannot wait for external events.');
       },

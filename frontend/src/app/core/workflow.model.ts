@@ -35,6 +35,7 @@ export type WorkflowNodeKind =
   | 'approval-gate'
   | 'for-each'
   | 'wait-event'
+  | 'ask-user'
   | 'execute-workflow'
   | 'error-handler';
 
@@ -318,6 +319,21 @@ export interface WaitEventNodeData {
   timeoutHours?: number;
 }
 
+/** Configuration for an `ask-user` flow node. */
+export interface AskUserNodeData {
+  /**
+   * Question template shown to the user. `{{field}}` placeholders interpolate
+   * against the incoming JSON payload (e.g. `Approve this draft for {{customer}}?`).
+   * When empty, the incoming payload text is shown as the question.
+   */
+  question?: string;
+  /**
+   * Payload key the user's response is merged under (default `userResponse`).
+   * The downstream agent receives `{...original, [responseKey]: '...'}`.
+   */
+  responseKey?: string;
+}
+
 /** Configuration for an `execute-workflow` flow node. */
 export interface ExecuteWorkflowNodeData {
   /** Id of the workflow resolved from the library or embedded registry. */
@@ -343,6 +359,7 @@ export type WorkflowNodeData =
   | ApprovalGateData
   | ForEachNodeData
   | WaitEventNodeData
+  | AskUserNodeData
   | ExecuteWorkflowNodeData
   | Record<string, never>;
 

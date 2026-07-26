@@ -416,5 +416,114 @@ console.log('\nE2E: wait-event timeout');
   );
 }
 
+// ── E2E 7: ask-user surfaces a question and merges the response ──────────────
+console.log('\nE2E: ask-user');
+{
+  const graph: WorkflowGraph = {
+    nodes: [
+      node('trig', 'manual-trigger', [{ id: 'trig-start', name: 'Start', role: 'message-out' }]),
+      node(
+        'ask',
+        'ask-user',
+        [
+          { id: 'ask-in', name: 'In', role: 'message-in' },
+          { id: 'ask-out', name: 'Answered', role: 'message-out' },
+        ],
+        { question: 'Approve draft for {{customer}}?', responseKey: 'userResponse' },
+      ),
+    ],
+    connections: [edge('e1', 'trig-start', 'ask-in')],
+  };
+
+  const events: RunEvent[] = [];
+  const seenQuestions: string[] = [];
+  const handle = startRun({
+    runId: 'e2e-7',
+    graph,
+    input: JSON.stringify({ customer: 'Acme', draft: 'v1' }),
+    model: { stream: async function* () { throw new Error('no model needed'); } } as never,
+    emit: event => events.push(event),
+    requestApproval: async () => true,
+    requestInput: async (_nodeId, question) => {
+      seenQuestions.push(question);
+      return 'yes, ship it';
+    },
+    waitForEvent: async () => {
+      throw new Error('not used');
+    },
+  });
+  await handle.done;
+
+  const completed = events.find(e => e.type === 'run-completed') as
+    | Extract<RunEvent, { type: 'run-completed' }>
+    | undefined;
+  check('run completed', !!completed, JSON.stringify(events.at(-1)));
+  check(
+    'question template interpolated against payload',
+    seenQuestions[0] === 'Approve draft for Acme?',
+    seenQuestions[0],
+  );
+  const askRequired = events.filter(e => e.type === 'ask-required');
+  const askResolved = events.filter(e => e.type === 'ask-resolved');
+  check('one ask-required event', askRequired.length === 1);
+  check('one ask-resolved event', askResolved.length === 1);
+  const output = JSON.parse(completed?.output ?? '{}') as {
+    customer?: string;
+    draft?: string;
+    userResponse?: string;
+  };
+  check(
+    'response merged under responseKey, original fields preserved',
+    output.userResponse === 'yes, ship it' && output.customer === 'Acme' && output.draft === 'v1',
+    JSON.stringify(output),
+  );
+}
+
+// ── E2E 8: ask-user with empty question falls back to payload ────────────────
+console.log('\nE2E: ask-user empty question falls back to payload');
+{
+  const graph: WorkflowGraph = {
+    nodes: [
+      node('trig', 'manual-trigger', [{ id: 'trig-start', name: 'Start', role: 'message-out' }]),
+      node(
+        'ask',
+        'ask-user',
+        [
+          { id: 'ask-in', name: 'In', role: 'message-in' },
+          { id: 'ask-out', name: 'Answered', role: 'message-out' },
+        ],
+        { responseKey: 'answer' },
+      ),
+    ],
+    connections: [edge('e1', 'trig-start', 'ask-in')],
+  };
+
+  const events: RunEvent[] = [];
+  let seenQuestion = '';
+  const handle = startRun({
+    runId: 'e2e-8',
+    graph,
+    input: 'What size do you want?',
+    model: { stream: async function* () { throw new Error('no model needed'); } } as never,
+    emit: event => events.push(event),
+    requestApproval: async () => true,
+    requestInput: async (_nodeId, question) => {
+      seenQuestion = question;
+      return 'large';
+    },
+    waitForEvent: async () => {
+      throw new Error('not used');
+    },
+  });
+  await handle.done;
+
+  check('empty question falls back to payload', seenQuestion === 'What size do you want?', seenQuestion);
+  const completed = events.find(e => e.type === 'run-completed') as
+    | Extract<RunEvent, { type: 'run-completed' }>
+    | undefined;
+  const output = JSON.parse(completed?.output ?? '{}') as { answer?: string };
+  check('custom responseKey honored', output.answer === 'large', JSON.stringify(output));
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

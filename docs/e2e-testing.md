@@ -71,6 +71,7 @@ const ids = await page.evaluate(() =>
 | `nodeStates()` | Canvas ring states per node (`thinking`/`done`/`error`/…). |
 | `approvals()` / `approve(nodeId, approved)` | Inspect and resolve human-approval gates. |
 | `waits()` / `sendEvent(nodeId, payload)` | Inspect and resolve Wait-for-Event suspensions. |
+| `questions()` / `answerQuestion(requestId, response)` | Inspect and answer Ask-User suspensions. |
 | `stop()` | Stop the in-flight run. |
 
 ### Recipes
@@ -111,6 +112,23 @@ await page.evaluate(() => window.__phormaTest.run('Draft it.'));
 const [gate] = await page.evaluate(() => window.__phormaTest.approvals());
 await page.evaluate(id => window.__phormaTest.approve(id, true), gate.nodeId);
 ```
+
+**Ask User flow:**
+
+```js
+await page.evaluate(() => window.__phormaTest.run('Book me a table.'));
+// wait until phase() === 'waiting-input', then:
+const [q] = await page.evaluate(() => window.__phormaTest.questions());
+await page.evaluate(id => window.__phormaTest.answerQuestion(id, 'Friday, 7pm'), q.requestId);
+```
+
+`answerQuestion` is the programmatic path. To test the UI itself, the answer
+box is rendered TWICE for the same question - inline on the canvas beneath the
+node (`app-ask-user-overlay`, real DOM, autofocused) and in the Runs panel card
+(`textarea[data-request-id]`). Both edit one shared draft in
+`RunControllerService`, so typing in one and submitting from the other is
+valid. A suspended question also reveals the Runs pane and raises a persistent
+"needs an answer" toast.
 
 ## Environment Notes
 

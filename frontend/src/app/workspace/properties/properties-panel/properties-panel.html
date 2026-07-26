@@ -651,6 +651,41 @@
       </section>
     }
 
+    <!-- Ask User -->
+    @if (askUserData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-question">Question</label>
+        <textarea
+          id="prop-question"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.question ?? ''"
+          (input)="patchData({ question: inputValue($event) })"
+          placeholder="Approve this draft for {{ '{' }}{{ '{' }}customer{{ '}' }}{{ '}' }}?"
+        ></textarea>
+        <p class="phorma-props__hint">
+          The run pauses and shows this question to the user.
+          {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} placeholders interpolate against the incoming JSON payload.
+          Leave empty to show the incoming payload as the question.
+        </p>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-response-key">Response key</label>
+        <input
+          id="prop-response-key"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.responseKey ?? 'userResponse'"
+          (input)="patchData({ responseKey: inputValue($event) })"
+          placeholder="userResponse"
+        />
+        <p class="phorma-props__hint">
+          The user's answer is merged into the payload under this key for the downstream agent
+          (e.g. {{ '{' }}{{ '{' }}userResponse{{ '}' }}{{ '}' }} references it in the next agent's prompt).
+        </p>
+      </section>
+    }
+
     <!-- Execute Workflow -->
     @if (executeWorkflowData(); as data) {
       <section class="phorma-props__section">

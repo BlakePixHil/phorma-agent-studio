@@ -44,7 +44,8 @@ export class ToastService {
   /** All currently visible toasts, oldest first. */
   readonly entries = this.entriesState.asReadonly();
 
-  show(options: ToastOptions): void {
+  /** Shows a toast and returns its id, so callers can dismiss it early. */
+  show(options: ToastOptions): number {
     const severity = options.severity ?? 'success';
     const entry: ToastEntry = {
       id: this.nextId++,
@@ -60,19 +61,20 @@ export class ToastService {
     if (entry.life > 0) {
       setTimeout(() => this.dismiss(entry.id), entry.life);
     }
+    return entry.id;
   }
 
   /** Convenience helpers — keep call sites terse. */
-  success(summary: string, detail?: string): void {
-    this.show({ summary, detail, severity: 'success' });
+  success(summary: string, detail?: string): number {
+    return this.show({ summary, detail, severity: 'success' });
   }
 
-  warning(summary: string, detail?: string, action?: ToastAction): void {
-    this.show({ summary, detail, severity: 'warning', action });
+  warning(summary: string, detail?: string, action?: ToastAction): number {
+    return this.show({ summary, detail, severity: 'warning', action });
   }
 
-  error(summary: string, detail?: string, action?: ToastAction): void {
-    this.show({ summary, detail, severity: 'error', action });
+  error(summary: string, detail?: string, action?: ToastAction): number {
+    return this.show({ summary, detail, severity: 'error', action });
   }
 
   dismiss(id: number): void {

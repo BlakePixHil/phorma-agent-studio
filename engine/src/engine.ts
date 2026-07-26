@@ -36,6 +36,7 @@ import {
   nodeForConnector,
   portBaseId,
   type AgentNodeData,
+  type AskUserNodeData,
   type EmbeddedWorkflow,
   type ExecuteWorkflowNodeData,
   type ForEachNodeData,
@@ -212,6 +213,20 @@ export interface RunOptions {
     payload: string,
     requestId: string,
   ): Promise<boolean>;
+  /**
+   * Asks a human a free-text question and resolves with their response.
+   * The run suspends at this node until the host resolves the promise.
+   * `requestId` uniquely identifies this deterministic node occurrence,
+   * including its nested frame. The response is merged into the payload
+   * under the node's `responseKey` (default `userResponse`) for the
+   * downstream agent.
+   */
+  requestInput(
+    nodeId: string,
+    question: string,
+    payload: string,
+    requestId: string,
+  ): Promise<string>;
   /**
    * Suspends until an external event with the given correlation key arrives
    * (webhook callback, e-sign completion, manual injection from the Runs
@@ -702,6 +717,12 @@ class WorkflowRun {
         return this.runForEach(node, payload);
       case 'wait-event':
         return this.runWaitEvent(node, payload);
+      case 'ask-user':
+        return this.runAskUser(
+          node,
+          payload,
+          executionKey ?? this.nextExecutionKey(node, payload),
+        );
       case 'execute-workflow': {
         const output = await this.runSubWorkflow(
           node,
@@ -1323,6 +1344,51 @@ class WorkflowRun {
     });
 
     return { output: mergePayloads(payload, eventPayload) };
+  }
+
+  /**
+   * Ask User — suspends the run and surfaces a question to a human. The
+   * user's free-text response is merged into the waiting payload under the
+   * node's `responseKey` (default `userResponse`) so the downstream agent
+   * receives `{...original, userResponse: '...'}`.
+   */
+  private async runAskUser(
+    node: WorkflowNode,
+    payload: string,
+    executionKey: string,
+  ): Promise<{ output: string }> {
+    const data = node.data as AskUserNodeData;
+    const responseKey = data.responseKey?.trim() || 'userResponse';
+    const questionTemplate = data.question?.trim() || '';
+    const question = questionTemplate
+      ? interpolatePayload(questionTemplate, payload)
+      : payload;
+    const requestId = `ask:${executionKey}`;
+
+    this.emit({
+      type: 'ask-required',
+      runId: this.options.runId,
+      requestId,
+      nodeId: node.id,
+      nodeName: node.name,
+      question,
+      payload,
+      at: Date.now(),
+    });
+
+    const response = await this.options.requestInput(node.id, question, payload, requestId);
+    if (this.gate.stopped) throw new RunStoppedError();
+
+    this.emit({
+      type: 'ask-resolved',
+      runId: this.options.runId,
+      requestId,
+      nodeId: node.id,
+      response,
+      at: Date.now(),
+    });
+
+    return { output: mergePayloads(payload, JSON.stringify({ [responseKey]: response })) };
   }
 
   /**

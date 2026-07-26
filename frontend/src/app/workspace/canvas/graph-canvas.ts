@@ -35,6 +35,7 @@ import { CanvasGraphRenderer, type RendererTheme } from './engine/canvas-graph-r
 import { graphToScene } from './engine/graph-to-scene';
 import { ThinkingOverlay } from './thinking-overlay/thinking-overlay';
 import { McpWarningOverlay } from './mcp-warning-overlay/mcp-warning-overlay';
+import { AskUserOverlay } from './ask-user-overlay/ask-user-overlay';
 import { canConnectPorts, findNodeForConnector } from '../../core/workflow.model';
 import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/workflow.model';
 
@@ -52,7 +53,7 @@ import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/work
 @Component({
   selector: 'app-graph-canvas',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ContextMenuModule, ThinkingOverlay, McpWarningOverlay],
+  imports: [ContextMenuModule, ThinkingOverlay, McpWarningOverlay, AskUserOverlay],
   template: `
     <canvas
       #cv
@@ -125,6 +126,26 @@ import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/work
           [style.top.px]="item.screenY"
           [style.width.px]="item.screenW"
           [style.height.px]="item.screenH"
+        />
+      }
+    </div>
+
+    <!-- Ask User answer cards: one per suspended ask-user node on THIS graph.
+         The run cannot advance without the operator, so the input sits under
+         the pulsing node instead of only in the Runs panel. Nodes inside
+         sub-workflows have no bounds here and stay panel-only. -->
+    <div class="phorma-ask-layer" aria-hidden="false">
+      @for (item of askUserOverlays(); track item.requestId) {
+        <app-ask-user-overlay
+          [requestId]="item.requestId"
+          [nodeName]="item.nodeName"
+          [question]="item.question"
+          [screenX]="item.screenX"
+          [screenY]="item.screenY"
+          [screenW]="item.screenW"
+          [draft]="item.draft"
+          (draftChange)="runController.setQuestionDraft(item.requestId, $event)"
+          (answered)="runController.resolveQuestion(item.requestId, $event)"
         />
       }
     </div>
@@ -222,6 +243,12 @@ import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/work
         z-index: 16;
         pointer-events: none;
       }
+      .phorma-ask-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 17;
+        pointer-events: none;
+      }
     `,
   ],
 })
@@ -234,7 +261,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   private readonly theme = inject(ThemeService);
   private readonly agentStream = inject(AgentStreamService);
   private readonly nodeDrag = inject(NodeDragService);
-  private readonly runController = inject(RunControllerService);
+  protected readonly runController = inject(RunControllerService);
   private readonly panels = inject(PanelRegistryService);
   private readonly terminal = inject(TerminalOutputService);
   private readonly toast = inject(ToastService);
@@ -343,6 +370,52 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
         screenW: bounds.w * sc,
         text: entry.text,
         streaming: entry.streaming,
+      });
+    }
+    return out;
+  });
+
+  /**
+   * Answer cards for suspended Ask-User nodes, projected into screen space.
+   * Anchored below the node like the thinking overlay, but offset further so
+   * the two never collide when a reasoning agent feeds the question.
+   *
+   * Questions raised inside a sub-workflow have no node on the active graph,
+   * so `nodeWorldBounds` returns null and they are skipped — those stay
+   * answerable in the Runs panel.
+   */
+  protected readonly askUserOverlays = computed(() => {
+    const questions = this.runController.pendingQuestions();
+    if (questions.length === 0) return [];
+    const drafts = this.runController.questionDrafts();
+    const thinking = this.runController.nodeThinking();
+    // Touch the tick so this recomputes every frame the renderer paints.
+    this.transformTick();
+    const sc = this.engine.scale;
+    const ox = this.engine.offsetX;
+    const oy = this.engine.offsetY;
+    const out: {
+      requestId: string;
+      nodeName: string;
+      question: string;
+      screenX: number;
+      screenY: number;
+      screenW: number;
+      draft: string;
+    }[] = [];
+    for (const question of questions) {
+      const bounds = this.engine.nodeWorldBounds(question.nodeId);
+      if (!bounds) continue;
+      // Clear the thinking overlay's label row when both are on the node.
+      const stacked = (thinking.get(question.nodeId)?.text.length ?? 0) > 0 ? 28 : 0;
+      out.push({
+        requestId: question.requestId,
+        nodeName: question.nodeName,
+        question: question.question,
+        screenX: bounds.x * sc + ox,
+        screenY: bounds.y * sc + oy + bounds.h * sc + 6 + stacked,
+        screenW: bounds.w * sc,
+        draft: drafts[question.requestId] ?? '',
       });
     }
     return out;
@@ -579,32 +652,32 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
     const readOnly = !!this.workflow.activeDoc()?.readOnly;
     const nodeItems: MenuItem[] = nodeId
       ? [
-          {
-            label: this.runController.breakpoints().has(nodeId)
-              ? 'Remove Breakpoint'
-              : 'Add Breakpoint',
-            icon: this.runController.breakpoints().has(nodeId)
-              ? 'ti ti-target-off'
-              : 'ti ti-target',
-            command: () => this.runController.toggleBreakpoint(nodeId),
+        {
+          label: this.runController.breakpoints().has(nodeId)
+            ? 'Remove Breakpoint'
+            : 'Add Breakpoint',
+          icon: this.runController.breakpoints().has(nodeId)
+            ? 'ti ti-target-off'
+            : 'ti ti-target',
+          command: () => this.runController.toggleBreakpoint(nodeId),
+        },
+        {
+          label: 'Extract to Sub-Workflow',
+          icon: 'ti ti-stack-push',
+          disabled: readOnly,
+          command: () => void this.extractContextSelection(nodeId),
+        },
+        {
+          label: 'Delete Node',
+          icon: 'ti ti-trash',
+          disabled: readOnly,
+          command: () => {
+            this.removeNode(nodeId);
+            this.selection.clear();
           },
-          {
-            label: 'Extract to Sub-Workflow',
-            icon: 'ti ti-stack-push',
-            disabled: readOnly,
-            command: () => void this.extractContextSelection(nodeId),
-          },
-          {
-            label: 'Delete Node',
-            icon: 'ti ti-trash',
-            disabled: readOnly,
-            command: () => {
-              this.removeNode(nodeId);
-              this.selection.clear();
-            },
-          },
-          { separator: true },
-        ]
+        },
+        { separator: true },
+      ]
       : [];
     return [
       ...nodeItems,
@@ -1349,16 +1422,16 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
     const parentGraph = saved.id === workflowId
       ? extraction.value.parentGraph
       : {
-          ...extraction.value.parentGraph,
-          nodes: extraction.value.parentGraph.nodes.map(node =>
-            node.id === replacement.id
-              ? {
-                  ...node,
-                  data: { ...node.data, workflowId: saved.id, workflowName: saved.name },
-                }
-              : node,
-          ),
-        };
+        ...extraction.value.parentGraph,
+        nodes: extraction.value.parentGraph.nodes.map(node =>
+          node.id === replacement.id
+            ? {
+              ...node,
+              data: { ...node.data, workflowId: saved.id, workflowName: saved.name },
+            }
+            : node,
+        ),
+      };
     this.history.boundaryOnce();
     this.workflow.replaceGraph(parentGraph);
     this.selection.setNodes([replacement.id]);

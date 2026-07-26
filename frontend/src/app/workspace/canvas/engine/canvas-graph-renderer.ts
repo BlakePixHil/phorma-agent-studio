@@ -948,7 +948,14 @@ export class CanvasGraphRenderer {
   private hasLiveRunVisuals(): boolean {
     if (this.activeEdges.size > 0) return true;
     for (const state of this.nodeStates.values()) {
-      if (state === 'thinking' || state === 'waiting-approval' || state === 'waiting-event') return true;
+      if (
+        state === 'thinking' ||
+        state === 'waiting-approval' ||
+        state === 'waiting-event' ||
+        state === 'waiting-input'
+      ) {
+        return true;
+      }
     }
     return false;
   }
@@ -1406,7 +1413,9 @@ export class CanvasGraphRenderer {
           ? this.theme.stateThinking
           : runState === 'queued'
             ? this.theme.stateQueued
-            : runState === 'waiting-approval' || runState === 'waiting-event'
+            : runState === 'waiting-approval' ||
+              runState === 'waiting-event' ||
+              runState === 'waiting-input'
               ? this.theme.stateWaiting
               : runState === 'error'
                 ? this.theme.stateError
@@ -1414,7 +1423,10 @@ export class CanvasGraphRenderer {
       ctx.save();
       // Thinking + waiting states breathe; settled states hold steady.
       const breathing =
-        runState === 'thinking' || runState === 'waiting-approval' || runState === 'waiting-event';
+        runState === 'thinking' ||
+        runState === 'waiting-approval' ||
+        runState === 'waiting-event' ||
+        runState === 'waiting-input';
       const alpha = breathing ? 0.55 + 0.45 * Math.abs(Math.sin(performance.now() / 420)) : 0.9;
       ctx.globalAlpha = alpha;
       ctx.strokeStyle = color;
