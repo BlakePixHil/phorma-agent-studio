@@ -2,11 +2,13 @@ import {
   ChangeDetectionStrategy,
   Component,
   ContentChildren,
+  ElementRef,
   QueryList,
   input,
   inject,
   signal,
   computed,
+  viewChild,
   WritableSignal,
   AfterContentInit,
   OnInit,
@@ -17,6 +19,8 @@ import { CdkDragDrop, CdkDrag, CdkDropList, CdkDragPlaceholder } from '@angular/
 import { TabsModule } from 'primeng/tabs';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
+import { ContextMenuModule } from 'primeng/contextmenu';
+import { MenuItem } from 'primeng/api';
 import { PanelRegistryService, PanelTab, DEFAULT_PANEL_WIDTH } from '../../core/panel-registry.service';
 import { SidePanelPane } from './side-panel-pane.directive';
 
@@ -31,7 +35,7 @@ import { SidePanelPane } from './side-panel-pane.directive';
  */
 @Component({
   selector: 'app-sidebar',
-  imports: [CommonModule, TabsModule, ButtonModule, TooltipModule, CdkDrag, CdkDropList, CdkDragPlaceholder],
+  imports: [CommonModule, TabsModule, ButtonModule, TooltipModule, ContextMenuModule, CdkDrag, CdkDropList, CdkDragPlaceholder],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './sidebar.html',
   styleUrl: './sidebar.scss',
@@ -124,6 +128,51 @@ export class Sidebar implements OnInit, AfterContentInit, OnDestroy {
   protected setActive(tabId: string): void {
     this.registry.setActive(this.side(), tabId);
   }
+
+  // ── Tab close / context menu ───────────────────────────────────────────
+
+  /** Tab the context menu is currently bound to (set on right-click). */
+  protected readonly contextTab = signal<PanelTab | null>(null);
+
+  /**
+   * Tab strip element, exposed as the context menu's target. The strip lives
+   * inside `@if (!collapsed())`, so a static ViewChild can't reach it — the
+   * signal-based `viewChild` resolves once the strip renders.
+   */
+  private readonly tabStripRef = viewChild<ElementRef<HTMLElement>>('tabStrip');
+  protected readonly tabStripTarget = computed(() => this.tabStripRef()?.nativeElement);
+
+  /** Middle-click a tab to close (hide) it. */
+  protected onTabAuxClick(event: MouseEvent, tab: PanelTab): void {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    this.registry.hideTab(tab.id);
+  }
+
+  /** Right-click a tab: bind it to the context menu before the menu opens. */
+  protected onTabContextMenu(tab: PanelTab): void {
+    this.contextTab.set(tab);
+  }
+
+  /** Context menu model for the right-clicked tab. */
+  protected readonly tabContextMenuItems = computed<MenuItem[]>(() => {
+    const tab = this.contextTab();
+    if (!tab) return [];
+    const otherSide = tab.side === 'left' ? 'right' : 'left';
+    return [
+      {
+        label: otherSide === 'left' ? 'Move to Left' : 'Move to Right',
+        icon: otherSide === 'left' ? 'ti ti-arrow-left-bar' : 'ti ti-arrow-right-bar',
+        command: () => this.registry.moveTab(tab.id, otherSide),
+      },
+      {
+        label: 'Close',
+        icon: 'ti ti-x',
+        disabled: !this.registry.canHide(tab.id),
+        command: () => this.registry.hideTab(tab.id),
+      },
+    ];
+  });
 
   /**
    * CDK DragDrop handler for tab reordering. Supports both same-strip

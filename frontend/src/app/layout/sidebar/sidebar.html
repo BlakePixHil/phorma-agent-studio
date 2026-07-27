@@ -13,6 +13,7 @@
   <!-- ── Tab strip ──────────────────────────────────────────────────────── -->
   @if (!collapsed()) {
     <div
+      #tabStrip
       class="phorma-tabstrip flex items-end gap-1 border-b border-white/5 flex-wrap px-2 py-1"
       cdkDropList
       cdkDropListOrientation="horizontal"
@@ -24,6 +25,8 @@
           class="phorma-tab group relative flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-sm font-medium transition-colors"
           [class.phorma-tab--active]="tab.id === activeTabId()"
           (click)="setActive(tab.id)"
+          (auxclick)="onTabAuxClick($event, tab)"
+          (contextmenu)="onTabContextMenu(tab)"
           cdkDrag
           cdkDragLockAxis="x"
           [cdkDragData]="tab"
@@ -42,6 +45,14 @@
       }
     </div>
   }
+
+  <!--
+    Right-click menu for tab headers: move to the other side / close.
+    NOTE: an explicit [target] is required — without one PrimeNG v20 never
+    binds its contextmenu listener (the menu would never render). The strip
+    is the target; (contextmenu) on each tab sets `contextTab`.
+  -->
+  <p-contextmenu [target]="tabStripTarget()" [model]="tabContextMenuItems()" appendTo="body" />
 
   <!-- ── Active pane content ────────────────────────────────────────────── -->
   @if (!collapsed()) {

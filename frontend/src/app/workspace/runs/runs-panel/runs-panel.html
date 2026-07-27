@@ -163,18 +163,23 @@
   </section>
 
   <!-- Run history -->
-  <section class="phorma-runs__section">
+  <section class="phorma-runs__section phorma-runs__history-section"
+    [class.phorma-runs__history-section--collapsed]="historyCollapsed()">
     @if (!selectedRun()) {
-    <label class="phorma-runs__label">
-      History
+    <button type="button" class="phorma-runs__history-header" (click)="toggleHistory()"
+      [attr.aria-expanded]="!historyCollapsed()" aria-controls="phorma-runs-history-list">
+      <i class="ti phorma-runs__history-chevron" [class.ti-chevron-down]="!historyCollapsed()"
+        [class.ti-chevron-right]="historyCollapsed()" aria-hidden="true"></i>
+      <span class="phorma-runs__history-header-label">History</span>
       <button type="button" class="phorma-runs__history-refresh" title="Refresh run history"
-        aria-label="Refresh run history" [disabled]="historyLoading()" (click)="refreshHistory()">
+        aria-label="Refresh run history" [disabled]="historyLoading()" (click)="refreshHistory(); $event.stopPropagation()">
         <i class="ti ti-refresh" [class.phorma-runs__history-refresh--spinning]="historyLoading()"
           aria-hidden="true"></i>
       </button>
-    </label>
+    </button>
+    @if (!historyCollapsed()) {
     @if (historyRows().length > 0) {
-    <ul class="phorma-runs__history">
+    <ul id="phorma-runs-history-list" class="phorma-runs__history">
       @for (row of historyRows(); track row.summary.id) {
       <li>
         <button type="button" class="phorma-runs__history-item" [class.phorma-runs__history-item--live]="row.live"
@@ -219,6 +224,7 @@
     </ul>
     } @else {
     <p class="phorma-runs__empty">No runs recorded yet for this workflow.</p>
+    }
     }
     } @else {
     <!-- Run detail -->

@@ -248,7 +248,15 @@ export class TenantStore {
     return snapshot;
   }
 
-  /** Records one settled run: ledger row + rollup bump + cache bust. */
+  /**
+   * Records one settled run: ledger row + rollup bump + cache bust.
+   *
+   * Idempotent on `run_id`: the `usage` insert uses `INSERT OR IGNORE` against
+   * the UNIQUE(tenant_id, run_id) index, and the quota rollup only bumps when
+   * the ledger row actually landed (meta.changes === 1). A retried settle (or
+   * any path that calls recordRun twice for the same run) is therefore a no-op
+   * instead of a double charge.
+   */
   async recordRun(entry: {
     tenantId: string;
     runId: string;
@@ -270,33 +278,42 @@ export class TenantStore {
     const month = currentMonth();
     const now = new Date().toISOString();
     const runIncrement = entry.countsAsRun === false ? 0 : 1;
-    await this.db.batch([
-      this.db
-        .prepare(
-          `INSERT INTO usage (tenant_id, run_id, workflow_id, month, cost_usd, tokens_in, tokens_out, duration_ms, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          entry.tenantId,
-          entry.runId,
-          entry.workflowId,
-          month,
-          entry.costUsd,
-          entry.tokensIn,
-          entry.tokensOut,
-          entry.durationMs ?? null,
-          now,
-        ),
-      this.db
-        .prepare(
-          `INSERT INTO quotas (tenant_id, month, runs_used, cost_usd_used)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(tenant_id, month) DO UPDATE SET
-             runs_used = quotas.runs_used + excluded.runs_used,
-             cost_usd_used = quotas.cost_usd_used + excluded.cost_usd_used`,
-        )
-        .bind(entry.tenantId, month, runIncrement, entry.costUsd),
-    ]);
+
+    // Ledger first: INSERT OR IGNORE against UNIQUE(tenant_id, run_id). Only
+    // when the row actually lands (a fresh run_id) do we bump the rollup and
+    // bust the cache — a duplicate run_id is a settle retry and must be a
+    // no-op rather than a second charge.
+    const ledger = await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO usage (tenant_id, run_id, workflow_id, month, cost_usd, tokens_in, tokens_out, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        entry.tenantId,
+        entry.runId,
+        entry.workflowId,
+        month,
+        entry.costUsd,
+        entry.tokensIn,
+        entry.tokensOut,
+        entry.durationMs ?? null,
+        now,
+      )
+      .run();
+
+    if (!ledger.meta.changes) return; // duplicate run_id — already recorded
+
+    await this.db
+      .prepare(
+        `INSERT INTO quotas (tenant_id, month, runs_used, cost_usd_used)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(tenant_id, month) DO UPDATE SET
+           runs_used = quotas.runs_used + excluded.runs_used,
+           cost_usd_used = quotas.cost_usd_used + excluded.cost_usd_used`,
+      )
+      .bind(entry.tenantId, month, runIncrement, entry.costUsd)
+      .run();
+
     await this.env.TENANTS?.delete(`quota:${entry.tenantId}:${month}`);
   }
 

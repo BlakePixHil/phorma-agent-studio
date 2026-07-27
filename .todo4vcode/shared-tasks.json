@@ -23,25 +23,14 @@
       "order": 2000
     },
     {
-      "id": "scan-797mey",
-      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
-      "description": "[NOTE] cloud/wrangler.jsonc:59",
-      "tags": [
-        "note",
-        "cloud/wrangler.jsonc",
-        "cloud/wrangler.jsonc:59"
-      ],
-      "priority": "Could",
+      "id": "5gh9rd619",
+      "text": "Maximised Side Panel Tabs",
+      "description": "Each side panel tab listed, eg. Runs, Prompt, Skills, Evals, Portal, Usage, Properties should be able to be expandable to a large model that fleshes out the feature more with more options and enhanced abilities.",
+      "priority": "Should",
       "status": "Todo",
       "completed": false,
-      "createdAt": 1785134618809,
-      "order": 3000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/wrangler.jsonc",
-        "line": 59,
-        "marker": "NOTE"
-      }
+      "createdAt": 1785151386780,
+      "order": 3000
     }
   ]
 }

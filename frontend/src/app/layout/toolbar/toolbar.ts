@@ -8,7 +8,7 @@ import { ClerkService, ClerkUserButtonComponent } from 'ngx-clerk';
 import { ThemeService, type ThemeMode } from '../../core/theme.service';
 import { THEME_MODES } from '../../core/theme-modes';
 import { CanvasStateService } from '../../core/canvas-state.service';
-import { PanelRegistryService } from '../../core/panel-registry.service';
+import { PanelRegistryService, type PanelTab } from '../../core/panel-registry.service';
 import { PortalService } from '../../core/portal.service';
 import { WorkflowService } from '../../core/workflow.service';
 import { TauriService } from '../../core/tauri.service';
@@ -579,7 +579,53 @@ export class Toolbar {
         },
       ],
     },
+    {
+      label: 'Window',
+      items: [
+        // Every panel tab, grouped by the side it lives on. Visible tabs get
+        // a checkmark; clicking toggles visibility (hiding a tab removes it
+        // from its sidebar, showing reveals + activates it).
+        ...this.panels.tabs()
+          .filter(t => t.side === 'left')
+          .sort((a, b) => a.order - b.order)
+          .map(tab => this.windowTabItem(tab)),
+        { separator: true },
+        ...this.panels.tabs()
+          .filter(t => t.side === 'right')
+          .sort((a, b) => a.order - b.order)
+          .map(tab => this.windowTabItem(tab)),
+        { separator: true },
+        {
+          label: 'Reset Panel Layout',
+          icon: 'ti ti-refresh',
+          command: () => this.panels.resetPanels(),
+        },
+      ],
+    },
   ]);
+
+  /**
+   * Builds a Window-menu entry for one panel tab: green checkmark when
+   * visible, click toggles show/hide. The last visible tab on a side can't
+   * be hidden (mirrors `PanelRegistryService.canHide`).
+   */
+  private windowTabItem(tab: PanelTab): MenuItem {
+    return {
+      label: tab.label,
+      icon: tab.visible ? 'ti ti-check text-green-500' : tab.icon,
+      disabled: tab.visible && !this.panels.canHide(tab.id),
+      command: () => {
+        if (tab.visible) {
+          this.panels.hideTab(tab.id);
+        } else {
+          this.panels.showTab(tab.id);
+          this.panels.setActive(tab.side, tab.id);
+          if (tab.side === 'right') this.panels.expandRight();
+          else this.panels.expandLeft();
+        }
+      },
+    };
+  }
 
   /** Run controls — delegate to the run controller. */
   protected toggleRun(): void {

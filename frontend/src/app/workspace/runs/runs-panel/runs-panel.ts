@@ -140,6 +140,9 @@ export class RunsPanel {
   /** Group keys the user has collapsed (groups start expanded). */
   protected readonly collapsedGroups = signal<ReadonlySet<string>>(new Set());
 
+  /** Whether the run-history section is collapsed (starts expanded). */
+  protected readonly historyCollapsed = signal(false);
+
   /** Trace entry id whose payload was just copied (drives the green tick). */
   protected readonly copiedId = signal<number | null>(null);
   private copyTimer?: ReturnType<typeof setTimeout>;
@@ -434,6 +437,11 @@ export class RunsPanel {
       else next.add(key);
       return next;
     });
+  }
+
+  /** Toggles the run-history section collapse. */
+  protected toggleHistory(): void {
+    this.historyCollapsed.update(v => !v);
   }
 
   /** Copy an entry's payload to the clipboard and flash the green tick. */

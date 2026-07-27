@@ -9,23 +9,37 @@ export interface PanelTab {
   side: 'left' | 'right';
   /** Display order within its side */
   order: number;
+  /** Whether the tab is shown in its sidebar. Hidden tabs can be reopened via the Window menu. */
+  visible: boolean;
 }
 
 /** Default width for each side panel (px) when no saved width exists. */
 export const DEFAULT_PANEL_WIDTH = 320;
 
-/** Default tab layout — used when resetting panels */
+/**
+ * Bump when the default tab layout changes in a way existing installs should
+ * adopt. Persisted under `phorma.layout.layoutVersion`; a missing/older value
+ * triggers a one-time migration that applies the new default visibility while
+ * preserving the user's side/order customizations.
+ */
+export const LAYOUT_VERSION = 2;
+
+/**
+ * Default tab layout — used for fresh installs and when resetting panels.
+ * First-run keeps the workspace focused: Agents/Workflows/Runs on the left,
+ * Prompt/Properties on the right. Everything else opens via the Window menu.
+ */
 const DEFAULT_TABS: PanelTab[] = [
-  { id: 'agents',     label: 'Agents',     icon: 'ti ti-robot',      side: 'left',  order: 0 },
-  { id: 'workflows',  label: 'Workflows',  icon: 'ti ti-topology-star-3', side: 'left', order: 1 },
-  { id: 'skills',     label: 'Skills',     icon: 'ti ti-books',      side: 'left',  order: 2 },
-  { id: 'prompt',     label: 'Prompt',     icon: 'ti ti-message-2',  side: 'right', order: 0 },
-  { id: 'properties', label: 'Properties', icon: 'ti ti-adjustments', side: 'right', order: 1 },
-  { id: 'runs',       label: 'Runs',       icon: 'ti ti-history',    side: 'right', order: 2 },
-  { id: 'usage',      label: 'Usage',      icon: 'ti ti-chart-bar',  side: 'right', order: 3 },
-  { id: 'evals',      label: 'Evals',      icon: 'ti ti-flask',      side: 'right', order: 4 },
-  { id: 'assistant',  label: 'Assistant',  icon: 'ti ti-sparkles',   side: 'right', order: 5 },
-  { id: 'portal',     label: 'Portal',     icon: 'ti ti-world-share', side: 'right', order: 6 },
+  { id: 'agents',     label: 'Agents',     icon: 'ti ti-robot',      side: 'left',  order: 0, visible: true },
+  { id: 'workflows',  label: 'Workflows',  icon: 'ti ti-topology-star-3', side: 'left', order: 1, visible: true },
+  { id: 'runs',       label: 'Runs',       icon: 'ti ti-history',    side: 'left',  order: 2, visible: true },
+  { id: 'skills',     label: 'Skills',     icon: 'ti ti-books',      side: 'left',  order: 3, visible: false },
+  { id: 'prompt',     label: 'Prompt',     icon: 'ti ti-message-2',  side: 'right', order: 0, visible: true },
+  { id: 'properties', label: 'Properties', icon: 'ti ti-adjustments', side: 'right', order: 1, visible: true },
+  { id: 'usage',      label: 'Usage',      icon: 'ti ti-chart-bar',  side: 'right', order: 2, visible: false },
+  { id: 'evals',      label: 'Evals',      icon: 'ti ti-flask',      side: 'right', order: 3, visible: false },
+  { id: 'assistant',  label: 'Assistant',  icon: 'ti ti-sparkles',   side: 'right', order: 4, visible: false },
+  { id: 'portal',     label: 'Portal',     icon: 'ti ti-world-share', side: 'right', order: 5, visible: false },
 ];
 
 /**
@@ -61,14 +75,14 @@ export class PanelRegistryService {
   readonly leftWidth = this._leftWidth.asReadonly();
   readonly rightWidth = this._rightWidth.asReadonly();
 
-  /** Tabs belonging to the left side, sorted by order */
+  /** Visible tabs belonging to the left side, sorted by order */
   readonly leftTabs = computed(() =>
-    this._tabs().filter(t => t.side === 'left').sort((a, b) => a.order - b.order)
+    this._tabs().filter(t => t.side === 'left' && t.visible).sort((a, b) => a.order - b.order)
   );
 
-  /** Tabs belonging to the right side, sorted by order */
+  /** Visible tabs belonging to the right side, sorted by order */
   readonly rightTabs = computed(() =>
-    this._tabs().filter(t => t.side === 'right').sort((a, b) => a.order - b.order)
+    this._tabs().filter(t => t.side === 'right' && t.visible).sort((a, b) => a.order - b.order)
   );
 
   constructor() {
@@ -86,8 +100,43 @@ export class PanelRegistryService {
   }
 
   setActive(side: 'left' | 'right', tabId: string): void {
+    // Auto-show a hidden tab when a feature targets it (e.g. a run starting
+    // reveals Runs) so activation never points at an invisible tab.
+    const tab = this._tabs().find(t => t.id === tabId);
+    if (tab && !tab.visible) this.showTab(tabId);
     if (side === 'left') this._activeLeft.set(tabId);
     else this._activeRight.set(tabId);
+  }
+
+  /** Show a hidden tab in its sidebar. */
+  showTab(tabId: string): void {
+    this._tabs.update(tabs =>
+      tabs.map(t => (t.id === tabId ? { ...t, visible: true } : t))
+    );
+  }
+
+  /** Whether the tab can be hidden — the last visible tab on a side must stay. */
+  canHide(tabId: string): boolean {
+    const tab = this._tabs().find(t => t.id === tabId);
+    if (!tab || !tab.visible) return false;
+    return this._tabs().some(t => t.id !== tabId && t.side === tab.side && t.visible);
+  }
+
+  /**
+   * Hide a tab from its sidebar (reopen via the Window menu). If it was the
+   * active tab on its side, activates the first remaining visible tab.
+   */
+  hideTab(tabId: string): void {
+    if (!this.canHide(tabId)) return;
+    const tab = this._tabs().find(t => t.id === tabId)!;
+    this._tabs.update(tabs =>
+      tabs.map(t => (t.id === tabId ? { ...t, visible: false } : t))
+    );
+    const active = tab.side === 'left' ? this._activeLeft() : this._activeRight();
+    if (active === tabId) {
+      const remaining = this._tabs().find(t => t.side === tab.side && t.visible);
+      if (remaining) this.setActive(tab.side, remaining.id);
+    }
   }
 
   setPanelWidth(side: 'left' | 'right', width: number): void {
@@ -185,9 +234,9 @@ export class PanelRegistryService {
     this.collapsedRight.set(false);
   }
 
-  /** Restore tabs to their original sides and expand both panels. */
+  /** Restore tabs to the default sides/visibility and expand both panels. */
   resetPanels(): void {
-    this._tabs.set([...DEFAULT_TABS]);
+    this._tabs.set(DEFAULT_TABS.map(t => ({ ...t })));
     this._activeLeft.set('agents');
     this._activeRight.set('prompt');
     this._leftWidth.set(DEFAULT_PANEL_WIDTH);
@@ -197,18 +246,38 @@ export class PanelRegistryService {
   }
 
   /**
-   * Loads persisted tab side/order assignments, merged onto the defaults so
-   * tabs added in future versions still appear. Each known tab adopts its
-   * saved `side` + `order`; unknown saved ids are ignored.
+   * Loads persisted tab side/order/visibility assignments, merged onto the
+   * defaults so tabs added in future versions still appear. Each known tab
+   * adopts its saved `side` + `order` + `visible`; unknown saved ids are
+   * ignored.
+   *
+   * Migration: installs from before tab visibility existed have a persisted
+   * layout but no `layoutVersion` — adopt the new default visibility for any
+   * tab that predates the change (preserving the user's side/order), then
+   * stamp the version so this runs once.
    */
   private loadTabs(): PanelTab[] {
     const saved = loadLayout<PanelTab[] | null>('panelTabs', null);
-    if (!saved || !Array.isArray(saved)) return [...DEFAULT_TABS];
-    return DEFAULT_TABS.map(def => {
+    if (!saved || !Array.isArray(saved)) {
+      saveLayout('layoutVersion', LAYOUT_VERSION);
+      return DEFAULT_TABS.map(t => ({ ...t }));
+    }
+    const version = loadLayout('layoutVersion', 1);
+    const migrateVisibility = version < LAYOUT_VERSION;
+    const tabs = DEFAULT_TABS.map(def => {
       const match = saved.find(s => s.id === def.id);
-      return match
-        ? { ...def, side: match.side, order: match.order }
-        : { ...def };
+      if (!match) return { ...def };
+      return {
+        ...def,
+        side: match.side,
+        order: match.order,
+        // Pre-visibility installs saved no `visible` flag — apply the new
+        // default (hiding Skills/Usage/Evals/Assistant/Portal) rather than
+        // leaving all ten tabs open.
+        visible: migrateVisibility || match.visible == null ? def.visible : match.visible,
+      };
     });
+    if (migrateVisibility) saveLayout('layoutVersion', LAYOUT_VERSION);
+    return tabs;
   }
 }
