@@ -1,14 +1,19 @@
-# Liquid Glass Design — Tailwind CSS
+---
+name: frosted-glass-modern-theme
+description: Frosted glass (glassmorphism) and modern web theme guidance. Use when building translucent UI surfaces, glass cards/buttons/navbars/modals/sheets, modern aesthetic tokens (color, radius, shadow, motion), or when the user mentions "frosted glass", "glassmorphism", "modern theme", "soft UI", or "neumorphism-adjacent" design. Framework-agnostic; biased toward Tailwind CSS v4.
+---
 
-Apply Apple's iOS 26 Liquid Glass design language to web projects using native Tailwind CSS.
+# Frosted Glass & Modern Theme
+
+Apply a frosted glass (glassmorphism) aesthetic and modern theme system to web projects. Framework-agnostic; examples use Tailwind CSS v4.
 
 ## When to Use
 
 Use this skill when:
-- Building UI components that follow a frosted glass aesthetic
-- Creating glassmorphism cards, buttons, navbars, modals, or sheets
-- Applying frosted glass to most web elements and refraction, specular highlights to hero web elements
-- The user mentions "glass design", "glassmorphism", "liquid glass" or "iOS 26 style" in order of relevance
+- Building UI components that follow a frosted glass / glassmorphism aesthetic
+- Creating glass cards, buttons, navbars, modals, sheets, or inputs
+- Establishing a modern theme token system (color, elevation, radius, motion)
+- The user mentions "frosted glass", "glassmorphism", "modern theme", "soft UI", or "translucent surfaces"
 
 ## Core Design Principles
 
@@ -19,17 +24,15 @@ Elements are semi-transparent, revealing blurred content beneath. The material a
 UI elements appear to levitate above the content layer with subtle shadows and elevation. Hierarchy comes from depth, not heavy borders.
 
 ### 3. Harmonized Radii
-All corners use consistent, generous border-radius. Apple favors squircle-like curves (superellipse) over standard circles.
+All corners use consistent, generous border-radius. Prefer squircle-like curves (superellipse) over standard circles where the platform allows.
 
 ### 4. Edge-to-Edge Content
 Content fills the viewport. Chrome (navbars, toolbars) is minimal and translucent, letting content breathe.
 
-### 5. Subtle Refraction
-Light appears to bend through glass elements, creating slight distortion of the background. This is the key differentiator from basic glassmorphism.
+### 5. Subtle Specular Highlight
+A soft rim light along the top edge suggests a light source without simulating physical refraction. This is the key differentiator from basic glassmorphism.
 
-## Tailwind CSS Implementation
-
-### Design Tokens (Tailwind v4 `@theme`)
+## Modern Theme Tokens (Tailwind v4 `@theme`)
 
 ```css
 @theme {
@@ -50,12 +53,17 @@ Light appears to bend through glass elements, creating slight distortion of the 
   --shadow-glass-lg: 0 8px 32px rgba(31, 38, 135, 0.20), inset 0 4px 20px rgba(255, 255, 255, 0.15);
   --shadow-glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.20);
 
-  /* Radii — squircle-inspired generous values */
+  /* Radii — generous, harmonized values */
   --radius-glass-sm: 12px;
   --radius-glass: 16px;
   --radius-glass-lg: 24px;
   --radius-glass-xl: 32px;
   --radius-glass-pill: 9999px;
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-base: 300ms;
 }
 ```
 
@@ -190,7 +198,7 @@ Add a `::after` pseudo-element for the characteristic rim light:
 }
 ```
 
-Or as Tailwind arbitrary in a `@layer`:
+Or as Tailwind in a `@layer`:
 ```css
 @layer components {
   .glass-shine {
@@ -210,40 +218,38 @@ Or as Tailwind arbitrary in a `@layer`:
 }
 ```
 
-### SVG Refraction Filter (Advanced — Chromium Only)
+## Modern Theme System
 
-For glass distortion, use an inline SVG filter:
+Beyond glass surfaces, a modern theme pairs translucent materials with a
+coherent color, elevation, and motion system.
 
-```html
-<svg class="absolute w-0 h-0" aria-hidden="true">
-  <defs>
-    <filter id="liquid-glass" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="blur" />
-      <feImage href="/displacement-map.png"
-        x="0" y="0" width="300" height="56" result="map" />
-      <feDisplacementMap in="blur" in2="map"
-        scale="55" xChannelSelector="R" yChannelSelector="G"
-        result="displaced" />
-      <feColorMatrix in="displaced" type="saturate" values="1.5"
-        result="saturated" />
-    </filter>
-  </defs>
-</svg>
+### Color Roles
+| Role | Light | Dark | Use |
+|------|-------|------|-----|
+| Background | `#f8fafc` | `#0b0f17` | App canvas behind glass |
+| Surface | `rgba(255,255,255,0.10)` | `rgba(255,255,255,0.06)` | Cards, sheets |
+| Surface elevated | `rgba(255,255,255,0.18)` | `rgba(255,255,255,0.10)` | Modals, popovers |
+| Border | `rgba(255,255,255,0.20)` | `rgba(255,255,255,0.08)` | Hairline edges |
+| Text primary | `#0f172a` | `#f1f5f9` | Body copy |
+| Text secondary | `#475569` | `#94a3b8` | Captions, hints |
+| Accent | brand-dependent | brand-dependent | CTAs, focus rings |
 
-<div class="backdrop-[url(#liquid-glass)_brightness(150%)]">
-  <!-- Element with refraction -->
-</div>
-```
+### Elevation Scale
+| Level | Shadow | Use |
+|-------|--------|-----|
+| 0 | none | Flat background |
+| 1 | `0 1px 2px rgba(0,0,0,0.06)` | Resting cards |
+| 2 | `0 4px 12px rgba(0,0,0,0.08)` | Hover state |
+| 3 | `0 8px 32px rgba(31,38,135,0.15)` | Glass surfaces |
+| 4 | `0 16px 48px rgba(0,0,0,0.20)` | Modals, FABs |
 
-**Important:** `backdrop-filter: url(#svg-filter)` only works in Chromium. Always provide a fallback:
-```css
-@supports not (backdrop-filter: url(#liquid-glass)) {
-  .glass-refraction {
-    backdrop-filter: blur(16px) saturate(180%);
-    background: rgba(255, 255, 255, 0.18);
-  }
-}
-```
+### Motion
+- Default duration: `300ms` (fast: `150ms`, slow: `500ms`)
+- Default easing: `cubic-bezier(0.4, 0, 0.2, 1)` (standard)
+- Spring easing for playful interactions: `cubic-bezier(0.34, 1.56, 0.64, 1)`
+- Hover lift: `hover:-translate-y-0.5`
+- Press feedback: `active:scale-95`
+- Entrance: `animate-in fade-in slide-in-from-bottom-4 duration-300`
 
 ### Dark Mode Adaptation
 
@@ -270,7 +276,7 @@ Adjust opacity ranges:
 
 ## Animations
 
-Liquid Glass favors smooth, spring-like transitions:
+Frosted glass favors smooth, spring-like transitions:
 
 ```
 /* Hover lift */
@@ -307,7 +313,6 @@ animate-in fade-in slide-in-from-bottom-4 duration-300
 
 - `backdrop-filter: blur()` triggers compositing — use sparingly on scroll-heavy views
 - Avoid stacking more than 2-3 glass layers
-- SVG displacement filters are expensive — reserve for hero elements
 - Test on lower-end devices
 - Prefer CSS-only effects over JS-driven animations
 
@@ -320,13 +325,4 @@ animate-in fade-in slide-in-from-bottom-4 duration-300
 - **Glass on glass on glass** — avoid deep nesting of translucent layers
 - **No fallback** — always degrade gracefully for unsupported browsers
 - **Ignoring accessibility** — translucent != illegible
-
-## Package Reference
-
-For a ready-to-use Tailwind plugin with all these patterns:
-
-```bash
-npm install liquidglass-tailwind
-```
-
-See `~/liquidglass-tailwind` for the source package.
+- **Refraction/displacement filters** — out of scope; use SVG filters only for hero elements and always provide a fallback
