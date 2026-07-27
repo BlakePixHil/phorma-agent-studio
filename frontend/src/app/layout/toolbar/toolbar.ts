@@ -9,6 +9,7 @@ import { ThemeService, type ThemeMode } from '../../core/theme.service';
 import { THEME_MODES } from '../../core/theme-modes';
 import { CanvasStateService } from '../../core/canvas-state.service';
 import { PanelRegistryService } from '../../core/panel-registry.service';
+import { PortalService } from '../../core/portal.service';
 import { WorkflowService } from '../../core/workflow.service';
 import { TauriService } from '../../core/tauri.service';
 import { TerminalOutputService } from '../../core/terminal-output.service';
@@ -49,6 +50,7 @@ export class Toolbar {
   protected readonly terminal = inject(TerminalOutputService);
   protected readonly runController = inject(RunControllerService);
   protected readonly cloud = inject(CloudService);
+  protected readonly portal = inject(PortalService);
   protected readonly clerk = inject(ClerkService);
   private readonly cloudDialog = inject(CloudDialogService);
   private readonly settingsDialog = inject(SettingsDialogService);
@@ -614,6 +616,16 @@ export class Toolbar {
       return;
     }
     this.cloudDialog.open();
+  }
+
+  /**
+   * Reveals the Portal panel. Deliberately NOT a dialog: publish state is
+   * something you keep an eye on while editing, and the panel is also where
+   * the checklist and access keys live.
+   */
+  protected openPortal(): void {
+    this.panels.expandRight();
+    this.panels.setActive('right', 'portal');
   }
 
   /** Toggles grid snapping on/off (toolbar icon button + View menu). */

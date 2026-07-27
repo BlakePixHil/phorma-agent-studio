@@ -194,6 +194,24 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     ports: [{ name: 'Request', role: 'message-out' }],
     defaultData: () => ({ path: '' }),
   },
+  {
+    id: 'trigger-portal',
+    label: 'Portal',
+    description: 'Publishes the workflow as a shareable chat or form page.',
+    icon: 'ti ti-world-share',
+    category: 'trigger',
+    kind: 'portal-trigger',
+    keywords: ['publish', 'public', 'share', 'chat', 'form', 'endpoint', 'link'],
+    defaultName: 'Portal',
+    ports: [{ name: 'Message', role: 'message-out' }],
+    // Runnable defaults: a public chat page needs zero configuration.
+    defaultData: () => ({
+      mode: 'chat' as const,
+      access: 'public' as const,
+      theme: 'auto' as const,
+      showBranding: true,
+    }),
+  },
 
   // ── Tools ──────────────────────────────────────────────────────────────────
   {

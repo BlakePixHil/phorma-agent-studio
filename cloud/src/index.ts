@@ -19,9 +19,12 @@ import { routeAgentRequest } from 'agents';
 import { verifyBearer, verifyRequest, isHosted } from './auth';
 import { handleApiRequest, type ApiEnv } from './api';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
+import { handlePortalEmbedScript, handlePortalRequest } from './portal';
+import { PortalIndex } from './portal-registry';
 import { WorkflowAgent, type Env } from './workflow-agent';
 
-export { WorkflowAgent };
+// Both Durable Object classes must be exported for their bindings to resolve.
+export { WorkflowAgent, PortalIndex };
 
 /** CORS headers for the current mode (scoped in hosted, `*` in BYO). */
 function corsHeaders(env: Env, request: Request): Record<string, string> {
@@ -54,6 +57,17 @@ export default {
     // Public release/download routes (no auth; backed by R2).
     const releaseResponse = await handleReleaseRequest(request, env as ReleaseEnv, cors);
     if (releaseResponse) return releaseResponse;
+
+    // Published portal surfaces (EPIC 9): `/p/{slug}` and its sub-routes are
+    // deliberately UNAUTHENTICATED, so they are matched before the studio's
+    // auth layers and carry their own open CORS + redaction rules.
+    const portalResponse = await handlePortalRequest(request, env);
+    if (portalResponse) return portalResponse;
+
+    // The embed loader a customer's site includes. Slug-agnostic and cacheable,
+    // so it lives at the top level rather than under `/p/`.
+    const embedResponse = handlePortalEmbedScript(request);
+    if (embedResponse) return embedResponse;
 
     // Control-plane routes (hosted mode).
     const apiResponse = await handleApiRequest(request, env as ApiEnv, cors, ctx);

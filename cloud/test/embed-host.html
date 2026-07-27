@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  Scratch host page for manually exercising the portal embed loader.
+
+  This stands in for a customer's website: it deliberately sets a STRICT CSP
+  that forbids inline script, which is the whole reason the loader is served as
+  a real file rather than inlined into the portal page. If the launcher appears
+  here, it will appear on a real site.
+
+  Serve it from a different origin than the worker to exercise the
+  cross-origin path, e.g.:
+    npx --yes http-server cloud/test -p 8123 -c-1
+  then open http://127.0.0.1:8123/embed-host.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'self'; script-src 'self' http://127.0.0.1:8799; frame-src http://127.0.0.1:8799; style-src 'unsafe-inline'; connect-src http://127.0.0.1:8799"
+>
+<title>Acme - embed host</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 3rem 1.5rem;
+    background: #fbfbfd;
+    color: #1c1e26;
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 42rem; margin: 0 auto; }
+  h1 { font-size: 1.75rem; margin: 0 0 .5rem; }
+  p { color: #5b6070; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Acme Corp</h1>
+  <p>
+    A pretend customer website. The chat launcher in the corner is injected by
+    <code>portal-embed.js</code> from the worker, under a strict CSP that blocks
+    inline script.
+  </p>
+  <p>
+    Click it to open the portal in an iframe, send a message, and confirm the
+    panel streams a reply. Press Escape to close.
+  </p>
+</main>
+
+<script
+  src="http://127.0.0.1:8799/portal-embed.js"
+  data-slug="acme-support"
+  data-label="Talk to us"
+  defer
+></script>
+</body>
+</html>

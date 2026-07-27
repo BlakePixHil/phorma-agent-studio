@@ -3,6 +3,11 @@ dist/
 .wrangler/
 .dev.vars
 
+# Per-user wrangler override written by the studio (Settings → Cloud). Holds
+# your Cloudflare account id, worker name and portal domain so wrangler.jsonc
+# stays pristine and `git pull` never conflicts.
+wrangler.byo.jsonc
+
 # Clerk secrets (never commit)
 .env
 .env.local

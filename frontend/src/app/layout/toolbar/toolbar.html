@@ -115,6 +115,22 @@
       tooltipPosition="bottom"
       (onClick)="openCloud()"
     />
+    <!--
+      Portal (EPIC 9). Only shown when the canvas actually declares a public
+      surface, so the toolbar doesn't grow a button most workflows never need.
+    -->
+    @if (portal.hasPortalTrigger()) {
+      <p-button
+        [text]="true"
+        severity="secondary"
+        size="small"
+        [icon]="portal.published() ? 'ti ti-world-check' : 'ti ti-world-share'"
+        [class.phorma-cloud-live]="portal.published()"
+        [pTooltip]="portal.published() ? 'Portal is live' : 'Publish this workflow'"
+        tooltipPosition="bottom"
+        (onClick)="openPortal()"
+      />
+    }
     <span class="phorma-toolbar-divider"></span>
     <p-button
       [text]="true"

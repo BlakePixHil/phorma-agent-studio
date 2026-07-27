@@ -74,6 +74,24 @@ const ids = await page.evaluate(() =>
 | `questions()` / `answerQuestion(requestId, response)` | Inspect and answer Ask-User suspensions. |
 | `stop()` | Stop the in-flight run. |
 
+### Opening dialogs
+
+| Method | Purpose |
+|---|---|
+| `openSettings(pageId?, anchorId?)` | Open the Settings dialog, optionally on a page (`'cloud'`, `'models'`, …) and scrolled to an anchor. |
+| `closeSettings()` | Close it. |
+
+Use these instead of clicking the menubar. Settings lives under **File →
+Preferences → Settings**, a PrimeNG nested submenu that needs a real hover chain;
+synthetic clicks resolve the `<li>` but never open the popup, and the `Ctrl+,`
+accelerator is registered by the menubar rather than a global key handler, so it
+does nothing when the canvas has focus. `openSettings('cloud')` is one call:
+
+```js
+await page.evaluate(() => window.__phormaTest.openSettings('cloud'));
+await page.locator('button:has-text("Your own Cloudflare")').first().click();
+```
+
 ### Recipes
 
 **Agent with a wired error branch (EPIC 3):**
@@ -162,3 +180,18 @@ valid. A suspended question also reveals the Runs pane and raises a persistent
   Prefer `addNode` with an explicit position.
 - The left palette overlay intercepts clicks near the left edge; interact with
   the canvas centre-right.
+- Inside the Settings dialog, Playwright's actionability checks often report the
+  search box or header paragraph "intercepts pointer events" on a control that
+  is plainly visible. Scroll and click in one `page.evaluate` instead:
+  ```js
+  await page.evaluate(() => {
+    const t = [...document.querySelectorAll('.phorma-settings__provider-tab')]
+      .find(b => b.textContent.includes('Phorma Cloud'));
+    t.scrollIntoView({ block: 'center' });
+    t.click();
+  });
+  ```
+- Set an explicit viewport (`page.setViewportSize({ width: 1440, height: 900 })`)
+  before screenshotting the studio. A shared page can carry a tiny viewport from
+  earlier work, which renders as a mostly-empty dark canvas and looks like a
+  rendering bug.

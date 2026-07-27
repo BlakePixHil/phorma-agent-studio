@@ -299,7 +299,12 @@ function fnv1a(value: string): string {
   return (hash >>> 0).toString(36);
 }
 
-const TRIGGER_KINDS = new Set(['manual-trigger', 'schedule-trigger', 'webhook-trigger']);
+const TRIGGER_KINDS = new Set([
+  'manual-trigger',
+  'schedule-trigger',
+  'webhook-trigger',
+  'portal-trigger',
+]);
 const TOOL_KINDS = new Set(['http-tool', 'web-search-tool', 'mcp-tool']);
 
 interface SharedExecutionState {

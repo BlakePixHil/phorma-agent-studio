@@ -36,7 +36,10 @@
               "sass": {
                 "silenceDeprecations": ["import"]
               }
-            }
+            },
+            "allowedCommonJsDependencies": [
+              "cronstrue"
+            ]
           },
           "configurations": {
             "production": {

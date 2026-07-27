@@ -1,0 +1,346 @@
+<div class="phorma-portal">
+  <!-- ── No portal on the canvas yet ── -->
+  @if (!portal.hasPortalTrigger()) {
+    <div class="phorma-portal__empty">
+      <i class="ti ti-world-share" aria-hidden="true"></i>
+      <p class="phorma-portal__empty-title">Not published</p>
+      <p class="phorma-portal__empty-body">
+        Add a <strong>Portal</strong> trigger from the Triggers palette to turn this workflow
+        into a shareable chat or form page that anyone with the link can use.
+      </p>
+    </div>
+  } @else {
+    <!-- ── Status ── -->
+    <section class="phorma-portal__section">
+      <div class="phorma-portal__status">
+        <span
+          class="phorma-portal__dot"
+          [class.phorma-portal__dot--live]="portal.published()"
+          aria-hidden="true"
+        ></span>
+        <span class="phorma-portal__status-text">
+          {{ portal.published() ? 'Live' : 'Not published' }}
+        </span>
+        <button
+          type="button"
+          class="phorma-portal__icon-btn"
+          title="Refresh"
+          aria-label="Refresh publish status"
+          [disabled]="portal.busy()"
+          (click)="refresh()"
+        >
+          <i class="ti ti-refresh" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      @if (portal.published() && portal.url(); as url) {
+        <div class="phorma-portal__url-row">
+          <input
+            class="phorma-portal__url"
+            type="text"
+            readonly
+            [value]="url"
+            aria-label="Public portal address"
+          />
+          <button
+            type="button"
+            class="phorma-portal__icon-btn"
+            title="Copy address"
+            aria-label="Copy the portal address"
+            (click)="copyUrl()"
+          >
+            <i class="ti ti-copy" aria-hidden="true"></i>
+          </button>
+          <button
+            type="button"
+            class="phorma-portal__icon-btn"
+            title="Open portal"
+            aria-label="Open the portal in a new tab"
+            (click)="openPortal()"
+          >
+            <i class="ti ti-external-link" aria-hidden="true"></i>
+          </button>
+        </div>
+      }
+
+      @if (portal.unreachable()) {
+        <p class="phorma-portal__note phorma-portal__note--warn">
+          <i class="ti ti-cloud-off" aria-hidden="true"></i>
+          Could not reach your worker. Deploy it and check the URL in Settings &rarr; Cloud.
+        </p>
+      }
+
+      <!--
+        BYO only. Phorma Cloud runtimes are deployed by us, so they are always
+        current and `portal.stale()` is always false for them.
+      -->
+      @if (portal.stale()) {
+        <p class="phorma-portal__note phorma-portal__note--warn">
+          <i class="ti ti-refresh-alert" aria-hidden="true"></i>
+          Your worker is running an older build, so it may be missing portal fixes.
+          <code>git pull</code> in your Phorma repo, then Deploy again.
+        </p>
+      }
+    </section>
+
+    <!-- ── Problems and warnings ── -->
+    @if (errors().length || warnings().length) {
+      <section class="phorma-portal__section">
+        @for (issue of errors(); track issue.code + (issue.nodeId ?? '')) {
+          <button
+            type="button"
+            class="phorma-portal__issue phorma-portal__issue--error"
+            [disabled]="!issue.nodeId"
+            (click)="focusIssueNode(issue.nodeId)"
+          >
+            <i class="ti ti-alert-circle" aria-hidden="true"></i>
+            <span>{{ issue.message }}</span>
+          </button>
+        }
+        @for (issue of warnings(); track issue.code + (issue.nodeId ?? '')) {
+          <button
+            type="button"
+            class="phorma-portal__issue phorma-portal__issue--warn"
+            [disabled]="!issue.nodeId"
+            (click)="focusIssueNode(issue.nodeId)"
+          >
+            <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+            <span>{{ issue.message }}</span>
+          </button>
+        }
+      </section>
+    }
+
+    <!-- ── Publish ── -->
+    <section class="phorma-portal__section">
+      @if (blockerMessage(); as blocked) {
+        <p class="phorma-portal__note">
+          <i class="ti ti-info-circle" aria-hidden="true"></i>
+          {{ blocked }}
+        </p>
+      }
+
+      <div class="phorma-portal__actions">
+        <button
+          pButton
+          type="button"
+          [disabled]="portal.busy() || !!portal.blocker()"
+          (click)="publish()"
+        >
+          <i class="ti ti-world-upload" aria-hidden="true"></i>
+          <span class="phorma-portal__btn-label">
+            {{ portal.published() ? 'Update portal' : 'Publish portal' }}
+          </span>
+        </button>
+
+        @if (portal.blocker() === 'no-provider' || portal.blocker() === 'no-worker-url') {
+          <button pButton type="button" severity="secondary" [outlined]="true" (click)="openCloudSettings()">
+            <i class="ti ti-settings" aria-hidden="true"></i>
+            <span class="phorma-portal__btn-label">Cloud settings</span>
+          </button>
+        } @else {
+          <button pButton type="button" severity="secondary" [outlined]="true" (click)="editPortalNode()">
+            <i class="ti ti-adjustments" aria-hidden="true"></i>
+            <span class="phorma-portal__btn-label">Configure</span>
+          </button>
+        }
+      </div>
+
+      <p class="phorma-portal__hint">
+        Publishing pushes the current workflow, then serves it at the address above.
+        Visitors spend your model budget, so keep an eye on Usage.
+      </p>
+    </section>
+
+    @if (portal.record(); as record) {
+      <!-- ── Access keys ── -->
+      <section class="phorma-portal__section">
+        <span class="phorma-portal__label">Access</span>
+        <p class="phorma-portal__hint">
+          @if (record.access === 'token') {
+            Visitors must present one of the keys below. Change this on the Portal node.
+          } @else {
+            Anyone with the link can use this workflow. Switch to
+            <em>Requires an access key</em> on the Portal node to lock it down.
+          }
+        </p>
+
+        @if (portal.mintedSecret(); as secret) {
+          <div class="phorma-portal__secret">
+            <p class="phorma-portal__secret-title">
+              <i class="ti ti-key" aria-hidden="true"></i>
+              Copy this key now
+            </p>
+            <p class="phorma-portal__secret-body">
+              This is the only time it is shown. Only a hash is stored.
+            </p>
+            <div class="phorma-portal__url-row">
+              <input
+                class="phorma-portal__url"
+                type="text"
+                readonly
+                [value]="secret"
+                aria-label="New access key"
+              />
+              <button
+                type="button"
+                class="phorma-portal__icon-btn"
+                title="Copy key"
+                aria-label="Copy the access key"
+                (click)="copyMintedSecret()"
+              >
+                <i class="ti ti-copy" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                class="phorma-portal__icon-btn"
+                title="Dismiss"
+                aria-label="Dismiss the access key"
+                (click)="dismissSecret()"
+              >
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        }
+
+        @if (record.tokens.length) {
+          <ul class="phorma-portal__list">
+            @for (token of record.tokens; track token.id) {
+              <li class="phorma-portal__row">
+                <i class="ti ti-key phorma-portal__row-icon" aria-hidden="true"></i>
+                <span class="phorma-portal__row-meta">
+                  <span class="phorma-portal__row-title">{{ token.label }}</span>
+                  <span class="phorma-portal__row-sub">
+                    @if (token.lastUsedAt) {
+                      last used {{ token.lastUsedAt | date: 'MMM d, HH:mm' }}
+                    } @else {
+                      never used &middot; created {{ token.createdAt | date: 'MMM d' }}
+                    }
+                  </span>
+                </span>
+                <span class="phorma-portal__row-actions">
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="phorma-portal__row-btn phorma-portal__row-btn--danger"
+                    title="Revoke key"
+                    [attr.aria-label]="'Revoke ' + token.label"
+                    (click)="revokeToken(token, $event)"
+                    (keydown.enter)="revokeToken(token, $event)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </span>
+                </span>
+              </li>
+            }
+          </ul>
+        }
+
+        <div class="phorma-portal__url-row">
+          <input
+            class="phorma-portal__url phorma-portal__url--plain"
+            type="text"
+            placeholder="Key name (e.g. Zapier)"
+            aria-label="Name for a new access key"
+            [value]="tokenLabel()"
+            (input)="onTokenLabelInput($event)"
+          />
+          <button
+            type="button"
+            class="phorma-portal__icon-btn"
+            title="Create an access key"
+            aria-label="Create an access key"
+            [disabled]="portal.busy()"
+            (click)="mintToken()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- ── Embed on a website ── -->
+      @if (record.embedEnabled) {
+        <section class="phorma-portal__section">
+          <span class="phorma-portal__label">Embed</span>
+          <p class="phorma-portal__hint">
+            Paste this into any page on
+            @if (record.embedOrigins?.length) {
+              your allowed sites
+            } @else {
+              your site
+            }
+            to add a chat button.
+          </p>
+          <div class="phorma-portal__url-row">
+            <input
+              class="phorma-portal__url"
+              type="text"
+              readonly
+              [value]="embedSnippet()"
+              aria-label="Embed snippet"
+            />
+            <button
+              type="button"
+              class="phorma-portal__icon-btn"
+              title="Copy snippet"
+              aria-label="Copy the embed snippet"
+              (click)="copyEmbedSnippet()"
+            >
+              <i class="ti ti-copy" aria-hidden="true"></i>
+            </button>
+          </div>
+          @if (!record.embedOrigins?.length) {
+            <p class="phorma-portal__note phorma-portal__note--warn">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              Any website can embed this portal. Add allowed sites on the Portal node.
+            </p>
+          }
+        </section>
+      }
+
+      <!-- ── Traffic ── -->
+      <section class="phorma-portal__section">
+        <span class="phorma-portal__label">Traffic</span>
+        <p class="phorma-portal__stat">
+          <strong>{{ record.hits }}</strong>
+          {{ record.hits === 1 ? 'message' : 'messages' }} since publishing
+          @if (record.lastHitAt) {
+            &middot; last {{ record.lastHitAt | date: 'MMM d, HH:mm' }}
+          }
+        </p>
+
+        @if (portal.runs().length) {
+          <ul class="phorma-portal__list">
+            @for (run of portal.runs(); track run.id) {
+              <li class="phorma-portal__row">
+                <i
+                  class="{{ runStatusIcon(run) }} phorma-portal__row-icon"
+                  [class.phorma-portal__row-icon--ok]="run.status === 'completed'"
+                  [class.phorma-portal__row-icon--bad]="run.status === 'failed'"
+                  aria-hidden="true"
+                ></i>
+                <span class="phorma-portal__row-meta">
+                  <span class="phorma-portal__row-title">{{ runPreview(run) }}</span>
+                  <span class="phorma-portal__row-sub">
+                    {{ run.startedAt | date: 'MMM d, HH:mm' }}
+                  </span>
+                </span>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="phorma-portal__hint">No visitors yet.</p>
+        }
+      </section>
+
+      <!-- ── Take offline ── -->
+      <section class="phorma-portal__section">
+        <button pButton type="button" severity="danger" [outlined]="true" [disabled]="portal.busy()" (click)="unpublish()">
+          <i class="ti ti-world-off" aria-hidden="true"></i>
+          <span class="phorma-portal__btn-label">Take offline</span>
+        </button>
+      </section>
+    }
+  }
+</div>

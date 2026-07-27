@@ -97,6 +97,89 @@ export interface ExecuteWorkflowNodeData {
   errorPortId?: string;
 }
 
+// ── Portal (EPIC 9: published endpoints) ─────────────────────────────────────
+
+/**
+ * How a published workflow presents itself to visitors.
+ * - `chat` — a conversational page; each message starts a run whose transcript
+ *   is carried forward as `{{history}}`.
+ * - `form` — typed fields submitted once; the answer streams back below.
+ */
+export type PortalMode = 'chat' | 'form';
+
+/**
+ * Who may reach a published surface.
+ * - `public` — anyone with the link.
+ * - `token`  — callers must present a scoped portal token.
+ */
+export type PortalAccess = 'public' | 'token';
+
+/** Input control rendered on a `form`-mode portal. */
+export interface PortalField {
+  /**
+   * Payload key. Reachable from agent prompts as `{{fields.<key>}}`.
+   * Must match `/^[a-zA-Z][a-zA-Z0-9_]*$/`.
+   */
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'select' | 'number' | 'boolean';
+  required?: boolean;
+  placeholder?: string;
+  /** Allowed values for `select` fields. */
+  options?: string[];
+}
+
+/**
+ * Configuration for a `portal-trigger` node — the canvas-visible declaration
+ * that a workflow is publicly reachable.
+ *
+ * The node is a pure pass-through entry point like every other trigger; the
+ * host (cloud worker) reads this data at publish time to build the public
+ * surface. Nothing here is secret: it is served to visitors as-is (minus
+ * `slug`, which is in the URL anyway).
+ */
+export interface PortalTriggerData {
+  /**
+   * URL segment the portal is served from (`/p/{slug}`). Lower-case
+   * alphanumerics and dashes; assigned at publish time when empty.
+   */
+  slug?: string;
+  mode: PortalMode;
+  /** Page heading. Falls back to the workflow name. */
+  title?: string;
+  /** Markdown opener shown before the first visitor message. */
+  greeting?: string;
+  /** Fields rendered in `form` mode. Ignored in `chat` mode. */
+  fields?: PortalField[];
+  /**
+   * Node whose streamed tokens and final output the visitor sees. `null` /
+   * absent = auto (the graph's single terminal leaf). Tokens from every other
+   * node are withheld so internal reasoning never reaches the public.
+   */
+  responderNodeId?: string | null;
+  access: PortalAccess;
+  /** Per-visitor request ceiling. 0/absent = host default. */
+  rateLimitPerMin?: number;
+  theme?: 'auto' | 'light' | 'dark';
+  /** False hides the "Powered by Phorma" footer. */
+  showBranding?: boolean;
+  /**
+   * Allows this portal to be embedded in a page on another site via the
+   * `/portal-embed.js` loader. When false the page sends
+   * `frame-ancestors 'none'`, so it cannot be framed at all - which is what
+   * stops an attacker framing a token-gated portal and clickjacking it.
+   */
+  embedEnabled?: boolean;
+  /**
+   * Sites permitted to frame this portal, as origins (`https://acme.com`).
+   * Empty with `embedEnabled` on means "any site", which is a deliberate but
+   * loud choice - the studio warns about it at publish time.
+   */
+  embedOrigins?: string[];
+  /** Label on the launcher bubble the loader injects. */
+  embedLabel?: string;
+}
+
 /**
  * Retry policy for an agent's model calls. Transient failures (429, 5xx,
  * network drops, timeouts) are retried BY DEFAULT (one retry, 1s backoff);

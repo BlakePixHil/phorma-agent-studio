@@ -20,6 +20,7 @@ import { TooltipModule } from 'primeng/tooltip';
 
 import { SettingsDialogService } from '../settings-dialog.service';
 import { CloudService, PHORMA_CLOUD_DEFAULT_URL } from '../../../core/cloud.service';
+import { DeployConfigService } from '../../../core/deploy-config.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
@@ -534,6 +535,7 @@ export class SettingsDialog {
 
   protected readonly cloud = inject(CloudService);
   protected readonly phormaCloud = inject(PhormaCloudService);
+  protected readonly deployConfig = inject(DeployConfigService);
   protected readonly tierLabel = tierLabel;
 
   /** Signed-in Clerk user (null while loading / signed out). */
@@ -566,6 +568,21 @@ export class SettingsDialog {
 
   protected onCloudFolderInput(event: Event): void {
     this.cloud.setCloudFolder((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  // ── Advanced BYO deploy overrides ────────────────────────────────────────
+  // All optional. Leaving them blank deploys the committed wrangler.jsonc as-is.
+
+  protected onAccountIdInput(event: Event): void {
+    this.deployConfig.setAccountId((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onWorkerNameInput(event: Event): void {
+    this.deployConfig.setWorkerName((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onPortalDomainInput(event: Event): void {
+    this.deployConfig.setPortalDomain((event.target as HTMLInputElement | null)?.value ?? '');
   }
 
   /** Worker secrets settable from the guided wizard (BYO Cloudflare). */

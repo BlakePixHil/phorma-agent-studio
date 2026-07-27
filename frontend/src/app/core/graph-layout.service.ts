@@ -69,7 +69,12 @@ export class GraphLayoutService {
     // ── Layer assignment via longest path from any source (node with no
     //    incoming edges). Entry-node kinds are forced to layer 0. ──
     const layers = new Map<string, number>();
-    const entryKinds = new Set(['manual-trigger', 'schedule-trigger', 'webhook-trigger']);
+    const entryKinds = new Set([
+      'manual-trigger',
+      'schedule-trigger',
+      'webhook-trigger',
+      'portal-trigger',
+    ]);
     // Kahn-style topological pass: process nodes whose incoming deps are all
     // already layered. Cycles (shouldn't happen — saveDraft rejects them — but
     // guard anyway) fall back to max-layer + 1.

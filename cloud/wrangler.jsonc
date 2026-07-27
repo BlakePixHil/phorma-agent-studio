@@ -1,4 +1,13 @@
-// Phorma Agent Studio — cloud runtime configuration.
+// Phorma Agent Studio - cloud runtime configuration.
+//
+// This top-level config is DELIBERATELY GENERIC so it deploys cleanly into
+// ANY Cloudflare account. It deliberately does NOT pin:
+//   - `account_id` - wrangler resolves the account from your login. (Pinning
+//     Phorma's own account id here made every BYO deploy fail.)
+//   - an R2 bucket - the `RELEASES` binding is a Phorma-internal updater
+//     feature and now lives under `env.hosted` only. `releases.ts` already
+//     returns 503 when the binding is absent, so a BYO worker simply has no
+//     release routes, which is correct.
 //
 // Deploys to YOUR Cloudflare account:
 //   1. npx wrangler login
@@ -9,10 +18,15 @@
 //      (the studio then authenticates with Clerk session JWTs; PHORMA_TOKEN
 //      remains as a fallback for non-Clerk clients)
 //   4. npx wrangler deploy   (or use Deploy in the studio's Cloud dialog)
+//
+// If you have MORE THAN ONE Cloudflare account, or you want a custom worker
+// name or a custom portal domain, set those in the studio under
+// Settings → Cloud. It writes a `wrangler.byo.jsonc` override (gitignored, so
+// `git pull` never conflicts) and deploys with `--config`. Never hand-edit
+// THIS file: it is version-controlled and shared with Phorma's own deploy.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "phorma-agent-studio-cloud",
-  "account_id": "a088bd7c3fb962dfb28d003e8478dffe",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -21,6 +35,11 @@
       {
         "name": "WorkflowAgent",
         "class_name": "WorkflowAgent"
+      },
+      // Portal slug registry + rate limiter (one instance per worker).
+      {
+        "name": "PortalIndex",
+        "class_name": "PortalIndex"
       }
     ]
   },
@@ -28,27 +47,26 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["WorkflowAgent"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["PortalIndex"]
     }
   ],
   "observability": {
     "enabled": true
   },
-  // ── Release artifacts (R2) ───────────────────────────────────────────────
-  // One-time setup:  npx wrangler r2 bucket create phorma-releases
-  "r2_buckets": [
-    {
-      "binding": "RELEASES",
-      "bucket_name": "phorma-releases"
-    }
-  ],
+  // NOTE: no `r2_buckets` here on purpose. The `RELEASES` bucket serves
+  // Phorma's installer downloads and update manifests, so it is bound under
+  // `env.hosted` only. A BYO worker has no reason to own that bucket.
   // ── Phorma Labs hosted deployment (multi-tenant) ─────────────────────────
   // Deployed ONLY by Phorma:  npx wrangler deploy --env hosted
   // Additional secrets (set with `wrangler secret put <NAME> --env hosted`):
-  //   CLERK_SECRET_KEY            — Clerk backend key (required; fail-closed)
-  //   CLERK_JWT_KEY               — Clerk instance PEM for offline JWT verify
-  //   KEY_ENC_SECRET              — base64 32-byte AES-GCM key for stored runtime keys
-  //   OPENROUTER_PROVISIONING_KEY — mints per-tenant credit-limited runtime keys
-  //   PHORMA_ADMIN_TOKEN          — guards /api/provision + /api/deactivate
+  //   CLERK_SECRET_KEY            - Clerk backend key (required; fail-closed)
+  //   CLERK_JWT_KEY               - Clerk instance PEM for offline JWT verify
+  //   KEY_ENC_SECRET              - base64 32-byte AES-GCM key for stored runtime keys
+  //   OPENROUTER_PROVISIONING_KEY - mints per-tenant credit-limited runtime keys
+  //   PHORMA_ADMIN_TOKEN          - guards /api/provision + /api/deactivate
   // One-time setup:
   //   npx wrangler d1 create phorma-cloud            (paste id below)
   //   npx wrangler kv namespace create TENANTS       (paste id below)
@@ -56,6 +74,10 @@
   "env": {
     "hosted": {
       "name": "phorma-agent-studio-cloud",
+      // Pinned HERE rather than at the top level, so Phorma's own deploy stays
+      // non-interactive while a BYO deploy resolves the account from its own
+      // `wrangler login`.
+      "account_id": "a088bd7c3fb962dfb28d003e8478dffe",
       "vars": {
         "PHORMA_MODE": "hosted",
         "ALLOWED_ORIGINS": "http://localhost:7322,tauri://localhost,https://tauri.localhost"
@@ -65,6 +87,11 @@
           {
             "name": "WorkflowAgent",
             "class_name": "WorkflowAgent"
+          },
+          // Portal slug registry + rate limiter (one instance per worker).
+          {
+            "name": "PortalIndex",
+            "class_name": "PortalIndex"
           }
         ]
       },
@@ -72,6 +99,10 @@
         {
           "tag": "v1",
           "new_sqlite_classes": ["WorkflowAgent"]
+        },
+        {
+          "tag": "v2",
+          "new_sqlite_classes": ["PortalIndex"]
         }
       ],
       "d1_databases": [

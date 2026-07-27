@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "tsc --noEmit && wrangler deploy --dry-run --outdir=dist"
+    "check": "tsc --noEmit && wrangler deploy --dry-run --outdir=dist",
+    "test": "npm run test:unit && npm run test:portal",
+    "test:unit": "tsx test/portal-projection.test.mjs && tsx test/portal-embed.test.mjs && tsx test/deploy-config.test.mjs",
+    "test:portal": "node test/portal.e2e.mjs"
   },
   "dependencies": {
     "@clerk/backend": "^3.10.0",
@@ -17,6 +20,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250620.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "wrangler": "^4.0.0"
   }

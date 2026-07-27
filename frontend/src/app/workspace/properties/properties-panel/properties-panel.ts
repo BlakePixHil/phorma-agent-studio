@@ -10,7 +10,6 @@ import {
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
-import cronstrue from 'cronstrue';
 
 import { SelectionService } from '../../../core/selection.service';
 import { WorkflowService } from '../../../core/workflow.service';
@@ -20,6 +19,8 @@ import { McpOAuthService } from '../../../core/mcp-oauth.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
+import { CloudService } from '../../../core/cloud.service';
+import { terminalLeafNodes, toPortalSlug, type PortalField } from '@phorma/engine';
 import type {
   ApprovalGateData,
   AskUserNodeData,
@@ -27,13 +28,41 @@ import type {
   ForEachNodeData,
   HttpToolData,
   McpToolData,
+  PortalTriggerData,
   ScheduleTriggerData,
   WaitEventNodeData,
   WebhookTriggerData,
+  WorkflowGraph,
   WorkflowNode,
 } from '../../../core/workflow.model';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+/**
+ * `cronstrue` renders "0 9 * * 1-5" as "At 09:00 AM, Monday through Friday".
+ * It is ~48kB of CommonJS and is only needed while a Schedule trigger is
+ * selected, so it is loaded on demand rather than shipped in the initial
+ * bundle (which also clears the CommonJS optimization-bailout warning).
+ */
+let cronDescriber: ((cron: string) => string) | null = null;
+let cronDescriberLoading: Promise<void> | null = null;
+
+function loadCronDescriber(): Promise<void> {
+  cronDescriberLoading ??= import('cronstrue').then(module => {
+    const describe = module.default ?? module;
+    cronDescriber = (cron: string) => describe.toString(cron);
+  });
+  return cronDescriberLoading;
+}
+
+/** Field types offered by the form-mode field editor. */
+const PORTAL_FIELD_TYPES: { id: PortalField['type']; label: string }[] = [
+  { id: 'text', label: 'Short text' },
+  { id: 'textarea', label: 'Long text' },
+  { id: 'select', label: 'Dropdown' },
+  { id: 'number', label: 'Number' },
+  { id: 'boolean', label: 'Yes / no' },
+];
 
 // ── Cron editor ─────────────────────────────────────────────────────────────
 
@@ -176,6 +205,7 @@ export class PropertiesPanel {
   private readonly toast = inject(ToastService);
   private readonly oauth = inject(McpOAuthService);
   private readonly phormaCloud = inject(PhormaCloudService);
+  private readonly cloud = inject(CloudService);
 
   protected readonly httpMethods = [...HTTP_METHODS];
   protected readonly mcpTransports = [
@@ -215,12 +245,19 @@ export class PropertiesPanel {
     return parseCron(data?.cron ?? '* * * * *');
   });
 
+  /**
+   * Bumped once the lazy `cronstrue` chunk lands, so the two computeds below
+   * recompute with the describer available.
+   */
+  private readonly cronDescriberReady = signal(cronDescriber !== null);
+
   /** Human-readable description of the cron expression. */
   protected readonly cronHumanReadable = computed<string | null>(() => {
     const data = this.scheduleData();
     if (!data?.cron?.trim()) return null;
+    if (!this.cronDescriberReady() || !cronDescriber) return null;
     try {
-      return cronstrue.toString(data.cron);
+      return cronDescriber(data.cron);
     } catch {
       return null;
     }
@@ -230,8 +267,11 @@ export class PropertiesPanel {
   protected readonly cronInvalid = computed(() => {
     const data = this.scheduleData();
     if (!data?.cron?.trim()) return true;
+    // Before the describer loads, assume valid: flashing "Invalid" at a correct
+    // expression for one frame would be worse than saying nothing.
+    if (!this.cronDescriberReady() || !cronDescriber) return false;
     try {
-      cronstrue.toString(data.cron);
+      cronDescriber(data.cron);
       return false;
     } catch {
       return true;
@@ -272,6 +312,10 @@ export class PropertiesPanel {
     const node = this.node();
     return node?.kind === 'webhook-trigger' ? (node.data as WebhookTriggerData) : null;
   });
+  protected readonly portalData = computed<PortalTriggerData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'portal-trigger' ? (node.data as PortalTriggerData) : null;
+  });
   protected readonly httpData = computed<HttpToolData | null>(() => {
     const node = this.node();
     return node?.kind === 'http-tool' ? (node.data as HttpToolData) : null;
@@ -300,6 +344,172 @@ export class PropertiesPanel {
     const node = this.node();
     return node?.kind === 'execute-workflow' ? (node.data as ExecuteWorkflowNodeData) : null;
   });
+
+  // ── Portal trigger (EPIC 9) ─────────────────────────────────────────────────
+
+  protected readonly portalFieldTypes = PORTAL_FIELD_TYPES;
+  protected readonly portalModes = [
+    { id: 'chat', label: 'Chat' },
+    { id: 'form', label: 'Form' },
+  ];
+  protected readonly portalAccessModes = [
+    { id: 'public', label: 'Anyone with the link' },
+    { id: 'token', label: 'Requires an access key' },
+  ];
+  protected readonly portalThemes = [
+    { id: 'auto', label: 'Match visitor' },
+    { id: 'light', label: 'Light' },
+    { id: 'dark', label: 'Dark' },
+  ];
+
+  /**
+   * Nodes eligible to answer visitors — the graph's terminal leaves. Reuses
+   * the engine's rail so the picker and the publish validator never disagree.
+   */
+  protected readonly portalResponderOptions = computed(() => {
+    if (!this.portalData()) return [];
+    const graph = this.workflow.activeDoc()?.graph;
+    if (!graph) return [];
+    const leaves = terminalLeafNodes(graph as WorkflowGraph);
+    return [
+      { id: '', label: leaves.length === 1 ? `Auto (${leaves[0].name})` : 'Auto (last step)' },
+      ...leaves.map(leaf => ({ id: leaf.id, label: leaf.name })),
+    ];
+  });
+
+  /**
+   * The public address the portal will be served from, once deployed.
+   * Delegates to `CloudService` so the custom-portal-domain rule lives in one
+   * place (this used to re-derive the URL and silently ignored the domain).
+   */
+  protected readonly portalUrl = computed(() => {
+    const slug = this.portalData()?.slug?.trim();
+    return slug ? this.cloud.portalUrl(slug) : null;
+  });
+
+  /** Live invoke URL for the webhook trigger — replaces the old dead hint. */
+  protected readonly webhookUrl = computed(() => {
+    if (!this.webhookData()) return null;
+    const base = this.cloud.effectiveWorkerUrl();
+    const workflowId = this.workflow.activeDoc()?.workflowId;
+    if (!base || !workflowId) return null;
+    return `${base}/agents/workflow-agent/${encodeURIComponent(workflowId)}/trigger`;
+  });
+
+  /** Sanitizes typed slugs so the address stays legal as the user types. */
+  protected onPortalSlugInput(event: Event): void {
+    const raw = this.inputValue(event);
+    // Keep the raw dashes while typing (`my-` is a legal intermediate state)
+    // but strip anything that could never appear in a slug.
+    const cleaned = raw.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48);
+    this.patchData({ slug: cleaned });
+  }
+
+  /** Fills an empty slug from the workflow name. */
+  protected suggestPortalSlug(): void {
+    const name = this.workflow.activeDoc()?.name ?? '';
+    const slug = toPortalSlug(name);
+    if (!slug) {
+      this.toast.warning('Name this workflow first', 'The address is derived from the workflow name.');
+      return;
+    }
+    this.patchData({ slug });
+  }
+
+  protected async copyPortalUrl(): Promise<void> {
+    const url = this.portalUrl();
+    if (!url) return;
+    await this.copyText(url, 'Portal address copied');
+  }
+
+  protected async copyWebhookUrl(): Promise<void> {
+    const url = this.webhookUrl();
+    if (!url) return;
+    await this.copyText(url, 'Webhook URL copied');
+  }
+
+  private async copyText(text: string, title: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.toast.success(title, text);
+    } catch {
+      this.toast.error('Could not copy', 'Copy the address from the field instead.');
+    }
+  }
+
+  protected openPortalUrl(): void {
+    const url = this.portalUrl();
+    if (url) window.open(url, '_blank', 'noopener');
+  }
+
+  // ── Portal form fields ──
+
+  private patchPortalFields(fields: PortalField[]): void {
+    this.patchData({ fields });
+  }
+
+  protected addPortalField(): void {
+    const fields = [...(this.portalData()?.fields ?? [])];
+    const index = fields.length + 1;
+    fields.push({ key: `field${index}`, label: `Field ${index}`, type: 'text' });
+    this.patchPortalFields(fields);
+  }
+
+  protected removePortalField(index: number): void {
+    const fields = [...(this.portalData()?.fields ?? [])];
+    fields.splice(index, 1);
+    this.patchPortalFields(fields);
+  }
+
+  protected movePortalField(index: number, delta: number): void {
+    const fields = [...(this.portalData()?.fields ?? [])];
+    const target = index + delta;
+    if (target < 0 || target >= fields.length) return;
+    [fields[index], fields[target]] = [fields[target], fields[index]];
+    this.patchPortalFields(fields);
+  }
+
+  protected updatePortalField(index: number, patch: Partial<PortalField>): void {
+    const fields = [...(this.portalData()?.fields ?? [])];
+    if (!fields[index]) return;
+    fields[index] = { ...fields[index], ...patch };
+    this.patchPortalFields(fields);
+  }
+
+  /** Comma-separated dropdown options, edited as one line. */
+  protected portalFieldOptionsText(field: PortalField): string {
+    return (field.options ?? []).join(', ');
+  }
+
+  // ── Embedding ──
+
+  /** Allowed embed origins as one editable comma-separated line. */
+  protected portalEmbedOriginsText(data: PortalTriggerData): string {
+    return (data.embedOrigins ?? []).join(', ');
+  }
+
+  /** True when embedding is on but no origin restricts it (i.e. any site). */
+  protected portalEmbedOpen(data: PortalTriggerData): boolean {
+    return !(data.embedOrigins ?? []).some(origin => origin.trim().length > 0);
+  }
+
+  protected onPortalEmbedOriginsInput(event: Event): void {
+    // Stored raw; the engine normalizes and de-duplicates at publish time, and
+    // the validator reports anything unusable.
+    const embedOrigins = this.inputValue(event)
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean);
+    this.patchData({ embedOrigins });
+  }
+
+  protected onPortalFieldOptionsInput(index: number, event: Event): void {
+    const options = this.inputValue(event)
+      .split(',')
+      .map(option => option.trim())
+      .filter(Boolean);
+    this.updatePortalField(index, { options });
+  }
 
   protected readonly workflowOptions = computed(() => {
     const data = this.executeWorkflowData();
@@ -442,6 +652,18 @@ export class PropertiesPanel {
   protected readonly advancedCollapser = effect(() => {
     this.node();
     this.advancedOpen.set(false);
+  });
+
+  /**
+   * Pulls in the lazy cron describer the first time a Schedule trigger is
+   * selected. `untracked` guards the signal write, matching the pattern used by
+   * the secret-flag refresher above.
+   */
+  protected readonly cronDescriberLoader = effect(() => {
+    if (!this.scheduleData() || this.cronDescriberReady()) return;
+    untracked(() => {
+      void loadCronDescriber().then(() => this.cronDescriberReady.set(true));
+    });
   });
 
   protected toggleAdvanced(): void {

@@ -349,10 +349,17 @@
 }
 
 /* ── Bespoke rows (API keys / integrations / default model) ──────────────── */
+// Prose that belongs to a row (hints, validation errors) is a SIBLING of the
+// row rather than a child, so it has to be indented by hand to line up with the
+// control instead of the label. These two constants are that offset.
+$settings-row-label-w: 130px;
+$settings-row-gap: 8px;
+$settings-row-indent: $settings-row-label-w + $settings-row-gap;
+
 .phorma-settings__row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: $settings-row-gap;
   flex-wrap: wrap;
 }
 
@@ -360,7 +367,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  width: 130px;
+  width: $settings-row-label-w;
   flex: 0 0 auto;
   font-size: 12px;
   font-weight: 600;
@@ -372,7 +379,7 @@
 }
 
 .phorma-settings__hint {
-  margin: -2px 0 4px 138px;
+  margin: -2px 0 4px $settings-row-indent;
   font-size: 13px;
   line-height: 1.5;
   color: var(--p-text-muted-color);
@@ -778,17 +785,28 @@
 }
 
 .phorma-settings__cloud-setup-steps {
+  // These steps are ORDERED - the numbers are the whole point, and two things
+  // conspire to hide them: Tailwind's preflight sets `list-style: none` on ol,
+  // and `display: flex` suppresses markers entirely. So the type is restored
+  // explicitly and spacing comes from margins rather than flex `gap`.
   margin: 0;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  padding-left: 22px;
+  list-style: decimal outside;
   font-size: 13px;
   line-height: 1.55;
   color: var(--p-text-muted-color);
 
   li {
     min-width: 0;
+
+    &::marker {
+      color: var(--p-primary-color);
+      font-weight: 600;
+    }
+
+    + li {
+      margin-top: 6px;
+    }
   }
 
   code {
@@ -799,6 +817,69 @@
     color: var(--p-text-color);
     word-break: break-all;
   }
+}
+
+// Trailing prose under the numbered steps (e.g. the update-path reminder).
+.phorma-settings__cloud-setup-note,
+.phorma-settings__row-error,
+.phorma-settings__row-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
+
+  code {
+    padding: 0.05em 0.4em;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+    font-size: 0.92em;
+    color: var(--p-text-color);
+    // Short identifiers, so wrap at the token boundary. `break-all` splits them
+    // mid-word ("wrangler.byo. jsonc"), which reads as a typo.
+    overflow-wrap: break-word;
+  }
+}
+
+// Validation prose for an advanced deploy field. Indented to sit under the
+// control it describes rather than under the label (see $settings-row-indent).
+.phorma-settings__row-error,
+.phorma-settings__row-note {
+  padding-left: $settings-row-indent;
+}
+
+.phorma-settings__row-error {
+  margin: -6px 0 4px;
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-settings__row-note {
+  // NOT flex. This note is a sentence containing inline <code>, and flex makes
+  // every text run and element its own flex item - the prose then wraps into a
+  // row of disconnected boxes. The icon is floated instead so the text still
+  // flows as one paragraph around it.
+  margin: -2px 0 4px;
+
+  i {
+    // Hangs into the indent so the sentence's first line starts flush with the
+    // control above it, like the error message does.
+    float: left;
+    margin: 2px 6px 0 -14px;
+    color: var(--p-primary-color);
+  }
+
+  code {
+    // These are short identifiers (a filename, a git command); breaking them
+    // mid-token is what produced "wrangler.byo. jsonc".
+    word-break: normal;
+    white-space: nowrap;
+  }
+}
+
+.phorma-settings__input--invalid {
+  // A 1px tint alone reads as "slightly different", not "wrong" - the ring is
+  // what actually makes an invalid field noticeable at a glance.
+  border-color: var(--phorma-accent-red, #ef4444);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--phorma-accent-red, #ef4444) 22%, transparent);
 }
 
 .phorma-settings__providers {

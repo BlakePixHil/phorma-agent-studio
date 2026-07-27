@@ -1,0 +1,406 @@
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.phorma-portal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 0;
+  padding: 0.65rem 0.75rem 0.8rem;
+  overflow-y: auto;
+}
+
+.phorma-portal__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.phorma-portal__label {
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+// ── Empty state ────────────────────────────────────────────────────────────
+
+.phorma-portal__empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 1rem 0.5rem;
+  text-align: center;
+  color: var(--p-text-muted-color);
+
+  > i {
+    font-size: 1.6rem;
+    opacity: 0.6;
+  }
+}
+
+.phorma-portal__empty-title {
+  margin: 0;
+  font-size: 0.928rem;
+  font-weight: 700;
+  color: var(--p-text-color);
+}
+
+.phorma-portal__empty-body {
+  margin: 0;
+  font-size: 0.928rem;
+  line-height: 1.5;
+}
+
+// ── Status ─────────────────────────────────────────────────────────────────
+
+.phorma-portal__status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.phorma-portal__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--p-text-muted-color);
+  opacity: 0.5;
+
+  &--live {
+    background: var(--phorma-accent-green, #22c55e);
+    opacity: 1;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--phorma-accent-green, #22c55e) 22%, transparent);
+  }
+}
+
+.phorma-portal__status-text {
+  flex: 1;
+  font-size: 0.928rem;
+  font-weight: 600;
+}
+
+// ── Shared rows / inputs ───────────────────────────────────────────────────
+
+.phorma-portal__url-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.phorma-portal__url {
+  min-width: 0;
+  flex: 1;
+  padding: 0.38rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.928rem;
+
+  &--plain {
+    font-family: inherit;
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color, #818cf8);
+  }
+}
+
+.phorma-portal__icon-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--p-text-color);
+    border-color: var(--p-primary-color, #818cf8);
+    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 10%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--p-primary-color, #818cf8);
+    outline-offset: 1px;
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+.phorma-portal__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--p-primary-color, #818cf8) 7%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 0.928rem;
+  line-height: 1.45;
+
+  > i {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+    color: var(--p-primary-color, #818cf8);
+  }
+
+  &--warn {
+    background: var(--phorma-accent-amber-soft, rgba(245, 158, 11, 0.16));
+
+    > i {
+      color: var(--phorma-accent-amber, #f59e0b);
+    }
+  }
+}
+
+.phorma-portal__hint {
+  margin: 0;
+  font-size: 0.928rem;
+  line-height: 1.45;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-portal__stat {
+  margin: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+
+  strong {
+    color: var(--p-text-color);
+  }
+}
+
+// ── Issues ─────────────────────────────────────────────────────────────────
+
+.phorma-portal__issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--p-text-color);
+  font: inherit;
+  font-size: 0.928rem;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+
+  > i {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &:hover:not(:disabled) {
+    border-color: var(--phorma-card-border);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--p-primary-color, #818cf8);
+    outline-offset: 1px;
+  }
+
+  &--error {
+    background: var(--phorma-accent-red-soft, rgba(239, 68, 68, 0.16));
+
+    > i {
+      color: var(--phorma-accent-red, #ef4444);
+    }
+  }
+
+  &--warn {
+    background: var(--phorma-accent-amber-soft, rgba(245, 158, 11, 0.16));
+
+    > i {
+      color: var(--phorma-accent-amber, #f59e0b);
+    }
+  }
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+
+.phorma-portal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+// PrimeNG v20 solid buttons paint an opaque ::before overlay over in-flow
+// content, so the icon and label must both be lifted above it.
+.phorma-portal__btn-label {
+  position: relative;
+  z-index: 1;
+}
+
+.phorma-portal__actions button i {
+  position: relative;
+  z-index: 1;
+}
+
+// ── One-time secret ────────────────────────────────────────────────────────
+
+.phorma-portal__secret {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-green, #22c55e) 40%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--phorma-accent-green, #22c55e) 10%, transparent);
+}
+
+.phorma-portal__secret-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.928rem;
+  font-weight: 700;
+
+  > i {
+    color: var(--phorma-accent-green, #22c55e);
+  }
+}
+
+.phorma-portal__secret-body {
+  margin: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+}
+
+// ── Lists ──────────────────────────────────────────────────────────────────
+
+.phorma-portal__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.phorma-portal__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 0.5rem;
+
+  &:hover {
+    background: var(--phorma-node-row-hover, rgba(0, 0, 0, 0.03));
+
+    .phorma-portal__row-actions {
+      width: auto;
+      opacity: 1;
+    }
+  }
+}
+
+.phorma-portal__row-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  color: var(--p-text-muted-color);
+
+  &--ok {
+    color: var(--phorma-accent-green, #22c55e);
+  }
+
+  &--bad {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+.phorma-portal__row-meta {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.phorma-portal__row-title {
+  overflow: hidden;
+  font-size: 0.928rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-portal__row-sub {
+  overflow: hidden;
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Collapsed until row hover, so the title gets the full width and truncates at
+// the real edge (same pattern as the Skills panel).
+.phorma-portal__row-actions {
+  display: inline-flex;
+  gap: 0.1rem;
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    width 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.phorma-portal__row-btn {
+  display: inline-flex;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--p-primary-color, #818cf8);
+    outline-offset: 1px;
+  }
+
+  &--danger:hover {
+    background: var(--phorma-accent-red-soft, rgba(239, 68, 68, 0.16));
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}

@@ -25,6 +25,7 @@ const DEFAULT_TABS: PanelTab[] = [
   { id: 'usage',      label: 'Usage',      icon: 'ti ti-chart-bar',  side: 'right', order: 3 },
   { id: 'evals',      label: 'Evals',      icon: 'ti ti-flask',      side: 'right', order: 4 },
   { id: 'assistant',  label: 'Assistant',  icon: 'ti ti-sparkles',   side: 'right', order: 5 },
+  { id: 'portal',     label: 'Portal',     icon: 'ti ti-world-share', side: 'right', order: 6 },
 ];
 
 /**

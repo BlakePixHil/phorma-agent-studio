@@ -17,3 +17,4 @@ export * from './tools.js';
 export * from './mcp-oauth.js';
 export * from './engine.js';
 export * from './evals.js';
+export * from './portal.js';

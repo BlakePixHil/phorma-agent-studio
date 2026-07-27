@@ -320,6 +320,8 @@ export class RunsPanel {
         return 'ti ti-refresh';
       case 'eval':
         return 'ti ti-flask';
+      case 'portal':
+        return 'ti ti-world-share';
       default:
         return 'ti ti-hand-click';
     }

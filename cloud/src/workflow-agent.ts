@@ -40,6 +40,19 @@ import {
   type TenantEnv,
   type TenantRecord,
 } from './tenants';
+import {
+  isTerminalPortalEvent,
+  toPortalEvent,
+  toSseFrame,
+  type PortalEvent,
+} from './portal-events';
+import {
+  portalIndex,
+  type PortalRegistryEnv,
+  type PublishRecord,
+} from './portal-registry';
+import { mintPortalToken, type PortalTokenRecord } from './portal-auth';
+import { WORKER_BUILD } from './build-info';
 
 import {
   FetchModelClient,
@@ -53,6 +66,17 @@ import {
   createRunRecorder,
   decodeRunSnapshot,
   encodeRunSnapshot,
+  buildPortalInput,
+  findPortalTrigger,
+  portalPublicConfig,
+  resolveResponderNodeId,
+  suggestPortalSlug,
+  trimPortalHistory,
+  validatePortal,
+  PORTAL_DEFAULT_RATE_LIMIT_PER_MIN,
+  type PortalTriggerData,
+  type PortalTurn,
+  type PortalValidation,
   type JournalEntry,
   type ModelProviderId,
   type ResolvedTool,
@@ -71,7 +95,7 @@ import {
   type WorkflowSpec,
 } from '@phorma/engine';
 
-export interface Env extends TenantEnv {
+export interface Env extends TenantEnv, PortalRegistryEnv {
   WorkflowAgent: DurableObjectNamespace;
   /** R2 bucket holding installer artifacts and update manifests. */
   RELEASES?: R2Bucket;
@@ -133,6 +157,33 @@ interface WorkflowAgentState {
    * effects) until execution reaches the first unfinished node.
    */
   activeRun?: { runId: string; input: string; startedAt: number } | null;
+  /**
+   * Set ONLY on session instances (`{workflowId}#s{sessionId}`), which serve
+   * one visitor conversation on a published portal. Its presence is what makes
+   * an instance a portal session: cron is never armed, and the redacted SSE
+   * projection reads `responderNodeId` from here.
+   */
+  portalSession?: PortalSessionState | null;
+}
+
+/** Per-visitor conversation state held by a session instance. */
+interface PortalSessionState {
+  slug: string;
+  sessionId: string;
+  /** Library workflow id this session serves. */
+  workflowId: string;
+  /**
+   * DO instance name of the owner's workflow, so settled runs can be mirrored
+   * back for the Runs/Usage panels. Carried explicitly because `this.name`
+   * THROWS on an instance reached by RPC (partyserver only sets it when the
+   * request came through `routePartykitRequest`).
+   */
+  ownerInstance: string;
+  /** Node whose tokens the visitor may see; null = final output only. */
+  responderNodeId: string | null;
+  /** Rolling transcript, capped by the engine's retention helpers. */
+  transcript: PortalTurn[];
+  createdAt: number;
 }
 
 /** The identity attached to an authorized request. */
@@ -179,6 +230,23 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   /** Called on every DO wake (cold start). Resumes an interrupted run. */
   override async onStart(): Promise<void> {
+    this.ensureTables();
+    const active = this.state.activeRun;
+    if (active && !this.handle) {
+      // The previous instance died mid-run (eviction). Restart the run with
+      // its journal: completed nodes replay instantly, suspended waits and
+      // approvals re-register, and execution continues from where it stopped.
+      await this.trigger(active.input, active.runId);
+    }
+  }
+
+  /**
+   * Creates this instance's tables. Idempotent and cheap, and deliberately
+   * callable from anywhere: an RPC entry point (a portal visitor's turn) can
+   * reach `trigger()` before `onStart()` has finished, which previously failed
+   * with "no such table: run_journal".
+   */
+  private ensureTables(): void {
     this.sql`
       CREATE TABLE IF NOT EXISTS run_journal (
         run_id TEXT NOT NULL,
@@ -224,13 +292,6 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         usage TEXT NOT NULL
       )
     `;
-    const active = this.state.activeRun;
-    if (active && !this.handle) {
-      // The previous instance died mid-run (eviction). Restart the run with
-      // its journal: completed nodes replay instantly, suspended waits and
-      // approvals re-register, and execution continues from where it stopped.
-      await this.trigger(active.input, active.runId);
-    }
   }
 
   private handle: RunHandle | null = null;
@@ -256,6 +317,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private eventLog: RunEvent[] = [];
   /** Run-history recorder for the in-flight run (EPIC 1). */
   private recorder: RunRecorder | null = null;
+  /**
+   * Open portal SSE writers (EPIC 9). Separate from `getConnections()` because
+   * these carry the REDACTED projection, never raw RunEvents.
+   */
+  private readonly portalStreams = new Set<PortalStreamWriter>();
+  /** Public events of the current portal run, replayed to a late subscriber. */
+  private portalReplay: PortalEvent[] = [];
 
   /** How many finished runs each workflow keeps; oldest are pruned. */
   private static readonly RUN_HISTORY_LIMIT = 50;
@@ -299,8 +367,12 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         input?: string;
         source?: string;
       };
-      // Callers may tag eval-suite case runs; everything else stays manual.
-      const source: RunSource = body.source === 'eval' ? 'eval' : 'manual';
+      // Callers may tag eval-suite case runs and machine webhook calls;
+      // everything else stays manual. `portal` is NOT accepted here — portal
+      // runs are minted by the public router in a session instance, so
+      // honouring it would let a caller forge portal attribution.
+      const source: RunSource =
+        body.source === 'eval' ? 'eval' : body.source === 'webhook' ? 'webhook' : 'manual';
       const result = await this.trigger(body.input ?? '', undefined, source);
       return json(result, result.ok ? 200 : (result.status ?? 409));
     }
@@ -381,6 +453,60 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         /** Correlation keys the current run is suspended on. */
         pendingWaits: [...this.waits.keys()],
       });
+    }
+
+    // ── Portal owner routes (EPIC 9) ─────────────────────────────────────────
+    // Authenticated (they sit below `authorized` + `enforceOwnership`). The
+    // PUBLIC surface lives in portal.ts and never reaches this method.
+
+    if (request.method === 'POST' && path.endsWith('/publish')) {
+      // Drain the body even though it is unused: leaving a request stream
+      // unread inside a Durable Object throws "Can't read from request stream
+      // after response has been sent" and wedges the connection for the
+      // caller's NEXT request on the same socket.
+      await request.text().catch(() => '');
+      return this.publishPortal();
+    }
+
+    if (request.method === 'POST' && path.endsWith('/unpublish')) {
+      await request.text().catch(() => '');
+      const result = await portalIndex(this.env).unpublish(this.workflowKey());
+      return json({ ok: true, removed: result.removed });
+    }
+
+    if (request.method === 'GET' && path.endsWith('/portal')) {
+      const [status, taken] = await Promise.all([
+        portalIndex(this.env).statusFor(this.workflowKey()),
+        portalIndex(this.env).takenSlugs(this.workflowKey()),
+      ]);
+      return json({
+        record: status.record ? redactPublishRecord(status.record) : null,
+        validation: this.validateForPublish(taken),
+        // Lets the studio warn a BYO owner that their deployed worker predates
+        // the app, i.e. it is missing portal fixes until they pull + deploy.
+        workerBuild: WORKER_BUILD,
+      });
+    }
+
+    if (request.method === 'POST' && path.endsWith('/portal-tokens')) {
+      const body = (await request.json().catch(() => ({}))) as { label?: string };
+      return this.mintPortalKey(body.label ?? '');
+    }
+
+    {
+      const match =
+        request.method === 'DELETE' ? /\/portal-tokens\/([^/]+)$/.exec(path) : null;
+      if (match) {
+        await request.text().catch(() => '');
+        return this.revokePortalKey(decodeURIComponent(match[1]));
+      }
+    }
+
+    // Portal runs execute in per-visitor session instances, so their history
+    // would be scattered across instances. Sessions mirror a compact summary
+    // back here at settle; this is where the studio reads them.
+    if (request.method === 'GET' && path.endsWith('/portal-runs')) {
+      return json({ runs: this.listPortalRunSummaries() });
     }
 
     return json({ error: 'Not found.' }, 404);
@@ -505,9 +631,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   }
 
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
-    // Drop existing cron schedules, then arm one per schedule-trigger node.
+    // Portal session instances serve ONE visitor conversation. Arming cron
+    // there would give every visitor their own recurring job.
+    if (this.state.portalSession) return;
+
+    // Drop existing CRON schedules only. Cancelling everything (the previous
+    // behaviour) also killed in-flight `waitTimedOut` / `workflowTimedOut`
+    // alarms, so a spec push during a suspended run silently dropped its
+    // timeouts and the run could hang forever.
     for (const schedule of this.getSchedules()) {
-      await this.cancelSchedule(schedule.id);
+      if (schedule.callback === 'scheduledRun') {
+        await this.cancelSchedule(schedule.id);
+      }
     }
     // Hosted mode: cap active schedules by tier so background cron runs
     // can't burn quota 24/7.
@@ -537,6 +672,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     const spec = this.state.spec;
     if (!spec) return { ok: false, error: 'No workflow uploaded yet.', status: 409 };
     if (this.handle) return { ok: false, error: 'A run is already in progress.', status: 409 };
+    // An RPC-initiated run (portal turn) can arrive before onStart completes.
+    this.ensureTables();
 
     // Hosted mode: resolve the tenant, gate on subscription + quota, and
     // resolve the credit-limited OpenRouter runtime key.
@@ -795,6 +932,9 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       this.persistRunEvents(runId, record.events);
       this.pruneRunHistory();
       this.writeUsageLedger(record.summary);
+      // Portal runs execute in per-visitor session instances, so without this
+      // the owner's Runs and Usage panels would never see them.
+      this.mirrorPortalRun(record.summary, recordGraphJson);
       if (this.recorder === recorder) this.recorder = null;
       // Hosted: authoritative per-run ledger row + quota rollup in D1.
       // A RESUMED run only ledgers the incremental usage of the re-execution
@@ -1110,6 +1250,417 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         // A dead monitor must never break a run.
       }
     }
+    this.fanOutToPortal(event);
+  }
+
+  // ── Portal: owner operations (EPIC 9) ──────────────────────────────────────
+
+  /**
+   * This instance's library workflow id.
+   *
+   * `this.name` is only available when the request arrived through
+   * `routePartykitRequest` — reading it on an RPC-reached instance throws — so
+   * the spec id and the session record are consulted first.
+   */
+  private workflowKey(): string {
+    const fromSpec = this.state.spec?.id;
+    if (fromSpec) return fromSpec;
+    const fromSession = this.state.portalSession?.workflowId;
+    if (fromSession) return fromSession;
+    try {
+      return this.name.split(':').pop() ?? this.name;
+    } catch {
+      return 'default';
+    }
+  }
+
+  /** Runs the shared publish validator against the current spec. */
+  private validateForPublish(takenSlugs: string[]): PortalValidation {
+    const graph = this.state.spec?.graph;
+    if (!graph) {
+      return {
+        errors: [{ code: 'no-workflow', message: 'Push this workflow before publishing it.' }],
+        warnings: [],
+        responderNodeId: null,
+      };
+    }
+    return validatePortal(graph, { takenSlugs });
+  }
+
+  /**
+   * Publishes the pushed spec's portal trigger. The spec is the source of
+   * truth: the studio edits the `portal-trigger` node on the canvas, pushes,
+   * then calls this. Re-validating here means a hand-rolled POST cannot
+   * bypass the UI's checks.
+   */
+  private async publishPortal(): Promise<Response> {
+    const spec = this.state.spec;
+    if (!spec) return json({ ok: false, error: 'Push this workflow before publishing it.' }, 409);
+
+    const trigger = findPortalTrigger(spec.graph);
+    if (!trigger) {
+      return json({ ok: false, error: 'This workflow has no Portal trigger node.' }, 422);
+    }
+
+    const index = portalIndex(this.env);
+    const workflowId = this.workflowKey();
+    const taken = await index.takenSlugs(workflowId);
+    const validation = validatePortal(spec.graph, { takenSlugs: taken });
+    if (validation.errors.length) {
+      return json({ ok: false, error: validation.errors[0].message, validation }, 422);
+    }
+
+    // Hosted mode: a published portal is reachable by strangers and spends the
+    // tenant's credits, so the count is capped per tier.
+    if (this.hosted && this.state.ownerId) {
+      const tenant = await new TenantStore(this.env).getTenant(this.state.ownerId);
+      const cap = tierLimits(tenant?.tier ?? 'starter').publishedPortals;
+      const already = await index.countForOwner(this.state.ownerId, workflowId);
+      if (already >= cap) {
+        return json(
+          {
+            ok: false,
+            error: `Your plan allows ${cap} published ${cap === 1 ? 'portal' : 'portals'}. Take one offline or upgrade your plan.`,
+          },
+          402,
+        );
+      }
+    }
+
+    const data = trigger.data as PortalTriggerData;
+    // An empty slug is normal — publishing must not stall on naming.
+    const slug = data.slug?.trim() || suggestPortalSlug(spec.name, () => Math.random());
+    const config = portalPublicConfig({ ...data, slug }, spec.name);
+    const existing = (await index.statusFor(workflowId)).record;
+
+    const record: PublishRecord = {
+      slug,
+      workflowId,
+      ownerId: this.state.ownerId ?? null,
+      workflowName: spec.name,
+      mode: config.mode,
+      access: config.access,
+      title: config.title,
+      greeting: config.greeting,
+      fields: config.fields,
+      responderNodeId: resolveResponderNodeId(spec.graph, data.responderNodeId),
+      rateLimitPerMin:
+        data.rateLimitPerMin && data.rateLimitPerMin > 0
+          ? Math.min(data.rateLimitPerMin, 120)
+          : PORTAL_DEFAULT_RATE_LIMIT_PER_MIN,
+      theme: config.theme,
+      showBranding: config.showBranding,
+      embedEnabled: config.embedEnabled,
+      embedOrigins: config.embedOrigins,
+      embedLabel: config.embedLabel,
+      // Keys survive re-publishing: an owner who tweaks a greeting must not
+      // silently break every integration holding a key.
+      tokens: existing?.tokens ?? [],
+      publishedAt: existing?.publishedAt ?? Date.now(),
+      updatedAt: Date.now(),
+      hits: existing?.hits ?? 0,
+      lastHitAt: existing?.lastHitAt,
+    };
+
+    const result = await index.publish(record);
+    if (!result.ok) return json({ ok: false, error: result.error }, 409);
+    return json({ ok: true, record: redactPublishRecord(record), validation });
+  }
+
+  /** Mints a scoped access key. The plaintext is returned exactly once. */
+  private async mintPortalKey(label: string): Promise<Response> {
+    const index = portalIndex(this.env);
+    const workflowId = this.workflowKey();
+    const { record } = await index.statusFor(workflowId);
+    if (!record) return json({ ok: false, error: 'Publish this workflow first.' }, 409);
+    if (record.tokens.length >= PORTAL_MAX_TOKENS) {
+      return json(
+        { ok: false, error: `A portal may hold at most ${PORTAL_MAX_TOKENS} access keys.` },
+        409,
+      );
+    }
+    const minted = await mintPortalToken(record.slug, label);
+    await index.setTokens(workflowId, [...record.tokens, minted.record]);
+    return json({
+      ok: true,
+      // The ONLY time the plaintext exists outside the caller's clipboard.
+      secret: minted.secret,
+      token: publicTokenView(minted.record),
+    });
+  }
+
+  /** Revokes one access key by id. */
+  private async revokePortalKey(tokenId: string): Promise<Response> {
+    const index = portalIndex(this.env);
+    const workflowId = this.workflowKey();
+    const { record } = await index.statusFor(workflowId);
+    if (!record) return json({ ok: false, error: 'This workflow is not published.' }, 409);
+    const remaining = record.tokens.filter(token => token.id !== tokenId);
+    if (remaining.length === record.tokens.length) {
+      return json({ ok: false, error: 'No such access key.' }, 404);
+    }
+    await index.setTokens(workflowId, remaining);
+    return json({ ok: true });
+  }
+
+  /** Portal-sourced run summaries mirrored here by session instances. */
+  private listPortalRunSummaries(): RunRecordSummary[] {
+    return this.listRunSummaries().filter(summary => summary.source === 'portal');
+  }
+
+  // ── Portal: session instances (EPIC 9) ─────────────────────────────────────
+
+  /**
+   * The spec a portal session should execute. Internal RPC from the public
+   * router: it deliberately returns the spec ONLY (no owner, usage, history or
+   * run state), and it is never reachable over HTTP.
+   */
+  async publishedSpec(): Promise<WorkflowSpec | null> {
+    return this.state.spec ?? null;
+  }
+
+  /**
+   * Prepares this instance to serve ONE visitor conversation.
+   *
+   * Called by the public router (worker-side, already rate-limited and
+   * access-checked) with the published spec. Session instances deliberately
+   * never arm cron: a hundred visitors must not create a hundred cron jobs.
+   */
+  async initPortalSession(input: {
+    spec: WorkflowSpec;
+    slug: string;
+    sessionId: string;
+    workflowId: string;
+    ownerInstance: string;
+    ownerId: string | null;
+    responderNodeId: string | null;
+  }): Promise<{ ok: true }> {
+    const existing = this.state.portalSession;
+    this.setState({
+      ...this.state,
+      spec: input.spec,
+      savedAt: new Date().toISOString(),
+      ownerId: input.ownerId,
+      portalSession: {
+        slug: input.slug,
+        sessionId: input.sessionId,
+        workflowId: input.workflowId,
+        ownerInstance: input.ownerInstance,
+        responderNodeId: input.responderNodeId,
+        // Re-initialising an existing session (a later turn, or a wake after
+        // eviction) must keep the transcript or `{{history}}` resets to empty.
+        transcript: existing?.transcript ?? [],
+        createdAt: existing?.createdAt ?? Date.now(),
+      },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Starts a visitor turn. Returns the runId the visitor's SSE stream should
+   * attach to, or a public-safe error.
+   *
+   * The transcript lives here, so multi-turn chat needs no engine change: the
+   * envelope carries `{{message}}` and `{{history}}` as JSON, which
+   * `interpolatePayload` already resolves.
+   */
+  async startPortalTurn(input: {
+    message?: string;
+    fields?: Record<string, string | number | boolean>;
+  }): Promise<{ ok: boolean; runId?: string; error?: string; status?: number }> {
+    const session = this.state.portalSession;
+    if (!session) return { ok: false, error: 'This conversation has expired.', status: 409 };
+    if (this.handle) {
+      return { ok: false, error: 'Still working on your last message.', status: 409 };
+    }
+
+    const message = input.message?.trim() ?? '';
+    const turnNumber = session.transcript.filter(turn => turn.role === 'user').length + 1;
+    const envelope = buildPortalInput({
+      message,
+      fields: input.fields,
+      history: session.transcript,
+      sessionId: session.sessionId,
+      turn: turnNumber,
+    });
+
+    // Record the visitor's turn BEFORE running so a failed run still leaves a
+    // coherent transcript for the retry.
+    this.appendPortalTurn({
+      role: 'user',
+      text: message || renderFieldSummary(input.fields),
+      at: Date.now(),
+    });
+
+    this.portalReplay = [];
+    const result = await this.trigger(envelope, undefined, 'portal');
+    if (!result.ok) {
+      // `trigger` rejections are written for the OPERATOR ("Visit Settings →
+      // Cloud to subscribe", "Monthly credits exhausted") and must never be
+      // shown to a stranger.
+      return { ok: false, error: publicTriggerError(result.status), status: result.status ?? 409 };
+    }
+    return result;
+  }
+
+  /** Answers a pending Ask User node from the portal page. */
+  async answerPortalQuestion(requestId: string, response: string): Promise<{ delivered: boolean }> {
+    const resolve = this.questions.get(requestId);
+    if (!resolve) return { delivered: false };
+    this.questions.delete(requestId);
+    resolve(response);
+    return { delivered: true };
+  }
+
+  /**
+   * Opens a redacted SSE stream for the current turn. Replays whatever the run
+   * has already produced (the page POSTs then subscribes, so tokens can arrive
+   * before the listener does).
+   */
+  async openPortalStream(): Promise<Response> {
+    if (!this.state.portalSession) {
+      return new Response('event: error\ndata: {"type":"error","message":"Expired."}\n\n', {
+        status: 200,
+        headers: SSE_HEADERS,
+      });
+    }
+
+    const encoder = new TextEncoder();
+    let writer: PortalStreamWriter | null = null;
+    const streams = this.portalStreams;
+    const replay = [...this.portalReplay];
+    const running = this.handle !== null;
+
+    const body = new ReadableStream<Uint8Array>({
+      start: controller => {
+        writer = {
+          write: text => controller.enqueue(encoder.encode(text)),
+          close: () => {
+            try {
+              controller.close();
+            } catch {
+              // Already closed by a racing terminal event.
+            }
+            if (writer) streams.delete(writer);
+          },
+        };
+
+        let sawTerminal = false;
+        for (const event of replay) {
+          writer.write(toSseFrame(event));
+          if (isTerminalPortalEvent(event)) sawTerminal = true;
+        }
+        // A finished turn needs no live subscription.
+        if (sawTerminal || !running) {
+          writer.close();
+          return;
+        }
+        streams.add(writer);
+      },
+      cancel: () => {
+        if (writer) streams.delete(writer);
+      },
+    });
+
+    return new Response(body, { status: 200, headers: SSE_HEADERS });
+  }
+
+  /** The visitor-facing config for this session's portal. */
+  async portalSessionInfo(): Promise<{ active: boolean; turns: number }> {
+    const session = this.state.portalSession;
+    return {
+      active: !!session,
+      turns: session?.transcript.filter(turn => turn.role === 'user').length ?? 0,
+    };
+  }
+
+  /**
+   * Accepts a settled portal run from a session instance so the owner's Runs
+   * and Usage panels stay whole. Internal: reached only via RPC from a sibling
+   * DO inside the same worker, never over HTTP.
+   */
+  async acceptPortalRun(summary: RunRecordSummary, graph: string): Promise<{ ok: true }> {
+    // Reached by RPC, so onStart may not have run yet.
+    this.ensureTables();
+    this.persistRunSummary(summary, graph);
+    this.pruneRunHistory();
+    this.writeUsageLedger(summary);
+    return { ok: true };
+  }
+
+  /**
+   * Copies a settled session run up to the owner instance. Best-effort: a
+   * mirroring failure must never affect the visitor's answer.
+   */
+  private mirrorPortalRun(summary: RunRecordSummary, graph: string): void {
+    const session = this.state.portalSession;
+    if (!session || summary.source !== 'portal') return;
+    // A session instance name always carries the `#s` suffix, so it can never
+    // equal the owner instance — but assert it anyway: a self-call would
+    // recurse through acceptPortalRun.
+    const ownerInstance = session.ownerInstance;
+    if (!ownerInstance || ownerInstance.includes('#s')) return;
+    void (async () => {
+      const stub = this.env.WorkflowAgent.get(
+        this.env.WorkflowAgent.idFromName(ownerInstance),
+      ) as unknown as { acceptPortalRun(s: RunRecordSummary, g: string): Promise<unknown> };
+      await stub.acceptPortalRun(summary, graph);
+    })().catch(() => undefined);
+  }
+
+  // ── Portal streaming (EPIC 9) ──────────────────────────────────────────────
+
+  /**
+   * Pushes the REDACTED projection of an event to portal SSE subscribers.
+   *
+   * Public visitors never get a WebSocket: the `agents` SDK sends the whole
+   * agent state (spec + ownerId) on connect and lets any client overwrite it,
+   * so a socket here would publish the owner's prompts. SSE is one-way and
+   * carries only what `toPortalEvent` explicitly allows.
+   */
+  private fanOutToPortal(event: RunEvent): void {
+    const session = this.state.portalSession;
+    if (!session) return;
+    const projected = toPortalEvent(event, { responderNodeId: session.responderNodeId });
+    if (!projected) return;
+
+    // Buffer for a visitor whose EventSource has not attached yet: the page
+    // POSTs the message and opens the stream as two round trips, so the first
+    // tokens can legitimately land before anyone is listening.
+    this.portalReplay.push(projected);
+    if (this.portalReplay.length > PORTAL_REPLAY_LIMIT) {
+      this.portalReplay = this.portalReplay.slice(-PORTAL_REPLAY_LIMIT);
+    }
+    // Remember the answer so the next turn's `{{history}}` includes it.
+    if (projected.type === 'done') {
+      this.appendPortalTurn({ role: 'assistant', text: projected.output, at: Date.now() });
+    }
+
+    const frame = toSseFrame(projected);
+    const terminal = isTerminalPortalEvent(projected);
+    for (const stream of [...this.portalStreams]) {
+      try {
+        stream.write(frame);
+        if (terminal) stream.close();
+      } catch {
+        // A disconnected visitor must never break a run.
+        this.portalStreams.delete(stream);
+      }
+    }
+    if (terminal) this.portalStreams.clear();
+  }
+
+  /** Records the assistant's answer in the session transcript. */
+  private appendPortalTurn(turn: PortalTurn): void {
+    const session = this.state.portalSession;
+    if (!session) return;
+    this.setState({
+      ...this.state,
+      portalSession: {
+        ...session,
+        transcript: trimPortalHistory([...session.transcript, turn]),
+      },
+    });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1160,9 +1711,75 @@ function json(body: unknown, status = 200): Response {
       'Content-Type': 'application/json',
       // The studio calls from a Tauri webview / localhost dev server.
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     },
   });
+}
+
+// ── Portal helpers (EPIC 9) ─────────────────────────────────────────────────
+
+/** How many public events a portal turn buffers for a late SSE subscriber. */
+const PORTAL_REPLAY_LIMIT = 2000;
+
+/** Access keys per portal. Enough for real integrations, bounded for storage. */
+const PORTAL_MAX_TOKENS = 20;
+
+const SSE_HEADERS: Record<string, string> = {
+  'Content-Type': 'text/event-stream; charset=utf-8',
+  'Cache-Control': 'no-cache, no-transform',
+  Connection: 'keep-alive',
+  // Nginx-style proxies buffer by default and would defeat streaming.
+  'X-Accel-Buffering': 'no',
+  'Access-Control-Allow-Origin': '*',
+};
+
+/** One open portal SSE stream. */
+interface PortalStreamWriter {
+  write(text: string): void;
+  close(): void;
+}
+
+/** Owner-facing key metadata. The hash never leaves the worker. */
+function publicTokenView(token: PortalTokenRecord): Omit<PortalTokenRecord, 'hash'> {
+  const { hash: _hash, ...rest } = token;
+  return rest;
+}
+
+/**
+ * The owner's view of a publish record: everything except the key hashes,
+ * which are useless to a client and are credential material.
+ */
+function redactPublishRecord(record: PublishRecord): Omit<PublishRecord, 'tokens'> & {
+  tokens: Omit<PortalTokenRecord, 'hash'>[];
+} {
+  return { ...record, tokens: record.tokens.map(publicTokenView) };
+}
+
+/**
+ * Maps a `trigger()` rejection to copy a stranger may read.
+ *
+ * The originals are addressed to the operator ("Visit Settings → Cloud to
+ * subscribe", "Monthly credits exhausted. Resets next month or upgrade your
+ * plan.") and would leak the owner's billing state to the public.
+ */
+function publicTriggerError(status?: number): string {
+  switch (status) {
+    case 429:
+      return 'This assistant is busy right now. Please try again shortly.';
+    case 402:
+      return 'This assistant is temporarily unavailable.';
+    default:
+      return 'This assistant is temporarily unavailable.';
+  }
+}
+
+/** Human-readable one-line summary of submitted form values. */
+function renderFieldSummary(fields?: Record<string, string | number | boolean>): string {
+  if (!fields) return '';
+  return Object.entries(fields)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(', ');
 }
 
 /** Hosted egress limits for user-defined tool calls. */

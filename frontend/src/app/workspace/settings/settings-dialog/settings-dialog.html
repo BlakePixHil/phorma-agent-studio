@@ -403,7 +403,7 @@
                           Subscribe to Phorma Cloud
                         </p>
                         <p class="phorma-settings__note">
-                          Run agents on Phorma Cloud credits — no API keys, no setup. Subscribe to
+                          Run agents on Phorma Cloud credits - no API keys, no setup. Subscribe to
                           pick from curated top models and have runs billed to your plan.
                         </p>
                         <p-button
@@ -454,7 +454,7 @@
                     }
                     @if (isPhormaCloud() && phormaCloud.subscribed()) {
                       <p class="phorma-settings__note">
-                        Phorma Cloud runs on your subscription credits — no API key needed.
+                        Phorma Cloud runs on your subscription credits - no API key needed.
                         Usage counts against your monthly credits.
                       </p>
                     }
@@ -493,7 +493,7 @@
                         [class.ti-alert-triangle]="!isDesktop"
                         aria-hidden="true"
                       ></i>
-                      These credentials are the application defaults — every node created from
+                      These credentials are the application defaults - every node created from
                       the preset uses them unless overridden on the node itself.
                     </p>
                     @for (preset of mcpPresets; track preset.id) {
@@ -671,7 +671,7 @@
                           <app-phorma-cloud-icon />
                           <h5>Phorma Cloud</h5>
                           <p>
-                            Run your agents on Phorma's infrastructure. No setup required —
+                            Run your agents on Phorma's infrastructure. No setup required -
                             sign in and deploy. Subscription.
                           </p>
                         </button>
@@ -684,7 +684,7 @@
                           <h5>Your own Cloudflare</h5>
                           <p>
                             Deploy the runtime to your own Cloudflare account with wrangler.
-                            Free — you pay Cloudflare directly. Technical setup.
+                            Free - you pay Cloudflare directly. Technical setup.
                           </p>
                         </button>
                       </div>
@@ -728,9 +728,9 @@
                                       plan · active
                                     </p>
                                   } @else if (profile.provisioned) {
-                                    <p>Subscription {{ profile.status }} — runs are paused.</p>
+                                    <p>Subscription {{ profile.status }} - runs are paused.</p>
                                   } @else {
-                                    <p>No subscription yet — contact Phorma Labs to activate.</p>
+                                    <p>No subscription yet - contact Phorma Labs to activate.</p>
                                   }
                                 } @else if (phormaCloud.loading()) {
                                   <p>Checking your account…</p>
@@ -814,22 +814,35 @@
                         <div class="phorma-settings__cloud-setup">
                           <p class="phorma-settings__cloud-setup-intro">
                             <i class="ti ti-terminal-2" aria-hidden="true"></i>
-                            One-time setup to deploy the runtime worker to your own Cloudflare account.
+                            One-time setup to run the agent runtime in your own Cloudflare
+                            account. You own the worker, the keys and the bill.
                           </p>
                           <ol class="phorma-settings__cloud-setup-steps">
+                            <li>
+                              Point the <code>cloud/</code> folder below at your clone of the
+                              Phorma Agent Studio repo, then run
+                              <code>npm install --legacy-peer-deps</code> in it once.
+                            </li>
                             <li>
                               Authenticate wrangler with your Cloudflare account:
                               <code>npx wrangler login</code>
                             </li>
                             <li>
-                              Deploy the worker from the Cloud dialog (uses the
-                              <code>cloud/</code> folder below).
+                              Press <strong>Deploy</strong> in the Cloud dialog. Nothing needs
+                              hand-editing - if you have several Cloudflare accounts, fill in
+                              the Account ID below first.
                             </li>
                             <li>
-                              Set provider secrets on the worker:
-                              <code>npx wrangler secret put ANTHROPIC_API_KEY</code>
+                              Set your model keys with the secrets wizard further down (or
+                              <code>npx wrangler secret put ANTHROPIC_API_KEY</code>), then paste
+                              the deployed Worker URL into the field below.
                             </li>
                           </ol>
+                          <p class="phorma-settings__cloud-setup-note">
+                            Portal improvements reach your worker when you
+                            <code>git pull</code> and Deploy again - the studio tells you when
+                            yours is behind.
+                          </p>
                         </div>
                         <div class="phorma-settings__row">
                           <span class="phorma-settings__row-label">
@@ -912,6 +925,119 @@
                           />
                         </div>
 
+                        <!--
+                          Advanced deploy overrides. Everything here is optional: with all
+                          three blank the studio deploys the committed wrangler.jsonc
+                          unchanged. Filling any of them makes the studio write a
+                          gitignored wrangler.byo.jsonc so the tracked config stays clean.
+                        -->
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">
+                            Account ID
+                            <app-info-popover label="Account ID" heading="When do I need this?">
+                              <p>
+                                Only if your Cloudflare login has access to
+                                <strong>more than one account</strong>. Deploys run
+                                non-interactively, so wrangler cannot stop and ask you which
+                                account to use - it just fails.
+                              </p>
+                              <p>
+                                Find it in the
+                                <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer">Cloudflare dashboard</a>
+                                sidebar, or run <code>npx wrangler whoami</code>. It is 32
+                                hexadecimal characters.
+                              </p>
+                            </app-info-popover>
+                          </span>
+                          <input
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--mono"
+                            placeholder="Optional - only with multiple Cloudflare accounts"
+                            [value]="deployConfig.accountId()"
+                            (input)="onAccountIdInput($event)"
+                            [class.phorma-settings__input--invalid]="!deployConfig.accountIdValid()"
+                            aria-label="Cloudflare account ID"
+                          />
+                        </div>
+                        @if (!deployConfig.accountIdValid()) {
+                          <p class="phorma-settings__row-error">
+                            An account ID is 32 hexadecimal characters.
+                          </p>
+                        }
+
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">
+                            Worker name
+                            <app-info-popover label="Worker name" heading="Why change the name?">
+                              <p>
+                                Defaults to <code>phorma-agent-studio-cloud</code>, which also
+                                becomes your <code>workers.dev</code> hostname. Change it to run
+                                more than one runtime in the same account, or just to give it a
+                                name you like.
+                              </p>
+                              <p>Renaming deploys a NEW worker - the old one keeps running until you delete it.</p>
+                            </app-info-popover>
+                          </span>
+                          <input
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--mono"
+                            placeholder="phorma-agent-studio-cloud"
+                            [value]="deployConfig.workerName()"
+                            (input)="onWorkerNameInput($event)"
+                            [class.phorma-settings__input--invalid]="!deployConfig.workerNameValid()"
+                            aria-label="Cloudflare worker name"
+                          />
+                        </div>
+                        @if (!deployConfig.workerNameValid()) {
+                          <p class="phorma-settings__row-error">
+                            Use lower-case letters, numbers and dashes.
+                          </p>
+                        }
+
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">
+                            Portal domain
+                            <app-info-popover label="Portal domain" heading="Serve portals from your own domain">
+                              <p>
+                                Published portal pages are served from
+                                <code>your-worker.workers.dev/p/slug</code> by default. Set a
+                                domain here to serve them from
+                                <code>chat.your-company.com/p/slug</code> instead.
+                              </p>
+                              <p>
+                                The domain's zone must already be in the same Cloudflare account.
+                                Deploy after saving and wrangler attaches the DNS record for you.
+                              </p>
+                              <p>
+                                This changes the <strong>public</strong> address only. The studio
+                                keeps talking to your Worker URL above for pushes, monitoring and
+                                run history.
+                              </p>
+                            </app-info-popover>
+                          </span>
+                          <input
+                            type="text"
+                            class="phorma-settings__input phorma-settings__input--mono"
+                            placeholder="Optional - e.g. chat.your-company.com"
+                            [value]="deployConfig.portalDomain()"
+                            (input)="onPortalDomainInput($event)"
+                            [class.phorma-settings__input--invalid]="!deployConfig.portalDomainValid()"
+                            aria-label="Custom portal domain"
+                          />
+                        </div>
+                        @if (!deployConfig.portalDomainValid()) {
+                          <p class="phorma-settings__row-error">
+                            Enter a bare hostname, e.g. chat.your-company.com
+                          </p>
+                        }
+                        @if (deployConfig.needsOverride()) {
+                          <p class="phorma-settings__row-note">
+                            <i class="ti ti-file-code" aria-hidden="true"></i>
+                            Deploy writes <code>cloud/wrangler.byo.jsonc</code> with these
+                            settings. It is gitignored, so <code>git pull</code> stays clean.
+                          </p>
+                        }
+
                         <!-- Connection test -->
                         <div class="phorma-settings__row phorma-settings__row--actions">
                           <p-button
@@ -932,7 +1058,7 @@
                             }
                             @case ('auth-failed') {
                               <span class="phorma-settings__pill phorma-settings__pill--warn">
-                                <i class="ti ti-lock-x" aria-hidden="true"></i> Auth failed — check the token
+                                <i class="ti ti-lock-x" aria-hidden="true"></i> Auth failed - check the token
                               </span>
                             }
                             @case ('unreachable') {
@@ -948,7 +1074,7 @@
                           <div class="phorma-settings__secrets">
                             <p class="phorma-settings__hint">
                               Set provider secrets on your worker without leaving the studio.
-                              Values go straight into <code>wrangler secret put</code> — they are
+                              Values go straight into <code>wrangler secret put</code> - they are
                               never stored here.
                             </p>
                             @for (name of workerSecretNames; track name) {
@@ -977,7 +1103,7 @@
                             @if (!cloud.cloudFolder()) {
                               <p class="phorma-settings__hint">
                                 <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-                                Set the cloud/ folder above first — wrangler runs there.
+                                Set the cloud/ folder above first - wrangler runs there.
                               </p>
                             }
                           </div>

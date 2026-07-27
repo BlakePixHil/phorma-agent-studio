@@ -88,16 +88,402 @@
     <!-- Webhook trigger -->
     @if (webhookData(); as data) {
       <section class="phorma-props__section">
-        <label class="phorma-props__label" for="prop-path">Path hint</label>
+        <label class="phorma-props__label">Invoke URL</label>
+        @if (webhookUrl(); as url) {
+          <div class="phorma-props__copy-row">
+            <input
+              class="phorma-props__input phorma-props__input--mono"
+              type="text"
+              readonly
+              [value]="url"
+              aria-label="Webhook invoke URL"
+            />
+            <button
+              type="button"
+              class="phorma-props__icon-btn"
+              title="Copy URL"
+              aria-label="Copy webhook URL"
+              (click)="copyWebhookUrl()"
+            >
+              <i class="ti ti-copy" aria-hidden="true"></i>
+            </button>
+          </div>
+          <p class="phorma-props__hint">
+            POST a JSON body of <code>{{ '{' }} "input": "…" {{ '}' }}</code> with your worker
+            token as a bearer header. Available once the workflow is pushed.
+          </p>
+        } @else {
+          <p class="phorma-props__hint">
+            Set your worker URL in Settings &rarr; Cloud and save this workflow to see the
+            invoke URL.
+          </p>
+        }
+
+        <label class="phorma-props__label phorma-props__label--gap" for="prop-path">Note</label>
         <input
           id="prop-path"
           type="text"
-          class="phorma-props__input phorma-props__input--mono"
+          class="phorma-props__input"
           [value]="data.path ?? ''"
           (input)="patchData({ path: inputValue($event) })"
-          placeholder="/hooks/intake"
+          placeholder="Which system calls this?"
         />
-        <p class="phorma-props__hint">The deployed workflow exposes an HTTP trigger endpoint.</p>
+        <p class="phorma-props__hint">A reminder for your team. Not part of the URL.</p>
+      </section>
+    }
+
+    <!-- Portal trigger -->
+    @if (portalData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Presents as</label>
+        <div class="phorma-props__presets" role="group" aria-label="Portal mode">
+          @for (mode of portalModes; track mode.id) {
+            <button
+              type="button"
+              class="phorma-props__preset-btn"
+              [class.phorma-props__preset-btn--active]="data.mode === mode.id"
+              [attr.aria-pressed]="data.mode === mode.id"
+              (click)="patchData({ mode: mode.id })"
+            >
+              {{ mode.label }}
+            </button>
+          }
+        </div>
+        <p class="phorma-props__hint">
+          @if (data.mode === 'chat') {
+            A conversation page. Each message runs the workflow; earlier turns are handed
+            to your prompts as <code>{{ '{' }}{{ '{' }}history{{ '}' }}{{ '}' }}</code>.
+          } @else {
+            A one-shot form. Submitted values reach your prompts as
+            <code>{{ '{' }}{{ '{' }}fields.key{{ '}' }}{{ '}' }}</code>.
+          }
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-portal-slug">Public address</label>
+        <div class="phorma-props__copy-row">
+          <input
+            id="prop-portal-slug"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.slug ?? ''"
+            (input)="onPortalSlugInput($event)"
+            placeholder="customer-intake"
+          />
+          <button
+            type="button"
+            class="phorma-props__icon-btn"
+            title="Suggest from the workflow name"
+            aria-label="Suggest an address from the workflow name"
+            (click)="suggestPortalSlug()"
+          >
+            <i class="ti ti-wand" aria-hidden="true"></i>
+          </button>
+        </div>
+        @if (portalUrl(); as url) {
+          <div class="phorma-props__copy-row phorma-props__label--gap">
+            <input
+              class="phorma-props__input phorma-props__input--mono"
+              type="text"
+              readonly
+              [value]="url"
+              aria-label="Portal address"
+            />
+            <button
+              type="button"
+              class="phorma-props__icon-btn"
+              title="Copy address"
+              aria-label="Copy portal address"
+              (click)="copyPortalUrl()"
+            >
+              <i class="ti ti-copy" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              class="phorma-props__icon-btn"
+              title="Open portal"
+              aria-label="Open the portal in a new tab"
+              (click)="openPortalUrl()"
+            >
+              <i class="ti ti-external-link" aria-hidden="true"></i>
+            </button>
+          </div>
+          <p class="phorma-props__hint">Live once you publish from the Portal panel.</p>
+        } @else {
+          <p class="phorma-props__hint">
+            Lower-case letters, numbers and dashes. Assigned automatically if you leave it
+            empty.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-portal-title">Heading</label>
+        <input
+          id="prop-portal-title"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.title ?? ''"
+          (input)="patchData({ title: inputValue($event) })"
+          placeholder="Ask our support assistant"
+        />
+
+        <label class="phorma-props__label phorma-props__label--gap" for="prop-portal-greeting">
+          Opening message (markdown)
+        </label>
+        <textarea
+          id="prop-portal-greeting"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.greeting ?? ''"
+          (input)="patchData({ greeting: inputValue($event) })"
+          placeholder="Hi! Tell me what you need and I'll take it from there."
+        ></textarea>
+      </section>
+
+      <!-- Form fields -->
+      @if (data.mode === 'form') {
+        <section class="phorma-props__section">
+          <div class="phorma-props__row phorma-props__row--between">
+            <span class="phorma-props__label">Fields</span>
+            <button
+              type="button"
+              class="phorma-props__icon-btn"
+              title="Add a field"
+              aria-label="Add a field"
+              (click)="addPortalField()"
+            >
+              <i class="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          @if (data.fields?.length) {
+            @for (field of data.fields; track $index) {
+              <div class="phorma-props__portal-field">
+                <div class="phorma-props__row">
+                  <input
+                    type="text"
+                    class="phorma-props__input"
+                    [value]="field.label"
+                    (input)="updatePortalField($index, { label: inputValue($event) })"
+                    [attr.aria-label]="'Label for field ' + ($index + 1)"
+                    placeholder="Label"
+                  />
+                  <button
+                    type="button"
+                    class="phorma-props__icon-btn"
+                    title="Move up"
+                    [attr.aria-label]="'Move field ' + ($index + 1) + ' up'"
+                    [disabled]="$first"
+                    (click)="movePortalField($index, -1)"
+                  >
+                    <i class="ti ti-chevron-up" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="phorma-props__icon-btn"
+                    title="Move down"
+                    [attr.aria-label]="'Move field ' + ($index + 1) + ' down'"
+                    [disabled]="$last"
+                    (click)="movePortalField($index, 1)"
+                  >
+                    <i class="ti ti-chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="phorma-props__icon-btn phorma-props__icon-btn--danger"
+                    title="Remove field"
+                    [attr.aria-label]="'Remove field ' + ($index + 1)"
+                    (click)="removePortalField($index)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <div class="phorma-props__row phorma-props__label--gap">
+                  <input
+                    type="text"
+                    class="phorma-props__input phorma-props__input--mono"
+                    [value]="field.key"
+                    (input)="updatePortalField($index, { key: inputValue($event) })"
+                    [attr.aria-label]="'Key for field ' + ($index + 1)"
+                    placeholder="key"
+                  />
+                  <p-select
+                    class="phorma-props__method"
+                    appendTo="body"
+                    [options]="portalFieldTypes"
+                    optionLabel="label"
+                    optionValue="id"
+                    [ngModel]="field.type"
+                    (ngModelChange)="updatePortalField($index, { type: $event })"
+                    [ariaLabel]="'Type for field ' + ($index + 1)"
+                  >
+                    <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+                  </p-select>
+                </div>
+                @if (field.type === 'select') {
+                  <input
+                    type="text"
+                    class="phorma-props__input phorma-props__label--gap"
+                    [value]="portalFieldOptionsText(field)"
+                    (input)="onPortalFieldOptionsInput($index, $event)"
+                    [attr.aria-label]="'Options for field ' + ($index + 1)"
+                    placeholder="Sales, Support, Billing"
+                  />
+                }
+                <label class="phorma-props__check">
+                  <input
+                    type="checkbox"
+                    [checked]="field.required ?? false"
+                    (change)="updatePortalField($index, { required: checkboxValue($event) })"
+                  />
+                  Required
+                </label>
+              </div>
+            }
+            <p class="phorma-props__hint">
+              Reach a value from any prompt with
+              <code>{{ '{' }}{{ '{' }}fields.key{{ '}' }}{{ '}' }}</code>.
+            </p>
+          } @else {
+            <p class="phorma-props__hint">Add at least one field for a form portal.</p>
+          }
+        </section>
+      }
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-portal-responder">Who answers</label>
+        <p-select
+          inputId="prop-portal-responder"
+          class="phorma-props__select-full"
+          appendTo="body"
+          [options]="portalResponderOptions()"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.responderNodeId ?? ''"
+          (ngModelChange)="patchData({ responderNodeId: $event || null })"
+        >
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          Only this node's answer reaches the visitor. Every other agent's output stays
+          private, so internal reasoning is never published.
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-portal-access">Who can reach it</label>
+        <p-select
+          inputId="prop-portal-access"
+          class="phorma-props__select-full"
+          appendTo="body"
+          [options]="portalAccessModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.access"
+          (ngModelChange)="patchData({ access: $event })"
+        >
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          @if (data.access === 'token') {
+            Visitors must append an access key you mint in the Portal panel.
+          } @else {
+            Anyone who has the link can use this workflow. It spends your model budget.
+          }
+        </p>
+
+        <label class="phorma-props__label phorma-props__label--gap" for="prop-portal-rate">
+          Messages per minute, per visitor
+        </label>
+        <input
+          id="prop-portal-rate"
+          type="number"
+          class="phorma-props__input"
+          min="1"
+          max="120"
+          [value]="data.rateLimitPerMin ?? 10"
+          (input)="patchData({ rateLimitPerMin: numberValue($event, 10) })"
+        />
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" for="prop-portal-theme">Appearance</label>
+        <p-select
+          inputId="prop-portal-theme"
+          class="phorma-props__select-full"
+          appendTo="body"
+          [options]="portalThemes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.theme ?? 'auto'"
+          (ngModelChange)="patchData({ theme: $event })"
+        >
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__check">
+          <input
+            type="checkbox"
+            [checked]="data.showBranding !== false"
+            (change)="patchData({ showBranding: checkboxValue($event) })"
+          />
+          Show "Powered by Phorma"
+        </label>
+      </section>
+
+      <!-- Embedding on other websites -->
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Embed on a website</label>
+        <label class="phorma-props__check">
+          <input
+            type="checkbox"
+            [checked]="data.embedEnabled === true"
+            (change)="patchData({ embedEnabled: checkboxValue($event) })"
+          />
+          Allow this portal to be embedded
+        </label>
+        @if (data.embedEnabled) {
+          <label class="phorma-props__label phorma-props__label--gap" for="prop-portal-embed-origins">
+            Allowed websites
+          </label>
+          <input
+            id="prop-portal-embed-origins"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="portalEmbedOriginsText(data)"
+            (input)="onPortalEmbedOriginsInput($event)"
+            placeholder="https://acme.com, https://www.acme.com"
+          />
+          <p class="phorma-props__hint">
+            @if (portalEmbedOpen(data)) {
+              <strong>Any website</strong> can embed this portal. List the sites you trust,
+              separated by commas, to lock it down.
+            } @else {
+              Only these sites can embed it. Everything else is blocked by the browser.
+            }
+          </p>
+
+          <label class="phorma-props__label phorma-props__label--gap" for="prop-portal-embed-label">
+            Button label
+          </label>
+          <input
+            id="prop-portal-embed-label"
+            type="text"
+            class="phorma-props__input"
+            [value]="data.embedLabel ?? ''"
+            (input)="patchData({ embedLabel: inputValue($event) })"
+            placeholder="Chat with us"
+          />
+          <p class="phorma-props__hint">
+            Copy the snippet from the Portal panel once you have published.
+          </p>
+        } @else {
+          <p class="phorma-props__hint">
+            Off by default: the page refuses to load inside a frame, which stops other
+            sites wrapping it to trick your visitors.
+          </p>
+        }
       </section>
     }
 

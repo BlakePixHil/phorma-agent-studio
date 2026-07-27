@@ -6,6 +6,7 @@ import { RunControllerService } from './run-controller.service';
 import { SelectionService } from './selection.service';
 import { TerminalOutputService, type RunPhase } from './terminal-output.service';
 import { WorkflowService } from './workflow.service';
+import { SettingsDialogService } from '../workspace/settings/settings-dialog.service';
 import { NODE_CATALOG, findCatalogEntry } from './node-catalog';
 import type {
   GraphPosition,
@@ -113,6 +114,14 @@ export interface TestHarnessApi {
   questions(): { requestId: string; nodeId: string; nodeName: string; question: string }[];
   /** Answers a suspended Ask-User node, resuming the run. */
   answerQuestion(requestId: string, response: string): void;
+  /**
+   * Opens the Settings dialog, optionally on a given page (and scrolled to an
+   * anchor). The only other route in is a PrimeNG menubar submenu, which needs
+   * a hover chain that synthetic events do not reliably reproduce.
+   */
+  openSettings(pageId?: string, anchorId?: string): void;
+  /** Closes the Settings dialog. */
+  closeSettings(): void;
 }
 
 declare global {
@@ -146,6 +155,7 @@ export class TestHarnessService {
   private readonly layout = inject(GraphLayoutService);
   private readonly terminal = inject(TerminalOutputService);
   private readonly canvasState = inject(CanvasStateService);
+  private readonly settingsDialog = inject(SettingsDialogService);
 
   /** Installs `window.__phormaTest` (no-op in production builds). */
   install(): void {
@@ -252,6 +262,10 @@ export class TestHarnessService {
       answerQuestion: zoned((requestId, response) =>
         this.runs.resolveQuestion(requestId, response),
       ),
+
+      openSettings: zoned((pageId, anchorId) => this.settingsDialog.open(pageId, anchorId)),
+
+      closeSettings: zoned(() => this.settingsDialog.visible.set(false)),
     };
   }
 

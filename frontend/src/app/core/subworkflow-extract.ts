@@ -9,7 +9,12 @@ import {
   type WorkflowSpec,
 } from './workflow.model';
 
-const TRIGGER_KINDS = new Set(['manual-trigger', 'schedule-trigger', 'webhook-trigger']);
+const TRIGGER_KINDS = new Set([
+  'manual-trigger',
+  'schedule-trigger',
+  'webhook-trigger',
+  'portal-trigger',
+]);
 const NODE_WIDTH = 220;
 const HEADER_HEIGHT = 30;
 const ROW_HEIGHT = 24;

@@ -26,8 +26,9 @@ import type { EmbeddedWorkflow, WorkflowGraph } from './types.js';
 /**
  * What initiated a run. `resume` = journal replay after host eviction.
  * `eval` = a test case executed by an eval suite run.
+ * `portal` = a visitor on a published endpoint (EPIC 9).
  */
-export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume' | 'eval';
+export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume' | 'eval' | 'portal';
 
 /** Where the run executed. */
 export type RunEnvironment = 'local' | 'cloud';

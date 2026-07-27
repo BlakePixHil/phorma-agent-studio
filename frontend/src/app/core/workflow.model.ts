@@ -26,6 +26,7 @@ export type WorkflowNodeKind =
   | 'manual-trigger'
   | 'schedule-trigger'
   | 'webhook-trigger'
+  | 'portal-trigger'
   | 'http-tool'
   | 'web-search-tool'
   | 'mcp-tool'
@@ -240,6 +241,70 @@ export interface WebhookTriggerData {
   path?: string;
 }
 
+// ── Portal (EPIC 9: published endpoints) ─────────────────────────────────────
+// Structural twins of the same names in `engine/src/types.ts`. Keep in sync.
+
+/**
+ * How a published workflow presents itself to visitors.
+ * - `chat` — a conversational page; each message starts a run whose transcript
+ *   is carried forward as `{{history}}`.
+ * - `form` — typed fields submitted once; the answer streams back below.
+ */
+export type PortalMode = 'chat' | 'form';
+
+/**
+ * Who may reach a published surface.
+ * - `public` — anyone with the link.
+ * - `token`  — callers must present a scoped portal token.
+ */
+export type PortalAccess = 'public' | 'token';
+
+/** Input control rendered on a `form`-mode portal. */
+export interface PortalField {
+  /** Payload key, reachable from prompts as `{{fields.<key>}}`. */
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'select' | 'number' | 'boolean';
+  required?: boolean;
+  placeholder?: string;
+  /** Allowed values for `select` fields. */
+  options?: string[];
+}
+
+/**
+ * Configuration for a `portal-trigger` node — the canvas-visible declaration
+ * that a workflow is publicly reachable. Read at publish time to build the
+ * public surface; nothing here is secret.
+ */
+export interface PortalTriggerData {
+  /** URL segment (`/p/{slug}`). Assigned at publish time when empty. */
+  slug?: string;
+  mode: PortalMode;
+  /** Page heading. Falls back to the workflow name. */
+  title?: string;
+  /** Markdown opener shown before the first visitor message. */
+  greeting?: string;
+  /** Fields rendered in `form` mode. Ignored in `chat` mode. */
+  fields?: PortalField[];
+  /**
+   * Node whose streamed tokens and final output the visitor sees. `null` /
+   * absent = auto (the graph's single terminal leaf).
+   */
+  responderNodeId?: string | null;
+  access: PortalAccess;
+  /** Per-visitor request ceiling. 0/absent = host default. */
+  rateLimitPerMin?: number;
+  theme?: 'auto' | 'light' | 'dark';
+  /** False hides the "Powered by Phorma" footer. */
+  showBranding?: boolean;
+  /** Allows embedding on other sites via the `/portal-embed.js` loader. */
+  embedEnabled?: boolean;
+  /** Origins permitted to frame this portal. Empty + enabled = any site. */
+  embedOrigins?: string[];
+  /** Label on the launcher bubble the loader injects. */
+  embedLabel?: string;
+}
+
 export interface HttpToolData {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
@@ -352,6 +417,7 @@ export type WorkflowNodeData =
   | AgentNodeData
   | ScheduleTriggerData
   | WebhookTriggerData
+  | PortalTriggerData
   | HttpToolData
   | WebSearchToolData
   | McpToolData

@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import type { RunEvent, RunRecord, RunRecordSummary, UsageLedgerEntry } from '@phorma/engine';
 
+import { DeployConfigService, BYO_CONFIG_FILENAME } from './deploy-config.service';
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
 import { SkillsService } from './skills.service';
@@ -14,6 +15,11 @@ import { WorkflowService } from './workflow.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import { ToastService } from '../shared/toast/toast.service';
 import { isAgentNode, type WorkflowSpec } from './workflow.model';
+import type {
+  PortalMintResponse,
+  PortalPublishResponse,
+  PortalStatusResponse,
+} from './portal.model';
 
 export type CloudConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -27,7 +33,7 @@ export const PHORMA_CLOUD_DEFAULT_URL = 'https://dev.phoma-labs.com';
  *   the repo's `cloud/` folder) into the console.
  * - **Push**: uploads the active workflow spec to its WorkflowAgent instance.
  * - **Monitor**: a WebSocket whose RunEvents feed the SAME
- *   `RunControllerService.apply()` path as local runs — cloud runs animate
+ *   `RunControllerService.apply()` path as local runs - cloud runs animate
  *   the canvas identically.
  * - **Trigger/Stop/Approve**: control frames sent over the socket.
  */
@@ -42,6 +48,7 @@ export class CloudService {
   private readonly skillsLibrary = inject(SkillsService);
   private readonly versions = inject(WorkflowVersionsService);
   private readonly clerk = inject(ClerkService);
+  private readonly deployConfig = inject(DeployConfigService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -114,16 +121,23 @@ export class CloudService {
     }
   }
 
-  // ── Deploy (desktop only — spawns wrangler via Rust) ───────────────────────
+  // ── Deploy (desktop only - spawns wrangler via Rust) ───────────────────────
 
   async deploy(): Promise<void> {
     if (!this.tauri.isDesktop) {
-      this.toast.warning('Desktop only', 'Deploying runs wrangler locally — use the desktop app.');
+      this.toast.warning('Desktop only', 'Deploying runs wrangler locally - use the desktop app.');
       return;
     }
     const cwd = this.cloudFolder();
     if (!cwd) {
       this.toast.warning('Set the cloud folder', "Pick the repo's cloud/ folder first.");
+      return;
+    }
+    if (!this.deployConfig.valid()) {
+      this.toast.warning(
+        'Check your Cloud settings',
+        'The account id, worker name or portal domain looks wrong.',
+      );
       return;
     }
     if (this.deploying()) return;
@@ -132,7 +146,20 @@ export class CloudService {
     this.deployCounter += 1;
     const requestId = `deploy-${this.deployCounter}`;
     this.terminal.open('run');
-    this.terminal.append('run', 'info', '$ npx wrangler deploy');
+
+    // A custom account, worker name or portal domain needs configuration that
+    // must NOT be hand-edited into the version-controlled wrangler.jsonc, so
+    // the studio writes a gitignored override and deploys with `--config`.
+    const args = ['wrangler', 'deploy'];
+    if (this.deployConfig.needsOverride()) {
+      const written = await this.writeOverrideConfig(cwd);
+      if (!written) {
+        this.deploying.set(false);
+        return;
+      }
+      args.push('--config', BYO_CONFIG_FILENAME);
+    }
+    this.terminal.append('run', 'info', `$ npx ${args.join(' ')}`);
 
     const { invoke } = await import('@tauri-apps/api/core');
     const { listen } = await import('@tauri-apps/api/event');
@@ -153,7 +180,7 @@ export class CloudService {
     try {
       const result = await invoke<{ success: boolean; exitCode: number | null }>(
         'run_streamed_command',
-        { requestId, cwd, program: 'npx', args: ['wrangler', 'deploy'] },
+        { requestId, cwd, program: 'npx', args },
       );
       if (result.success) {
         this.toast.success('Deployed', 'Worker published. Push your workflow next.');
@@ -168,7 +195,33 @@ export class CloudService {
     }
   }
 
-  // ── Worker secrets (desktop only — wrangler secret put via Rust) ───────────
+  /**
+   * Writes the generated wrangler override into the cloud folder. Returns false
+   * (having toasted) when it could not be written, so the caller aborts rather
+   * than deploying with stale or default configuration.
+   */
+  private async writeOverrideConfig(cwd: string): Promise<boolean> {
+    // Match the folder's own separator instead of assuming one.
+    const separator = cwd.includes('\\') ? '\\' : '/';
+    const path = `${cwd.replace(/[\\/]$/, '')}${separator}${BYO_CONFIG_FILENAME}`;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('write_workflow_file', {
+        path,
+        content: this.deployConfig.buildOverrideConfig(),
+      });
+      this.terminal.append('run', 'info', `Wrote ${BYO_CONFIG_FILENAME} (generated, gitignored).`);
+      return true;
+    } catch (error) {
+      this.toast.error(
+        'Could not write the deploy config',
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
+  }
+
+  // ── Worker secrets (desktop only - wrangler secret put via Rust) ───────────
 
   /** Secret name currently being saved (drives per-row button spinners). */
   readonly savingSecret = signal<string | null>(null);
@@ -176,11 +229,11 @@ export class CloudService {
   /**
    * Sets a secret on the user's deployed worker via
    * `npx wrangler secret put <NAME>`. The value travels through the Rust
-   * backend into wrangler's stdin — never through argv or the console.
+   * backend into wrangler's stdin - never through argv or the console.
    */
   async putWorkerSecret(name: string, value: string): Promise<void> {
     if (!this.tauri.isDesktop) {
-      this.toast.warning('Desktop only', 'Setting secrets runs wrangler locally — use the desktop app.');
+      this.toast.warning('Desktop only', 'Setting secrets runs wrangler locally - use the desktop app.');
       return;
     }
     const cwd = this.cloudFolder();
@@ -342,7 +395,7 @@ export class CloudService {
   /**
    * Lists the deployed workflow's persisted runs from its Durable Object.
    * Returns null when the workflow was never pushed (404) or the worker is
-   * unreachable — callers render local history only in that case.
+   * unreachable - callers render local history only in that case.
    */
   async listRuns(
     workflowId: string,
@@ -359,7 +412,7 @@ export class CloudService {
   }
 
   /**
-   * Fetches the deployed workflow's usage ledger (EPIC 2) — per-run usage
+   * Fetches the deployed workflow's usage ledger (EPIC 2) - per-run usage
    * rows that survive run-history pruning. Null when unreachable/never
    * pushed, same contract as {@link listRuns}.
    */
@@ -376,6 +429,109 @@ export class CloudService {
     } catch {
       return null;
     }
+  }
+
+  // ── Portal (EPIC 9) ────────────────────────────────────────────────────────
+
+  /**
+   * Reads the deployed workflow's publish record and publish-readiness.
+   * Returns null when the worker is unreachable or the workflow was never
+   * pushed, same contract as {@link listRuns}.
+   */
+  async fetchPortal(workflowId: string): Promise<PortalStatusResponse | null> {
+    return this.portalRequest<PortalStatusResponse>(workflowId, 'portal', 'GET');
+  }
+
+  /**
+   * Publishes the pushed spec's portal trigger. The worker re-validates, so a
+   * stale studio state cannot publish a broken portal.
+   */
+  async publishPortal(workflowId: string): Promise<PortalPublishResponse | null> {
+    return this.portalRequest<PortalPublishResponse>(workflowId, 'publish', 'POST');
+  }
+
+  /** Takes the portal offline. The slug is released for reuse. */
+  async unpublishPortal(workflowId: string): Promise<{ ok: boolean; removed?: string[] } | null> {
+    return this.portalRequest(workflowId, 'unpublish', 'POST');
+  }
+
+  /**
+   * Mints a scoped access key. The plaintext comes back exactly ONCE - show it
+   * to the user immediately, because the worker only stores its hash.
+   */
+  async mintPortalToken(workflowId: string, label: string): Promise<PortalMintResponse | null> {
+    return this.portalRequest<PortalMintResponse>(workflowId, 'portal-tokens', 'POST', { label });
+  }
+
+  /** Revokes one access key by id. */
+  async revokePortalToken(workflowId: string, tokenId: string): Promise<{ ok: boolean } | null> {
+    return this.portalRequest(
+      workflowId,
+      `portal-tokens/${encodeURIComponent(tokenId)}`,
+      'DELETE',
+    );
+  }
+
+  /**
+   * Portal-sourced runs. Portal runs execute in per-visitor session instances,
+   * so the owner instance mirrors their summaries here.
+   */
+  async listPortalRuns(workflowId: string): Promise<RunRecordSummary[] | null> {
+    const body = await this.portalRequest<{ runs?: RunRecordSummary[] }>(
+      workflowId,
+      'portal-runs',
+      'GET',
+    );
+    return body ? (body.runs ?? []) : null;
+  }
+
+  /**
+   * The public address a published portal is served from.
+   *
+   * A custom portal domain wins when set. Note this is deliberately NOT the
+   * same as {@link effectiveWorkerUrl}, which also carries the PRIVATE control
+   * plane (push, monitor, run history) - those must keep using the worker URL
+   * so owner traffic never rides a public marketing domain.
+   */
+  portalUrl(slug: string): string | null {
+    if (!slug) return null;
+    // Own-Cloudflare only: a Phorma Cloud portal lives on our own host.
+    if (this.provider() !== 'phorma') {
+      const domain = this.deployConfig.portalDomain();
+      if (domain) return `https://${domain}/p/${slug}`;
+    }
+    const base = this.effectiveWorkerUrl();
+    return base ? `${base}/p/${slug}` : null;
+  }
+
+  /**
+   * Shared plumbing for the owner-side portal routes. Throws with the worker's
+   * message on a 4xx/5xx so callers can surface it; returns null only when the
+   * worker is unreachable or unconfigured.
+   */
+  private async portalRequest<T>(
+    workflowId: string,
+    action: string,
+    method: 'GET' | 'POST' | 'DELETE',
+    body?: unknown,
+  ): Promise<T | null> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) return null;
+    let response: Response;
+    try {
+      response = await fetch(`${base}/${action}`, {
+        method,
+        headers: await this.headers(),
+        body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
+      });
+    } catch {
+      return null;
+    }
+    const payload = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+    if (!response.ok) {
+      throw new Error(payload?.error ?? `HTTP ${response.status}`);
+    }
+    return payload;
   }
 
   /** Fetches one full cloud RunRecord (detail view / Bring to Canvas). */
@@ -445,7 +601,7 @@ export class CloudService {
         this.socket = null;
         this.connection.set('disconnected');
         if (event.code === 4001) {
-          this.toast.error('Cloud monitor rejected', 'Token mismatch — check the Cloud dialog.');
+          this.toast.error('Cloud monitor rejected', 'Token mismatch - check the Cloud dialog.');
         }
       }
     };
@@ -468,7 +624,7 @@ export class CloudService {
 
   // ── Remote run control (over the socket) ───────────────────────────────────
   /**
-   * Triggers a run over HTTP (no monitor socket required) — used by the
+   * Triggers a run over HTTP (no monitor socket required) - used by the
    * eval runner (EPIC 4), which polls `listRuns` for completion instead of
    * listening on the WebSocket. Throws on rejection (409 busy, 402 quota…).
    */
@@ -553,7 +709,7 @@ export class CloudService {
         const jwt = await session.getToken();
         if (jwt) return jwt;
       } catch {
-        // Token refresh failed — fall through to static token.
+        // Token refresh failed - fall through to static token.
       }
     }
     if (this.provider() === 'phorma') return null; // never send the static token

@@ -65,6 +65,12 @@
           <app-assistant-panel />
         }
       </ng-template>
+
+      <ng-template sidePanelPane tabId="portal">
+        @defer (on immediate) {
+          <app-portal-panel />
+        }
+      </ng-template>
     </app-sidebar>
 
     <!-- ── Right sidebar (z-10) ── -->
@@ -96,6 +102,12 @@
       <ng-template sidePanelPane tabId="assistant">
         @defer (on immediate) {
           <app-assistant-panel />
+        }
+      </ng-template>
+
+      <ng-template sidePanelPane tabId="portal">
+        @defer (on immediate) {
+          <app-portal-panel />
         }
       </ng-template>
 
