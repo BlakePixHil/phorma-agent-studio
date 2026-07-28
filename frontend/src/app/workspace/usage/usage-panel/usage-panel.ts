@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
 import { CurrencyPipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
 import { UIChart } from 'primeng/chart';
 import { SelectModule } from 'primeng/select';
+import { SelectButtonModule } from 'primeng/selectbutton';
 
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import {
@@ -29,7 +31,15 @@ const PERIODS: { id: UsagePeriod; label: string }[] = [
 @Component({
   selector: 'app-usage-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DecimalPipe, FormsModule, UIChart, SelectModule],
+  imports: [
+    CurrencyPipe,
+    DecimalPipe,
+    FormsModule,
+    ButtonModule,
+    UIChart,
+    SelectModule,
+    SelectButtonModule,
+  ],
   templateUrl: './usage-panel.html',
   styleUrl: './usage-panel.scss',
 })

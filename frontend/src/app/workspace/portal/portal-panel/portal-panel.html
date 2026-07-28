@@ -23,28 +23,43 @@
         </span>
         <button
           type="button"
-          class="phorma-portal__icon-btn"
+          pButton
+          severity="secondary"
+          [text]="true"
+          [rounded]="true"
+          size="small"
+          class="phorma-panel-icon-btn"
           title="Refresh"
           aria-label="Refresh publish status"
           [disabled]="portal.busy()"
           (click)="refresh()"
         >
-          <i class="ti ti-refresh" aria-hidden="true"></i>
+          <i
+            class="ti ti-refresh"
+            [class.phorma-icon-spin]="portal.busy()"
+            aria-hidden="true"
+          ></i>
         </button>
       </div>
 
       @if (portal.published() && portal.url(); as url) {
         <div class="phorma-portal__url-row">
           <input
+            pInputText
             class="phorma-portal__url"
             type="text"
+            pSize="small"
             readonly
             [value]="url"
             aria-label="Public portal address"
           />
           <button
             type="button"
-            class="phorma-portal__icon-btn"
+            pButton
+            severity="secondary"
+            [outlined]="true"
+            size="small"
+            class="phorma-input-icon-btn"
             title="Copy address"
             aria-label="Copy the portal address"
             (click)="copyUrl()"
@@ -53,7 +68,11 @@
           </button>
           <button
             type="button"
-            class="phorma-portal__icon-btn"
+            pButton
+            severity="secondary"
+            [outlined]="true"
+            size="small"
+            class="phorma-input-icon-btn"
             title="Open portal"
             aria-label="Open the portal in a new tab"
             (click)="openPortal()"
@@ -89,6 +108,10 @@
         @for (issue of errors(); track issue.code + (issue.nodeId ?? '')) {
           <button
             type="button"
+            pButton
+            severity="danger"
+            [text]="true"
+            size="small"
             class="phorma-portal__issue phorma-portal__issue--error"
             [disabled]="!issue.nodeId"
             (click)="focusIssueNode(issue.nodeId)"
@@ -100,6 +123,10 @@
         @for (issue of warnings(); track issue.code + (issue.nodeId ?? '')) {
           <button
             type="button"
+            pButton
+            severity="warn"
+            [text]="true"
+            size="small"
             class="phorma-portal__issue phorma-portal__issue--warn"
             [disabled]="!issue.nodeId"
             (click)="focusIssueNode(issue.nodeId)"
@@ -125,8 +152,7 @@
           pButton
           type="button"
           [disabled]="portal.busy() || !!portal.blocker()"
-          (click)="publish()"
-        >
+          (click)="publish()" size="small">
           <i class="ti ti-world-upload" aria-hidden="true"></i>
           <span class="phorma-portal__btn-label">
             {{ portal.published() ? 'Update portal' : 'Publish portal' }}
@@ -134,12 +160,12 @@
         </button>
 
         @if (portal.blocker() === 'no-provider' || portal.blocker() === 'no-worker-url') {
-          <button pButton type="button" severity="secondary" [outlined]="true" (click)="openCloudSettings()">
+          <button pButton type="button" severity="secondary" [outlined]="true" (click)="openCloudSettings()" size="small">
             <i class="ti ti-settings" aria-hidden="true"></i>
             <span class="phorma-portal__btn-label">Cloud settings</span>
           </button>
         } @else {
-          <button pButton type="button" severity="secondary" [outlined]="true" (click)="editPortalNode()">
+          <button pButton type="button" severity="secondary" [outlined]="true" (click)="editPortalNode()" size="small">
             <i class="ti ti-adjustments" aria-hidden="true"></i>
             <span class="phorma-portal__btn-label">Configure</span>
           </button>
@@ -176,15 +202,21 @@
             </p>
             <div class="phorma-portal__url-row">
               <input
+                pInputText
                 class="phorma-portal__url"
                 type="text"
+                pSize="small"
                 readonly
                 [value]="secret"
                 aria-label="New access key"
               />
               <button
                 type="button"
-                class="phorma-portal__icon-btn"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn"
                 title="Copy key"
                 aria-label="Copy the access key"
                 (click)="copyMintedSecret()"
@@ -193,7 +225,11 @@
               </button>
               <button
                 type="button"
-                class="phorma-portal__icon-btn"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn"
                 title="Dismiss"
                 aria-label="Dismiss the access key"
                 (click)="dismissSecret()"
@@ -220,17 +256,20 @@
                   </span>
                 </span>
                 <span class="phorma-portal__row-actions">
-                  <span
-                    role="button"
-                    tabindex="0"
-                    class="phorma-portal__row-btn phorma-portal__row-btn--danger"
+                  <button
+                    type="button"
+                    pButton
+                    severity="danger"
+                    [text]="true"
+                    [rounded]="true"
+                    size="small"
+                    class="phorma-portal__row-btn"
                     title="Revoke key"
                     [attr.aria-label]="'Revoke ' + token.label"
                     (click)="revokeToken(token, $event)"
-                    (keydown.enter)="revokeToken(token, $event)"
                   >
                     <i class="ti ti-trash" aria-hidden="true"></i>
-                  </span>
+                  </button>
                 </span>
               </li>
             }
@@ -239,16 +278,22 @@
 
         <div class="phorma-portal__url-row">
           <input
+            pInputText
             class="phorma-portal__url phorma-portal__url--plain"
             type="text"
+            pSize="small"
             placeholder="Key name (e.g. Zapier)"
             aria-label="Name for a new access key"
-            [value]="tokenLabel()"
-            (input)="onTokenLabelInput($event)"
+            [ngModel]="tokenLabel()"
+            (ngModelChange)="tokenLabel.set($event)"
           />
           <button
             type="button"
-            class="phorma-portal__icon-btn"
+            pButton
+            severity="secondary"
+            [outlined]="true"
+            size="small"
+            class="phorma-input-icon-btn"
             title="Create an access key"
             aria-label="Create an access key"
             [disabled]="portal.busy()"
@@ -274,15 +319,21 @@
           </p>
           <div class="phorma-portal__url-row">
             <input
+              pInputText
               class="phorma-portal__url"
               type="text"
+              pSize="small"
               readonly
               [value]="embedSnippet()"
               aria-label="Embed snippet"
             />
             <button
               type="button"
-              class="phorma-portal__icon-btn"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
               title="Copy snippet"
               aria-label="Copy the embed snippet"
               (click)="copyEmbedSnippet()"
@@ -336,7 +387,7 @@
 
       <!-- ── Take offline ── -->
       <section class="phorma-portal__section">
-        <button pButton type="button" severity="danger" [outlined]="true" [disabled]="portal.busy()" (click)="unpublish()">
+        <button pButton type="button" severity="danger" [outlined]="true" [disabled]="portal.busy()" (click)="unpublish()" size="small">
           <i class="ti ti-world-off" aria-hidden="true"></i>
           <span class="phorma-portal__btn-label">Take offline</span>
         </button>

@@ -1,6 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
+import { InputNumberModule } from 'primeng/inputnumber';
+import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { TextareaModule } from 'primeng/textarea';
 import DOMPurify from 'dompurify';
@@ -54,7 +58,15 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-prompt-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, SelectModule, TextareaModule],
+  imports: [
+    FormsModule,
+    ButtonModule,
+    CheckboxModule,
+    InputNumberModule,
+    InputTextModule,
+    SelectModule,
+    TextareaModule,
+  ],
   templateUrl: './prompt-panel.html',
   styleUrl: './prompt-panel.scss',
 })
@@ -321,14 +333,6 @@ export class PromptPanel {
     this.settingsDialog.open('cloud');
   }
 
-  protected onModelInput(event: Event): void {
-    const agent = this.agent();
-    if (!agent) return;
-    this.workflow.updateNodeData(agent.id, {
-      model: (event.target as HTMLInputElement | null)?.value ?? '',
-    });
-  }
-
   /**
    * Fetches the live model list for a BYO provider into {@link liveModels}.
    * Fails silently (recording the error) so the picker falls back to static
@@ -356,12 +360,11 @@ export class PromptPanel {
     }
   }
 
-  protected onRegionInput(event: Event): void {
+  /** Bedrock region from a PrimeNG input. Empty = inherit the app default. */
+  protected onRegionChange(value: string): void {
     const agent = this.agent();
     if (!agent) return;
-    // Empty = inherit the application default Bedrock region.
-    const region = (event.target as HTMLInputElement | null)?.value.trim() || undefined;
-    this.workflow.updateNodeData(agent.id, { region });
+    this.workflow.updateNodeData(agent.id, { region: (value ?? '').trim() || undefined });
   }
 
   // ── Reliability (EPIC 3) ────────────────────────────────────────────────
@@ -404,10 +407,11 @@ export class PromptPanel {
     });
   }
 
-  protected onRetryAttemptsInput(event: Event): void {
+  /** Retry attempts from p-inputnumber (clamped 1..5; 2 is the default). */
+  protected onRetryAttemptsChange(value: number | null): void {
     const agent = this.agent();
     if (!agent) return;
-    const raw = Number((event.target as HTMLInputElement | null)?.value);
+    const raw = Number(value);
     const maxAttempts = Number.isFinite(raw) ? Math.min(Math.max(Math.round(raw), 1), 5) : 2;
     this.workflow.updateNodeData(agent.id, {
       retry: { ...agent.data.retry, maxAttempts: maxAttempts === 2 ? undefined : maxAttempts },
@@ -445,10 +449,11 @@ export class PromptPanel {
     });
   }
 
-  protected onTimeoutInput(event: Event): void {
+  /** Node timeout from p-inputnumber. Empty/0 clears the limit. */
+  protected onTimeoutChange(value: number | null): void {
     const agent = this.agent();
     if (!agent) return;
-    const raw = Number((event.target as HTMLInputElement | null)?.value);
+    const raw = Number(value);
     const timeoutSec = Number.isFinite(raw) && raw > 0 ? Math.round(raw) : undefined;
     this.workflow.updateNodeData(agent.id, { timeoutSec });
   }

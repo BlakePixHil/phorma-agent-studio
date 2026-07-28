@@ -8,7 +8,9 @@ import {
   untracked,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
+import { InputTextModule } from 'primeng/inputtext';
 
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { PanelRegistryService } from '../../../core/panel-registry.service';
@@ -32,7 +34,7 @@ import type { RunRecordSummary } from '@phorma/engine';
 @Component({
   selector: 'app-portal-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, ButtonModule],
+  imports: [DatePipe, FormsModule, ButtonModule, InputTextModule],
   templateUrl: './portal-panel.html',
   styleUrl: './portal-panel.scss',
 })
@@ -157,10 +159,6 @@ export class PortalPanel {
 
   protected dismissSecret(): void {
     this.portal.dismissMintedSecret();
-  }
-
-  protected onTokenLabelInput(event: Event): void {
-    this.tokenLabel.set((event.target as HTMLInputElement | null)?.value ?? '');
   }
 
   protected async mintToken(): Promise<void> {

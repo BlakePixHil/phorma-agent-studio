@@ -9,7 +9,9 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
+import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
+import { TextareaModule } from 'primeng/textarea';
 
 import {
   evalPassCounts,
@@ -54,7 +56,15 @@ const MATCHER_OPTIONS: { id: EvalMatcher; label: string }[] = [
 @Component({
   selector: 'app-evals-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FormsModule, ButtonModule, SelectModule],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    FormsModule,
+    ButtonModule,
+    InputTextModule,
+    SelectModule,
+    TextareaModule,
+  ],
   templateUrl: './evals-panel.html',
   styleUrl: './evals-panel.scss',
 })
@@ -145,16 +155,12 @@ export class EvalsPanel {
   }
 
   /** Applies a partial update to the working copy and persists it. */
-  private patchSuite(patch: Partial<EvalSuite>): void {
+  protected patchSuite(patch: Partial<EvalSuite>): void {
     const suite = this.selectedSuite();
     if (!suite) return;
     const next = { ...suite, ...patch };
     this.selectedSuite.set(next);
     void this.evals.saveSuite(next);
-  }
-
-  protected onSuiteName(event: Event): void {
-    this.patchSuite({ name: (event.target as HTMLInputElement).value });
   }
 
   // ── Case editing (immutable array patch, MCP-args pattern) ────────────
@@ -183,11 +189,6 @@ export class EvalsPanel {
     if (!suite) return;
     const cases = suite.cases.map((item, i) => (i === index ? { ...item, ...patch } : item));
     this.patchSuite({ cases });
-  }
-
-  protected onCaseField(index: number, field: 'name' | 'input' | 'expected' | 'judgeCriteria', event: Event): void {
-    const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
-    this.patchCase(index, { [field]: value });
   }
 
   // ── Judge + comparison models ──────────────────────────────────────────

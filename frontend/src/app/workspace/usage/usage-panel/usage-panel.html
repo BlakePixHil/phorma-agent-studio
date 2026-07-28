@@ -5,7 +5,12 @@
       Usage
       <button
         type="button"
-        class="phorma-usage__refresh"
+        pButton
+        severity="secondary"
+        [text]="true"
+        [rounded]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
         title="Refresh usage"
         aria-label="Refresh usage"
         [disabled]="analytics.loading()"
@@ -13,7 +18,7 @@
       >
         <i
           class="ti ti-refresh"
-          [class.phorma-usage__refresh--spinning]="analytics.loading()"
+          [class.phorma-icon-spin]="analytics.loading()"
           aria-hidden="true"
         ></i>
       </button>
@@ -27,22 +32,18 @@
         [ngModel]="analytics.scope()"
         (ngModelChange)="onScopeChange($event)"
         appendTo="body"
-        ariaLabel="Workflow scope"
+        ariaLabel="Workflow scope" size="small" />
+      <p-selectbutton
+        class="phorma-usage__periods"
+        [options]="periods"
+        optionLabel="label"
+        optionValue="id"
+        [allowEmpty]="false"
+        size="small"
+        [ngModel]="analytics.period()"
+        (ngModelChange)="setPeriod($event)"
+        ariaLabel="Period"
       />
-      <div class="phorma-usage__periods" role="tablist" aria-label="Period">
-        @for (period of periods; track period.id) {
-          <button
-            type="button"
-            role="tab"
-            class="phorma-usage__period"
-            [class.phorma-usage__period--active]="analytics.period() === period.id"
-            [attr.aria-selected]="analytics.period() === period.id"
-            (click)="setPeriod(period.id)"
-          >
-            {{ period.label }}
-          </button>
-        }
-      </div>
     </div>
   </section>
 

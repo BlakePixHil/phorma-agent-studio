@@ -48,25 +48,27 @@
   }
 }
 
+// pInputText / pTextarea supply the chrome; these only size them to the panel.
 .phorma-props__input,
 .phorma-props__textarea {
   width: 100%;
-  padding: 0.38rem 0.55rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
   font-size: 0.928rem;
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
-  }
 }
 
 .phorma-props__textarea {
   resize: vertical;
   line-height: 1.5;
+}
+
+// p-inputnumber wrapper: full-width like the plain inputs it replaced.
+.phorma-props__number {
+  width: 100%;
+
+  ::ng-deep .p-inputnumber,
+  ::ng-deep .p-inputnumber-input {
+    width: 100%;
+    font-size: 0.928rem;
+  }
 }
 
 .phorma-props__input--mono {
@@ -87,6 +89,20 @@
     align-items: center;
     justify-content: space-between;
   }
+
+  // Portal field key + type: the key is a short slug, so the type select gets
+  // the flexible share and never truncates its option labels.
+  &--field-type {
+    .phorma-props__input {
+      flex: 0 0 7rem;
+      min-width: 0;
+    }
+
+    .phorma-props__field-type {
+      flex: 1;
+      min-width: 0;
+    }
+  }
 }
 
 // ── Portal trigger (EPIC 9) ────────────────────────────────────────────────
@@ -103,43 +119,13 @@
   }
 }
 
-.phorma-props__icon-btn {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 1.85rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    border-color 0.15s ease,
-    background-color 0.15s ease;
-
-  &:hover:not(:disabled) {
-    color: var(--p-text-color);
-    border-color: var(--p-primary-color, #818cf8);
-    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 10%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--p-primary-color, #818cf8);
-    outline-offset: 1px;
-  }
-
-  &:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-
-  &--danger:hover:not(:disabled) {
-    color: var(--phorma-accent-red, #f87171);
-    border-color: var(--phorma-accent-red, #f87171);
-    background: color-mix(in srgb, var(--phorma-accent-red, #f87171) 12%, transparent);
-  }
+// Sizing comes from the shared `.phorma-input-icon-btn` class in styles.scss.
+// Destructive actions stay neutral until hovered, so the panel does not read
+// as a wall of warnings.
+.phorma-props__icon-btn--danger.p-button:hover:not(:disabled) {
+  border-color: var(--phorma-accent-red, #f87171);
+  color: var(--phorma-accent-red, #f87171);
+  background: color-mix(in srgb, var(--phorma-accent-red, #f87171) 12%, transparent);
 }
 
 .phorma-props__select-full {
@@ -194,11 +180,6 @@
   font-size: 0.928rem;
   color: var(--p-text-color);
   cursor: pointer;
-
-  input[type='checkbox'] {
-    accent-color: var(--p-primary-color);
-    cursor: pointer;
-  }
 }
 
 .phorma-props__ports {
@@ -262,29 +243,10 @@
   font-size: 0.8rem;
 }
 
-.phorma-props__btn {
-  display: inline-flex;
-  align-items: center;
+.phorma-props__btn.p-button {
   gap: 0.25rem;
-  padding: 0.36rem 0.7rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
   font-size: 0.928rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
 }
 
 /* ── MCP preset status + Advanced group ─────────────────────────────────── */
@@ -317,27 +279,15 @@
 }
 
 
-.phorma-props__advanced-toggle {
+.phorma-props__advanced-toggle.p-button {
   align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
   gap: 0.3rem;
   margin-top: 0.3rem;
   padding: 0.25rem 0.4rem 0.25rem 0.2rem;
-  border: none;
-  border-radius: 0.4rem;
-  background: transparent;
-  color: var(--p-text-muted-color);
   font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  cursor: pointer;
-  transition: color 0.15s ease;
-
-  &:hover {
-    color: var(--p-text-color);
-  }
 
   i {
     font-size: 0.8rem;
@@ -370,25 +320,12 @@
   margin-bottom: 0.15rem;
 }
 
-.phorma-props__preset-btn {
-  display: inline-flex;
-  align-items: center;
+.phorma-props__preset-btn.p-button {
   padding: 0.22rem 0.55rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
   font-size: 0.928rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &--active {
+  &.phorma-props__preset-btn--active {
     background: color-mix(in srgb, var(--p-primary-color, #818cf8) 14%, transparent);
     border-color: var(--p-primary-color, #818cf8);
     color: var(--p-primary-color, #818cf8);
@@ -436,28 +373,14 @@
   gap: 0.2rem;
 }
 
-.phorma-props__chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.phorma-props__chip.p-button {
   min-width: 2.2rem;
   height: 1.55rem;
   padding: 0 0.3rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
   font-size: 0.928rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &--active {
+  &.phorma-props__chip--active {
     background: color-mix(in srgb, var(--p-primary-color, #818cf8) 16%, transparent);
     border-color: var(--p-primary-color, #818cf8);
     color: var(--p-primary-color, #818cf8);
@@ -525,13 +448,7 @@
   font-weight: 700;
 }
 
-/* Emphasized action (the Connect button). */
-.phorma-props__btn--primary {
-  border-color: color-mix(in srgb, var(--p-primary-color, #818cf8) 45%, transparent);
-  color: var(--p-primary-color, #818cf8);
-
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 12%, transparent);
-    color: var(--p-primary-color, #818cf8);
-  }
+/* Emphasized action (the Connect button) - PrimeNG primary severity. */
+.phorma-props__btn--primary.p-button {
+  gap: 0.3rem;
 }

@@ -37,48 +37,26 @@
   color: var(--p-text-muted-color);
 }
 
-.phorma-evals__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+// Sizing comes from the shared `.phorma-panel-icon-btn` class in styles.scss.
+// Heading actions push to the trailing edge of the label they sit in.
+.phorma-panel-icon-btn.p-button {
   margin-left: auto;
-  border-radius: 0.4rem;
-  border: none;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+}
 
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
-    color: var(--p-text-color);
-  }
+// Destructive actions stay neutral until hovered, and sit inline (no auto
+// margin) because they follow a field rather than a heading.
+.phorma-evals__icon-btn--danger.p-button {
+  margin-left: 0;
 
-  &--danger {
-    margin-left: 0;
-
-    &:hover {
-      background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-      color: var(--phorma-accent-red, #ef4444);
-    }
+  &:hover:not(:disabled) {
+    color: var(--phorma-accent-red, #ef4444);
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
   }
 }
 
+// Font size comes from PrimeNG's `size="small"` token so inputs and the selects
+// beside them are the same height. Don't override it here.
 .phorma-evals__input {
-  padding: 0.4rem 0.55rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
-  color: var(--p-text-color);
-  font-size: 0.8rem;
-
-  &:focus {
-    outline: none;
-    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
-  }
-
   &--grow {
     flex: 1;
     min-width: 0;
@@ -86,7 +64,6 @@
 }
 
 .phorma-evals__textarea {
-  @extend .phorma-evals__input;
   resize: vertical;
   line-height: 1.45;
   font-family: inherit;
@@ -128,23 +105,15 @@
   padding: 0;
 }
 
-.phorma-evals__list-item {
-  display: flex;
-  align-items: center;
+.phorma-evals__list-item.p-button {
+  justify-content: flex-start;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
   width: 100%;
   padding: 0.45rem 0.55rem;
-  border-radius: 0.55rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
   color: var(--p-text-color);
   text-align: left;
-  cursor: pointer;
-  transition: background 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
-  }
 }
 
 .phorma-evals__list-icon {
@@ -175,25 +144,25 @@
   color: var(--p-text-muted-color);
 }
 
-.phorma-evals__delete {
-  display: inline-flex;
+// The delete action sits beside the row button (never nested inside it).
+.phorma-evals__row {
+  position: relative;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.25rem;
+}
+
+.phorma-evals__delete.p-button {
+  flex-shrink: 0;
   width: 1.5rem;
   height: 1.5rem;
-  border-radius: 0.4rem;
-  color: var(--p-text-muted-color);
+  padding: 0;
   opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: opacity 0.15s ease;
 
-  .phorma-evals__list-item:hover &,
+  .phorma-evals__row:hover &,
   &:focus-visible {
     opacity: 1;
-  }
-
-  &:hover {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
   }
 }
 
@@ -262,6 +231,14 @@
   padding: 0;
 }
 
+// The scored result row is a real button (expand/collapse); the "Bring run to
+// canvas" action sits beside it so buttons are never nested.
+.phorma-evals__result-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .phorma-evals__result {
   display: flex;
   align-items: center;
@@ -270,19 +247,18 @@
   padding: 0.45rem 0.55rem;
   border-radius: 0.55rem;
   border: 1px solid var(--phorma-card-border);
-  cursor: pointer;
-  transition: background 0.15s ease;
 
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  &.p-button {
+    justify-content: flex-start;
+    flex: 1;
+    min-width: 0;
+    color: var(--p-text-color);
+    text-align: left;
   }
 
+  // Live (in-flight) rows are plain list items, not buttons.
   &--live {
     cursor: default;
-
-    &:hover {
-      background: transparent;
-    }
   }
 }
 

@@ -976,4 +976,72 @@ app-root {
   }
 }
 
+/* ----------------------------------------------------------------------------
+   Selection-control cursor fix
+   ---------------------------------------------------------------------------- */
+
+/*
+ * PrimeNG renders checkbox / radio / toggle-switch as a styled box plus a
+ * transparent native <input> stretched over the top to keep them focusable and
+ * form-associated. That overlay is still an `<input>`, so the UA default
+ * `cursor: text` wins over the wrapper's `cursor: pointer` — hovering the box
+ * itself shows an I-beam. Force the pointer on the overlay (and the disabled
+ * cursor when it is off) so the affordance matches what the control does.
+ */
+.p-checkbox-input,
+.p-radiobutton-input,
+.p-toggleswitch-input {
+  cursor: pointer;
+}
+
+.p-disabled .p-checkbox-input,
+.p-disabled .p-radiobutton-input,
+.p-disabled .p-toggleswitch-input,
+.p-checkbox-input:disabled,
+.p-radiobutton-input:disabled,
+.p-toggleswitch-input:disabled {
+  cursor: default;
+}
+
+/* ----------------------------------------------------------------------------
+   Shared panel affordances
+   ---------------------------------------------------------------------------- */
+
+/*
+ * A small square icon-only action that sits inline in a panel section heading
+ * (Usage "Refresh", Portal "Refresh", Evals "New suite"/"Add case", …). Apply
+ * to a `pButton severity="secondary" [text] [rounded] size="small"` button so
+ * every panel heading action is the same size and weight.
+ *
+ * Pair with `.phorma-icon-spin` on the inner <i> to spin while busy.
+ */
+.phorma-panel-icon-btn.p-button {
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/*
+ * A square icon-only action sized to sit flush beside a `size="small"` input
+ * (copy / open / add buttons in a `__url-row` or `__copy-row`). Apply to a
+ * `pButton severity="secondary" [outlined] size="small"` button. Height comes
+ * from the row's `align-items: stretch`, so only the width is pinned.
+ */
+.phorma-input-icon-btn.p-button {
+  width: 1.85rem;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.phorma-icon-spin {
+  animation: phorma-icon-spin 0.9s linear infinite;
+}
+
+@keyframes phorma-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 

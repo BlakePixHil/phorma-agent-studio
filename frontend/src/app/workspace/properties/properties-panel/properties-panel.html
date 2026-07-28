@@ -8,6 +8,8 @@
     <section class="phorma-props__section">
       <label class="phorma-props__label" for="prop-name">Name</label>
       <input
+        pInputText
+        pSize="small"
         id="prop-name"
         type="text"
         class="phorma-props__input"
@@ -17,6 +19,8 @@
 
       <label class="phorma-props__label phorma-props__label--gap" for="prop-desc">Description</label>
       <textarea
+        pTextarea
+        pSize="small"
         id="prop-desc"
         class="phorma-props__textarea"
         rows="2"
@@ -35,6 +39,10 @@
           @for (preset of cronPresets; track preset.label) {
             <button
               type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
               class="phorma-props__preset-btn"
               [class.phorma-props__preset-btn--active]="selectedPreset() === preset.label"
               (click)="onCronPreset(preset)"
@@ -47,6 +55,8 @@
 
         <!-- Cron text input -->
         <input
+          pInputText
+          pSize="small"
           id="prop-cron"
           type="text"
           class="phorma-props__input phorma-props__input--mono"
@@ -71,6 +81,11 @@
                 @for (opt of fieldDef.options; track opt.value) {
                   <button
                     type="button"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    [rounded]="true"
+                    size="small"
                     class="phorma-props__chip"
                     [class.phorma-props__chip--active]="isSimpleFieldValue(fieldDef.key, opt.value)"
                     (click)="onCronFieldChange(fieldDef.key, opt.value)"
@@ -92,6 +107,8 @@
         @if (webhookUrl(); as url) {
           <div class="phorma-props__copy-row">
             <input
+              pInputText
+              pSize="small"
               class="phorma-props__input phorma-props__input--mono"
               type="text"
               readonly
@@ -100,7 +117,11 @@
             />
             <button
               type="button"
-              class="phorma-props__icon-btn"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
               title="Copy URL"
               aria-label="Copy webhook URL"
               (click)="copyWebhookUrl()"
@@ -121,6 +142,8 @@
 
         <label class="phorma-props__label phorma-props__label--gap" for="prop-path">Note</label>
         <input
+          pInputText
+          pSize="small"
           id="prop-path"
           type="text"
           class="phorma-props__input"
@@ -140,6 +163,10 @@
           @for (mode of portalModes; track mode.id) {
             <button
               type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
               class="phorma-props__preset-btn"
               [class.phorma-props__preset-btn--active]="data.mode === mode.id"
               [attr.aria-pressed]="data.mode === mode.id"
@@ -164,6 +191,8 @@
         <label class="phorma-props__label" for="prop-portal-slug">Public address</label>
         <div class="phorma-props__copy-row">
           <input
+            pInputText
+            pSize="small"
             id="prop-portal-slug"
             type="text"
             class="phorma-props__input phorma-props__input--mono"
@@ -173,7 +202,11 @@
           />
           <button
             type="button"
-            class="phorma-props__icon-btn"
+            pButton
+            severity="secondary"
+            [outlined]="true"
+            size="small"
+            class="phorma-input-icon-btn"
             title="Suggest from the workflow name"
             aria-label="Suggest an address from the workflow name"
             (click)="suggestPortalSlug()"
@@ -184,6 +217,8 @@
         @if (portalUrl(); as url) {
           <div class="phorma-props__copy-row phorma-props__label--gap">
             <input
+              pInputText
+              pSize="small"
               class="phorma-props__input phorma-props__input--mono"
               type="text"
               readonly
@@ -192,7 +227,11 @@
             />
             <button
               type="button"
-              class="phorma-props__icon-btn"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
               title="Copy address"
               aria-label="Copy portal address"
               (click)="copyPortalUrl()"
@@ -201,7 +240,11 @@
             </button>
             <button
               type="button"
-              class="phorma-props__icon-btn"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
               title="Open portal"
               aria-label="Open the portal in a new tab"
               (click)="openPortalUrl()"
@@ -221,6 +264,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-portal-title">Heading</label>
         <input
+          pInputText
+          pSize="small"
           id="prop-portal-title"
           type="text"
           class="phorma-props__input"
@@ -233,6 +278,8 @@
           Opening message (markdown)
         </label>
         <textarea
+          pTextarea
+          pSize="small"
           id="prop-portal-greeting"
           class="phorma-props__textarea"
           rows="3"
@@ -249,7 +296,12 @@
             <span class="phorma-props__label">Fields</span>
             <button
               type="button"
-              class="phorma-props__icon-btn"
+              pButton
+              severity="secondary"
+              [text]="true"
+              [rounded]="true"
+              size="small"
+              class="phorma-panel-icon-btn"
               title="Add a field"
               aria-label="Add a field"
               (click)="addPortalField()"
@@ -263,6 +315,8 @@
               <div class="phorma-props__portal-field">
                 <div class="phorma-props__row">
                   <input
+                    pInputText
+                    pSize="small"
                     type="text"
                     class="phorma-props__input"
                     [value]="field.label"
@@ -272,7 +326,11 @@
                   />
                   <button
                     type="button"
-                    class="phorma-props__icon-btn"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-input-icon-btn"
                     title="Move up"
                     [attr.aria-label]="'Move field ' + ($index + 1) + ' up'"
                     [disabled]="$first"
@@ -282,7 +340,11 @@
                   </button>
                   <button
                     type="button"
-                    class="phorma-props__icon-btn"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-input-icon-btn"
                     title="Move down"
                     [attr.aria-label]="'Move field ' + ($index + 1) + ' down'"
                     [disabled]="$last"
@@ -292,7 +354,11 @@
                   </button>
                   <button
                     type="button"
-                    class="phorma-props__icon-btn phorma-props__icon-btn--danger"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-input-icon-btn phorma-props__icon-btn--danger"
                     title="Remove field"
                     [attr.aria-label]="'Remove field ' + ($index + 1)"
                     (click)="removePortalField($index)"
@@ -300,8 +366,10 @@
                     <i class="ti ti-trash" aria-hidden="true"></i>
                   </button>
                 </div>
-                <div class="phorma-props__row phorma-props__label--gap">
+                <div class="phorma-props__row phorma-props__row--field-type phorma-props__label--gap">
                   <input
+                    pInputText
+                    pSize="small"
                     type="text"
                     class="phorma-props__input phorma-props__input--mono"
                     [value]="field.key"
@@ -310,20 +378,21 @@
                     placeholder="key"
                   />
                   <p-select
-                    class="phorma-props__method"
+                    class="phorma-props__field-type"
                     appendTo="body"
                     [options]="portalFieldTypes"
                     optionLabel="label"
                     optionValue="id"
                     [ngModel]="field.type"
                     (ngModelChange)="updatePortalField($index, { type: $event })"
-                    [ariaLabel]="'Type for field ' + ($index + 1)"
-                  >
+                    [ariaLabel]="'Type for field ' + ($index + 1)" size="small">
                     <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
                   </p-select>
                 </div>
                 @if (field.type === 'select') {
                   <input
+                    pInputText
+                    pSize="small"
                     type="text"
                     class="phorma-props__input phorma-props__label--gap"
                     [value]="portalFieldOptionsText(field)"
@@ -333,10 +402,12 @@
                   />
                 }
                 <label class="phorma-props__check">
-                  <input
-                    type="checkbox"
-                    [checked]="field.required ?? false"
-                    (change)="updatePortalField($index, { required: checkboxValue($event) })"
+                  <p-checkbox
+                    [binary]="true"
+                    size="small"
+                    [ngModel]="field.required ?? false"
+                    (ngModelChange)="updatePortalField($index, { required: $event })"
+                    [ariaLabel]="'Field ' + ($index + 1) + ' is required'"
                   />
                   Required
                 </label>
@@ -362,8 +433,7 @@
           optionLabel="label"
           optionValue="id"
           [ngModel]="data.responderNodeId ?? ''"
-          (ngModelChange)="patchData({ responderNodeId: $event || null })"
-        >
+          (ngModelChange)="patchData({ responderNodeId: $event || null })" size="small">
           <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
         </p-select>
         <p class="phorma-props__hint">
@@ -382,8 +452,7 @@
           optionLabel="label"
           optionValue="id"
           [ngModel]="data.access"
-          (ngModelChange)="patchData({ access: $event })"
-        >
+          (ngModelChange)="patchData({ access: $event })" size="small">
           <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
         </p-select>
         <p class="phorma-props__hint">
@@ -397,14 +466,16 @@
         <label class="phorma-props__label phorma-props__label--gap" for="prop-portal-rate">
           Messages per minute, per visitor
         </label>
-        <input
-          id="prop-portal-rate"
-          type="number"
-          class="phorma-props__input"
-          min="1"
-          max="120"
-          [value]="data.rateLimitPerMin ?? 10"
-          (input)="patchData({ rateLimitPerMin: numberValue($event, 10) })"
+        <p-inputnumber
+          inputId="prop-portal-rate"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [max]="120"
+          [showButtons]="false"
+          [useGrouping]="false"
+          [ngModel]="data.rateLimitPerMin ?? 10"
+          (ngModelChange)="patchData({ rateLimitPerMin: $event ?? 10 })"
         />
       </section>
 
@@ -418,15 +489,16 @@
           optionLabel="label"
           optionValue="id"
           [ngModel]="data.theme ?? 'auto'"
-          (ngModelChange)="patchData({ theme: $event })"
-        >
+          (ngModelChange)="patchData({ theme: $event })" size="small">
           <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
         </p-select>
         <label class="phorma-props__check">
-          <input
-            type="checkbox"
-            [checked]="data.showBranding !== false"
-            (change)="patchData({ showBranding: checkboxValue($event) })"
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            inputId="prop-portal-branding"
+            [ngModel]="data.showBranding !== false"
+            (ngModelChange)="patchData({ showBranding: $event })"
           />
           Show "Powered by Phorma"
         </label>
@@ -436,10 +508,12 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label">Embed on a website</label>
         <label class="phorma-props__check">
-          <input
-            type="checkbox"
-            [checked]="data.embedEnabled === true"
-            (change)="patchData({ embedEnabled: checkboxValue($event) })"
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            inputId="prop-portal-embed"
+            [ngModel]="data.embedEnabled === true"
+            (ngModelChange)="patchData({ embedEnabled: $event })"
           />
           Allow this portal to be embedded
         </label>
@@ -448,6 +522,8 @@
             Allowed websites
           </label>
           <input
+            pInputText
+            pSize="small"
             id="prop-portal-embed-origins"
             type="text"
             class="phorma-props__input phorma-props__input--mono"
@@ -468,6 +544,8 @@
             Button label
           </label>
           <input
+            pInputText
+            pSize="small"
             id="prop-portal-embed-label"
             type="text"
             class="phorma-props__input"
@@ -497,9 +575,10 @@
             [options]="httpMethods"
             [ngModel]="data.method"
             (ngModelChange)="patchData({ method: $event })"
-            appendTo="body"
-          />
+            appendTo="body" size="small" />
           <input
+            pInputText
+            pSize="small"
             type="text"
             class="phorma-props__input phorma-props__input--mono"
             [value]="data.url"
@@ -510,6 +589,8 @@
         </div>
         <label class="phorma-props__label phorma-props__label--gap" for="prop-body">Body template</label>
         <textarea
+          pTextarea
+          pSize="small"
           id="prop-body"
           class="phorma-props__textarea phorma-props__input--mono"
           rows="4"
@@ -532,8 +613,7 @@
             optionValue="id"
             [ngModel]="data.transport"
             (ngModelChange)="patchData({ transport: $event })"
-            appendTo="body"
-          />
+            appendTo="body" size="small" />
         }
         @if (data.transport === 'stdio') {
           @if (mcpPreset(); as preset) {
@@ -561,7 +641,7 @@
                   }
                 </span>
               </div>
-              <button type="button" pButton [text]="true" (click)="openIntegrationSettings()">
+              <button type="button" pButton [text]="true" (click)="openIntegrationSettings()" size="small">
                 <i class="ti ti-settings" aria-hidden="true"></i>
                 Configure defaults in Settings › Integrations
               </button>
@@ -572,6 +652,8 @@
               @for (entry of argFields; track entry.index) {
                 <label class="phorma-props__label phorma-props__label--gap">{{ entry.field.label }}</label>
                 <input
+                  pInputText
+                  pSize="small"
                   type="text"
                   class="phorma-props__input phorma-props__input--mono"
                   [value]="entry.value"
@@ -588,6 +670,10 @@
             <!-- Advanced: per-node overrides + command/args -->
             <button
               type="button"
+              pButton
+              severity="secondary"
+              [text]="true"
+              size="small"
               class="phorma-props__advanced-toggle"
               (click)="toggleAdvanced()"
               [attr.aria-expanded]="advancedOpen()"
@@ -620,6 +706,8 @@
                         }
                       </span>
                       <input
+                        pInputText
+                        pSize="small"
                         [type]="field.secret ? 'password' : 'text'"
                         class="phorma-props__input"
                         [placeholder]="secretConfigured(field.name) ? '••••••••  (override stored)' : presetDefaultConfigured(field.name) ? 'Using app default' : (field.placeholder ?? '')"
@@ -634,8 +722,7 @@
                         severity="secondary"
                         [outlined]="true"
                         [disabled]="mcpSecretDrafts()[field.name] === undefined"
-                        (click)="saveSecret(field.name)"
-                      >
+                        (click)="saveSecret(field.name)" size="small">
                         Save
                       </button>
                       @if (secretConfigured(field.name)) {
@@ -646,8 +733,7 @@
                           [text]="true"
                           [rounded]="true"
                           (click)="clearSecret(field.name)"
-                          title="Remove override (revert to application default)"
-                        >
+                          title="Remove override (revert to application default)" size="small">
                           <i class="ti ti-trash" aria-hidden="true"></i>
                         </button>
                       }
@@ -661,6 +747,8 @@
 
                 <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
                 <input
+                  pInputText
+                  pSize="small"
                   id="prop-cmd"
                   type="text"
                   class="phorma-props__input phorma-props__input--mono"
@@ -674,6 +762,8 @@
                   @for (arg of data.args ?? []; track $index) {
                     <li>
                       <input
+                        pInputText
+                        pSize="small"
                         type="text"
                         class="phorma-props__input phorma-props__input--mono"
                         [value]="arg"
@@ -687,8 +777,7 @@
                         [text]="true"
                         [rounded]="true"
                         (click)="removeArg($index)"
-                        title="Remove argument"
-                      >
+                        title="Remove argument" size="small">
                         <i class="ti ti-trash" aria-hidden="true"></i>
                       </button>
                     </li>
@@ -696,7 +785,7 @@
                     <p class="phorma-props__hint">No arguments.</p>
                   }
                 </ul>
-                <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()">
+                <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()" size="small">
                   <i class="ti ti-plus" aria-hidden="true"></i> Add argument
                 </button>
               </div>
@@ -705,6 +794,8 @@
             <!-- Generic MCP node: command/args inline (no preset defaults) -->
             <label class="phorma-props__label phorma-props__label--gap" for="prop-cmd">Command</label>
             <input
+              pInputText
+              pSize="small"
               id="prop-cmd"
               type="text"
               class="phorma-props__input phorma-props__input--mono"
@@ -718,6 +809,8 @@
               @for (arg of data.args ?? []; track $index) {
                 <li>
                   <input
+                    pInputText
+                    pSize="small"
                     type="text"
                     class="phorma-props__input phorma-props__input--mono"
                     [value]="arg"
@@ -731,8 +824,7 @@
                     [text]="true"
                     [rounded]="true"
                     (click)="removeArg($index)"
-                    title="Remove argument"
-                  >
+                    title="Remove argument" size="small">
                     <i class="ti ti-trash" aria-hidden="true"></i>
                   </button>
                 </li>
@@ -740,7 +832,7 @@
                 <p class="phorma-props__hint">No arguments.</p>
               }
             </ul>
-            <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()">
+            <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()" size="small">
               <i class="ti ti-plus" aria-hidden="true"></i> Add argument
             </button>
           }
@@ -755,6 +847,8 @@
           } @else {
             <label class="phorma-props__label phorma-props__label--gap" for="prop-url">Server URL</label>
             <input
+              pInputText
+              pSize="small"
               id="prop-url"
               type="text"
               class="phorma-props__input phorma-props__input--mono"
@@ -794,7 +888,7 @@
                   <span class="phorma-props__oauth-step-num">1</span>
                   Register a (free) OAuth app on your account — the form is pre-filled:
                 </p>
-                <button type="button" pButton severity="secondary" [outlined]="true" (click)="openOAuthRegisterPage()">
+                <button type="button" pButton severity="secondary" [outlined]="true" (click)="openOAuthRegisterPage()" size="small">
                   <i class="ti ti-external-link" aria-hidden="true"></i>
                   Open registration page
                 </button>
@@ -803,13 +897,15 @@
                 </p>
                 <div class="phorma-props__row">
                   <input
+                    pInputText
+                    pSize="small"
                     type="text"
                     class="phorma-props__input phorma-props__input--mono"
                     [value]="oauthRedirectUri()"
                     readonly
                     aria-label="Callback URL to register"
                   />
-                  <button type="button" pButton severity="secondary" [text]="true" [rounded]="true" (click)="copyRedirectUri()" title="Copy callback URL">
+                  <button type="button" pButton severity="secondary" [text]="true" [rounded]="true" (click)="copyRedirectUri()" title="Copy callback URL" size="small">
                     <i class="ti ti-copy" aria-hidden="true"></i>
                   </button>
                 </div>
@@ -821,6 +917,8 @@
                   <p class="phorma-props__hint">{{ note }}</p>
                 }
                 <input
+                  pInputText
+                  pSize="small"
                   type="text"
                   class="phorma-props__input phorma-props__input--mono"
                   placeholder="Client ID"
@@ -831,6 +929,8 @@
                 />
                 @if (oauthSetup()?.needsClientSecret) {
                   <input
+                    pInputText
+                    pSize="small"
                     type="password"
                     class="phorma-props__input phorma-props__input--mono"
                     placeholder="Client secret"
@@ -846,14 +946,13 @@
                   severity="secondary"
                   [outlined]="true"
                   [disabled]="!oauthClientIdDraft().trim()"
-                  (click)="saveOAuthClient()"
-                >
+                  (click)="saveOAuthClient()" size="small">
                   <i class="ti ti-device-floppy" aria-hidden="true"></i>
                   Save app credentials
                 </button>
               </div>
             } @else if (oauthSetup() && oauthClientAvailable()) {
-              <button type="button" pButton [text]="true" (click)="toggleOAuthSetup()">
+              <button type="button" pButton [text]="true" (click)="toggleOAuthSetup()" size="small">
                 <i class="ti ti-key" aria-hidden="true"></i>
                 {{ oauthClientConfigured() ? 'OAuth app configured — change credentials' : 'Using a custom OAuth app instead' }}
               </button>
@@ -862,6 +961,8 @@
             <div class="phorma-props__row phorma-props__label--gap">
               <button
                 type="button"
+                pButton
+                size="small"
                 class="phorma-props__btn phorma-props__btn--primary"
                 [disabled]="oauthConnecting() || !data.url || (oauthSetup() && !oauthClientAvailable())"
                 (click)="connectOAuth()"
@@ -877,8 +978,7 @@
                   [text]="true"
                   [rounded]="true"
                   (click)="disconnectOAuth()"
-                  title="Disconnect (clear stored tokens)"
-                >
+                  title="Disconnect (clear stored tokens)" size="small">
                   <i class="ti ti-trash" aria-hidden="true"></i>
                 </button>
               }
@@ -896,6 +996,8 @@
               </label>
               <div class="phorma-props__row">
                 <input
+                  pInputText
+                  pSize="small"
                   [type]="field.secret ? 'password' : 'text'"
                   class="phorma-props__input"
                   [placeholder]="secretConfigured(field.name) ? '••••••••  (stored)' : presetDefaultConfigured(field.name) ? 'Using app default' : (field.placeholder ?? '')"
@@ -910,8 +1012,7 @@
                   severity="secondary"
                   [outlined]="true"
                   [disabled]="mcpSecretDrafts()[field.name] === undefined"
-                  (click)="saveSecret(field.name)"
-                >
+                  (click)="saveSecret(field.name)" size="small">
                   Save
                 </button>
                 @if (secretConfigured(field.name)) {
@@ -922,8 +1023,7 @@
                     [text]="true"
                     [rounded]="true"
                     (click)="clearSecret(field.name)"
-                    title="Remove stored secret"
-                  >
+                    title="Remove stored secret" size="small">
                     <i class="ti ti-trash" aria-hidden="true"></i>
                   </button>
                 }
@@ -942,6 +1042,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-approval">Message to approver (markdown)</label>
         <textarea
+          pTextarea
+          pSize="small"
           id="prop-approval"
           class="phorma-props__textarea"
           rows="3"
@@ -957,6 +1059,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-items-path">Items path</label>
         <input
+          pInputText
+          pSize="small"
           id="prop-items-path"
           type="text"
           class="phorma-props__input"
@@ -972,20 +1076,24 @@
       </section>
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-concurrency">Concurrency</label>
-        <input
-          id="prop-concurrency"
-          type="number"
-          class="phorma-props__input"
-          min="1"
-          max="8"
-          [value]="data.concurrency ?? 1"
-          (input)="patchData({ concurrency: numberValue($event, 1) })"
+        <p-inputnumber
+          inputId="prop-concurrency"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [max]="8"
+          [showButtons]="false"
+          [useGrouping]="false"
+          [ngModel]="data.concurrency ?? 1"
+          (ngModelChange)="patchData({ concurrency: $event ?? 1 })"
         />
         <label class="phorma-props__check">
-          <input
-            type="checkbox"
-            [checked]="data.continueOnError ?? true"
-            (change)="patchData({ continueOnError: checkboxValue($event) })"
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            inputId="prop-continue-on-error"
+            [ngModel]="data.continueOnError ?? true"
+            (ngModelChange)="patchData({ continueOnError: $event })"
           />
           Continue when an item fails
         </label>
@@ -997,6 +1105,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-correlation">Correlation key</label>
         <input
+          pInputText
+          pSize="small"
           id="prop-correlation"
           type="text"
           class="phorma-props__input"
@@ -1012,6 +1122,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-wait-message">Waiting note (markdown)</label>
         <textarea
+          pTextarea
+          pSize="small"
           id="prop-wait-message"
           class="phorma-props__textarea"
           rows="3"
@@ -1022,13 +1134,15 @@
       </section>
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-wait-timeout">Timeout (hours)</label>
-        <input
-          id="prop-wait-timeout"
-          type="number"
-          class="phorma-props__input"
-          min="0"
-          [value]="data.timeoutHours ?? 0"
-          (input)="patchData({ timeoutHours: numberValue($event, 0) })"
+        <p-inputnumber
+          inputId="prop-wait-timeout"
+          class="phorma-props__number"
+          size="small"
+          [min]="0"
+          [showButtons]="false"
+          [useGrouping]="false"
+          [ngModel]="data.timeoutHours ?? 0"
+          (ngModelChange)="patchData({ timeoutHours: $event ?? 0 })"
         />
         <p class="phorma-props__hint">
           Fail the node if no event arrives within this many hours. 0 waits forever.
@@ -1042,6 +1156,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-question">Question</label>
         <textarea
+          pTextarea
+          pSize="small"
           id="prop-question"
           class="phorma-props__textarea"
           rows="3"
@@ -1058,6 +1174,8 @@
       <section class="phorma-props__section">
         <label class="phorma-props__label" for="prop-response-key">Response key</label>
         <input
+          pInputText
+          pSize="small"
           id="prop-response-key"
           type="text"
           class="phorma-props__input"
@@ -1086,8 +1204,7 @@
           placeholder="Choose a saved workflow"
           appendTo="body"
           [filter]="true"
-          filterBy="label"
-        />
+          filterBy="label" size="small" />
         <p class="phorma-props__hint">
           The Task input starts the selected workflow. Its terminal result leaves through Result.
           Self-reference is allowed and stops at your plan depth limit.
@@ -1098,8 +1215,7 @@
           severity="secondary"
           [outlined]="true"
           [disabled]="!data.workflowId"
-          (click)="openTargetWorkflow()"
-        >
+          (click)="openTargetWorkflow()" size="small">
           <i class="ti ti-external-link" aria-hidden="true"></i>
           {{ targetIsEmbeddedOnly() ? 'Open Embedded Snapshot' : 'Open Workflow' }}
         </button>
@@ -1107,10 +1223,12 @@
           <p class="phorma-props__hint">This target exists only in the portable embedded registry and opens read-only.</p>
         }
         <label class="phorma-props__check">
-          <input
-            type="checkbox"
-            [checked]="hasExecuteWorkflowErrorBranch()"
-            (change)="toggleExecuteWorkflowErrorBranch($any($event.target).checked)"
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            inputId="prop-subwf-error-branch"
+            [ngModel]="hasExecuteWorkflowErrorBranch()"
+            (ngModelChange)="toggleExecuteWorkflowErrorBranch($event)"
           />
           On-error output
         </label>
@@ -1136,6 +1254,8 @@
           @for (port of branch.ports; track port.id) {
             <li>
               <input
+                pInputText
+                pSize="small"
                 type="text"
                 class="phorma-props__input"
                 [value]="port.name"
@@ -1150,8 +1270,7 @@
                 [rounded]="true"
                 (click)="removePort(selected, port.id)"
                 [disabled]="branch.ports.length <= 2"
-                title="Remove"
-              >
+                title="Remove" size="small">
                 <i class="ti ti-trash" aria-hidden="true"></i>
               </button>
             </li>
@@ -1162,8 +1281,7 @@
           pButton
           severity="secondary"
           [outlined]="true"
-          (click)="addBranchPort(selected, branch.role)"
-        >
+          (click)="addBranchPort(selected, branch.role)" size="small">
           <i class="ti ti-plus" aria-hidden="true"></i> Add
         </button>
       </section>
@@ -1182,14 +1300,16 @@
     </header>
     <section class="phorma-props__section">
       <label class="phorma-props__label" for="prop-wf-timeout">Timeout (minutes)</label>
-      <input
-        id="prop-wf-timeout"
-        type="number"
-        class="phorma-props__input"
-        min="0"
-        [value]="workflowSettings().timeoutMinutes ?? ''"
-        (input)="onWorkflowTimeoutInput($event)"
+      <p-inputnumber
+        inputId="prop-wf-timeout"
+        class="phorma-props__number"
+        size="small"
+        [min]="0"
+        [showButtons]="false"
+        [useGrouping]="false"
         placeholder="none"
+        [ngModel]="workflowSettings().timeoutMinutes ?? null"
+        (ngModelChange)="onWorkflowTimeoutChange($event)"
       />
       <p class="phorma-props__hint">
         Fails the run if it takes longer than this end-to-end. Paused time doesn't count.

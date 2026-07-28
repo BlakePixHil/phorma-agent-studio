@@ -35,29 +35,13 @@
   white-space: nowrap;
 }
 
-.phorma-prompt__toggle {
-  display: inline-flex;
-  align-items: center;
+// PrimeNG text button, outlined to read as a header toggle.
+.phorma-prompt__toggle.p-button {
   gap: 0.3rem;
   padding: 0.28rem 0.55rem;
-  border-radius: 0.5rem;
   border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
   font-size: 0.928rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
 }
 
 .phorma-prompt__spin {
@@ -72,14 +56,27 @@
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  /* Never collapse below the section's own content - otherwise the trailing
+     hint overflows and collides with the next section's heading. */
+  flex-shrink: 0;
 
+  /* The prompt editor section absorbs spare vertical space but never shrinks
+     below its own content. `flex-shrink: 1` here let the panel squeeze the
+     section down to its 12rem min-height while the label + textarea + hint
+     needed more, so the hint overflowed onto the next section's heading. */
   &--grow {
-    flex: 1;
+    flex: 1 0 auto;
     min-height: 12rem;
   }
 }
 
+// Section headings are flex rows so a trailing action button sits on the same
+// baseline as the label (same pattern as the Usage and Evals panels). Using
+// `float` here made the following hint text wrap underneath the heading.
 .phorma-prompt__label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.857rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -92,27 +89,14 @@
 }
 
 /* ── Skills (EPIC 6) ──────────────────────────────────────────────────── */
-.phorma-prompt__label-btn {
-  display: inline-flex;
-  align-items: center;
+.phorma-prompt__label-btn.p-button {
   gap: 0.25rem;
-  float: right;
+  margin-left: auto;
   padding: 0.1rem 0.4rem;
-  border-radius: 0.4rem;
-  border: none;
-  background: transparent;
-  color: var(--p-text-muted-color);
   font-size: 0.857rem;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 7%, transparent);
-    color: var(--p-text-color);
-  }
 }
 
 .phorma-prompt__skill-chips {
@@ -148,37 +132,21 @@
   white-space: nowrap;
 }
 
-.phorma-prompt__skill-chip-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.phorma-prompt__skill-chip-remove.p-button {
   width: 1.1rem;
   height: 1.1rem;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  padding: 0;
 
   &:hover {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 16%, transparent);
     color: var(--phorma-accent-red, #ef4444);
   }
 }
 
-.phorma-prompt__link {
+.phorma-prompt__link.p-button {
   padding: 0;
-  border: none;
-  background: none;
-  color: var(--p-primary-color);
   font-size: inherit;
   font-weight: 600;
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
+  vertical-align: baseline;
 }
 
 .phorma-prompt__editor {
@@ -295,37 +263,17 @@
   color: var(--p-text-color);
 }
 
-.phorma-prompt__subscribe-btn {
+.phorma-prompt__subscribe-btn.p-button {
   align-self: flex-start;
   margin-top: 0.15rem;
-  padding: 0.35rem 0.9rem;
-  border: none;
-  border-radius: 0.4rem;
   font-size: 0.857rem;
   font-weight: 600;
-  cursor: pointer;
-  color: #fff;
-  background: var(--p-primary-color);
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-primary-color) 88%, white);
-  }
 }
 
 .phorma-prompt__model {
   flex: 1 1 8rem;
   min-width: 0;
-  padding: 0.35rem 0.55rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
   font-size: 0.928rem;
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
-  }
 }
 
 .phorma-prompt__check {
@@ -336,11 +284,6 @@
   font-weight: 600;
   color: var(--p-text-color);
   cursor: pointer;
-
-  input[type='checkbox'] {
-    accent-color: var(--p-primary-color, #818cf8);
-    cursor: pointer;
-  }
 
   & + & {
     margin-top: 0.35rem;
@@ -360,6 +303,11 @@
 
 .phorma-prompt__number {
   flex: 0 0 5.5rem;
+
+  ::ng-deep .p-inputnumber-input {
+    width: 100%;
+    font-size: 0.928rem;
+  }
 }
 
 .phorma-prompt__chips {

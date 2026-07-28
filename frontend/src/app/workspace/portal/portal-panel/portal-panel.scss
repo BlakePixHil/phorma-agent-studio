@@ -100,56 +100,16 @@
 .phorma-portal__url {
   min-width: 0;
   flex: 1;
-  padding: 0.38rem 0.55rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
   font-size: 0.928rem;
 
   &--plain {
     font-family: inherit;
   }
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
-  }
 }
 
-.phorma-portal__icon-btn {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 1.85rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    border-color 0.15s ease,
-    background-color 0.15s ease;
-
-  &:hover:not(:disabled) {
-    color: var(--p-text-color);
-    border-color: var(--p-primary-color, #818cf8);
-    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 10%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--p-primary-color, #818cf8);
-    outline-offset: 1px;
-  }
-
-  &:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-}
+// Icon buttons use the shared `.phorma-input-icon-btn` / `.phorma-panel-icon-btn`
+// classes from styles.scss - nothing panel-specific to add here.
 
 .phorma-portal__note {
   display: flex;
@@ -198,38 +158,24 @@
 
 // ── Issues ─────────────────────────────────────────────────────────────────
 
-.phorma-portal__issue {
-  display: flex;
+.phorma-portal__issue.p-button {
   align-items: flex-start;
   gap: 0.4rem;
   width: 100%;
   padding: 0.45rem 0.55rem;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
-  background: transparent;
   color: var(--p-text-color);
-  font: inherit;
   font-size: 0.928rem;
   line-height: 1.45;
   text-align: left;
-  cursor: pointer;
 
   > i {
     flex-shrink: 0;
     margin-top: 0.12rem;
   }
 
-  &:disabled {
-    cursor: default;
-  }
-
   &:hover:not(:disabled) {
     border-color: var(--phorma-card-border);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--p-primary-color, #818cf8);
-    outline-offset: 1px;
   }
 
   &--error {
@@ -378,29 +324,9 @@
     opacity 0.15s ease;
 }
 
-.phorma-portal__row-btn {
-  display: inline-flex;
+.phorma-portal__row-btn.p-button {
   width: 1.4rem;
   height: 1.4rem;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.35rem;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--p-primary-color, #818cf8);
-    outline-offset: 1px;
-  }
-
-  &--danger:hover {
-    background: var(--phorma-accent-red-soft, rgba(239, 68, 68, 0.16));
-    color: var(--phorma-accent-red, #ef4444);
-  }
+  padding: 0;
 }

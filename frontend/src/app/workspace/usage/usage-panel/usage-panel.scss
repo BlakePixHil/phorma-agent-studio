@@ -31,29 +31,6 @@
   color: var(--p-text-muted-color);
 }
 
-.phorma-usage__refresh {
-  display: inline-flex;
-  padding: 0.1rem;
-  border: none;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-
-  &:hover:not(:disabled) {
-    color: var(--p-text-color);
-  }
-
-  &--spinning {
-    animation: phorma-usage-spin 0.9s linear infinite;
-  }
-}
-
-@keyframes phorma-usage-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .phorma-usage__controls {
   display: flex;
   flex-direction: column;
@@ -65,30 +42,21 @@
   width: 100%;
 }
 
+// p-selectbutton replaces the old hand-rolled period tabs. It spans the panel
+// width so it lines up with the scope select above it.
 .phorma-usage__periods {
-  display: flex;
-  gap: 0.25rem;
-}
+  display: block;
 
-.phorma-usage__period {
-  padding: 0.24rem 0.55rem;
-  border-radius: 0.45rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-muted-color);
-  font-size: 0.928rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    color: var(--p-text-color);
+  ::ng-deep .p-selectbutton {
+    display: flex;
+    width: 100%;
   }
 
-  &--active {
-    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
-    background: color-mix(in srgb, var(--p-primary-color) 14%, transparent);
-    color: var(--p-primary-color, #818cf8);
+  ::ng-deep .p-togglebutton {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 0.928rem;
+    font-weight: 600;
   }
 }
 

@@ -9,6 +9,10 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
+import { InputNumberModule } from 'primeng/inputnumber';
+import { InputTextModule } from 'primeng/inputtext';
+import { TextareaModule } from 'primeng/textarea';
 import { SelectModule } from 'primeng/select';
 
 import { SelectionService } from '../../../core/selection.service';
@@ -193,7 +197,15 @@ const CRON_PRESETS: CronPreset[] = [
 @Component({
   selector: 'app-properties-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, ButtonModule, SelectModule],
+  imports: [
+    FormsModule,
+    ButtonModule,
+    CheckboxModule,
+    InputNumberModule,
+    InputTextModule,
+    SelectModule,
+    TextareaModule,
+  ],
   templateUrl: './properties-panel.html',
   styleUrl: './properties-panel.scss',
 })
@@ -221,8 +233,9 @@ export class PropertiesPanel {
     () => this.workflow.activeDoc()?.settings ?? {},
   );
 
-  protected onWorkflowTimeoutInput(event: Event): void {
-    const raw = Number((event.target as HTMLInputElement | null)?.value);
+  /** Workflow timeout from p-inputnumber. Empty/0 clears the limit. */
+  protected onWorkflowTimeoutChange(value: number | null): void {
+    const raw = Number(value);
     this.workflow.updateSettings({
       timeoutMinutes: Number.isFinite(raw) && raw > 0 ? Math.round(raw) : undefined,
     });
@@ -922,15 +935,6 @@ export class PropertiesPanel {
 
   protected inputValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLTextAreaElement | null)?.value ?? '';
-  }
-
-  protected numberValue(event: Event, fallback: number): number {
-    const raw = Number((event.target as HTMLInputElement | null)?.value);
-    return Number.isFinite(raw) && raw > 0 ? raw : fallback;
-  }
-
-  protected checkboxValue(event: Event): boolean {
-    return (event.target as HTMLInputElement | null)?.checked ?? false;
   }
 
   protected renamePort(node: WorkflowNode, portId: string, event: Event): void {
