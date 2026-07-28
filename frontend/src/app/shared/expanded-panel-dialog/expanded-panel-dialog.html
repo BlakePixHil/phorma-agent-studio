@@ -1,0 +1,42 @@
+@if (visible()) {
+  <div class="phorma-xpanel" role="presentation" (click)="onBackdropClick()">
+    <section
+      #card
+      class="phorma-xpanel__card"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      [attr.aria-label]="title()"
+      [style.width]="width()"
+      [style.height]="height()"
+      [style.max-height]="'calc(100vh - 48px)'"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-xpanel__header">
+        <span class="phorma-xpanel__icon" aria-hidden="true"><i [class]="icon()"></i></span>
+        <div class="phorma-xpanel__titles">
+          <h2>{{ title() }}</h2>
+          @if (subtitle()) {
+            <p>{{ subtitle() }}</p>
+          }
+        </div>
+        <div class="phorma-xpanel__actions">
+          <ng-content select="[xpanelActions]" />
+        </div>
+        <button
+          type="button"
+          class="phorma-xpanel__close"
+          title="Collapse to side panel (Esc)"
+          aria-label="Close"
+          (click)="close()"
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="phorma-xpanel__body">
+        <ng-content />
+      </div>
+    </section>
+  </div>
+}

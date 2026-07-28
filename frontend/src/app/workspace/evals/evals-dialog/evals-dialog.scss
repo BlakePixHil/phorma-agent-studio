@@ -1,0 +1,824 @@
+:host {
+  display: contents;
+}
+
+/* ── Left rail ─────────────────────────────────────────────────────────── */
+.phorma-evalsd__suites {
+  flex: 0 0 244px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.1));
+}
+
+.phorma-evalsd__side-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px 6px 14px;
+}
+
+.phorma-evalsd__side-title {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+
+  > i {
+    font-size: 13px;
+    color: var(--p-primary-color);
+  }
+}
+
+.phorma-evalsd__side-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 10px 14px;
+}
+
+.phorma-evalsd__history {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px 12px 14px;
+  border-top: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.08));
+}
+
+.phorma-evalsd__list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.phorma-evalsd__suite,
+.phorma-evalsd__run {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 26px 7px 9px;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--p-text-color);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  }
+
+  &--active {
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  }
+}
+
+.phorma-evalsd__suite-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.phorma-evalsd__suite-sub,
+.phorma-evalsd__run-sub {
+  font-size: 10px;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evalsd__run {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+
+.phorma-evalsd__run-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-red, #ef4444) 40%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 12%, transparent);
+  color: var(--phorma-accent-red, #ef4444);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+
+  &--all {
+    border-color: color-mix(in srgb, var(--phorma-accent-green, #34d399) 40%, transparent);
+    background: color-mix(in srgb, var(--phorma-accent-green, #34d399) 12%, transparent);
+    color: var(--phorma-accent-green, #34d399);
+  }
+}
+
+.phorma-evalsd__run-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 11px;
+}
+
+/* Nested "button" - a real <button> inside a <button> is invalid HTML, so
+   these use role=button on a span. */
+.phorma-evalsd__suite-del {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--p-text-muted-color);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  &:focus-visible {
+    opacity: 1;
+    outline: 1px solid var(--p-primary-color);
+  }
+}
+
+.phorma-evalsd__suite:hover .phorma-evalsd__suite-del,
+.phorma-evalsd__run:hover .phorma-evalsd__suite-del {
+  opacity: 1;
+}
+
+/* ── Main area ─────────────────────────────────────────────────────────── */
+.phorma-evalsd__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.phorma-evalsd__strip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.08));
+}
+
+.phorma-evalsd__suite-input {
+  flex: 0 1 15rem;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.phorma-evalsd__view {
+  ::ng-deep .p-togglebutton {
+    font-size: 11px;
+  }
+}
+
+.phorma-evalsd__run-btn.p-button {
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+
+  &:first-of-type {
+    margin-left: auto;
+  }
+}
+
+.phorma-evalsd__progress {
+  position: relative;
+  flex-shrink: 0;
+  height: 18px;
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+}
+
+.phorma-evalsd__progress-bar {
+  height: 100%;
+  background: color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+  transition: width 0.2s ease;
+}
+
+.phorma-evalsd__progress-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--p-text-color);
+}
+
+.phorma-evalsd__stats {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--p-content-background) 40%, transparent);
+}
+
+.phorma-evalsd__stat {
+  font-size: 11px;
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+
+  > b {
+    color: var(--p-text-color);
+    font-size: 12px;
+  }
+
+  &--muted {
+    margin-left: auto;
+  }
+}
+
+.phorma-evalsd__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+/* ── Shared bits ───────────────────────────────────────────────────────── */
+.phorma-evalsd__section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evalsd__label-btn.p-button {
+  gap: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.phorma-evalsd__hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
+
+  code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+}
+
+.phorma-evalsd__empty {
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evalsd__placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--p-text-muted-color);
+
+  > i {
+    font-size: 32px;
+    opacity: 0.5;
+  }
+
+  > p {
+    margin: 0;
+    font-size: 13px;
+  }
+}
+
+.phorma-evalsd__badge,
+.phorma-evalsd__submeta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.phorma-evalsd__badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-card-border);
+}
+
+.phorma-evalsd__act {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  &--danger:hover:not(:disabled) {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+.phorma-evalsd__chip {
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+/* ── Tables ────────────────────────────────────────────────────────────── */
+.phorma-evalsd__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+
+  th,
+  td {
+    padding: 5px 7px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.07));
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--p-content-background);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--p-text-muted-color);
+    white-space: nowrap;
+  }
+
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  }
+}
+
+/* ── Cases view ────────────────────────────────────────────────────────── */
+.phorma-evalsd__cases-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.phorma-evalsd__bulk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-evalsd__col-num {
+  width: 2rem;
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.phorma-evalsd__col-name {
+  width: 11rem;
+}
+
+.phorma-evalsd__col-matcher {
+  width: 9rem;
+}
+
+.phorma-evalsd__col-acts {
+  width: 5.5rem;
+  white-space: nowrap;
+}
+
+.phorma-evalsd__cell-input,
+.phorma-evalsd__cell-select {
+  width: 100%;
+  font-size: 11px;
+}
+
+.phorma-evalsd__cell-area {
+  width: 100%;
+  resize: vertical;
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color, #818cf8);
+  }
+
+  &--criteria {
+    margin-top: 4px;
+    border-style: dashed;
+  }
+}
+
+.phorma-evalsd__config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.phorma-evalsd__config-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 35%, transparent);
+}
+
+.phorma-evalsd__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  ::ng-deep .p-select {
+    flex: 1 1 8rem;
+    min-width: 0;
+    font-size: 11px;
+  }
+}
+
+/* ── Matrix view ───────────────────────────────────────────────────────── */
+.phorma-evalsd__matrix-wrap {
+  overflow: auto;
+}
+
+.phorma-evalsd__table--matrix {
+  td,
+  th {
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .phorma-evalsd__col-case {
+    text-align: left;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  tfoot th,
+  tfoot td {
+    border-top: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.14));
+    background: color-mix(in srgb, var(--p-content-background) 55%, transparent);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.phorma-evalsd__col-model {
+  min-width: 7rem;
+}
+
+.phorma-evalsd__model-name {
+  display: block;
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--p-text-color);
+}
+
+.phorma-evalsd__model-provider {
+  display: block;
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+.phorma-evalsd__mcell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &[data-status='passed'] {
+    background: color-mix(in srgb, var(--phorma-accent-green, #34d399) 14%, transparent);
+    color: var(--phorma-accent-green, #34d399);
+  }
+
+  &[data-status='failed'] {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  &[data-status='error'] {
+    background: color-mix(in srgb, #fbbf24 16%, transparent);
+    color: #fbbf24;
+  }
+
+  &:hover {
+    border-color: currentColor;
+  }
+
+  &--empty {
+    color: var(--p-text-muted-color);
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
+.phorma-evalsd__mscore {
+  font-size: 10px;
+}
+
+.phorma-evalsd__pct {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.phorma-evalsd__col-rowagg {
+  min-width: 5rem;
+}
+
+.phorma-evalsd__foot--bad {
+  color: var(--phorma-accent-red, #ef4444);
+  font-weight: 700;
+}
+
+/* ── Trends view ───────────────────────────────────────────────────────── */
+.phorma-evalsd__trends {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.phorma-evalsd__chart {
+  height: 240px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 35%, transparent);
+}
+
+.phorma-evalsd__table--flaky {
+  td,
+  th:not(.phorma-evalsd__col-case) {
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .phorma-evalsd__col-case {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  i[data-status='passed'] { color: var(--phorma-accent-green, #34d399); }
+  i[data-status='failed'] { color: var(--phorma-accent-red, #ef4444); }
+  i[data-status='error'] { color: #fbbf24; }
+}
+
+.phorma-evalsd__meter {
+  display: block;
+  width: 4.5rem;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+  overflow: hidden;
+}
+
+.phorma-evalsd__meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #fbbf24;
+}
+
+/* ── Run detail view ───────────────────────────────────────────────────── */
+.phorma-evalsd__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phorma-evalsd__result {
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 35%, transparent);
+  overflow: hidden;
+
+  &[data-status='passed'] {
+    border-left: 3px solid var(--phorma-accent-green, #34d399);
+  }
+
+  &[data-status='failed'] {
+    border-left: 3px solid var(--phorma-accent-red, #ef4444);
+  }
+
+  &[data-status='error'] {
+    border-left: 3px solid #fbbf24;
+  }
+}
+
+.phorma-evalsd__result-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 34px 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--p-text-color);
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  }
+
+  > i:first-child {
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+}
+
+.phorma-evalsd__result[data-status='passed'] .phorma-evalsd__result-head > i:first-child {
+  color: var(--phorma-accent-green, #34d399);
+}
+.phorma-evalsd__result[data-status='failed'] .phorma-evalsd__result-head > i:first-child {
+  color: var(--phorma-accent-red, #ef4444);
+}
+.phorma-evalsd__result[data-status='error'] .phorma-evalsd__result-head > i:first-child {
+  color: #fbbf24;
+}
+
+.phorma-evalsd__result-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.phorma-evalsd__caret {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: var(--p-text-muted-color);
+}
+
+/* The nested "open run" affordance sits left of the caret in this context. */
+.phorma-evalsd__result-head .phorma-evalsd__suite-del {
+  right: 30px;
+}
+
+.phorma-evalsd__result-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.phorma-evalsd__error,
+.phorma-evalsd__reasoning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.55;
+
+  > i {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+}
+
+.phorma-evalsd__error {
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 10%, transparent);
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-evalsd__reasoning {
+  background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+  color: var(--p-text-color);
+}
+
+.phorma-evalsd__compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.phorma-evalsd__compare-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+
+  > pre {
+    margin: 0;
+    max-height: 14rem;
+    overflow: auto;
+    padding: 8px 9px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+    font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.phorma-evalsd__compare-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}

@@ -1,0 +1,1320 @@
+@if (node(); as selected) {
+  <div class="phorma-props" [class.phorma-props--grid]="layout() === 'grid'">
+    @if (showHeader()) {
+      <header class="phorma-props__head">
+        <i class="{{ selected.icon }}" aria-hidden="true"></i>
+        <span class="phorma-props__kind">{{ kindLabel() }}</span>
+      </header>
+    }
+
+    <section class="phorma-props__section" data-section="identity">
+      <label class="phorma-props__label" [for]="id('prop-name')">Name</label>
+      <input
+        pInputText
+        pSize="small"
+        [id]="id('prop-name')"
+        type="text"
+        class="phorma-props__input"
+        [value]="selected.name"
+        (input)="onNameInput($event)"
+      />
+
+      <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-desc')">Description</label>
+      <textarea
+        pTextarea
+        pSize="small"
+        [id]="id('prop-desc')"
+        class="phorma-props__textarea"
+        rows="2"
+        [value]="selected.description ?? ''"
+        (input)="onDescriptionInput($event)"
+      ></textarea>
+    </section>
+
+    <!-- Schedule trigger -->
+    @if (scheduleData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Cron expression</label>
+
+        <!-- Preset buttons -->
+        <div class="phorma-props__presets">
+          @for (preset of cronPresets; track preset.label) {
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-props__preset-btn"
+              [class.phorma-props__preset-btn--active]="selectedPreset() === preset.label"
+              (click)="onCronPreset(preset)"
+              [attr.title]="preset.description"
+            >
+              {{ preset.label }}
+            </button>
+          }
+        </div>
+
+        <!-- Cron text input -->
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-cron')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.cron"
+          (input)="patchData({ cron: inputValue($event) })"
+          placeholder="0 9 * * 1-5"
+        />
+
+        <!-- Human-readable description -->
+        @if (cronHumanReadable(); as desc) {
+          <p class="phorma-props__cron-desc">{{ desc }}</p>
+        } @else if (cronInvalid()) {
+          <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid">Invalid cron expression</p>
+        }
+
+        <!-- Field chips -->
+        <div class="phorma-props__cron-fields">
+          @for (fieldDef of cronFieldDefs; track fieldDef.key) {
+            <div class="phorma-props__field-row">
+              <span class="phorma-props__field-label">{{ fieldDef.label }}</span>
+              <div class="phorma-props__chips">
+                @for (opt of fieldDef.options; track opt.value) {
+                  <button
+                    type="button"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-props__chip"
+                    [class.phorma-props__chip--active]="isSimpleFieldValue(fieldDef.key, opt.value)"
+                    (click)="onCronFieldChange(fieldDef.key, opt.value)"
+                  >
+                    {{ opt.label }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </section>
+    }
+
+    <!-- Webhook trigger -->
+    @if (webhookData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Invoke URL</label>
+        @if (webhookUrl(); as url) {
+          <div class="phorma-props__copy-row">
+            <input
+              pInputText
+              pSize="small"
+              class="phorma-props__input phorma-props__input--mono"
+              type="text"
+              readonly
+              [value]="url"
+              aria-label="Webhook invoke URL"
+            />
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
+              title="Copy URL"
+              aria-label="Copy webhook URL"
+              (click)="copyWebhookUrl()"
+            >
+              <i class="ti ti-copy" aria-hidden="true"></i>
+            </button>
+          </div>
+          <p class="phorma-props__hint">
+            POST a JSON body of <code>{{ '{' }} "input": "…" {{ '}' }}</code> with your worker
+            token as a bearer header. Available once the workflow is pushed.
+          </p>
+        } @else {
+          <p class="phorma-props__hint">
+            Set your worker URL in Settings &rarr; Cloud and save this workflow to see the
+            invoke URL.
+          </p>
+        }
+
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-path')">Note</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-path')"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.path ?? ''"
+          (input)="patchData({ path: inputValue($event) })"
+          placeholder="Which system calls this?"
+        />
+        <p class="phorma-props__hint">A reminder for your team. Not part of the URL.</p>
+      </section>
+    }
+
+    <!-- Portal trigger -->
+    @if (portalData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Presents as</label>
+        <div class="phorma-props__presets" role="group" aria-label="Portal mode">
+          @for (mode of portalModes; track mode.id) {
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-props__preset-btn"
+              [class.phorma-props__preset-btn--active]="data.mode === mode.id"
+              [attr.aria-pressed]="data.mode === mode.id"
+              (click)="patchData({ mode: mode.id })"
+            >
+              {{ mode.label }}
+            </button>
+          }
+        </div>
+        <p class="phorma-props__hint">
+          @if (data.mode === 'chat') {
+            A conversation page. Each message runs the workflow; earlier turns are handed
+            to your prompts as <code>{{ '{' }}{{ '{' }}history{{ '}' }}{{ '}' }}</code>.
+          } @else {
+            A one-shot form. Submitted values reach your prompts as
+            <code>{{ '{' }}{{ '{' }}fields.key{{ '}' }}{{ '}' }}</code>.
+          }
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-portal-slug')">Public address</label>
+        <div class="phorma-props__copy-row">
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-portal-slug')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.slug ?? ''"
+            (input)="onPortalSlugInput($event)"
+            placeholder="customer-intake"
+          />
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [outlined]="true"
+            size="small"
+            class="phorma-input-icon-btn"
+            title="Suggest from the workflow name"
+            aria-label="Suggest an address from the workflow name"
+            (click)="suggestPortalSlug()"
+          >
+            <i class="ti ti-wand" aria-hidden="true"></i>
+          </button>
+        </div>
+        @if (portalUrl(); as url) {
+          <div class="phorma-props__copy-row phorma-props__label--gap">
+            <input
+              pInputText
+              pSize="small"
+              class="phorma-props__input phorma-props__input--mono"
+              type="text"
+              readonly
+              [value]="url"
+              aria-label="Portal address"
+            />
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
+              title="Copy address"
+              aria-label="Copy portal address"
+              (click)="copyPortalUrl()"
+            >
+              <i class="ti ti-copy" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn"
+              title="Open portal"
+              aria-label="Open the portal in a new tab"
+              (click)="openPortalUrl()"
+            >
+              <i class="ti ti-external-link" aria-hidden="true"></i>
+            </button>
+          </div>
+          <p class="phorma-props__hint">Live once you publish from the Portal panel.</p>
+        } @else {
+          <p class="phorma-props__hint">
+            Lower-case letters, numbers and dashes. Assigned automatically if you leave it
+            empty.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-portal-title')">Heading</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-portal-title')"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.title ?? ''"
+          (input)="patchData({ title: inputValue($event) })"
+          placeholder="Ask our support assistant"
+        />
+
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-portal-greeting')">
+          Opening message (markdown)
+        </label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-portal-greeting')"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.greeting ?? ''"
+          (input)="patchData({ greeting: inputValue($event) })"
+          placeholder="Hi! Tell me what you need and I'll take it from there."
+        ></textarea>
+      </section>
+
+      <!-- Form fields -->
+      @if (data.mode === 'form') {
+        <section class="phorma-props__section">
+          <div class="phorma-props__row phorma-props__row--between">
+            <span class="phorma-props__label">Fields</span>
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [text]="true"
+              size="small"
+              class="phorma-panel-icon-btn"
+              title="Add a field"
+              aria-label="Add a field"
+              (click)="addPortalField()"
+            >
+              <i class="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          @if (data.fields?.length) {
+            @for (field of data.fields; track $index) {
+              <div class="phorma-props__portal-field">
+                <div class="phorma-props__row">
+                  <input
+                    pInputText
+                    pSize="small"
+                    type="text"
+                    class="phorma-props__input"
+                    [value]="field.label"
+                    (input)="updatePortalField($index, { label: inputValue($event) })"
+                    [attr.aria-label]="'Label for field ' + ($index + 1)"
+                    placeholder="Label"
+                  />
+                  <button
+                    type="button"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-input-icon-btn"
+                    title="Move up"
+                    [attr.aria-label]="'Move field ' + ($index + 1) + ' up'"
+                    [disabled]="$first"
+                    (click)="movePortalField($index, -1)"
+                  >
+                    <i class="ti ti-chevron-up" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-input-icon-btn"
+                    title="Move down"
+                    [attr.aria-label]="'Move field ' + ($index + 1) + ' down'"
+                    [disabled]="$last"
+                    (click)="movePortalField($index, 1)"
+                  >
+                    <i class="ti ti-chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    pButton
+                    severity="secondary"
+                    [outlined]="true"
+                    size="small"
+                    class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+                    title="Remove field"
+                    [attr.aria-label]="'Remove field ' + ($index + 1)"
+                    (click)="removePortalField($index)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <div class="phorma-props__row phorma-props__row--field-type phorma-props__label--gap">
+                  <input
+                    pInputText
+                    pSize="small"
+                    type="text"
+                    class="phorma-props__input phorma-props__input--mono"
+                    [value]="field.key"
+                    (input)="updatePortalField($index, { key: inputValue($event) })"
+                    [attr.aria-label]="'Key for field ' + ($index + 1)"
+                    placeholder="key"
+                  />
+                  <p-select
+                    class="phorma-props__field-type"
+                    appendTo="body"
+                    [options]="portalFieldTypes"
+                    optionLabel="label"
+                    optionValue="id"
+                    [ngModel]="field.type"
+                    (ngModelChange)="updatePortalField($index, { type: $event })"
+                    [ariaLabel]="'Type for field ' + ($index + 1)" size="small">
+                    <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+                  </p-select>
+                </div>
+                @if (field.type === 'select') {
+                  <input
+                    pInputText
+                    pSize="small"
+                    type="text"
+                    class="phorma-props__input phorma-props__label--gap"
+                    [value]="portalFieldOptionsText(field)"
+                    (input)="onPortalFieldOptionsInput($index, $event)"
+                    [attr.aria-label]="'Options for field ' + ($index + 1)"
+                    placeholder="Sales, Support, Billing"
+                  />
+                }
+                <label class="phorma-props__check">
+                  <p-checkbox
+                    [binary]="true"
+                    size="small"
+                    [ngModel]="field.required ?? false"
+                    (ngModelChange)="updatePortalField($index, { required: $event })"
+                    [ariaLabel]="'Field ' + ($index + 1) + ' is required'"
+                  />
+                  Required
+                </label>
+              </div>
+            }
+            <p class="phorma-props__hint">
+              Reach a value from any prompt with
+              <code>{{ '{' }}{{ '{' }}fields.key{{ '}' }}{{ '}' }}</code>.
+            </p>
+          } @else {
+            <p class="phorma-props__hint">Add at least one field for a form portal.</p>
+          }
+        </section>
+      }
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-portal-responder')">Who answers</label>
+        <p-select
+          [inputId]="id('prop-portal-responder')"
+          class="phorma-props__select-full"
+          appendTo="body"
+          [options]="portalResponderOptions()"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.responderNodeId ?? ''"
+          (ngModelChange)="patchData({ responderNodeId: $event || null })" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          Only this node's answer reaches the visitor. Every other agent's output stays
+          private, so internal reasoning is never published.
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-portal-access')">Who can reach it</label>
+        <p-select
+          [inputId]="id('prop-portal-access')"
+          class="phorma-props__select-full"
+          appendTo="body"
+          [options]="portalAccessModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.access"
+          (ngModelChange)="patchData({ access: $event })" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          @if (data.access === 'token') {
+            Visitors must append an access key you mint in the Portal panel.
+          } @else {
+            Anyone who has the link can use this workflow. It spends your model budget.
+          }
+        </p>
+
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-portal-rate')">
+          Messages per minute, per visitor
+        </label>
+        <p-inputnumber
+          [inputId]="id('prop-portal-rate')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [max]="120"
+          [showButtons]="false"
+          [useGrouping]="false"
+          [ngModel]="data.rateLimitPerMin ?? 10"
+          (ngModelChange)="patchData({ rateLimitPerMin: $event ?? 10 })"
+        />
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-portal-theme')">Appearance</label>
+        <p-select
+          [inputId]="id('prop-portal-theme')"
+          class="phorma-props__select-full"
+          appendTo="body"
+          [options]="portalThemes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.theme ?? 'auto'"
+          (ngModelChange)="patchData({ theme: $event })" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-portal-branding')"
+            [ngModel]="data.showBranding !== false"
+            (ngModelChange)="patchData({ showBranding: $event })"
+          />
+          Show "Powered by Phorma"
+        </label>
+      </section>
+
+      <!-- Embedding on other websites -->
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Embed on a website</label>
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-portal-embed')"
+            [ngModel]="data.embedEnabled === true"
+            (ngModelChange)="patchData({ embedEnabled: $event })"
+          />
+          Allow this portal to be embedded
+        </label>
+        @if (data.embedEnabled) {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-portal-embed-origins')">
+            Allowed websites
+          </label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-portal-embed-origins')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="portalEmbedOriginsText(data)"
+            (input)="onPortalEmbedOriginsInput($event)"
+            placeholder="https://acme.com, https://www.acme.com"
+          />
+          <p class="phorma-props__hint">
+            @if (portalEmbedOpen(data)) {
+              <strong>Any website</strong> can embed this portal. List the sites you trust,
+              separated by commas, to lock it down.
+            } @else {
+              Only these sites can embed it. Everything else is blocked by the browser.
+            }
+          </p>
+
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-portal-embed-label')">
+            Button label
+          </label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-portal-embed-label')"
+            type="text"
+            class="phorma-props__input"
+            [value]="data.embedLabel ?? ''"
+            (input)="patchData({ embedLabel: inputValue($event) })"
+            placeholder="Chat with us"
+          />
+          <p class="phorma-props__hint">
+            Copy the snippet from the Portal panel once you have published.
+          </p>
+        } @else {
+          <p class="phorma-props__hint">
+            Off by default: the page refuses to load inside a frame, which stops other
+            sites wrapping it to trick your visitors.
+          </p>
+        }
+      </section>
+    }
+
+    <!-- HTTP tool -->
+    @if (httpData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Request</label>
+        <div class="phorma-props__row">
+          <p-select
+            class="phorma-props__method"
+            [options]="httpMethods"
+            [ngModel]="data.method"
+            (ngModelChange)="patchData({ method: $event })"
+            appendTo="body" size="small" />
+          <input
+            pInputText
+            pSize="small"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.url"
+            (input)="patchData({ url: inputValue($event) })"
+            placeholder="https://api.example.com/search"
+            aria-label="Request URL"
+          />
+        </div>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-body')">Body template</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-body')"
+          class="phorma-props__textarea phorma-props__input--mono"
+          rows="4"
+          [value]="data.bodyTemplate ?? ''"
+          (input)="patchData({ bodyTemplate: inputValue($event) })"
+          placeholder="JSON body — use the input placeholder to interpolate the agent's call"
+        ></textarea>
+      </section>
+    }
+
+    <!-- MCP tool -->
+    @if (mcpData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">MCP server</label>
+        @if (!mcpPreset()) {
+          <!-- Only generic MCP nodes choose a transport; presets fix it. -->
+          <p-select
+            [options]="mcpTransports"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="data.transport"
+            (ngModelChange)="patchData({ transport: $event })"
+            appendTo="body" size="small" />
+        }
+        @if (data.transport === 'stdio') {
+          @if (mcpPreset(); as preset) {
+            <!-- Preset node: credentials status + Advanced overrides. Presets
+                 without credentials (e.g. Filesystem) skip the status — there
+                 is nothing to configure. -->
+            @if (preset.envSchema.length > 0) {
+              <div
+                class="phorma-props__preset-status"
+                [class.phorma-props__preset-status--ok]="presetFullyConfigured()"
+              >
+                <i
+                  class="ti"
+                  [class.ti-circle-check]="presetFullyConfigured()"
+                  [class.ti-alert-triangle]="!presetFullyConfigured()"
+                  aria-hidden="true"
+                ></i>
+                <span>
+                  @if (hasNodeOverrides()) {
+                    Using node overrides — see Advanced below.
+                  } @else if (presetFullyConfigured()) {
+                    Using application defaults.
+                  } @else {
+                    Credentials missing — set application defaults in Settings.
+                  }
+                </span>
+              </div>
+              <button type="button" pButton [text]="true" (click)="openIntegrationSettings()" size="small">
+                <i class="ti ti-settings" aria-hidden="true"></i>
+                Configure defaults in Settings › Integrations
+              </button>
+            }
+
+            <!-- Preset argument fields (e.g. the filesystem allowed directory) -->
+            @if (mcpArgFields(); as argFields) {
+              @for (entry of argFields; track entry.index) {
+                <label class="phorma-props__label phorma-props__label--gap">{{ entry.field.label }}</label>
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="entry.value"
+                  (input)="onArgInput(entry.index, $event)"
+                  [placeholder]="entry.field.placeholder ?? ''"
+                  [attr.aria-label]="entry.field.label"
+                />
+                @if (entry.field.description) {
+                  <p class="phorma-props__hint">{{ entry.field.description }}</p>
+                }
+              }
+            }
+
+            <!-- Advanced: per-node overrides + command/args -->
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [text]="true"
+              size="small"
+              class="phorma-props__advanced-toggle"
+              (click)="toggleAdvanced()"
+              [attr.aria-expanded]="advancedOpen()"
+            >
+              <i
+                class="ti"
+                [class.ti-chevron-right]="!advancedOpen()"
+                [class.ti-chevron-down]="advancedOpen()"
+                aria-hidden="true"
+              ></i>
+              Advanced
+            </button>
+            @if (advancedOpen()) {
+              <div class="phorma-props__advanced">
+                @if (preset.envSchema.length > 0) {
+                <label class="phorma-props__label">Credential overrides</label>
+                <p class="phorma-props__hint">
+                  Override the application defaults for this node only. Stored in your OS
+                  keychain (desktop) or localStorage (browser) — never in the workflow file.
+                </p>
+                <ul class="phorma-props__ports">
+                  @for (field of preset.envSchema; track field.name) {
+                    <li>
+                      <span class="phorma-props__provider">
+                        {{ field.label }}
+                        @if (secretConfigured(field.name)) {
+                          <i class="ti ti-circle-check phorma-props__ok" title="Overridden on this node" aria-hidden="true"></i>
+                        } @else if (presetDefaultConfigured(field.name)) {
+                          <i class="ti ti-settings-check phorma-props__default" title="Using application default" aria-hidden="true"></i>
+                        }
+                      </span>
+                      <input
+                        pInputText
+                        pSize="small"
+                        [type]="field.secret ? 'password' : 'text'"
+                        class="phorma-props__input"
+                        [placeholder]="secretConfigured(field.name) ? '••••••••  (override stored)' : presetDefaultConfigured(field.name) ? 'Using app default' : (field.placeholder ?? '')"
+                        [value]="mcpSecretDrafts()[field.name] || ''"
+                        (input)="onSecretInput(field.name, $event)"
+                        (keydown.enter)="saveSecret(field.name)"
+                        autocomplete="off"
+                      />
+                      <button
+                        type="button"
+                        pButton
+                        severity="secondary"
+                        [outlined]="true"
+                        [disabled]="mcpSecretDrafts()[field.name] === undefined"
+                        (click)="saveSecret(field.name)" size="small">
+                        Save
+                      </button>
+                      @if (secretConfigured(field.name)) {
+                        <button
+                          type="button"
+                          pButton
+                          severity="danger"
+                          [text]="true"
+                          (click)="clearSecret(field.name)"
+                          title="Remove override (revert to application default)" size="small">
+                          <i class="ti ti-trash" aria-hidden="true"></i>
+                        </button>
+                      }
+                    </li>
+                    @if (field.description) {
+                      <p class="phorma-props__hint">{{ field.description }}</p>
+                    }
+                  }
+                </ul>
+                }
+
+                <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-cmd')">Command</label>
+                <input
+                  pInputText
+                  pSize="small"
+                  [id]="id('prop-cmd')"
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="data.command ?? ''"
+                  (input)="patchData({ command: inputValue($event) })"
+                  placeholder="npx -y @modelcontextprotocol/server-filesystem"
+                />
+
+                <label class="phorma-props__label phorma-props__label--gap">Arguments</label>
+                <ul class="phorma-props__ports">
+                  @for (arg of data.args ?? []; track $index) {
+                    <li>
+                      <input
+                        pInputText
+                        pSize="small"
+                        type="text"
+                        class="phorma-props__input phorma-props__input--mono"
+                        [value]="arg"
+                        (input)="onArgInput($index, $event)"
+                        [attr.aria-label]="'Argument ' + ($index + 1)"
+                      />
+                      <button
+                        type="button"
+                        pButton
+                        severity="danger"
+                        [text]="true"
+                        (click)="removeArg($index)"
+                        title="Remove argument" size="small">
+                        <i class="ti ti-trash" aria-hidden="true"></i>
+                      </button>
+                    </li>
+                  } @empty {
+                    <p class="phorma-props__hint">No arguments.</p>
+                  }
+                </ul>
+                <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()" size="small">
+                  <i class="ti ti-plus" aria-hidden="true"></i> Add argument
+                </button>
+              </div>
+            }
+          } @else {
+            <!-- Generic MCP node: command/args inline (no preset defaults) -->
+            <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-cmd')">Command</label>
+            <input
+              pInputText
+              pSize="small"
+              [id]="id('prop-cmd')"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="data.command ?? ''"
+              (input)="patchData({ command: inputValue($event) })"
+              placeholder="npx -y @modelcontextprotocol/server-filesystem"
+            />
+
+            <label class="phorma-props__label phorma-props__label--gap">Arguments</label>
+            <ul class="phorma-props__ports">
+              @for (arg of data.args ?? []; track $index) {
+                <li>
+                  <input
+                    pInputText
+                    pSize="small"
+                    type="text"
+                    class="phorma-props__input phorma-props__input--mono"
+                    [value]="arg"
+                    (input)="onArgInput($index, $event)"
+                    [attr.aria-label]="'Argument ' + ($index + 1)"
+                  />
+                  <button
+                    type="button"
+                    pButton
+                    severity="danger"
+                    [text]="true"
+                    (click)="removeArg($index)"
+                    title="Remove argument" size="small">
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                </li>
+              } @empty {
+                <p class="phorma-props__hint">No arguments.</p>
+              }
+            </ul>
+            <button type="button" pButton severity="secondary" [outlined]="true" (click)="addArg()" size="small">
+              <i class="ti ti-plus" aria-hidden="true"></i> Add argument
+            </button>
+          }
+        } @else {
+          @if (urlLockedByPreset()) {
+            <!-- Preset-fixed endpoint: shown for transparency, not editable. -->
+            <label class="phorma-props__label phorma-props__label--gap">Server</label>
+            <div class="phorma-props__locked-url" [title]="data.url">
+              <i class="ti ti-lock" aria-hidden="true"></i>
+              <span>{{ data.url }}</span>
+            </div>
+          } @else {
+            <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-url')">Server URL</label>
+            <input
+              pInputText
+              pSize="small"
+              [id]="id('prop-url')"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="data.url ?? ''"
+              (input)="patchData({ url: inputValue($event) })"
+              placeholder="https://mcp.example.com/sse"
+            />
+          }
+
+          <!-- Interactive OAuth: Connect / Disconnect instead of a token field -->
+          @if (usesOAuth()) {
+            <div
+              class="phorma-props__preset-status phorma-props__label--gap"
+              [class.phorma-props__preset-status--ok]="oauthConnected()"
+            >
+              <i
+                class="ti"
+                [class.ti-circle-check]="oauthConnected()"
+                [class.ti-plug-connected-x]="!oauthConnected()"
+                aria-hidden="true"
+              ></i>
+              <span>
+                @if (oauthConnected()) {
+                  Connected — this agent tool is ready to use.
+                } @else if (oauthSetup() && !oauthClientAvailable()) {
+                  One-time setup needed before you can connect.
+                } @else {
+                  Not connected — click Connect to sign in.
+                }
+              </span>
+            </div>
+
+            <!-- One-time OAuth-app setup (providers without automatic registration) -->
+            @if (oauthSetupVisible()) {
+              <div class="phorma-props__oauth-setup">
+                <p class="phorma-props__oauth-step">
+                  <span class="phorma-props__oauth-step-num">1</span>
+                  Register a (free) OAuth app on your account — the form is pre-filled:
+                </p>
+                <button type="button" pButton severity="secondary" [outlined]="true" (click)="openOAuthRegisterPage()" size="small">
+                  <i class="ti ti-external-link" aria-hidden="true"></i>
+                  Open registration page
+                </button>
+                <p class="phorma-props__hint">
+                  Callback URL (pre-filled; copy if you need it):
+                </p>
+                <div class="phorma-props__row">
+                  <input
+                    pInputText
+                    pSize="small"
+                    type="text"
+                    class="phorma-props__input phorma-props__input--mono"
+                    [value]="oauthRedirectUri()"
+                    readonly
+                    aria-label="Callback URL to register"
+                  />
+                  <button type="button" pButton severity="secondary" [text]="true" class="phorma-input-icon-btn" (click)="copyRedirectUri()" title="Copy callback URL" size="small">
+                    <i class="ti ti-copy" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <p class="phorma-props__oauth-step">
+                  <span class="phorma-props__oauth-step-num">2</span>
+                  Paste the app’s credentials here:
+                </p>
+                @if (oauthSetup()?.note; as note) {
+                  <p class="phorma-props__hint">{{ note }}</p>
+                }
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  placeholder="Client ID"
+                  [value]="oauthClientIdDraft()"
+                  (input)="onOAuthClientIdInput($event)"
+                  autocomplete="off"
+                  aria-label="OAuth client ID"
+                />
+                @if (oauthSetup()?.needsClientSecret) {
+                  <input
+                    pInputText
+                    pSize="small"
+                    type="password"
+                    class="phorma-props__input phorma-props__input--mono"
+                    placeholder="Client secret"
+                    [value]="oauthClientSecretDraft()"
+                    (input)="onOAuthClientSecretInput($event)"
+                    autocomplete="off"
+                    aria-label="OAuth client secret"
+                  />
+                }
+                <button
+                  type="button"
+                  pButton
+                  severity="secondary"
+                  [outlined]="true"
+                  [disabled]="!oauthClientIdDraft().trim()"
+                  (click)="saveOAuthClient()" size="small">
+                  <i class="ti ti-device-floppy" aria-hidden="true"></i>
+                  Save app credentials
+                </button>
+              </div>
+            } @else if (oauthSetup() && oauthClientAvailable()) {
+              <button type="button" pButton [text]="true" (click)="toggleOAuthSetup()" size="small">
+                <i class="ti ti-key" aria-hidden="true"></i>
+                {{ oauthClientConfigured() ? 'OAuth app configured — change credentials' : 'Using a custom OAuth app instead' }}
+              </button>
+            }
+
+            <div class="phorma-props__row phorma-props__label--gap">
+              <button
+                type="button"
+                pButton
+                size="small"
+                class="phorma-props__btn phorma-props__btn--primary"
+                [disabled]="oauthConnecting() || !data.url || (oauthSetup() && !oauthClientAvailable())"
+                (click)="connectOAuth()"
+              >
+                <i class="ti ti-plug-connected" aria-hidden="true"></i>
+                {{ oauthConnecting() ? 'Connecting…' : oauthConnected() ? 'Reconnect' : 'Connect' }}
+              </button>
+              @if (oauthConnected()) {
+                <button
+                  type="button"
+                  pButton
+                  severity="danger"
+                  [text]="true"
+                  (click)="disconnectOAuth()"
+                  title="Disconnect (clear stored tokens)" size="small">
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </button>
+              }
+            </div>
+          } @else if (mcpPreset(); as preset) {
+            <!-- Remote preset credentials (static bearer token + any extra secrets) -->
+            @for (field of preset.envSchema; track field.name) {
+              <label class="phorma-props__label phorma-props__label--gap">
+                {{ field.label }}
+                @if (secretConfigured(field.name)) {
+                  <i class="ti ti-circle-check phorma-props__ok" title="Stored" aria-hidden="true"></i>
+                } @else if (presetDefaultConfigured(field.name)) {
+                  <i class="ti ti-settings-check phorma-props__default" title="Using application default" aria-hidden="true"></i>
+                }
+              </label>
+              <div class="phorma-props__row">
+                <input
+                  pInputText
+                  pSize="small"
+                  [type]="field.secret ? 'password' : 'text'"
+                  class="phorma-props__input"
+                  [placeholder]="secretConfigured(field.name) ? '••••••••  (stored)' : presetDefaultConfigured(field.name) ? 'Using app default' : (field.placeholder ?? '')"
+                  [value]="mcpSecretDrafts()[field.name] || ''"
+                  (input)="onSecretInput(field.name, $event)"
+                  (keydown.enter)="saveSecret(field.name)"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  pButton
+                  severity="secondary"
+                  [outlined]="true"
+                  [disabled]="mcpSecretDrafts()[field.name] === undefined"
+                  (click)="saveSecret(field.name)" size="small">
+                  Save
+                </button>
+                @if (secretConfigured(field.name)) {
+                  <button
+                    type="button"
+                    pButton
+                    severity="danger"
+                    [text]="true"
+                    (click)="clearSecret(field.name)"
+                    title="Remove stored secret" size="small">
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                }
+              </div>
+              @if (field.description) {
+                <p class="phorma-props__hint">{{ field.description }}</p>
+              }
+            }
+          }
+        }
+      </section>
+    }
+
+    <!-- Approval gate -->
+    @if (approvalData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-approval')">Message to approver (markdown)</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-approval')"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.message ?? ''"
+          (input)="patchData({ message: inputValue($event) })"
+          placeholder="Please review the draft before it is published."
+        ></textarea>
+      </section>
+    }
+
+    <!-- ForEach loop -->
+    @if (forEachData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-items-path')">Items path</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-items-path')"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.itemsPath ?? ''"
+          (input)="patchData({ itemsPath: inputValue($event) })"
+          placeholder="jobs (empty = auto-detect the array)"
+        />
+        <p class="phorma-props__hint">
+          Dotted path to the array inside the incoming JSON payload. Leave empty to
+          auto-detect. The loop body receives one item at a time; the Done port
+          receives the aggregated results and exceptions.
+        </p>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-concurrency')">Concurrency</label>
+        <p-inputnumber
+          [inputId]="id('prop-concurrency')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [max]="8"
+          [showButtons]="false"
+          [useGrouping]="false"
+          [ngModel]="data.concurrency ?? 1"
+          (ngModelChange)="patchData({ concurrency: $event ?? 1 })"
+        />
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-continue-on-error')"
+            [ngModel]="data.continueOnError ?? true"
+            (ngModelChange)="patchData({ continueOnError: $event })"
+          />
+          Continue when an item fails
+        </label>
+      </section>
+    }
+
+    <!-- Wait for Event -->
+    @if (waitEventData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-correlation')">Correlation key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-correlation')"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.correlationKey ?? ''"
+          (input)="patchData({ correlationKey: inputValue($event) })"
+          placeholder="signed:{{ '{' }}{{ '{' }}jobId{{ '}' }}{{ '}' }}"
+        />
+        <p class="phorma-props__hint">
+          The run resumes when an external event with this key arrives.
+          {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} placeholders interpolate against the incoming JSON payload.
+        </p>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-wait-message')">Waiting note (markdown)</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-wait-message')"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.message ?? ''"
+          (input)="patchData({ message: inputValue($event) })"
+          placeholder="Waiting for the signed IAS to be returned."
+        ></textarea>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-wait-timeout')">Timeout (hours)</label>
+        <p-inputnumber
+          [inputId]="id('prop-wait-timeout')"
+          class="phorma-props__number"
+          size="small"
+          [min]="0"
+          [showButtons]="false"
+          [useGrouping]="false"
+          [ngModel]="data.timeoutHours ?? 0"
+          (ngModelChange)="patchData({ timeoutHours: $event ?? 0 })"
+        />
+        <p class="phorma-props__hint">
+          Fail the node if no event arrives within this many hours. 0 waits forever.
+          Deployed runs enforce this with a durable alarm that survives restarts.
+        </p>
+      </section>
+    }
+
+    <!-- Ask User -->
+    @if (askUserData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-question')">Question</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-question')"
+          class="phorma-props__textarea"
+          rows="3"
+          [value]="data.question ?? ''"
+          (input)="patchData({ question: inputValue($event) })"
+          placeholder="Approve this draft for {{ '{' }}{{ '{' }}customer{{ '}' }}{{ '}' }}?"
+        ></textarea>
+        <p class="phorma-props__hint">
+          The run pauses and shows this question to the user.
+          {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} placeholders interpolate against the incoming JSON payload.
+          Leave empty to show the incoming payload as the question.
+        </p>
+      </section>
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-response-key')">Response key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-response-key')"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.responseKey ?? 'userResponse'"
+          (input)="patchData({ responseKey: inputValue($event) })"
+          placeholder="userResponse"
+        />
+        <p class="phorma-props__hint">
+          The user's answer is merged into the payload under this key for the downstream agent
+          (e.g. {{ '{' }}{{ '{' }}userResponse{{ '}' }}{{ '}' }} references it in the next agent's prompt).
+        </p>
+      </section>
+    }
+
+    <!-- Execute Workflow -->
+    @if (executeWorkflowData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-sub-workflow')">Workflow</label>
+        <p-select
+          [inputId]="id('prop-sub-workflow')"
+          [options]="workflowOptions()"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.workflowId ?? null"
+          (ngModelChange)="selectWorkflow($event)"
+          placeholder="Choose a saved workflow"
+          appendTo="body"
+          [filter]="true"
+          filterBy="label" size="small" />
+        <p class="phorma-props__hint">
+          The Task input starts the selected workflow. Its terminal result leaves through Result.
+          Self-reference is allowed and stops at your plan depth limit.
+        </p>
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [outlined]="true"
+          [disabled]="!data.workflowId"
+          (click)="openTargetWorkflow()" size="small">
+          <i class="ti ti-external-link" aria-hidden="true"></i>
+          {{ targetIsEmbeddedOnly() ? 'Open Embedded Snapshot' : 'Open Workflow' }}
+        </button>
+        @if (targetIsEmbeddedOnly()) {
+          <p class="phorma-props__hint">This target exists only in the portable embedded registry and opens read-only.</p>
+        }
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-subwf-error-branch')"
+            [ngModel]="hasExecuteWorkflowErrorBranch()"
+            (ngModelChange)="toggleExecuteWorkflowErrorBranch($event)"
+          />
+          On-error output
+        </label>
+        @if (hasExecuteWorkflowErrorBranch()) {
+          <p class="phorma-props__hint">
+            Child failures route through the <strong>On error</strong> port instead of failing the run.
+          </p>
+        }
+        <p class="phorma-props__depth-hint">
+          <i class="ti ti-layers-subtract" aria-hidden="true"></i>
+          {{ subWorkflowDepthHint() }}
+        </p>
+      </section>
+    }
+
+    <!-- Branch ports (router routes / parallel branches / aggregator inputs) -->
+    @if (editableOutPorts(); as branch) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">
+          {{ selected.kind === 'router' ? 'Routes' : selected.kind === 'aggregator' ? 'Inputs' : 'Branches' }}
+        </label>
+        <ul class="phorma-props__ports">
+          @for (port of branch.ports; track port.id) {
+            <li>
+              <input
+                pInputText
+                pSize="small"
+                type="text"
+                class="phorma-props__input"
+                [value]="port.name"
+                (input)="renamePort(selected, port.id, $event)"
+                [attr.aria-label]="'Rename ' + port.name"
+              />
+              <button
+                type="button"
+                pButton
+                severity="danger"
+                [text]="true"
+                (click)="removePort(selected, port.id)"
+                [disabled]="branch.ports.length <= 2"
+                title="Remove" size="small">
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </li>
+          }
+        </ul>
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [outlined]="true"
+          (click)="addBranchPort(selected, branch.role)" size="small">
+          <i class="ti ti-plus" aria-hidden="true"></i> Add
+        </button>
+      </section>
+    }
+  </div>
+} @else if (multiSelection()) {
+  <div class="phorma-props__placeholder">
+    <i class="ti ti-stack-2" aria-hidden="true"></i>
+    <p>Multiple nodes selected.</p>
+  </div>
+} @else {
+  <div class="phorma-props" [class.phorma-props--grid]="layout() === 'grid'">
+    @if (showHeader()) {
+      <header class="phorma-props__head">
+        <i class="ti ti-settings-2" aria-hidden="true"></i>
+        <span class="phorma-props__kind">Workflow</span>
+      </header>
+    }
+    <section class="phorma-props__section" data-section="workflow">
+      <label class="phorma-props__label" [for]="id('prop-wf-timeout')">Timeout (minutes)</label>
+      <p-inputnumber
+        [inputId]="id('prop-wf-timeout')"
+        class="phorma-props__number"
+        size="small"
+        [min]="0"
+        [showButtons]="false"
+        [useGrouping]="false"
+        placeholder="none"
+        [ngModel]="workflowSettings().timeoutMinutes ?? null"
+        (ngModelChange)="onWorkflowTimeoutChange($event)"
+      />
+      <p class="phorma-props__hint">
+        Fails the run if it takes longer than this end-to-end. Paused time doesn't count.
+        Leave empty for no limit. Applies to local and deployed runs.
+      </p>
+    </section>
+    <div class="phorma-props__placeholder phorma-props__placeholder--inline">
+      <i class="ti ti-adjustments" aria-hidden="true"></i>
+      <p>Select a node to edit its properties.</p>
+    </div>
+  </div>
+}

@@ -1,0 +1,354 @@
+:host {
+  display: contents;
+}
+
+.phorma-usaged {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.phorma-usaged__filters {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.08));
+  background: var(--p-content-background);
+}
+
+.phorma-usaged__scope {
+  flex: 0 1 13rem;
+  font-size: 12px;
+}
+
+.phorma-usaged__periods {
+  ::ng-deep .p-togglebutton {
+    font-size: 11px;
+  }
+}
+
+.phorma-usaged__facets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.phorma-usaged__facet {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.phorma-usaged__facet-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-usaged__chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+
+  &--on {
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+    background: color-mix(in srgb, var(--p-primary-color) 14%, transparent);
+    color: var(--p-primary-color);
+  }
+}
+
+.phorma-usaged__clear.p-button {
+  gap: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── Stat strip ────────────────────────────────────────────────────────── */
+.phorma-usaged__stats {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--p-border-color, rgba(255, 255, 255, 0.07));
+  border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.08));
+}
+
+.phorma-usaged__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--p-content-background);
+
+  > b {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  > small {
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--p-text-muted-color);
+  }
+
+  &--bad > b {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+/* ── Cards + charts ────────────────────────────────────────────────────── */
+.phorma-usaged__grid,
+.phorma-usaged__tables {
+  /* Direct children of the flex column must not shrink below their content -
+     the dialog body scrolls instead. */
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 14px;
+  padding: 14px 16px 0;
+}
+
+.phorma-usaged__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 35%, transparent);
+
+  /* Two columns when the grid is wide enough to have them. */
+  &--wide {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .phorma-usaged__card--wide {
+    grid-column: span 1;
+  }
+}
+
+.phorma-usaged__card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+
+  > small {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    opacity: 0.85;
+  }
+}
+
+.phorma-usaged__chart {
+  min-width: 0;
+}
+
+/* ── Tables ────────────────────────────────────────────────────────────── */
+.phorma-usaged__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+
+  th,
+  td {
+    padding: 4px 6px;
+    text-align: left;
+    border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.07));
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--p-content-background);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--p-text-muted-color);
+    white-space: nowrap;
+  }
+
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+  }
+
+  tbody tr[data-status='failed'] td:nth-child(4) {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  tbody tr[data-status='completed'] td:nth-child(4) {
+    color: var(--phorma-accent-green, #34d399);
+  }
+}
+
+.phorma-usaged__num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+
+  > span + span {
+    margin-left: 5px;
+  }
+}
+
+.phorma-usaged__model {
+  display: block;
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14rem;
+}
+
+.phorma-usaged__sub {
+  display: block;
+  font-size: 9px;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-usaged__clickable {
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent) !important;
+  }
+}
+
+/* A ledger row whose node no longer exists in the workflow - not selectable. */
+.phorma-usaged__stale .phorma-usaged__model {
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
+
+.phorma-usaged__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--p-text-color);
+  }
+}
+
+/* ── Run ledger ────────────────────────────────────────────────────────── */
+.phorma-usaged__ledger {
+  /* `.phorma-usaged` is a flex column, so this card must be told not to shrink
+     - otherwise it collapses to its title height and the 25 rows inside are
+     unreachable behind `overflow: auto`. */
+  flex-shrink: 0;
+  margin: 14px 16px;
+  /* The rows scroll inside the card so the pager stays reachable without
+     scrolling the whole dialog to the bottom first. */
+  max-height: 30rem;
+  overflow: auto;
+
+  /* Keep the title + pager visible above the scrolling rows. */
+  > .phorma-usaged__card-title {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: -12px -13px 0;
+    padding: 10px 13px 8px;
+    background: var(--p-content-background);
+  }
+}
+
+.phorma-usaged__ledger-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.phorma-usaged__pager {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+}
+
+.phorma-usaged__page-label {
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--p-text-muted-color);
+}
+
+/* ── Misc ──────────────────────────────────────────────────────────────── */
+.phorma-usaged__empty {
+  margin: 14px 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-usaged__footnote {
+  margin: 0 16px 16px;
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--p-text-muted-color);
+}

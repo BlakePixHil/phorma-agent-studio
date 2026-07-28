@@ -1,0 +1,239 @@
+:host {
+  display: contents;
+}
+
+.phorma-propsd {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── Node header card ───────────────────────────────────────────────────── */
+.phorma-propsd__card {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 16px 18px 0;
+  padding: 14px 15px;
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 45%, transparent);
+}
+
+.phorma-propsd__card-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid;
+  border-radius: 10px;
+  /* `currentColor` is the node's category accent, set inline. */
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 20px;
+}
+
+.phorma-propsd__card-titles {
+  min-width: 0;
+
+  > h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  > p {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 0;
+  }
+}
+
+.phorma-propsd__kind {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.phorma-propsd__id {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  > code {
+    font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+/* ── Wiring summary ─────────────────────────────────────────────────────── */
+.phorma-propsd__wiring {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-left: auto;
+  max-width: 46%;
+}
+
+.phorma-propsd__wire-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.phorma-propsd__wire-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-propsd__wire {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 11rem;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--p-text-color);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  > i {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--p-text-muted-color);
+  }
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+    background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  }
+}
+
+.phorma-propsd__wire-empty {
+  font-size: 11px;
+  color: var(--p-text-muted-color);
+}
+
+/* ── JSON inspector ────────────────────────────────────────────────────── */
+.phorma-propsd__json-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 4px 9px;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+
+  &--on {
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+    color: var(--p-primary-color);
+  }
+}
+
+.phorma-propsd__json {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 18px 0;
+  padding: 12px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 45%, transparent);
+}
+
+.phorma-propsd__json-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phorma-propsd__json-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-propsd__json-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+}
+
+.phorma-propsd__json-body {
+  margin: 0;
+  max-height: 15rem;
+  overflow: auto;
+  padding: 10px 11px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+/* ── Form area ─────────────────────────────────────────────────────────── */
+.phorma-propsd__form {
+  flex: 1;
+  min-height: 0;
+}

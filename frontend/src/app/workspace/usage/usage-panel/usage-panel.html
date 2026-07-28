@@ -8,7 +8,6 @@
         pButton
         severity="secondary"
         [text]="true"
-        [rounded]="true"
         size="small"
         class="phorma-panel-icon-btn"
         title="Refresh usage"
@@ -21,6 +20,19 @@
           [class.phorma-icon-spin]="analytics.loading()"
           aria-hidden="true"
         ></i>
+      </button>
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
+        title="Expand to full view — more charts, filters and the run ledger"
+        aria-label="Expand to full view"
+        (click)="expand()"
+      >
+        <i class="ti ti-arrows-maximize" aria-hidden="true"></i>
       </button>
     </label>
     <div class="phorma-usage__controls">

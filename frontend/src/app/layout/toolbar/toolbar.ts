@@ -9,6 +9,7 @@ import { ThemeService, type ThemeMode } from '../../core/theme.service';
 import { THEME_MODES } from '../../core/theme-modes';
 import { CanvasStateService } from '../../core/canvas-state.service';
 import { PanelRegistryService, type PanelTab } from '../../core/panel-registry.service';
+import { PanelExpandService, isExpandablePanelId } from '../../core/panel-expand.service';
 import { PortalService } from '../../core/portal.service';
 import { WorkflowService } from '../../core/workflow.service';
 import { TauriService } from '../../core/tauri.service';
@@ -59,6 +60,7 @@ export class Toolbar {
   protected readonly updates = inject(UpdateService);
   private readonly tauri = inject(TauriService);
   private readonly panels = inject(PanelRegistryService);
+  private readonly panelExpand = inject(PanelExpandService);
   private readonly history = inject(HistoryService);
   private readonly clipboard = inject(ClipboardService);
   private readonly selection = inject(SelectionService);
@@ -281,7 +283,10 @@ export class Toolbar {
       this.selection.selectAll();
       return;
     } else if (!ctrl && !e.metaKey && !e.altKey && key === 'escape') {
-      this.selection.deselect();
+      // Any open overlay owns Escape (it closes itself). Deselecting as well
+      // would silently drop the selection the overlay was editing, so the
+      // reopened panel would come back empty.
+      if (!this.anyOverlayOpen()) this.selection.deselect();
       return;
     }
 
@@ -304,6 +309,12 @@ export class Toolbar {
     if (ctrl && shift && key === 'b') {
       e.preventDefault();
       this.panels.collapsedRight() ? this.panels.expandRight() : this.panels.collapseRight();
+    }
+    // View > Expand Active Panel — Ctrl+Shift+E.
+    if (ctrl && shift && key === 'e') {
+      e.preventDefault();
+      this.expandActivePanel();
+      return;
     }
     if (ctrl && key === '`') {
       e.preventDefault();
@@ -553,6 +564,14 @@ export class Toolbar {
             },
             { separator: true },
             {
+              label: 'Expand Active Panel',
+              icon: 'ti ti-arrows-maximize',
+              shortcut: 'Ctrl+Shift+E',
+              disabled: !isExpandablePanelId(this.panels.activeRight()),
+              command: () => this.expandActivePanel(),
+            },
+            { separator: true },
+            {
               label: 'Collapse Both Panels',
               icon: 'ti ti-arrows-minimize',
               command: () => this.panels.collapseAll(),
@@ -665,6 +684,20 @@ export class Toolbar {
   }
 
   /**
+   * Expands the active right-side panel into its full-size dialog, or closes
+   * the open one. Only Prompt / Properties / Evals / Usage have expanded
+   * surfaces; anything else is a no-op (the menu item is disabled to match).
+   */
+  private expandActivePanel(): void {
+    if (this.panelExpand.anyOpen()) {
+      this.panelExpand.close();
+      return;
+    }
+    const active = this.panels.activeRight();
+    if (isExpandablePanelId(active)) this.panelExpand.open(active);
+  }
+
+  /**
    * Reveals the Portal panel. Deliberately NOT a dialog: publish state is
    * something you keep an eye on while editing, and the panel is also where
    * the checklist and access keys live.
@@ -704,6 +737,16 @@ export class Toolbar {
     } catch (error) {
       this.toast.error('Import failed', error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /**
+   * True while any modal surface is mounted. Every dialog in the studio is an
+   * `@if`-gated overlay carrying `role="dialog"`, so one DOM probe covers them
+   * all - including ones added later - without this handler having to inject
+   * every dialog service.
+   */
+  private anyOverlayOpen(): boolean {
+    return !!document.querySelector('[role="dialog"]');
   }
 
   private isTextEditingTarget(target: EventTarget | null): boolean {

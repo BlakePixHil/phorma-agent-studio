@@ -6,6 +6,7 @@ import { UIChart } from 'primeng/chart';
 import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
 
+import { PanelExpandService } from '../../../core/panel-expand.service';
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import {
   UsageAnalyticsService,
@@ -47,8 +48,14 @@ export class UsagePanel {
   protected readonly analytics = inject(UsageAnalyticsService);
   private readonly workflow = inject(WorkflowService);
   private readonly panels = inject(PanelRegistryService);
+  private readonly panelExpand = inject(PanelExpandService);
 
   protected readonly periods = PERIODS;
+
+  /** Opens the expanded usage dialog (more charts, filters, run ledger). */
+  protected expand(): void {
+    this.panelExpand.open('usage');
+  }
 
   constructor() {
     // Refresh whenever the panel becomes the active tab on either side.

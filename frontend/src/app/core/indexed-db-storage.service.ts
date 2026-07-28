@@ -3,12 +3,13 @@ import { Injectable } from '@angular/core';
 import type { EvalRunSummary, EvalSuite, RunRecord, UsageLedgerEntry } from '@phorma/engine';
 
 import type { ChatThread } from './assistant-chat.model';
+import type { PromptEntry } from './prompt-library.model';
 import type { SkillDef } from './skills.model';
 import type { WorkflowSpec } from './workflow.model';
 import { WORKFLOW_VERSIONS_KEEP, type WorkflowVersion } from './workflow-versions.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -53,6 +54,14 @@ const CHAT_THREADS_KEEP = 50;
  * The skill library is GLOBAL (cross-workflow), so there is no workflow index.
  */
 const SKILLS_STORE = 'skills';
+
+/**
+ * Object store holding {@link PromptEntry} documents (keyPath `id`).
+ * Like the skill library the prompt library is GLOBAL (cross-workflow), so
+ * there is no workflow index. Built-in prompts are derived from the node
+ * catalog at read time and never stored here.
+ */
+const PROMPTS_STORE = 'prompts';
 
 /** Full workflow snapshots used by persistent edit history (EPIC 7). */
 const WORKFLOW_VERSIONS_STORE = 'workflow-versions';
@@ -303,6 +312,31 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Prompt library ─────────────────────────────────────────────────────
+
+  /** All user-saved prompts, most recently updated first. */
+  async listPrompts(): Promise<PromptEntry[]> {
+    const db = await this.open();
+    const prompts = await this.request<PromptEntry[]>(
+      db.transaction(PROMPTS_STORE, 'readonly').objectStore(PROMPTS_STORE).getAll(),
+    );
+    return prompts.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async savePrompt(prompt: PromptEntry): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(PROMPTS_STORE, 'readwrite').objectStore(PROMPTS_STORE).put(prompt),
+    );
+  }
+
+  async removePrompt(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(PROMPTS_STORE, 'readwrite').objectStore(PROMPTS_STORE).delete(id),
+    );
+  }
+
   // ── Workflow versions (EPIC 7) ────────────────────────────────────────
 
   /** All versions for a workflow, newest first. */
@@ -415,6 +449,9 @@ export class IndexedDbStorageService {
         }
         if (!db.objectStoreNames.contains(SKILLS_STORE)) {
           db.createObjectStore(SKILLS_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(PROMPTS_STORE)) {
+          db.createObjectStore(PROMPTS_STORE, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(WORKFLOW_VERSIONS_STORE)) {
           const versions = db.createObjectStore(WORKFLOW_VERSIONS_STORE, { keyPath: 'id' });

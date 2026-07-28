@@ -1,0 +1,719 @@
+<app-expanded-panel-dialog
+  panelId="evals"
+  title="Evals"
+  icon="ti ti-flask"
+  [subtitle]="subtitle()"
+  width="min(1480px, 100%)"
+  [blockClose]="runner.running()"
+>
+  <!-- ══ Left rail: suite list ══ -->
+  <aside class="phorma-evalsd__suites">
+    <div class="phorma-evalsd__side-head">
+      <span class="phorma-evalsd__side-title">
+        <i class="ti ti-flask" aria-hidden="true"></i> Suites
+      </span>
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
+        title="New suite"
+        aria-label="New suite"
+        (click)="createSuite()"
+      >
+        <i class="ti ti-plus" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="phorma-evalsd__side-scroll">
+      @if (evals.suites().length === 0) {
+        <p class="phorma-evalsd__empty">
+          No suites yet for {{ workflowName() }}. Create one to start testing.
+        </p>
+      }
+      <ul class="phorma-evalsd__list">
+        @for (suite of evals.suites(); track suite.id) {
+          <li>
+            <button
+              type="button"
+              class="phorma-evalsd__suite"
+              [class.phorma-evalsd__suite--active]="selectedSuite()?.id === suite.id"
+              (click)="openSuite(suite)"
+            >
+              <span class="phorma-evalsd__suite-name">{{ suite.name }}</span>
+              <span class="phorma-evalsd__suite-sub">
+                {{ suite.cases.length }} {{ suite.cases.length === 1 ? 'case' : 'cases' }}
+                · {{ suite.updatedAt | date: 'MMM d, HH:mm' }}
+              </span>
+              <span
+                class="phorma-evalsd__suite-del"
+                role="button"
+                tabindex="0"
+                title="Delete suite"
+                aria-label="Delete suite"
+                (click)="deleteSuite(suite, $event)"
+                (keydown.enter)="deleteSuite(suite, $event)"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <!-- Run history for the selected suite -->
+    @if (selectedSuite()) {
+      <div class="phorma-evalsd__history">
+        <span class="phorma-evalsd__side-title">
+          <i class="ti ti-history" aria-hidden="true"></i> Past runs
+        </span>
+        @if (evals.runs().length === 0) {
+          <p class="phorma-evalsd__empty">No runs yet.</p>
+        }
+        <ul class="phorma-evalsd__list">
+          @for (run of evals.runs(); track run.id) {
+            <li>
+              <button
+                type="button"
+                class="phorma-evalsd__run"
+                [class.phorma-evalsd__run--active]="selectedRun()?.id === run.id"
+                (click)="openRun(run)"
+              >
+                <span
+                  class="phorma-evalsd__run-badge"
+                  [class.phorma-evalsd__run-badge--all]="passCounts(run).passed === passCounts(run).total"
+                >
+                  {{ passCounts(run).passed }}/{{ passCounts(run).total }}
+                </span>
+                <span class="phorma-evalsd__run-meta">
+                  <span>{{ run.startedAt | date: 'MMM d, HH:mm' }}</span>
+                  <span class="phorma-evalsd__run-sub">
+                    {{ run.environment }}@if (run.status !== 'completed') { · {{ run.status }} }
+                  </span>
+                </span>
+                <span
+                  class="phorma-evalsd__suite-del"
+                  role="button"
+                  tabindex="0"
+                  title="Delete run"
+                  aria-label="Delete run"
+                  (click)="deleteEvalRun(run, $event)"
+                  (keydown.enter)="deleteEvalRun(run, $event)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </span>
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  </aside>
+
+  <!-- ══ Main area ══ -->
+  <section class="phorma-evalsd__main">
+    @if (selectedSuite(); as suite) {
+      <!-- Header strip: name, run controls, view switch -->
+      <div class="phorma-evalsd__strip">
+        <input
+          pInputText
+          pSize="small"
+          class="phorma-evalsd__suite-input"
+          aria-label="Suite name"
+          [ngModel]="suite.name"
+          (ngModelChange)="patchSuite({ name: $event })"
+        />
+        <p-selectbutton
+          class="phorma-evalsd__view"
+          [options]="viewOptions"
+          optionLabel="label"
+          optionValue="value"
+          [allowEmpty]="false"
+          [ngModel]="view()"
+          (ngModelChange)="view.set($event)"
+          size="small"
+        />
+        @if (runner.running()) {
+          <button
+            type="button"
+            pButton
+            severity="danger"
+            size="small"
+            class="phorma-evalsd__run-btn phorma-btn-content"
+            (click)="cancelRun()"
+          >
+            <i class="ti ti-player-stop" aria-hidden="true"></i> <span>Stop</span>
+          </button>
+        } @else {
+          <button
+            type="button"
+            pButton
+            size="small"
+            class="phorma-evalsd__run-btn phorma-btn-content"
+            title="Run every case locally"
+            (click)="runSuite('local')"
+          >
+            <i class="ti ti-player-play" aria-hidden="true"></i> <span>Run local</span>
+          </button>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [outlined]="true"
+            size="small"
+            class="phorma-evalsd__run-btn"
+            [disabled]="!cloudAvailable()"
+            [title]="cloudAvailable() ? 'Run against the deployed workflow' : 'Deploy this workflow to run in the cloud'"
+            (click)="runSuite('cloud')"
+          >
+            <i class="ti ti-cloud" aria-hidden="true"></i> Run cloud
+          </button>
+        }
+      </div>
+
+      @if (runner.running()) {
+        <div class="phorma-evalsd__progress" role="progressbar" [attr.aria-valuenow]="progressPercent()">
+          <div class="phorma-evalsd__progress-bar" [style.width.%]="progressPercent()"></div>
+          <span class="phorma-evalsd__progress-text">
+            {{ runner.progress().done }} / {{ runner.progress().total }} cases
+          </span>
+        </div>
+      }
+
+      <!-- Run summary stats for the inspected run -->
+      @if (inspectedRun(); as run) {
+        <div class="phorma-evalsd__stats">
+          <span class="phorma-evalsd__stat">
+            <b>{{ passCounts(run).passed }}/{{ passCounts(run).total }}</b> passed
+          </span>
+          @if (runDuration() !== null) {
+            <span class="phorma-evalsd__stat"><b>{{ duration(runDuration()!) }}</b> total</span>
+          }
+          @if (runCost() !== null) {
+            <span class="phorma-evalsd__stat"><b>{{ runCost()! | number: '1.4-4' }}</b> USD</span>
+          }
+          <span class="phorma-evalsd__stat">{{ run.environment }} · {{ run.status }}</span>
+          <span class="phorma-evalsd__stat phorma-evalsd__stat--muted">
+            {{ run.startedAt | date: 'MMM d, HH:mm:ss' }}
+          </span>
+        </div>
+      }
+
+      <div class="phorma-evalsd__body">
+        <!-- ── Cases view ── -->
+        @if (view() === 'cases') {
+          <div class="phorma-evalsd__cases">
+            <div class="phorma-evalsd__cases-head">
+              <span class="phorma-evalsd__section-label">Cases</span>
+              <span class="phorma-evalsd__bulk">
+                Set all matchers:
+                @for (option of matcherOptions; track option.id) {
+                  <button
+                    type="button"
+                    class="phorma-evalsd__chip"
+                    [disabled]="suite.cases.length === 0"
+                    (click)="setAllMatchers(option.id)"
+                  >
+                    {{ option.label }}
+                  </button>
+                }
+              </span>
+              <button
+                type="button"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                (click)="addCase()"
+              >
+                <i class="ti ti-plus" aria-hidden="true"></i> Add case
+              </button>
+            </div>
+
+            @if (suite.cases.length === 0) {
+              <p class="phorma-evalsd__empty">No cases yet. Add one to describe expected behaviour.</p>
+            } @else {
+              <table class="phorma-evalsd__table phorma-evalsd__table--cases">
+                <thead>
+                  <tr>
+                    <th class="phorma-evalsd__col-num">#</th>
+                    <th class="phorma-evalsd__col-name">Name</th>
+                    <th>Input</th>
+                    <th>Expected</th>
+                    <th class="phorma-evalsd__col-matcher">Matcher</th>
+                    <th class="phorma-evalsd__col-acts"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (item of suite.cases; track item.id; let i = $index) {
+                    <tr>
+                      <td class="phorma-evalsd__col-num">{{ i + 1 }}</td>
+                      <td>
+                        <input
+                          pInputText
+                          pSize="small"
+                          class="phorma-evalsd__cell-input"
+                          aria-label="Case name"
+                          [ngModel]="item.name"
+                          (ngModelChange)="patchCase(i, { name: $event })"
+                        />
+                      </td>
+                      <td>
+                        <textarea
+                          pTextarea
+                          class="phorma-evalsd__cell-area"
+                          rows="2"
+                          placeholder="Run input"
+                          aria-label="Case input"
+                          [ngModel]="item.input"
+                          (ngModelChange)="patchCase(i, { input: $event })"
+                        ></textarea>
+                      </td>
+                      <td>
+                        <textarea
+                          pTextarea
+                          class="phorma-evalsd__cell-area"
+                          rows="2"
+                          [placeholder]="item.matcher === 'llm-judge' ? 'Reference answer' : 'Expected output'"
+                          aria-label="Expected output"
+                          [ngModel]="item.expected"
+                          (ngModelChange)="patchCase(i, { expected: $event })"
+                        ></textarea>
+                        @if (item.matcher === 'llm-judge') {
+                          <textarea
+                            pTextarea
+                            class="phorma-evalsd__cell-area phorma-evalsd__cell-area--criteria"
+                            rows="2"
+                            placeholder="Extra grading criteria (optional)"
+                            aria-label="Judge criteria"
+                            [ngModel]="item.judgeCriteria ?? ''"
+                            (ngModelChange)="patchCase(i, { judgeCriteria: $event || undefined })"
+                          ></textarea>
+                        }
+                      </td>
+                      <td>
+                        <p-select
+                          class="phorma-evalsd__cell-select"
+                          [options]="matcherOptions"
+                          optionLabel="label"
+                          optionValue="id"
+                          [ngModel]="item.matcher"
+                          (ngModelChange)="patchCase(i, { matcher: $event })"
+                          size="small"
+                          appendTo="body"
+                          ariaLabel="Matcher"
+                        />
+                      </td>
+                      <td class="phorma-evalsd__col-acts">
+                        <button
+                          type="button"
+                          class="phorma-evalsd__act"
+                          title="Move up"
+                          aria-label="Move up"
+                          [disabled]="i === 0"
+                          (click)="moveCase(i, -1)"
+                        >
+                          <i class="ti ti-chevron-up" aria-hidden="true"></i>
+                        </button>
+                        <button
+                          type="button"
+                          class="phorma-evalsd__act"
+                          title="Move down"
+                          aria-label="Move down"
+                          [disabled]="i === suite.cases.length - 1"
+                          (click)="moveCase(i, 1)"
+                        >
+                          <i class="ti ti-chevron-down" aria-hidden="true"></i>
+                        </button>
+                        <button
+                          type="button"
+                          class="phorma-evalsd__act"
+                          title="Duplicate case"
+                          aria-label="Duplicate case"
+                          (click)="duplicateCase(i)"
+                        >
+                          <i class="ti ti-copy" aria-hidden="true"></i>
+                        </button>
+                        <button
+                          type="button"
+                          class="phorma-evalsd__act phorma-evalsd__act--danger"
+                          title="Remove case"
+                          aria-label="Remove case"
+                          (click)="removeCase(i)"
+                        >
+                          <i class="ti ti-trash" aria-hidden="true"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+
+            <!-- Judge + comparison models -->
+            <div class="phorma-evalsd__config">
+              @if (usesJudge()) {
+                <div class="phorma-evalsd__config-block">
+                  <span class="phorma-evalsd__section-label">Judge model</span>
+                  <div class="phorma-evalsd__row">
+                    <p-select
+                      [options]="judgeProviderOptions()"
+                      optionLabel="label"
+                      optionValue="id"
+                      [ngModel]="suite.judge?.provider ?? null"
+                      (ngModelChange)="setJudgeProvider($event)"
+                      size="small"
+                      appendTo="body"
+                      ariaLabel="Judge provider"
+                    />
+                    @if (suite.judge; as judge) {
+                      <p-select
+                        [options]="modelSuggestions(judge.provider)"
+                        [editable]="true"
+                        [ngModel]="judge.model"
+                        (ngModelChange)="setJudgeModel($event)"
+                        size="small"
+                        appendTo="body"
+                        placeholder="model id"
+                        ariaLabel="Judge model"
+                      />
+                    }
+                  </div>
+                  <p class="phorma-evalsd__hint">
+                    Grades <code>llm-judge</code> cases at temperature 0. Leave on Studio default to
+                    reuse the application model.
+                  </p>
+                </div>
+              }
+
+              <div class="phorma-evalsd__config-block">
+                <span class="phorma-evalsd__section-label">
+                  Compare models
+                  <button
+                    type="button"
+                    pButton
+                    severity="secondary"
+                    [text]="true"
+                    size="small"
+                    class="phorma-evalsd__label-btn"
+                    (click)="addComparisonModel()"
+                  >
+                    <i class="ti ti-plus" aria-hidden="true"></i> Add
+                  </button>
+                </span>
+                @for (ref of suite.models ?? []; track $index; let i = $index) {
+                  <div class="phorma-evalsd__row">
+                    <p-select
+                      [options]="providers()"
+                      optionLabel="label"
+                      optionValue="id"
+                      [ngModel]="ref.provider"
+                      (ngModelChange)="patchComparisonModel(i, { provider: $event })"
+                      size="small"
+                      appendTo="body"
+                      ariaLabel="Comparison provider"
+                    />
+                    <p-select
+                      [options]="modelSuggestions(ref.provider)"
+                      [editable]="true"
+                      [ngModel]="ref.model"
+                      (ngModelChange)="patchComparisonModel(i, { model: $event })"
+                      size="small"
+                      appendTo="body"
+                      placeholder="model id"
+                      ariaLabel="Comparison model"
+                    />
+                    <button
+                      type="button"
+                      class="phorma-evalsd__act phorma-evalsd__act--danger"
+                      title="Remove model"
+                      aria-label="Remove model"
+                      (click)="removeComparisonModel(i)"
+                    >
+                      <i class="ti ti-trash" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                }
+                <p class="phorma-evalsd__hint">
+                  Each model runs the whole suite as its own pass, overriding the default model.
+                  Agents pinning an explicit model are unaffected. Local runs only.
+                </p>
+              </div>
+            </div>
+          </div>
+        }
+
+        <!-- ── Matrix view ── -->
+        @if (view() === 'matrix') {
+          @if (!hasMatrix()) {
+            <p class="phorma-evalsd__empty">
+              Run the suite to populate the matrix. Add models under
+              <b>Cases › Compare models</b> to see a side-by-side comparison.
+            </p>
+          } @else {
+            <div class="phorma-evalsd__matrix-wrap">
+              <table class="phorma-evalsd__table phorma-evalsd__table--matrix">
+                <thead>
+                  <tr>
+                    <th class="phorma-evalsd__col-case">Case</th>
+                    @for (column of modelColumns(); track column.model) {
+                      <th class="phorma-evalsd__col-model">
+                        <span class="phorma-evalsd__model-name">{{ shortModel(column.model) }}</span>
+                        @if (providerOf(column.model)) {
+                          <span class="phorma-evalsd__model-provider">{{ providerOf(column.model) }}</span>
+                        }
+                      </th>
+                    }
+                    <th class="phorma-evalsd__col-rowagg">Case pass</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of matrixRows(); track row.caseId) {
+                    <tr>
+                      <th scope="row" class="phorma-evalsd__col-case">{{ row.name }}</th>
+                      @for (cell of row.cells; track $index) {
+                        <td class="phorma-evalsd__cell">
+                          @if (cell.result; as result) {
+                            <button
+                              type="button"
+                              class="phorma-evalsd__mcell"
+                              [attr.data-status]="result.status"
+                              [title]="
+                                result.status +
+                                (result.score !== undefined ? ' · score ' + result.score : '') +
+                                ' · ' + duration(result.durationMs) +
+                                ' — click to open the run'
+                              "
+                              (click)="openCaseRun(result, $event)"
+                            >
+                              <i [class]="resultIcon(result.status)" aria-hidden="true"></i>
+                              @if (result.score !== undefined) {
+                                <span class="phorma-evalsd__mscore">{{ result.score | number: '1.2-2' }}</span>
+                              }
+                            </button>
+                          } @else {
+                            <span class="phorma-evalsd__mcell phorma-evalsd__mcell--empty" aria-label="No result">
+                              <i class="ti ti-minus" aria-hidden="true"></i>
+                            </span>
+                          }
+                        </td>
+                      }
+                      <td class="phorma-evalsd__col-rowagg">
+                        <span class="phorma-evalsd__pct">{{ row.passRate * 100 | number: '1.0-0' }}%</span>
+                        @if (row.meanScore !== null) {
+                          <span class="phorma-evalsd__submeta">score {{ row.meanScore | number: '1.2-2' }}</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <th scope="row" class="phorma-evalsd__col-case">Pass rate</th>
+                    @for (column of modelColumns(); track column.model) {
+                      <td class="phorma-evalsd__foot">
+                        <span class="phorma-evalsd__pct">{{ column.passRate * 100 | number: '1.0-0' }}%</span>
+                        <span class="phorma-evalsd__submeta">{{ column.passed }}/{{ column.total }}</span>
+                      </td>
+                    }
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <th scope="row" class="phorma-evalsd__col-case">Mean score</th>
+                    @for (column of modelColumns(); track column.model) {
+                      <td class="phorma-evalsd__foot">
+                        {{ column.meanScore === null ? '—' : (column.meanScore | number: '1.2-2') }}
+                      </td>
+                    }
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <th scope="row" class="phorma-evalsd__col-case">Cost</th>
+                    @for (column of modelColumns(); track column.model) {
+                      <td class="phorma-evalsd__foot">
+                        {{ column.costUsd === null ? '—' : '$' + (column.costUsd | number: '1.4-4') }}
+                      </td>
+                    }
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <th scope="row" class="phorma-evalsd__col-case">Latency p50 / p95</th>
+                    @for (column of modelColumns(); track column.model) {
+                      <td class="phorma-evalsd__foot">
+                        {{ duration(column.p50DurationMs) }} / {{ duration(column.p95DurationMs) }}
+                      </td>
+                    }
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <th scope="row" class="phorma-evalsd__col-case">Errors</th>
+                    @for (column of modelColumns(); track column.model) {
+                      <td class="phorma-evalsd__foot" [class.phorma-evalsd__foot--bad]="column.errored > 0">
+                        {{ column.errored }}
+                      </td>
+                    }
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          }
+        }
+
+        <!-- ── Trends view ── -->
+        @if (view() === 'trends') {
+          @if (!hasTrend()) {
+            <p class="phorma-evalsd__empty">
+              No run history yet. Run this suite a few times to see how it trends.
+            </p>
+          } @else {
+            <div class="phorma-evalsd__trends">
+              <span class="phorma-evalsd__section-label">
+                Pass rate over the last {{ trend().length }} runs
+              </span>
+              <div class="phorma-evalsd__chart">
+                @defer (on immediate) {
+                  <p-chart type="bar" [data]="trendData()" [options]="trendOptions()" height="240px" />
+                }
+              </div>
+
+              <span class="phorma-evalsd__section-label">Case stability</span>
+              <table class="phorma-evalsd__table phorma-evalsd__table--flaky">
+                <thead>
+                  <tr>
+                    <th class="phorma-evalsd__col-case">Case</th>
+                    <th>Runs</th>
+                    <th>Passed</th>
+                    <th>Failed</th>
+                    <th>Errors</th>
+                    <th>Pass rate</th>
+                    <th>Instability</th>
+                    <th>Latest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of flakiness(); track row.caseId) {
+                    <tr>
+                      <th scope="row" class="phorma-evalsd__col-case">{{ caseNameById(row.caseId) }}</th>
+                      <td>{{ row.runs }}</td>
+                      <td>{{ row.passed }}</td>
+                      <td>{{ row.failed }}</td>
+                      <td [class.phorma-evalsd__foot--bad]="row.errored > 0">{{ row.errored }}</td>
+                      <td>{{ row.passRate * 100 | number: '1.0-0' }}%</td>
+                      <td>
+                        <span class="phorma-evalsd__meter" [attr.aria-label]="'Instability ' + (row.instability * 100 | number: '1.0-0') + '%'">
+                          <span class="phorma-evalsd__meter-fill" [style.width.%]="row.instability * 100"></span>
+                        </span>
+                      </td>
+                      <td>
+                        <i
+                          [class]="resultIcon(row.latestStatus)"
+                          [attr.data-status]="row.latestStatus"
+                          [title]="row.latestStatus ?? 'unknown'"
+                          aria-hidden="true"
+                        ></i>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <p class="phorma-evalsd__hint">
+                Instability peaks when a case passes about half the time — those are the cases worth
+                investigating first. A case counts as passed for a run only when every model pass
+                passed it.
+              </p>
+            </div>
+          }
+        }
+
+        <!-- ── Run detail view ── -->
+        @if (view() === 'detail') {
+          @if (inspectedRun(); as run) {
+            <ul class="phorma-evalsd__results">
+              @for (result of run.results; track resultKey(result)) {
+                <li class="phorma-evalsd__result" [attr.data-status]="result.status">
+                  <button
+                    type="button"
+                    class="phorma-evalsd__result-head"
+                    [attr.aria-expanded]="isResultExpanded(result)"
+                    (click)="toggleResult(result)"
+                  >
+                    <i [class]="resultIcon(result.status)" aria-hidden="true"></i>
+                    <span class="phorma-evalsd__result-name">{{ caseName(result) }}</span>
+                    @if (result.model) {
+                      <span class="phorma-evalsd__badge">{{ shortModel(result.model) }}</span>
+                    }
+                    @if (result.score !== undefined) {
+                      <span class="phorma-evalsd__submeta">score {{ result.score | number: '1.2-2' }}</span>
+                    }
+                    <span class="phorma-evalsd__submeta">{{ duration(result.durationMs) }}</span>
+                    @if (result.costUsd !== undefined) {
+                      <span class="phorma-evalsd__submeta">${{ result.costUsd | number: '1.4-4' }}</span>
+                    }
+                    <span
+                      class="phorma-evalsd__suite-del"
+                      role="button"
+                      tabindex="0"
+                      title="Bring this case run to the canvas"
+                      aria-label="Bring this case run to the canvas"
+                      (click)="openCaseRun(result, $event)"
+                      (keydown.enter)="openCaseRun(result, $event)"
+                    >
+                      <i class="ti ti-layout-grid-add" aria-hidden="true"></i>
+                    </span>
+                    <i
+                      class="ti phorma-evalsd__caret"
+                      [class.ti-chevron-down]="!isResultExpanded(result)"
+                      [class.ti-chevron-up]="isResultExpanded(result)"
+                      aria-hidden="true"
+                    ></i>
+                  </button>
+
+                  @if (isResultExpanded(result)) {
+                    <div class="phorma-evalsd__result-body">
+                      @if (result.error) {
+                        <p class="phorma-evalsd__error">
+                          <i class="ti ti-alert-triangle" aria-hidden="true"></i> {{ result.error }}
+                        </p>
+                      }
+                      @if (result.judgeReasoning) {
+                        <p class="phorma-evalsd__reasoning">
+                          <i class="ti ti-gavel" aria-hidden="true"></i> {{ result.judgeReasoning }}
+                        </p>
+                      }
+                      <div class="phorma-evalsd__compare">
+                        <div class="phorma-evalsd__compare-col">
+                          <span class="phorma-evalsd__compare-label">Expected</span>
+                          <pre class="selectable">{{ expectedFor(result.caseId) || '—' }}</pre>
+                        </div>
+                        <div class="phorma-evalsd__compare-col">
+                          <span class="phorma-evalsd__compare-label">Actual output</span>
+                          <pre class="selectable">{{ result.output || '—' }}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
+            @if (run.results.length === 0) {
+              <p class="phorma-evalsd__empty">This run produced no results.</p>
+            }
+          } @else {
+            <p class="phorma-evalsd__empty">
+              Pick a run from <b>Past runs</b>, or run the suite to see scored results.
+            </p>
+          }
+        }
+      </div>
+    } @else {
+      <div class="phorma-evalsd__placeholder">
+        <i class="ti ti-flask" aria-hidden="true"></i>
+        <p>Select a suite to edit its cases, or create one.</p>
+      </div>
+    }
+  </section>
+</app-expanded-panel-dialog>

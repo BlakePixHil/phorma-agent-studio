@@ -26,6 +26,7 @@ import {
 import { CloudService } from '../../../core/cloud.service';
 import { EvalRunnerService } from '../../../core/eval-runner.service';
 import { EvalService } from '../../../core/eval.service';
+import { PanelExpandService } from '../../../core/panel-expand.service';
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import { RunControllerService } from '../../../core/run-controller.service';
 import { RunHistoryService } from '../../../core/run-history.service';
@@ -76,10 +77,16 @@ export class EvalsPanel {
   private readonly runHistory = inject(RunHistoryService);
   private readonly runController = inject(RunControllerService);
   private readonly panels = inject(PanelRegistryService);
+  private readonly panelExpand = inject(PanelExpandService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly toast = inject(ToastService);
 
   protected readonly matcherOptions = MATCHER_OPTIONS;
+
+  /** Opens the expanded evals dialog (matrix, trends, flakiness). */
+  protected expand(): void {
+    this.panelExpand.open('evals');
+  }
 
   /** Provider options for judge/comparison pickers. */
   protected readonly providers = computed(() => {

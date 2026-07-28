@@ -1,0 +1,112 @@
+:host {
+  display: contents;
+}
+
+/* ── Overlay + card — mirrors .phorma-assistd / .phorma-cloud ───────────── */
+.phorma-xpanel {
+  position: fixed;
+  inset: 0;
+  /*
+   * 75: above the canvas/panels/terminal, but deliberately BELOW true dialogs
+   * (80). An expanded panel is a bigger *panel*, not a modal, so confirms,
+   * settings and the skill editor summoned from inside it must layer on top.
+   * At an equal z-index they lost on DOM order and became unclickable.
+   */
+  z-index: 75;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 7, 18, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.phorma-xpanel__card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  background: var(--p-content-background, rgba(20, 22, 30, 0.92));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  color: var(--p-text-color, #f8fafc);
+  outline: none;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────── */
+.phorma-xpanel__header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 14px 20px;
+  border-bottom: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.1));
+}
+
+.phorma-xpanel__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  font-size: 17px;
+  color: var(--p-primary-color);
+}
+
+.phorma-xpanel__titles {
+  min-width: 0;
+  flex: 1;
+
+  > h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  > p {
+    margin: 3px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--p-text-muted-color);
+  }
+}
+
+.phorma-xpanel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.phorma-xpanel__close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+/* ── Body — children own their own scroll containers ───────────────────── */
+.phorma-xpanel__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}

@@ -154,6 +154,25 @@
   <!-- ── AI Assistant (expanded chat dialog — EPIC 5) ── -->
   <app-assistant-dialog />
 
+  <!--
+    ── Expanded side panels ──
+    Each renders the SAME services as its sidebar counterpart, so expanding
+    never copies state. Deferred because they pull heavy deps (chart.js, the
+    markdown pipeline) that must stay out of the initial bundle.
+  -->
+  @defer (on immediate) {
+    <app-prompt-dialog />
+  }
+  @defer (on immediate) {
+    <app-properties-dialog />
+  }
+  @defer (on immediate) {
+    <app-evals-dialog />
+  }
+  @defer (on immediate) {
+    <app-usage-dialog />
+  }
+
   <!-- ── Skill editor (create/edit library skills — EPIC 6) ── -->
   <app-skill-editor-dialog />
 

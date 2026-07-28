@@ -1,0 +1,398 @@
+<app-expanded-panel-dialog
+  panelId="prompt"
+  title="Prompt"
+  icon="ti ti-message-2"
+  [subtitle]="agent() ? agent()!.name : 'No agent selected — browsing the prompt library'"
+  width="min(1440px, 100%)"
+>
+  <!-- ══ Left rail: prompt library ══ -->
+  <aside class="phorma-promptd__library">
+    <div class="phorma-promptd__lib-head">
+      <span class="phorma-promptd__lib-title">
+        <i class="ti ti-books" aria-hidden="true"></i> Prompt library
+      </span>
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
+        title="Import a PROMPT.md file"
+        aria-label="Import a PROMPT.md file"
+        (click)="pickImportFile()"
+      >
+        <i class="ti ti-file-import" aria-hidden="true"></i>
+      </button>
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
+        title="New prompt from the current editor content"
+        aria-label="New prompt"
+        (click)="newPrompt()"
+      >
+        <i class="ti ti-plus" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="phorma-promptd__filters">
+      <input
+        pInputText
+        type="search"
+        pSize="small"
+        class="phorma-promptd__search"
+        placeholder="Search prompts…"
+        aria-label="Search prompts"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+      />
+      <p-select
+        class="phorma-promptd__preset"
+        [options]="presetOptions"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="presetFilter()"
+        (ngModelChange)="presetFilter.set($event)"
+        [showClear]="true"
+        size="small"
+        appendTo="body"
+        placeholder="Any agent type"
+        ariaLabel="Filter by agent type"
+      />
+      @if (library.allTags().length > 0) {
+        <div class="phorma-promptd__tags">
+          @for (tag of library.allTags(); track tag) {
+            <button
+              type="button"
+              class="phorma-promptd__tag"
+              [class.phorma-promptd__tag--active]="tagFilter() === tag"
+              (click)="toggleTag(tag)"
+            >
+              {{ tag }}
+            </button>
+          }
+        </div>
+      }
+      @if (hasFilters()) {
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [text]="true"
+          size="small"
+          class="phorma-promptd__clear"
+          (click)="clearFilters()"
+        >
+          <i class="ti ti-filter-off" aria-hidden="true"></i> Clear filters
+        </button>
+      }
+    </div>
+
+    <div class="phorma-promptd__lib-scroll">
+      @if (filtered().length === 0) {
+        <p class="phorma-promptd__empty">No prompts match these filters.</p>
+      }
+
+      @if (userResults().length > 0) {
+        <p class="phorma-promptd__group">My prompts</p>
+        <ul class="phorma-promptd__list">
+          @for (entry of userResults(); track entry.id) {
+            <ng-container [ngTemplateOutlet]="entryRow" [ngTemplateOutletContext]="{ entry }" />
+          }
+        </ul>
+      }
+
+      @if (builtInResults().length > 0) {
+        <p class="phorma-promptd__group">Built-in</p>
+        <ul class="phorma-promptd__list">
+          @for (entry of builtInResults(); track entry.id) {
+            <ng-container [ngTemplateOutlet]="entryRow" [ngTemplateOutletContext]="{ entry }" />
+          }
+        </ul>
+      }
+    </div>
+
+    <div class="phorma-promptd__lib-foot">
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        size="small"
+        class="phorma-promptd__save-current phorma-btn-content"
+        [disabled]="!agent() || !promptText().trim()"
+        title="Save the current editor content as a reusable prompt"
+        (click)="saveCurrent()"
+      >
+        <i class="ti ti-bookmark-plus" aria-hidden="true"></i> <span>Save current prompt</span>
+      </button>
+    </div>
+
+    <!-- Inline create/edit form -->
+    @if (creatingNew() || editing()) {
+      <form class="phorma-promptd__form" (submit)="$event.preventDefault(); submitForm()">
+        <p class="phorma-promptd__form-title">
+          {{ creatingNew() ? 'Save to library' : 'Edit prompt details' }}
+        </p>
+        <input
+          pInputText
+          pSize="small"
+          placeholder="Name"
+          aria-label="Prompt name"
+          [ngModel]="formName()"
+          (ngModelChange)="formName.set($event)"
+          name="promptName"
+        />
+        <input
+          pInputText
+          pSize="small"
+          placeholder="Description (optional)"
+          aria-label="Prompt description"
+          [ngModel]="formDescription()"
+          (ngModelChange)="formDescription.set($event)"
+          name="promptDescription"
+        />
+        <p-select
+          [options]="presetOptions"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="formPreset()"
+          (ngModelChange)="formPreset.set($event)"
+          [showClear]="true"
+          size="small"
+          appendTo="body"
+          placeholder="Agent type (optional)"
+          ariaLabel="Agent type"
+          name="promptPreset"
+        />
+        <input
+          pInputText
+          pSize="small"
+          placeholder="Tags, comma separated"
+          aria-label="Tags"
+          [ngModel]="formTags()"
+          (ngModelChange)="formTags.set($event)"
+          name="promptTags"
+        />
+        <div class="phorma-promptd__form-actions">
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            (click)="closeForm()"
+          >
+            Cancel
+          </button>
+          <button type="submit" pButton size="small" class="phorma-btn-content" [disabled]="!formValid()">
+            <span>{{ creatingNew() ? 'Save' : 'Update' }}</span>
+          </button>
+        </div>
+      </form>
+    }
+
+    <input
+      #fileInput
+      type="file"
+      accept=".md,.markdown,text/markdown"
+      class="phorma-promptd__file"
+      (change)="onImportFile($event)"
+    />
+  </aside>
+
+  <!-- ══ Centre: editor ══ -->
+  <section class="phorma-promptd__main">
+    @if (agent(); as node) {
+      <div class="phorma-promptd__toolbar">
+        <p-selectbutton
+          class="phorma-promptd__mode"
+          [options]="modeOptions"
+          optionLabel="label"
+          optionValue="value"
+          [allowEmpty]="false"
+          [ngModel]="mode()"
+          (ngModelChange)="mode.set($event)"
+          size="small"
+          ariaLabelledBy="Editor mode"
+        />
+        <div class="phorma-promptd__snippets">
+          @for (snippet of snippets; track snippet.label) {
+            <button
+              type="button"
+              class="phorma-promptd__snippet"
+              [title]="snippet.title"
+              (click)="insertSnippet(snippet.text)"
+            >
+              {{ snippet.label }}
+            </button>
+          }
+        </div>
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [text]="true"
+          size="small"
+          class="phorma-promptd__ai"
+          [disabled]="generating()"
+          [title]="node.data.prompt.trim() ? 'Improve this prompt with AI' : 'Generate a prompt with AI'"
+          (click)="generatePrompt()"
+        >
+          <i
+            class="ti"
+            [class.ti-sparkles]="!generating()"
+            [class.ti-loader-2]="generating()"
+            [class.phorma-icon-spin]="generating()"
+            aria-hidden="true"
+          ></i>
+          {{ generating() ? 'Drafting…' : 'AI draft' }}
+        </button>
+      </div>
+
+      <div class="phorma-promptd__editor-wrap" [attr.data-mode]="mode()">
+        @if (mode() !== 'preview') {
+          <textarea
+            #editor
+            pTextarea
+            class="phorma-promptd__editor"
+            spellcheck="false"
+            aria-label="System prompt markdown"
+            [value]="node.data.prompt"
+            (input)="onPromptInput($event)"
+            placeholder="# Role&#10;&#10;You are…&#10;&#10;# Task&#10;&#10;{{ '{{input}}' }}"
+          ></textarea>
+        }
+        @if (mode() !== 'edit') {
+          <div class="phorma-promptd__preview selectable" [innerHTML]="previewHtml()"></div>
+        }
+      </div>
+
+      <footer class="phorma-promptd__status">
+        <span class="phorma-promptd__vars-label">Variables</span>
+        @if (variables().length > 0) {
+          <span class="phorma-promptd__vars">
+            @for (variable of variables(); track variable) {
+              <code class="phorma-promptd__var">{{ '{{' }}{{ variable }}{{ '}}' }}</code>
+            }
+          </span>
+        } @else {
+          <span class="phorma-promptd__vars-empty">
+            none — add <code>{{ '{{input}}' }}</code> to interpolate the incoming task
+          </span>
+        }
+        <span class="phorma-promptd__counts" [class.phorma-promptd__counts--warn]="overSoftCap()">
+          {{ wordCount() }} words · {{ charCount() }} / {{ softCap }} chars · ~{{ tokenEstimate() }} tokens
+          @if (overSoftCap()) {
+            <i class="ti ti-alert-triangle" title="Long prompts cost more and dilute focus" aria-hidden="true"></i>
+          }
+        </span>
+      </footer>
+    } @else {
+      <div class="phorma-promptd__placeholder">
+        <i class="ti ti-message-2" aria-hidden="true"></i>
+        <p>Select an agent on the canvas to edit its prompt.</p>
+        <p class="phorma-promptd__placeholder-hint">
+          You can still browse, edit and organise the library on the left.
+        </p>
+      </div>
+    }
+  </section>
+
+  <!-- ══ Right rail: agent configuration ══ -->
+  @if (agent(); as node) {
+    <aside class="phorma-promptd__context">
+      <app-agent-config [agent]="node" scope="dialog" />
+    </aside>
+  }
+</app-expanded-panel-dialog>
+
+<!-- ══ Library row template ══ -->
+<ng-template #entryRow let-entry="entry">
+  <li class="phorma-promptd__item" [class.phorma-promptd__item--builtin]="entry.builtIn">
+    <div class="phorma-promptd__item-head">
+      <span class="phorma-promptd__item-name">{{ entry.name }}</span>
+      @if (entry.builtIn) {
+        <i class="ti ti-lock" title="Built-in — fork to edit" aria-hidden="true"></i>
+      }
+    </div>
+    @if (entry.description) {
+      <p class="phorma-promptd__item-desc">{{ entry.description }}</p>
+    }
+    <div class="phorma-promptd__item-meta">
+      @if (entry.presetId) {
+        <span class="phorma-promptd__badge">{{ presetLabel(entry.presetId) }}</span>
+      }
+      @if (!entry.builtIn) {
+        <span class="phorma-promptd__meta-text">{{ entry.updatedAt | date: 'MMM d' }}</span>
+      }
+      @if (entry.usageCount) {
+        <span class="phorma-promptd__meta-text">used {{ entry.usageCount }}×</span>
+      }
+    </div>
+    <div class="phorma-promptd__item-actions">
+      <button
+        type="button"
+        class="phorma-promptd__act phorma-promptd__act--primary"
+        [disabled]="!agent()"
+        title="Replace the agent's prompt with this one"
+        (click)="apply(entry)"
+      >
+        <i class="ti ti-arrow-right" aria-hidden="true"></i> Apply
+      </button>
+      <button
+        type="button"
+        class="phorma-promptd__act"
+        [disabled]="!agent()"
+        title="Insert at the caret without replacing"
+        aria-label="Insert at caret"
+        (click)="insert(entry)"
+      >
+        <i class="ti ti-text-plus" aria-hidden="true"></i>
+      </button>
+      @if (!entry.builtIn) {
+        <button
+          type="button"
+          class="phorma-promptd__act"
+          title="Edit name, description and tags"
+          aria-label="Edit details"
+          (click)="editEntry(entry)"
+        >
+          <i class="ti ti-pencil" aria-hidden="true"></i>
+        </button>
+      }
+      <button
+        type="button"
+        class="phorma-promptd__act"
+        [title]="entry.builtIn ? 'Fork into your library' : 'Duplicate'"
+        [attr.aria-label]="entry.builtIn ? 'Fork into your library' : 'Duplicate'"
+        (click)="fork(entry)"
+      >
+        <i class="ti" [class.ti-git-fork]="entry.builtIn" [class.ti-copy]="!entry.builtIn" aria-hidden="true"></i>
+      </button>
+      <button
+        type="button"
+        class="phorma-promptd__act"
+        title="Export as PROMPT.md"
+        aria-label="Export as PROMPT.md"
+        (click)="exportEntry(entry)"
+      >
+        <i class="ti ti-download" aria-hidden="true"></i>
+      </button>
+      @if (!entry.builtIn) {
+        <button
+          type="button"
+          class="phorma-promptd__act phorma-promptd__act--danger"
+          title="Delete from library"
+          aria-label="Delete from library"
+          (click)="remove(entry)"
+        >
+          <i class="ti ti-trash" aria-hidden="true"></i>
+        </button>
+      }
+    </div>
+  </li>
+</ng-template>

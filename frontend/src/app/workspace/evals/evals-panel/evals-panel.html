@@ -9,7 +9,6 @@
           pButton
           severity="secondary"
           [text]="true"
-          [rounded]="true"
           size="small"
           class="phorma-panel-icon-btn"
           title="New suite"
@@ -17,6 +16,19 @@
           (click)="createSuite()"
         >
           <i class="ti ti-plus" aria-hidden="true"></i>
+        </button>
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [text]="true"
+          size="small"
+          class="phorma-panel-icon-btn phorma-evals__expand"
+          title="Expand to full view — model matrix, trends and flakiness"
+          aria-label="Expand to full view"
+          (click)="expand()"
+        >
+          <i class="ti ti-arrows-maximize" aria-hidden="true"></i>
         </button>
       </label>
       @if (evals.suites().length > 0) {
@@ -46,7 +58,6 @@
                 pButton
                 severity="danger"
                 [text]="true"
-                [rounded]="true"
                 size="small"
                 class="phorma-evals__delete"
                 title="Delete suite"
@@ -133,7 +144,6 @@
             pButton
             severity="secondary"
             [text]="true"
-            [rounded]="true"
             size="small"
             class="phorma-panel-icon-btn"
             title="Add case"
@@ -170,7 +180,6 @@
                 pButton
                 severity="secondary"
                 [text]="true"
-                [rounded]="true"
                 size="small"
                 class="phorma-panel-icon-btn phorma-evals__icon-btn--danger"
                 title="Remove case"
@@ -250,7 +259,6 @@
             pButton
             severity="secondary"
             [text]="true"
-            [rounded]="true"
             size="small"
             class="phorma-panel-icon-btn"
             title="Add comparison model"
@@ -284,7 +292,6 @@
               pButton
               severity="secondary"
               [text]="true"
-              [rounded]="true"
               size="small"
               class="phorma-panel-icon-btn phorma-evals__icon-btn--danger"
               title="Remove model"
@@ -372,7 +379,6 @@
                   pButton
                   severity="danger"
                   [text]="true"
-                  [rounded]="true"
                   size="small"
                   class="phorma-evals__delete"
                   title="Delete eval run"
@@ -452,7 +458,6 @@
                   pButton
                   severity="secondary"
                   [text]="true"
-                  [rounded]="true"
                   size="small"
                   class="phorma-panel-icon-btn"
                   title="Bring run to canvas"

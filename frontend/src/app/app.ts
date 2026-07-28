@@ -29,6 +29,10 @@ import { CommandPalette } from './workspace/command-palette/command-palette';
 import { AiReviewBar } from './workspace/command-palette/ai-review-bar';
 import { AssistantPanel } from './workspace/assistant/assistant-panel/assistant-panel';
 import { AssistantDialog } from './workspace/assistant/assistant-dialog/assistant-dialog';
+import { PromptDialog } from './workspace/prompt/prompt-dialog/prompt-dialog';
+import { PropertiesDialog } from './workspace/properties/properties-dialog/properties-dialog';
+import { EvalsDialog } from './workspace/evals/evals-dialog/evals-dialog';
+import { UsageDialog } from './workspace/usage/usage-dialog/usage-dialog';
 import { SkillsPanel } from './workspace/skills/skills-panel/skills-panel';
 import { SkillEditorDialog } from './workspace/skills/skill-editor-dialog/skill-editor-dialog';
 import { PortalPanel } from './workspace/portal/portal-panel/portal-panel';
@@ -67,6 +71,10 @@ import { Toast } from './shared/toast/toast';
     AiReviewBar,
     AssistantPanel,
     AssistantDialog,
+    PromptDialog,
+    PropertiesDialog,
+    EvalsDialog,
+    UsageDialog,
     SkillsPanel,
     SkillEditorDialog,
     PortalPanel,

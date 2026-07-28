@@ -1009,17 +1009,21 @@ app-root {
 
 /*
  * A small square icon-only action that sits inline in a panel section heading
- * (Usage "Refresh", Portal "Refresh", Evals "New suite"/"Add case", …). Apply
- * to a `pButton severity="secondary" [text] [rounded] size="small"` button so
- * every panel heading action is the same size and weight.
+ * (Usage "Refresh", Portal "Refresh", Evals "New suite"/"Add case", …).
  *
- * Pair with `.phorma-icon-spin` on the inner <i> to spin while busy.
+ * This is the CANONICAL panel header action button — it matches the bespoke
+ * `.phorma-assist__icon-btn` / `.phorma-skills__icon-btn` exactly: 1.5rem
+ * square, 0.4rem radius, transparent background, muted icon, hover lift.
+ * Apply to a `pButton severity="secondary" [text] size="small"` button (no
+ * `[rounded]` — that makes it a circular pill). Pair with `.phorma-icon-spin`
+ * on the inner <i> to spin while busy.
  */
 .phorma-panel-icon-btn.p-button {
-  width: 1.4rem;
-  height: 1.4rem;
+  width: 1.5rem;
+  height: 1.5rem;
   padding: 0;
   flex-shrink: 0;
+  border-radius: 0.4rem;
 }
 
 /*
@@ -1032,6 +1036,31 @@ app-root {
   width: 1.85rem;
   padding: 0;
   flex-shrink: 0;
+}
+
+/*
+ * Lifts inline button content above PrimeNG v20's opaque `::before` overlay.
+ *
+ * Solid (non-outlined) `pButton` paints a `position:absolute; z-index:0;
+ * inset:0` overlay filled with the button's own background colour. In-flow
+ * children default to `z-index:auto`, so a bare text label and a static `<i>`
+ * icon both render UNDERNEATH it and vanish — the button looks empty.
+ *
+ * Applying this class to the button lifts every element child AND establishes
+ * a stacking context, and because `::before` is pushed to `z-index:-1` the
+ * fix also covers bare text nodes (which `> *` cannot reach).
+ */
+.phorma-btn-content.p-button {
+  isolation: isolate;
+
+  &::before {
+    z-index: -1;
+  }
+
+  > * {
+    position: relative;
+    z-index: 1;
+  }
 }
 
 .phorma-icon-spin {

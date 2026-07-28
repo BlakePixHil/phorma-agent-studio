@@ -1,0 +1,507 @@
+<app-expanded-panel-dialog
+  panelId="usage"
+  title="Usage"
+  icon="ti ti-chart-bar"
+  [subtitle]="subtitle()"
+  width="min(1480px, 100%)"
+>
+  <div class="phorma-usaged">
+    <!-- ══ Filter bar ══ -->
+    <div class="phorma-usaged__filters">
+      <p-select
+        class="phorma-usaged__scope"
+        [options]="scopes()"
+        optionLabel="label"
+        optionValue="id"
+        [ngModel]="analytics.scope()"
+        (ngModelChange)="onScopeChange($event)"
+        size="small"
+        appendTo="body"
+        ariaLabel="Workflow scope"
+      />
+      <p-selectbutton
+        class="phorma-usaged__periods"
+        [options]="periods"
+        optionLabel="label"
+        optionValue="id"
+        [allowEmpty]="false"
+        size="small"
+        [ngModel]="analytics.period()"
+        (ngModelChange)="setPeriod($event)"
+        ariaLabel="Period"
+      />
+
+      <div class="phorma-usaged__facets">
+        @if (analytics.availableSources().length > 1) {
+          <span class="phorma-usaged__facet">
+            <span class="phorma-usaged__facet-label">Source</span>
+            @for (value of analytics.availableSources(); track value) {
+              <button
+                type="button"
+                class="phorma-usaged__chip"
+                [class.phorma-usaged__chip--on]="facetActive('sources', value)"
+                [attr.aria-pressed]="facetActive('sources', value)"
+                (click)="toggleFacet('sources', value)"
+              >
+                {{ value }}
+              </button>
+            }
+          </span>
+        }
+        @if (analytics.availableStatuses().length > 1) {
+          <span class="phorma-usaged__facet">
+            <span class="phorma-usaged__facet-label">Status</span>
+            @for (value of analytics.availableStatuses(); track value) {
+              <button
+                type="button"
+                class="phorma-usaged__chip"
+                [class.phorma-usaged__chip--on]="facetActive('statuses', value)"
+                [attr.aria-pressed]="facetActive('statuses', value)"
+                (click)="toggleFacet('statuses', value)"
+              >
+                {{ value }}
+              </button>
+            }
+          </span>
+        }
+        @if (analytics.availableEnvironments().length > 1) {
+          <span class="phorma-usaged__facet">
+            <span class="phorma-usaged__facet-label">Where</span>
+            @for (value of analytics.availableEnvironments(); track value) {
+              <button
+                type="button"
+                class="phorma-usaged__chip"
+                [class.phorma-usaged__chip--on]="facetActive('environments', value)"
+                [attr.aria-pressed]="facetActive('environments', value)"
+                (click)="toggleFacet('environments', value)"
+              >
+                {{ value }}
+              </button>
+            }
+          </span>
+        }
+        @if (analytics.facetsActive()) {
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-usaged__clear"
+            (click)="analytics.clearFacets()"
+          >
+            <i class="ti ti-filter-off" aria-hidden="true"></i> Clear
+          </button>
+        }
+      </div>
+
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
+        title="Refresh usage"
+        aria-label="Refresh usage"
+        [disabled]="analytics.loading()"
+        (click)="analytics.refresh()"
+      >
+        <i class="ti ti-refresh" [class.phorma-icon-spin]="analytics.loading()" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    @if (!hasData()) {
+      <p class="phorma-usaged__empty">
+        No usage recorded for this scope and period. Run a workflow, then come back.
+      </p>
+    } @else {
+      <!-- ══ Stat strip ══ -->
+      <div class="phorma-usaged__stats">
+        <span class="phorma-usaged__stat">
+          <b>{{ analytics.totals().runs | number }}</b>
+          <small>runs</small>
+        </span>
+        <span class="phorma-usaged__stat">
+          <b>{{ analytics.totals().credits | number }}</b>
+          <small>credits</small>
+        </span>
+        <span class="phorma-usaged__stat">
+          <b>{{ analytics.totals().usd | currency: 'USD' : 'symbol' : '1.2-4' }}</b>
+          <small>BYO{{ analytics.totals().estimated ? ' (est.)' : '' }}</small>
+        </span>
+        <span class="phorma-usaged__stat">
+          <b>{{ totalTokens() | number }}</b>
+          <small>
+            tokens · {{ analytics.totals().inputTokens | number }} in /
+            {{ analytics.totals().outputTokens | number }} out
+          </small>
+        </span>
+        <span class="phorma-usaged__stat">
+          <b>{{ analytics.perRunAverage().usd | currency: 'USD' : 'symbol' : '1.4-4' }}</b>
+          <small>avg / run</small>
+        </span>
+        <span class="phorma-usaged__stat">
+          <b>{{ shortDuration(analytics.durations().p50) }}</b>
+          <small>median run · p95 {{ shortDuration(analytics.durations().p95) }}</small>
+        </span>
+        <span class="phorma-usaged__stat">
+          <b>{{ analytics.successRate() * 100 | number: '1.0-0' }}%</b>
+          <small>succeeded</small>
+        </span>
+        <span
+          class="phorma-usaged__stat"
+          [class.phorma-usaged__stat--bad]="analytics.failedSpend().runs > 0"
+        >
+          <b>{{ analytics.failedSpend().usd | currency: 'USD' : 'symbol' : '1.4-4' }}</b>
+          <small>
+            wasted on {{ analytics.failedSpend().runs }} failed
+            @if (analytics.failedSpend().credits > 0) {
+              · {{ analytics.failedSpend().credits | number }} credits
+            }
+          </small>
+        </span>
+      </div>
+
+      <!-- ══ Charts ══ -->
+      <div class="phorma-usaged__grid">
+        <section class="phorma-usaged__card phorma-usaged__card--wide">
+          <span class="phorma-usaged__card-title">Spend and runs per day</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart type="bar" [data]="dailyData()" [options]="dailyOptions" height="220px" />
+            }
+          </div>
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">Cost by model</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart
+                type="doughnut"
+                [data]="modelShareData()"
+                [options]="doughnutOptions"
+                height="200px"
+              />
+            }
+          </div>
+        </section>
+
+        <section class="phorma-usaged__card phorma-usaged__card--wide">
+          <span class="phorma-usaged__card-title">
+            Cost by node
+            <small>click a bar to select the node on the canvas</small>
+          </span>
+          @if (topNodes().length > 0) {
+            <div class="phorma-usaged__chart">
+              @defer (on immediate) {
+                <p-chart type="bar" [data]="nodeData()" [options]="nodeOptions" height="260px" />
+              }
+            </div>
+          } @else {
+            <p class="phorma-usaged__empty">
+              No per-node rollups in this period. Runs recorded before per-node accounting
+              shipped only carry totals.
+            </p>
+          }
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">Cost by trigger</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart
+                type="doughnut"
+                [data]="sourceData()"
+                [options]="doughnutOptions"
+                height="200px"
+              />
+            }
+          </div>
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">Local vs cloud</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart
+                type="doughnut"
+                [data]="environmentData()"
+                [options]="doughnutOptions"
+                height="200px"
+              />
+            }
+          </div>
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">Per-model trend</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart type="line" [data]="modelTrendData()" [options]="lineOptions" height="200px" />
+            }
+          </div>
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">Run duration spread</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart
+                type="bar"
+                [data]="durationData()"
+                [options]="histogramOptions"
+                height="200px"
+              />
+            }
+          </div>
+        </section>
+
+        <section class="phorma-usaged__card phorma-usaged__card--wide">
+          <span class="phorma-usaged__card-title">Token mix per day</span>
+          <div class="phorma-usaged__chart">
+            @defer (on immediate) {
+              <p-chart type="bar" [data]="tokenMixData()" [options]="stackedOptions" height="200px" />
+            }
+          </div>
+        </section>
+      </div>
+
+      <!-- ══ Tables ══ -->
+      <div class="phorma-usaged__tables">
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">By model</span>
+          <table class="phorma-usaged__table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th class="phorma-usaged__num">Runs</th>
+                <th class="phorma-usaged__num">In</th>
+                <th class="phorma-usaged__num">Out</th>
+                <th class="phorma-usaged__num">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of analytics.byModel(); track row.provider + ':' + row.model) {
+                <tr>
+                  <td>
+                    <span class="phorma-usaged__model">{{ row.model }}</span>
+                    <span class="phorma-usaged__sub">{{ row.provider }}</span>
+                  </td>
+                  <td class="phorma-usaged__num">{{ row.runs | number }}</td>
+                  <td class="phorma-usaged__num">{{ row.inputTokens | number }}</td>
+                  <td class="phorma-usaged__num">{{ row.outputTokens | number }}</td>
+                  <td class="phorma-usaged__num">
+                    @if (row.credits !== null) {
+                      <span>{{ row.credits | number }} cr</span>
+                    }
+                    @if (row.usd !== null) {
+                      <span>
+                        {{ row.usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ row.estimated ? '*' : '' }}
+                      </span>
+                    }
+                    @if (row.credits === null && row.usd === null) {
+                      <span>—</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">By node</span>
+          @if (analytics.byNode().length > 0) {
+            <table class="phorma-usaged__table">
+              <thead>
+                <tr>
+                  <th>Node</th>
+                  <th class="phorma-usaged__num">Runs</th>
+                  <th class="phorma-usaged__num">Tokens</th>
+                  <th class="phorma-usaged__num">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of analytics.byNode(); track row.nodeKey) {
+                  <tr
+                    [class.phorma-usaged__clickable]="nodeExists(row.nodeId)"
+                    [class.phorma-usaged__stale]="!nodeExists(row.nodeId)"
+                    [title]="nodeExists(row.nodeId) ? 'Select this node on the canvas' : 'This node is no longer in the workflow'"
+                    (click)="nodeExists(row.nodeId) && selectNode(row.nodeId)"
+                  >
+                    <td>
+                      <span class="phorma-usaged__model">{{ nodeLabel(row.nodeId) }}</span>
+                      <span class="phorma-usaged__sub">{{ row.provider }}:{{ row.model }}</span>
+                    </td>
+                    <td class="phorma-usaged__num">{{ row.runs | number }}</td>
+                    <td class="phorma-usaged__num">{{ row.inputTokens + row.outputTokens | number }}</td>
+                    <td class="phorma-usaged__num">
+                      @if (row.credits !== null) {
+                        <span>{{ row.credits | number }} cr</span>
+                      }
+                      @if (row.usd !== null) {
+                        <span>
+                          {{ row.usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ row.estimated ? '*' : '' }}
+                        </span>
+                      }
+                      @if (row.credits === null && row.usd === null) {
+                        <span>—</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="phorma-usaged__empty">No per-node data in this period.</p>
+          }
+        </section>
+
+        <section class="phorma-usaged__card">
+          <span class="phorma-usaged__card-title">By workflow</span>
+          <table class="phorma-usaged__table">
+            <thead>
+              <tr>
+                <th>Workflow</th>
+                <th class="phorma-usaged__num">Runs</th>
+                <th class="phorma-usaged__num">Tokens</th>
+                <th class="phorma-usaged__num">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of analytics.byWorkflow(); track row.workflowId ?? 'draft') {
+                <tr>
+                  <td>{{ row.workflowName }}</td>
+                  <td class="phorma-usaged__num">{{ row.runs | number }}</td>
+                  <td class="phorma-usaged__num">{{ row.inputTokens + row.outputTokens | number }}</td>
+                  <td class="phorma-usaged__num">
+                    @if (row.credits !== null) {
+                      <span>{{ row.credits | number }} cr</span>
+                    }
+                    @if (row.usd !== null) {
+                      <span>
+                        {{ row.usd | currency: 'USD' : 'symbol' : '1.4-4' }}{{ row.estimated ? '*' : '' }}
+                      </span>
+                    }
+                    @if (row.credits === null && row.usd === null) {
+                      <span>—</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
+      </div>
+
+      <!-- ══ Run ledger ══ -->
+      <section class="phorma-usaged__card phorma-usaged__ledger">
+        <span class="phorma-usaged__card-title">
+          Run ledger
+          <small>{{ sortedLedger().length | number }} runs</small>
+          <span class="phorma-usaged__ledger-actions">
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [text]="true"
+              size="small"
+              class="phorma-usaged__clear"
+              title="Export the filtered ledger as CSV"
+              (click)="exportCsv()"
+            >
+              <i class="ti ti-download" aria-hidden="true"></i> CSV
+            </button>
+            <button
+              type="button"
+              class="phorma-usaged__pager"
+              title="Previous page"
+              aria-label="Previous page"
+              [disabled]="ledgerPage() === 0"
+              (click)="pageBy(-1)"
+            >
+              <i class="ti ti-chevron-left" aria-hidden="true"></i>
+            </button>
+            <span class="phorma-usaged__page-label">
+              {{ ledgerPage() + 1 }} / {{ pageCount() }}
+            </span>
+            <button
+              type="button"
+              class="phorma-usaged__pager"
+              title="Next page"
+              aria-label="Next page"
+              [disabled]="ledgerPage() + 1 >= pageCount()"
+              (click)="pageBy(1)"
+            >
+              <i class="ti ti-chevron-right" aria-hidden="true"></i>
+            </button>
+          </span>
+        </span>
+        <table class="phorma-usaged__table">
+          <thead>
+            <tr>
+              <th>
+                <button type="button" class="phorma-usaged__sort" (click)="setSort('started')">
+                  Started
+                  @if (ledgerSort() === 'started') { <i class="ti ti-arrow-down" aria-hidden="true"></i> }
+                </button>
+              </th>
+              <th>Workflow</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>Where</th>
+              <th class="phorma-usaged__num">
+                <button type="button" class="phorma-usaged__sort" (click)="setSort('tokens')">
+                  Tokens
+                  @if (ledgerSort() === 'tokens') { <i class="ti ti-arrow-down" aria-hidden="true"></i> }
+                </button>
+              </th>
+              <th class="phorma-usaged__num">
+                <button type="button" class="phorma-usaged__sort" (click)="setSort('cost')">
+                  Cost
+                  @if (ledgerSort() === 'cost') { <i class="ti ti-arrow-down" aria-hidden="true"></i> }
+                </button>
+              </th>
+              <th class="phorma-usaged__num">
+                <button type="button" class="phorma-usaged__sort" (click)="setSort('duration')">
+                  Duration
+                  @if (ledgerSort() === 'duration') { <i class="ti ti-arrow-down" aria-hidden="true"></i> }
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (entry of ledgerPageRows(); track entry.runId) {
+              <tr [attr.data-status]="entry.status">
+                <td>{{ entry.startedAt | date: 'MMM d, HH:mm:ss' }}</td>
+                <td>{{ entry.workflowName }}</td>
+                <td>{{ entry.source }}</td>
+                <td>
+                  <i [class]="statusIcon(entry.status)" aria-hidden="true"></i> {{ entry.status }}
+                </td>
+                <td>{{ entry.environment }}</td>
+                <td class="phorma-usaged__num">
+                  {{ entry.usage.inputTokens + entry.usage.outputTokens | number }}
+                </td>
+                <td class="phorma-usaged__num">
+                  {{ entry.usage.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}
+                </td>
+                <td class="phorma-usaged__num">
+                  {{ entry.endedAt ? shortDuration(durationOf(entry)) : '—' }}
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </section>
+
+      <p class="phorma-usaged__footnote">
+        Phorma Cloud usage is billed in plan credits, never dollars; only BYO-key spend is shown in
+        USD. <b>*</b> marks figures estimated from the synced pricing table rather than provider
+        accounting.
+      </p>
+    }
+  </div>
+</app-expanded-panel-dialog>

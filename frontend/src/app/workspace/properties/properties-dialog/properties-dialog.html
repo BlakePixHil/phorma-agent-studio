@@ -1,0 +1,113 @@
+<app-expanded-panel-dialog
+  panelId="properties"
+  title="Properties"
+  icon="ti ti-adjustments"
+  [subtitle]="subtitle()"
+  width="min(1320px, 100%)"
+  height="auto"
+>
+  <div class="phorma-propsd">
+    <!-- ══ Node header card ══ -->
+    @if (node(); as selected) {
+      <header class="phorma-propsd__card">
+        <span
+          class="phorma-propsd__card-icon"
+          [style.border-color]="categoryColor()"
+          [style.color]="categoryColor()"
+          aria-hidden="true"
+        >
+          <i class="{{ selected.icon }}"></i>
+        </span>
+        <div class="phorma-propsd__card-titles">
+          <h3>{{ selected.name }}</h3>
+          <p>
+            <span class="phorma-propsd__kind" [style.color]="categoryColor()">{{ kindLabel() }}</span>
+            <button
+              type="button"
+              class="phorma-propsd__id"
+              title="Copy node id"
+              (click)="copyId()"
+            >
+              <code>{{ selected.id }}</code>
+              <i class="ti ti-copy" aria-hidden="true"></i>
+            </button>
+          </p>
+        </div>
+
+        <!-- Wiring summary -->
+        <div class="phorma-propsd__wiring">
+          <div class="phorma-propsd__wire-group">
+            <span class="phorma-propsd__wire-label">Inputs</span>
+            @if (inbound().length > 0) {
+              @for (link of inbound(); track $index) {
+                <button
+                  type="button"
+                  class="phorma-propsd__wire"
+                  [title]="'Select ' + link.node.name"
+                  (click)="select(link.node)"
+                >
+                  <i [class]="neighbourIcon(link.kind)" aria-hidden="true"></i>
+                  {{ link.node.name }}
+                </button>
+              }
+            } @else {
+              <span class="phorma-propsd__wire-empty">none</span>
+            }
+          </div>
+          <div class="phorma-propsd__wire-group">
+            <span class="phorma-propsd__wire-label">Outputs</span>
+            @if (outbound().length > 0) {
+              @for (link of outbound(); track $index) {
+                <button
+                  type="button"
+                  class="phorma-propsd__wire"
+                  [title]="'Select ' + link.node.name"
+                  (click)="select(link.node)"
+                >
+                  <i [class]="neighbourIcon(link.kind)" aria-hidden="true"></i>
+                  {{ link.node.name }}
+                </button>
+              }
+            } @else {
+              <span class="phorma-propsd__wire-empty">none</span>
+            }
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="phorma-propsd__json-toggle"
+          [class.phorma-propsd__json-toggle--on]="showJson()"
+          [attr.aria-pressed]="showJson()"
+          title="Inspect the raw node data"
+          (click)="toggleJson()"
+        >
+          <i class="ti ti-braces" aria-hidden="true"></i> JSON
+        </button>
+      </header>
+    }
+
+    <!-- ══ Raw data inspector ══ -->
+    @if (showJson() && node()) {
+      <section class="phorma-propsd__json">
+        <div class="phorma-propsd__json-head">
+          <span class="phorma-propsd__json-title">Raw node data</span>
+          <button
+            type="button"
+            class="phorma-propsd__json-copy"
+            title="Copy JSON to the clipboard"
+            (click)="copyJson()"
+          >
+            <i class="ti ti-copy" aria-hidden="true"></i> Copy
+          </button>
+        </div>
+        <pre class="phorma-propsd__json-body selectable">{{ dataJson() }}</pre>
+      </section>
+    }
+
+    <!-- ══ The shared form, flowed into columns ══ -->
+    <div class="phorma-propsd__form">
+      <app-properties-form scope="dialog" layout="grid" [showHeader]="false" />
+    </div>
+  </div>
+</app-expanded-panel-dialog>
