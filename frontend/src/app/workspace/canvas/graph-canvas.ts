@@ -16,6 +16,7 @@ import { ContextMenuModule } from 'primeng/contextmenu';
 import { type MenuItem } from 'primeng/api';
 
 import { CanvasStateService } from '../../core/canvas-state.service';
+import { CapabilityFindingsService } from '../../core/capability-findings.service';
 import { SettingsService } from '../../core/settings.service';
 import { WorkflowService } from '../../core/workflow.service';
 import { SelectionService } from '../../core/selection.service';
@@ -35,9 +36,11 @@ import { CanvasGraphRenderer, type RendererTheme } from './engine/canvas-graph-r
 import { graphToScene } from './engine/graph-to-scene';
 import { ThinkingOverlay } from './thinking-overlay/thinking-overlay';
 import { McpWarningOverlay } from './mcp-warning-overlay/mcp-warning-overlay';
+import { CapabilityFindingOverlay } from './capability-finding-overlay/capability-finding-overlay';
 import { AskUserOverlay } from './ask-user-overlay/ask-user-overlay';
-import { canConnectPorts, findNodeForConnector } from '../../core/workflow.model';
+import { canConnectPorts, findNodeForConnector, toolLinkRejection } from '../../core/workflow.model';
 import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/workflow.model';
+import type { CapabilityFinding } from '@phorma/engine';
 
 /**
  * ── GraphCanvas ─────────────────────────────────────────────────────────────
@@ -53,7 +56,7 @@ import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/work
 @Component({
   selector: 'app-graph-canvas',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ContextMenuModule, ThinkingOverlay, McpWarningOverlay, AskUserOverlay],
+  imports: [ContextMenuModule, ThinkingOverlay, McpWarningOverlay, CapabilityFindingOverlay, AskUserOverlay],
   template: `
     <canvas
       #cv
@@ -122,6 +125,24 @@ import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/work
           [nodeId]="item.nodeId"
           [warning]="item.warning"
           [presetId]="item.presetId"
+          [style.left.px]="item.screenX"
+          [style.top.px]="item.screenY"
+          [style.width.px]="item.screenW"
+          [style.height.px]="item.screenH"
+        />
+      }
+    </div>
+
+    <!-- Capability-finding overlays (Requirement 17.8): one per node the
+         active host's capability record or connection inventory raises a
+         finding against. Anchored at the node's top-left corner (the MCP
+         badge above owns the top-right), so both can show at once. Purely
+         informational - never blocks editing. -->
+    <div class="phorma-cap-layer" aria-hidden="false">
+      @for (item of capabilityFindingOverlays(); track item.nodeId) {
+        <app-capability-finding-overlay
+          [nodeId]="item.nodeId"
+          [findings]="item.findings"
           [style.left.px]="item.screenX"
           [style.top.px]="item.screenY"
           [style.width.px]="item.screenW"
@@ -243,6 +264,12 @@ import type { GraphPosition, WorkflowGraph, WorkflowNode } from '../../core/work
         z-index: 16;
         pointer-events: none;
       }
+      .phorma-cap-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 16;
+        pointer-events: none;
+      }
       .phorma-ask-layer {
         position: absolute;
         inset: 0;
@@ -269,6 +296,7 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   private readonly oauth = inject(McpOAuthService);
   private readonly history = inject(HistoryService);
   private readonly confirmDialog = inject(ConfirmDialogService);
+  private readonly capabilityFindings = inject(CapabilityFindingsService);
 
   @ViewChild('cv', { static: true }) private cvRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('mini') private miniRef?: ElementRef<HTMLCanvasElement>;
@@ -487,6 +515,67 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   });
 
   /**
+   * Node ids carrying at least one `error`-severity capability finding
+   * (Requirement 17.8). Computed WITHOUT reading `transformTick`, so it can
+   * feed the renderer's `setCapabilityErrorNodes` without a per-frame
+   * feedback loop, mirroring {@link mcpWarningNodeIds}.
+   */
+  protected readonly capabilityErrorNodeIds = computed<Set<string>>(() => {
+    const out = new Set<string>();
+    for (const finding of this.capabilityFindings.findings()) {
+      if (finding.severity === 'error' && finding.nodeId) out.add(finding.nodeId);
+    }
+    return out;
+  });
+
+  /**
+   * Per-node capability-finding overlays projected into screen space
+   * (Requirement 17.8). Emits one entry per node carrying at least one
+   * finding, error or warning, grouping every finding for that node so the
+   * popover lists all of them together. Reads the live transform (via
+   * `transformTick`) so the badges track pan/zoom, mirroring the
+   * thinking-overlay and MCP-warning-overlay patterns.
+   */
+  protected readonly capabilityFindingOverlays = computed(() => {
+    const findings = this.capabilityFindings.findings();
+    if (findings.length === 0) return [];
+    const byNode = new Map<string, CapabilityFinding[]>();
+    for (const finding of findings) {
+      if (!finding.nodeId) continue;
+      const list = byNode.get(finding.nodeId);
+      if (list) list.push(finding);
+      else byNode.set(finding.nodeId, [finding]);
+    }
+    if (byNode.size === 0) return [];
+    // Touch the tick so this recomputes every frame the renderer paints.
+    this.transformTick();
+    const sc = this.engine.scale;
+    const ox = this.engine.offsetX;
+    const oy = this.engine.offsetY;
+    const out: {
+      nodeId: string;
+      screenX: number;
+      screenY: number;
+      screenW: number;
+      screenH: number;
+      findings: CapabilityFinding[];
+    }[] = [];
+    for (const [nodeId, nodeFindings] of byNode) {
+      const bounds = this.engine.nodeWorldBounds(nodeId);
+      if (!bounds) continue;
+      out.push({
+        nodeId,
+        screenX: bounds.x * sc + ox,
+        screenY: bounds.y * sc + oy,
+        screenW: bounds.w * sc,
+        screenH: bounds.h * sc,
+        findings: nodeFindings,
+      });
+    }
+    return out;
+  });
+
+  /**
    * Determines the warning text for an MCP node, or `null` when fully
    * configured. Mirrors the logic in `PropertiesPanel.presetFullyConfigured`
    * but also covers OAuth nodes and generic (non-preset) MCP servers.
@@ -584,6 +673,11 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
   /** Whether any MCP node currently carries a warning (for the onAfterDraw hook). */
   private hasMcpWarnings(): boolean {
     return this.mcpWarningNodeIds().size > 0;
+  }
+
+  /** Whether any node currently carries a capability finding (for the onAfterDraw hook). */
+  private hasCapabilityFindings(): boolean {
+    return this.capabilityFindings.findings().length > 0;
   }
   private draggingMinimap = false;
 
@@ -740,6 +834,12 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       const ids = this.mcpWarningNodeIds();
       untracked(() => this.engine.setWarningNodes(ids));
     });
+    // Capability-error findings (Requirement 17.8): dashed red outline on a
+    // node the active host cannot run at all.
+    effect(() => {
+      const ids = this.capabilityErrorNodeIds();
+      untracked(() => this.engine.setCapabilityErrorNodes(ids));
+    });
     // Click-to-add from the palette: place at the viewport centre, cascading
     // successive adds so they don't stack exactly.
     effect(() => {
@@ -806,7 +906,8 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       if (
         this.runController.nodeThinking().size > 0 ||
         this.runController.pendingQuestions().length > 0 ||
-        this.hasMcpWarnings()
+        this.hasMcpWarnings() ||
+        this.hasCapabilityFindings()
       ) {
         this.zone.run(() => this.transformTick.update(v => v + 1));
       }
@@ -1486,6 +1587,12 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       }
       return 'Handoffs flow from a Result port into a Task port.';
     }
+    // Data nodes execute in the graph walk, never as an agent capability.
+    const toolLinkReason = toolLinkRejection(
+      { node: source.node, role: source.port.role },
+      { node: target.node, role: target.port.role },
+    );
+    if (toolLinkReason) return toolLinkReason;
     return null;
   }
 

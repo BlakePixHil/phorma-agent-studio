@@ -7,6 +7,26 @@
       </header>
     }
 
+    <!-- Capability findings (Requirements 17.8, 17.9, 17.15): every problem
+         the active host's capability record and connection inventory raise
+         against this node. Inline only - never disables a control below. -->
+    @if (nodeCapabilityFindings().length > 0) {
+      <div class="phorma-props__findings" role="alert">
+        @for (finding of nodeCapabilityFindings(); track $index) {
+          <p
+            class="phorma-props__finding"
+            [class.phorma-props__finding--warning]="finding.severity === 'warning'"
+          >
+            <i
+              class="ti {{ finding.severity === 'warning' ? 'ti-alert-triangle' : 'ti-alert-circle' }}"
+              aria-hidden="true"
+            ></i>
+            <span>{{ finding.message }}</span>
+          </p>
+        }
+      </div>
+    }
+
     <section class="phorma-props__section" data-section="identity">
       <label class="phorma-props__label" [for]="id('prop-name')">Name</label>
       <input
@@ -1235,6 +1255,1682 @@
         <p class="phorma-props__depth-hint">
           <i class="ti ti-layers-subtract" aria-hidden="true"></i>
           {{ subWorkflowDepthHint() }}
+        </p>
+      </section>
+    }
+
+    <!-- Data node: connection reference (http-request / sql-query / notify) -->
+    @if (connectionRef(); as ref) {
+      <section class="phorma-props__section">
+        <div class="phorma-props__row phorma-props__row--between">
+          <label class="phorma-props__label" [for]="id('prop-connection-id')">Connection</label>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Manage connections"
+            aria-label="Manage connections"
+            (click)="openConnectionsPanel()"
+          >
+            <i class="ti ti-settings" aria-hidden="true"></i>
+          </button>
+        </div>
+        <p-select
+          [inputId]="id('prop-connection-id')"
+          class="phorma-props__select-full phorma-props__input--mono"
+          [options]="connectionOptions()"
+          optionLabel="label"
+          optionValue="id"
+          optionDisabled="disabled"
+          [editable]="true"
+          [ngModel]="ref.connectionId"
+          (ngModelChange)="patchData({ connectionId: ($event ?? '').trim() })"
+          placeholder="conn-crm"
+          appendTo="body"
+          [filter]="true"
+          filterBy="label"
+          ariaLabel="Connection"
+          size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+          <ng-template #item let-option>
+            <div class="phorma-props__conn-option" [class.phorma-props__conn-option--disabled]="option.disabled">
+              <span class="phorma-props__conn-option-name">{{ option.label }}</span>
+              <span class="phorma-props__conn-option-meta">
+                {{ option.type }} · {{ option.secretsPresent }}/{{ option.secretsTotal }} secrets
+                @if (option.disabled) {
+                  <i class="ti ti-alert-triangle" aria-hidden="true" title="Missing one or more secrets"></i>
+                }
+              </span>
+            </div>
+          </ng-template>
+        </p-select>
+        @if (connectionUnmatched()) {
+          <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid">
+            <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+            "{{ ref.connectionId }}" matches no known connection on this host.
+          </p>
+        }
+        <p class="phorma-props__hint">
+          Identifier of the stored connection supplying the base address and credentials.
+          Secrets stay in the host secret store — never in the workflow file. Pick a listed
+          connection or type an id directly; a greyed-out entry is missing a required secret.
+        </p>
+      </section>
+    }
+
+    <!-- HTTP Request (data step) -->
+    @if (httpRequestData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label">Request</label>
+        <div class="phorma-props__row">
+          <p-select
+            class="phorma-props__method"
+            [options]="dataHttpMethods"
+            [ngModel]="data.method"
+            (ngModelChange)="patchData({ method: $event })"
+            ariaLabel="Request method"
+            appendTo="body" size="small" />
+          <input
+            pInputText
+            pSize="small"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.url"
+            (input)="patchData({ url: inputValue($event) })"
+            placeholder="/v1/contacts?since={{ '{' }}{{ '{' }}since{{ '}' }}{{ '}' }}"
+            aria-label="Request URL or path"
+          />
+        </div>
+        <p class="phorma-props__hint">
+          A path is appended to the connection's base address; an absolute URL is used as given.
+          {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} placeholders interpolate against the incoming payload.
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <div class="phorma-props__row phorma-props__row--between">
+          <span class="phorma-props__label">Query parameters</span>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Add a query parameter"
+            aria-label="Add a query parameter"
+            (click)="addHttpPair('query')"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        @for (pair of data.query ?? []; track $index) {
+          <div class="phorma-props__row">
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="pair.key"
+              (input)="updateHttpPair('query', $index, { key: inputValue($event) })"
+              [attr.aria-label]="'Query parameter ' + ($index + 1) + ' name'"
+              placeholder="updated_since"
+            />
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="pair.value"
+              (input)="updateHttpPair('query', $index, { value: inputValue($event) })"
+              [attr.aria-label]="'Query parameter ' + ($index + 1) + ' value'"
+              placeholder="{{ '{' }}{{ '{' }}since{{ '}' }}{{ '}' }}"
+            />
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+              title="Remove parameter"
+              [attr.aria-label]="'Remove query parameter ' + ($index + 1)"
+              (click)="removeHttpPair('query', $index)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          </div>
+        } @empty {
+          <p class="phorma-props__hint">No query parameters. Values are encoded exactly once.</p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <div class="phorma-props__row phorma-props__row--between">
+          <span class="phorma-props__label">Headers</span>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Add a header"
+            aria-label="Add a header"
+            (click)="addHttpPair('headers')"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        @for (pair of data.headers ?? []; track $index) {
+          <div class="phorma-props__row">
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="pair.key"
+              (input)="updateHttpPair('headers', $index, { key: inputValue($event) })"
+              [attr.aria-label]="'Header ' + ($index + 1) + ' name'"
+              placeholder="Accept"
+            />
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="pair.value"
+              (input)="updateHttpPair('headers', $index, { value: inputValue($event) })"
+              [attr.aria-label]="'Header ' + ($index + 1) + ' value'"
+              placeholder="application/json"
+            />
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+              title="Remove header"
+              [attr.aria-label]="'Remove header ' + ($index + 1)"
+              (click)="removeHttpPair('headers', $index)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          </div>
+        } @empty {
+          <p class="phorma-props__hint">
+            Non-secret headers only. Connection credentials are applied by the host and always win.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-http-body-mode')">Body</label>
+        <p-select
+          [inputId]="id('prop-http-body-mode')"
+          class="phorma-props__select-full"
+          [options]="bodyModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.bodyMode ?? 'none'"
+          (ngModelChange)="patchData({ bodyMode: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        @if ((data.bodyMode ?? 'none') !== 'none') {
+          <textarea
+            pTextarea
+            pSize="small"
+            [id]="id('prop-http-body')"
+            class="phorma-props__textarea phorma-props__input--mono phorma-props__label--gap"
+            rows="4"
+            [value]="data.body ?? ''"
+            (input)="patchData({ body: inputValue($event) })"
+            aria-label="Request body template"
+            placeholder="JSON body — payload placeholders interpolate before sending"
+          ></textarea>
+          <p class="phorma-props__hint">
+            A JSON body is rendered and parsed before anything is sent, so a broken template
+            fails the node instead of reaching the API.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-http-response-mode')">Response</label>
+        <p-select
+          [inputId]="id('prop-http-response-mode')"
+          class="phorma-props__select-full"
+          [options]="responseModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.responseMode ?? 'json'"
+          (ngModelChange)="patchData({ responseMode: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-http-success-codes')">
+          Extra success codes
+        </label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-http-success-codes')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="numberCsvText(data.successCodes)"
+          (input)="onSuccessCodesInput($event)"
+          placeholder="404, 409"
+        />
+        <p class="phorma-props__hint">
+          Comma-separated status codes treated as success alongside 2xx.
+        </p>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-http-result-path')">
+          Result path
+        </label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-http-result-path')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.resultPath ?? ''"
+          (input)="patchData({ resultPath: inputValue($event) })"
+          placeholder="data.items"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-http-result-key')">
+          Result key
+        </label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-http-result-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.resultKey ?? ''"
+          (input)="patchData({ resultKey: inputValue($event) })"
+          placeholder="contacts (empty replaces the payload)"
+        />
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-http-pagination')">Pagination</label>
+        <p-select
+          [inputId]="id('prop-http-pagination')"
+          class="phorma-props__select-full"
+          [options]="paginationModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="paginationMode()"
+          (ngModelChange)="onPaginationModeChange($event)"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+
+        @if (cursorPagination(); as page) {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-cursor-path')">Cursor path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-page-cursor-path')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.cursorPath"
+            (input)="patchPagination({ cursorPath: inputValue($event) })"
+            placeholder="meta.next_cursor"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-cursor-param')">Cursor parameter</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-page-cursor-param')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.cursorParam"
+            (input)="patchPagination({ cursorParam: inputValue($event) })"
+            placeholder="cursor"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-cursor-items')">Items path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-page-cursor-items')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.itemsPath"
+            (input)="patchPagination({ itemsPath: inputValue($event) })"
+            placeholder="data"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-cursor-max')">Maximum pages</label>
+          <p-inputnumber
+            [inputId]="id('prop-page-cursor-max')"
+            class="phorma-props__number"
+            size="small"
+            [min]="1"
+            [max]="1000"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.maxPages"
+            (ngModelChange)="patchPagination({ maxPages: $event ?? 100 })"
+          />
+        }
+
+        @if (pagePagination(); as page) {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-param')">Page parameter</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-page-param')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.pageParam"
+            (input)="patchPagination({ pageParam: inputValue($event) })"
+            placeholder="page"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-size-param')">Page-size parameter</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-page-size-param')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.sizeParam ?? ''"
+            (input)="patchPagination({ sizeParam: inputValue($event) })"
+            placeholder="per_page"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-size')">Page size</label>
+          <p-inputnumber
+            [inputId]="id('prop-page-size')"
+            class="phorma-props__number"
+            size="small"
+            [min]="1"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.pageSize ?? null"
+            (ngModelChange)="patchPagination({ pageSize: numberOrUndefined($event) })"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-start')">First page number</label>
+          <p-inputnumber
+            [inputId]="id('prop-page-start')"
+            class="phorma-props__number"
+            size="small"
+            [min]="0"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.startPage ?? null"
+            (ngModelChange)="patchPagination({ startPage: numberOrUndefined($event) })"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-items')">Items path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-page-items')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.itemsPath"
+            (input)="patchPagination({ itemsPath: inputValue($event) })"
+            placeholder="results"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-page-max')">Maximum pages</label>
+          <p-inputnumber
+            [inputId]="id('prop-page-max')"
+            class="phorma-props__number"
+            size="small"
+            [min]="1"
+            [max]="1000"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.maxPages"
+            (ngModelChange)="patchPagination({ maxPages: $event ?? 100 })"
+          />
+        }
+
+        @if (offsetPagination(); as page) {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-offset-param')">Offset parameter</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-offset-param')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.offsetParam"
+            (input)="patchPagination({ offsetParam: inputValue($event) })"
+            placeholder="offset"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-limit-param')">Limit parameter</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-limit-param')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.limitParam"
+            (input)="patchPagination({ limitParam: inputValue($event) })"
+            placeholder="limit"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-limit-value')">Limit</label>
+          <p-inputnumber
+            [inputId]="id('prop-limit-value')"
+            class="phorma-props__number"
+            size="small"
+            [min]="1"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.limit"
+            (ngModelChange)="patchPagination({ limit: $event ?? 100 })"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-offset-items')">Items path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-offset-items')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.itemsPath"
+            (input)="patchPagination({ itemsPath: inputValue($event) })"
+            placeholder="rows"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-offset-max')">Maximum pages</label>
+          <p-inputnumber
+            [inputId]="id('prop-offset-max')"
+            class="phorma-props__number"
+            size="small"
+            [min]="1"
+            [max]="1000"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.maxPages"
+            (ngModelChange)="patchPagination({ maxPages: $event ?? 100 })"
+          />
+        }
+
+        @if (linkHeaderPagination(); as page) {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-link-rel')">Link relation</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-link-rel')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.rel ?? ''"
+            (input)="patchPagination({ rel: inputValue($event) })"
+            placeholder="next"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-link-items')">Items path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-link-items')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="page.itemsPath"
+            (input)="patchPagination({ itemsPath: inputValue($event) })"
+            placeholder="items"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-link-max')">Maximum pages</label>
+          <p-inputnumber
+            [inputId]="id('prop-link-max')"
+            class="phorma-props__number"
+            size="small"
+            [min]="1"
+            [max]="1000"
+            [showButtons]="false"
+            [useGrouping]="false"
+            [ngModel]="page.maxPages"
+            (ngModelChange)="patchPagination({ maxPages: $event ?? 100 })"
+          />
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-http-idempotency')">Idempotency key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-http-idempotency')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.idempotencyKey ?? ''"
+          (input)="patchData({ idempotencyKey: inputValue($event) })"
+          placeholder="sync-{{ '{' }}{{ '{' }}contactId{{ '}' }}{{ '}' }}"
+        />
+        <p class="phorma-props__hint">
+          Sent as <code>Idempotency-Key</code> and claimed in durable state, so a retried or
+          resumed run never writes the same record twice.
+        </p>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-http-timeout')">Timeout (seconds)</label>
+        <p-inputnumber
+          [inputId]="id('prop-http-timeout')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="host default"
+          [ngModel]="data.timeoutSec ?? null"
+          (ngModelChange)="patchData({ timeoutSec: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-http-persist-request')"
+            [ngModel]="data.persistRequestBody ?? false"
+            (ngModelChange)="patchData({ persistRequestBody: $event })"
+          />
+          Keep the request body in the trace
+        </label>
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-http-persist-response')"
+            [ngModel]="data.persistResponseBody ?? false"
+            (ngModelChange)="patchData({ persistResponseBody: $event })"
+          />
+          Keep the response body in the trace
+        </label>
+        <p class="phorma-props__hint">
+          Bodies are excluded from run history unless you opt in here. Redaction rules still apply.
+        </p>
+      </section>
+    }
+
+    <!-- SQL Query -->
+    @if (sqlQueryData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-sql-driver')">Driver</label>
+        <p-select
+          [inputId]="id('prop-sql-driver')"
+          class="phorma-props__select-full"
+          [options]="sqlDrivers"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.driver ?? null"
+          (ngModelChange)="patchData({ driver: $event ?? undefined })"
+          placeholder="Inherit from the connection"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          Must match the connection's driver. Browser preview runs no SQL at all; the deployed
+          worker supports PostgreSQL and MySQL.
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-sql-statement')">Statement</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-sql-statement')"
+          class="phorma-props__textarea phorma-props__input--mono"
+          rows="5"
+          [value]="data.statement"
+          (input)="patchData({ statement: inputValue($event) })"
+          placeholder="select id, email from contacts where updated_at > :since"
+        ></textarea>
+        <p class="phorma-props__hint">
+          Named parameters (<code>:name</code>) only. Payload text is bound as a value and is
+          never concatenated into SQL.
+        </p>
+      </section>
+
+      <section class="phorma-props__section">
+        <div class="phorma-props__row phorma-props__row--between">
+          <span class="phorma-props__label">Parameters</span>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Add a parameter"
+            aria-label="Add a parameter"
+            (click)="addSqlParam()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        @for (param of data.params ?? []; track $index) {
+          <div class="phorma-props__row">
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="param.name"
+              (input)="updateSqlParam($index, { name: inputValue($event) })"
+              [attr.aria-label]="'Parameter ' + ($index + 1) + ' name'"
+              placeholder="since"
+            />
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="param.expression"
+              (input)="onSqlParamExpressionInput($index, $event)"
+              [attr.aria-label]="'Parameter ' + ($index + 1) + ' expression'"
+              [attr.aria-invalid]="expressionIssue('sql-param', $index) ? true : null"
+              placeholder="state.watermark"
+            />
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [outlined]="true"
+              size="small"
+              class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+              title="Remove parameter"
+              [attr.aria-label]="'Remove parameter ' + ($index + 1)"
+              (click)="removeSqlParam($index)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          </div>
+          @if (expressionIssue('sql-param', $index); as issue) {
+            <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid" role="alert">
+              {{ expressionIssueText(issue) }}
+            </p>
+          }
+        } @empty {
+          <p class="phorma-props__hint">
+            Each parameter binds an expression evaluated against the incoming payload.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-sql-max-rows')">Maximum rows</label>
+        <p-inputnumber
+          [inputId]="id('prop-sql-max-rows')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="connection limit"
+          [ngModel]="data.maxRows ?? null"
+          (ngModelChange)="patchData({ maxRows: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-sql-timeout')">
+          Statement timeout (ms)
+        </label>
+        <p-inputnumber
+          [inputId]="id('prop-sql-timeout')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="connection limit"
+          [ngModel]="data.statementTimeoutMs ?? null"
+          (ngModelChange)="patchData({ statementTimeoutMs: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-sql-result-key')">Result key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-sql-result-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.resultKey ?? ''"
+          (input)="patchData({ resultKey: inputValue($event) })"
+          placeholder="rows"
+        />
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-sql-persist-rows')"
+            [ngModel]="data.persistRows ?? false"
+            (ngModelChange)="patchData({ persistRows: $event })"
+          />
+          Keep returned rows in the trace
+        </label>
+      </section>
+    }
+
+    <!-- Transform -->
+    @if (transformData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-transform-items')">Items path</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-transform-items')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.itemsPath ?? ''"
+          (input)="patchData({ itemsPath: inputValue($event) })"
+          placeholder="rows (empty maps the whole payload)"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-transform-mode')">Emits</label>
+        <p-select
+          [inputId]="id('prop-transform-mode')"
+          class="phorma-props__select-full"
+          [options]="transformModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.mode ?? 'record'"
+          (ngModelChange)="patchData({ mode: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-transform-result-key')">Result key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-transform-result-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.resultKey ?? ''"
+          (input)="patchData({ resultKey: inputValue($event) })"
+          placeholder="items (empty emits a bare array)"
+        />
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-transform-passthrough')"
+            [ngModel]="data.passthrough ?? false"
+            (ngModelChange)="patchData({ passthrough: $event })"
+          />
+          Keep unmapped source fields
+        </label>
+      </section>
+
+      <section class="phorma-props__section">
+        <div class="phorma-props__row phorma-props__row--between">
+          <span class="phorma-props__label">Fields</span>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Add a field"
+            aria-label="Add a mapped field"
+            (click)="addTransformField()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        @for (field of transformFields(); track $index) {
+          <div class="phorma-props__portal-field">
+            <div class="phorma-props__row">
+              <input
+                pInputText
+                pSize="small"
+                type="text"
+                class="phorma-props__input phorma-props__input--mono"
+                [value]="field.target"
+                (input)="updateTransformField($index, { target: inputValue($event) })"
+                [attr.aria-label]="'Target path for field ' + ($index + 1)"
+                placeholder="contact.email"
+              />
+              <button
+                type="button"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn"
+                title="Move up"
+                [attr.aria-label]="'Move field ' + ($index + 1) + ' up'"
+                [disabled]="$first"
+                (click)="moveTransformField($index, -1)"
+              >
+                <i class="ti ti-chevron-up" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn"
+                title="Move down"
+                [attr.aria-label]="'Move field ' + ($index + 1) + ' down'"
+                [disabled]="$last"
+                (click)="moveTransformField($index, 1)"
+              >
+                <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+                title="Remove field"
+                [attr.aria-label]="'Remove field ' + ($index + 1)"
+                (click)="removeTransformField($index)"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="field.expression"
+              (input)="onTransformExpressionInput($index, $event)"
+              [attr.aria-label]="'Expression for field ' + ($index + 1)"
+              [attr.aria-invalid]="expressionIssue('transform', $index) ? true : null"
+              placeholder="lower(trim(item.Email))"
+            />
+            @if (expressionIssue('transform', $index); as issue) {
+              <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid" role="alert">
+                {{ expressionIssueText(issue) }}
+              </p>
+            }
+            <div class="phorma-props__row phorma-props__row--field-type">
+              <input
+                pInputText
+                pSize="small"
+                type="text"
+                class="phorma-props__input phorma-props__input--mono"
+                [value]="transformDefaultText(field)"
+                (input)="onTransformDefault($index, $event)"
+                [attr.aria-label]="'Default for field ' + ($index + 1)"
+                placeholder="default"
+              />
+              <p-select
+                class="phorma-props__field-type"
+                appendTo="body"
+                [options]="transformCasts"
+                optionLabel="label"
+                optionValue="id"
+                [ngModel]="field.cast ?? ''"
+                (ngModelChange)="onTransformCast($index, $event)"
+                [ariaLabel]="'Cast for field ' + ($index + 1)" size="small">
+                <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+              </p-select>
+            </div>
+            <label class="phorma-props__check">
+              <p-checkbox
+                [binary]="true"
+                size="small"
+                [ngModel]="field.required ?? false"
+                (ngModelChange)="updateTransformField($index, { required: $event })"
+                [ariaLabel]="'Field ' + ($index + 1) + ' is required'"
+              />
+              Required
+            </label>
+          </div>
+        } @empty {
+          <p class="phorma-props__hint">
+            Add at least one field. The default is applied first, then the cast, then the
+            required check.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-transform-lookups')">Lookup tables (JSON)</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-transform-lookups')"
+          class="phorma-props__textarea phorma-props__input--mono"
+          rows="4"
+          [value]="lookupsText()"
+          (input)="onLookupsInput($event)"
+          placeholder="Named tables reachable as lookup('name', key)"
+        ></textarea>
+        @if (lookupsError(); as error) {
+          <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid">{{ error }}</p>
+        } @else {
+          <p class="phorma-props__hint">
+            An object of named tables, each mapping a key to a string, number or boolean.
+          </p>
+        }
+      </section>
+    }
+
+    <!-- Aggregate -->
+    @if (aggregateData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-aggregate-op')">Operation</label>
+        <p-select
+          [inputId]="id('prop-aggregate-op')"
+          class="phorma-props__select-full"
+          [options]="aggregateOps"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.op"
+          (ngModelChange)="onAggregateOpChange($event)"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-aggregate-items')">Items path</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-aggregate-items')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.itemsPath ?? ''"
+          (input)="patchData({ itemsPath: inputValue($event) })"
+          placeholder="rows"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-aggregate-result-key')">Result key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-aggregate-result-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.resultKey ?? ''"
+          (input)="patchData({ resultKey: inputValue($event) })"
+          placeholder="summary"
+        />
+      </section>
+
+      @if (groupSpec(); as group) {
+        <section class="phorma-props__section">
+          <label class="phorma-props__label" [for]="id('prop-group-by')">Group by</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-group-by')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="csvText(group.by)"
+            (input)="onGroupByInput($event)"
+            placeholder="region, status"
+          />
+          <p class="phorma-props__hint">Comma-separated source paths. Groups keep first-seen order.</p>
+          <div class="phorma-props__row phorma-props__row--between phorma-props__label--gap">
+            <span class="phorma-props__label">Metrics</span>
+            <button
+              type="button"
+              pButton
+              severity="secondary"
+              [text]="true"
+              size="small"
+              class="phorma-panel-icon-btn"
+              title="Add a metric"
+              aria-label="Add a metric"
+              (click)="addMetric()"
+            >
+              <i class="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+          @for (metric of groupMetrics(); track $index) {
+            <div class="phorma-props__portal-field">
+              <div class="phorma-props__row phorma-props__row--field-type">
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="metric.name"
+                  (input)="updateMetric($index, { name: inputValue($event) })"
+                  [attr.aria-label]="'Metric ' + ($index + 1) + ' name'"
+                  placeholder="total"
+                />
+                <p-select
+                  class="phorma-props__field-type"
+                  appendTo="body"
+                  [options]="metricFns"
+                  optionLabel="label"
+                  optionValue="id"
+                  [ngModel]="metric.fn"
+                  (ngModelChange)="updateMetric($index, { fn: $event })"
+                  [ariaLabel]="'Metric ' + ($index + 1) + ' function'" size="small">
+                  <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+                </p-select>
+                <button
+                  type="button"
+                  pButton
+                  severity="secondary"
+                  [outlined]="true"
+                  size="small"
+                  class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+                  title="Remove metric"
+                  [attr.aria-label]="'Remove metric ' + ($index + 1)"
+                  (click)="removeMetric($index)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </button>
+              </div>
+              @if (metric.fn !== 'count' && metric.fn !== 'countIf') {
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="metric.path ?? ''"
+                  (input)="updateMetric($index, { path: inputValue($event) })"
+                  [attr.aria-label]="'Metric ' + ($index + 1) + ' source path'"
+                  placeholder="amount"
+                />
+              }
+              @if (metric.fn === 'countIf') {
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-props__input phorma-props__input--mono"
+                  [value]="metric.where ?? ''"
+                  (input)="onMetricWhereInput($index, $event)"
+                  [attr.aria-label]="'Metric ' + ($index + 1) + ' predicate'"
+                  [attr.aria-invalid]="expressionIssue('metric', $index) ? true : null"
+                  placeholder="item.status == 'open'"
+                />
+                @if (expressionIssue('metric', $index); as issue) {
+                  <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid" role="alert">
+                    {{ expressionIssueText(issue) }}
+                  </p>
+                }
+              }
+            </div>
+          } @empty {
+            <p class="phorma-props__hint">Add a metric — names must be unique inside the group.</p>
+          }
+        </section>
+      }
+
+      @if (joinSpec(); as join) {
+        <section class="phorma-props__section">
+          <label class="phorma-props__label" [for]="id('prop-join-left-path')">Left list path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-join-left-path')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="join.leftPath"
+            (input)="patchJoin({ leftPath: inputValue($event) })"
+            placeholder="contacts"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-join-right-path')">Right list path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-join-right-path')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="join.rightPath"
+            (input)="patchJoin({ rightPath: inputValue($event) })"
+            placeholder="orders"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-join-left-key')">Left key</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-join-left-key')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="join.leftKey"
+            (input)="patchJoin({ leftKey: inputValue($event) })"
+            placeholder="id"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-join-right-key')">Right key</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-join-right-key')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="join.rightKey"
+            (input)="patchJoin({ rightKey: inputValue($event) })"
+            placeholder="contact_id"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-join-type')">Join type</label>
+          <p-select
+            [inputId]="id('prop-join-type')"
+            class="phorma-props__select-full"
+            [options]="joinTypes"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="join.type"
+            (ngModelChange)="patchJoin({ type: $event })"
+            appendTo="body" size="small">
+            <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+          </p-select>
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-join-prefix')">Collision prefix</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-join-prefix')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="join.collisionPrefix ?? ''"
+            (input)="patchJoin({ collisionPrefix: inputValue($event) })"
+            placeholder="right_"
+          />
+          <p class="phorma-props__hint">
+            Applied to right-hand fields whose names collide with the left row.
+          </p>
+        </section>
+      }
+
+      @if (pivotSpec(); as pivot) {
+        <section class="phorma-props__section">
+          <label class="phorma-props__label" [for]="id('prop-pivot-rows')">Rows path</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-pivot-rows')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="pivot.rowsPath ?? ''"
+            (input)="patchPivot({ rowsPath: inputValue($event) })"
+            placeholder="groups"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-pivot-key-fields')">Key fields</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-pivot-key-fields')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="csvText(pivot.keyFields)"
+            (input)="onPivotKeyFieldsInput($event)"
+            placeholder="region, status"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-pivot-value-field')">Value field</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-pivot-value-field')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="pivot.valueField"
+            (input)="patchPivot({ valueField: inputValue($event) })"
+            placeholder="total"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-pivot-separator')">Separator</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-pivot-separator')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="pivot.separator ?? ''"
+            (input)="patchPivot({ separator: inputValue($event) })"
+            placeholder="_"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-pivot-columns')">Columns</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-pivot-columns')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="csvText(pivot.columns)"
+            (input)="onPivotColumnsInput($event)"
+            placeholder="north_open, north_closed"
+          />
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-pivot-fill')">Fill value</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-pivot-fill')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="pivotFillValueText(pivot)"
+            (input)="onPivotFillValueInput($event)"
+            placeholder="0"
+          />
+          <p class="phorma-props__hint">
+            Emitted for every declared column missing from the grouped rows.
+          </p>
+        </section>
+      }
+    }
+
+    <!-- Assert -->
+    @if (assertData(); as data) {
+      <section class="phorma-props__section">
+        <div class="phorma-props__row phorma-props__row--between">
+          <span class="phorma-props__label">Assertions</span>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Add an assertion"
+            aria-label="Add an assertion"
+            (click)="addAssertion()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        @for (assertion of assertions(); track $index) {
+          <div class="phorma-props__portal-field">
+            <div class="phorma-props__row phorma-props__row--field-type">
+              <input
+                pInputText
+                pSize="small"
+                type="text"
+                class="phorma-props__input phorma-props__input--mono"
+                [value]="assertion.name"
+                (input)="updateAssertion($index, { name: inputValue($event) })"
+                [attr.aria-label]="'Assertion ' + ($index + 1) + ' name'"
+                placeholder="row-count"
+              />
+              <p-select
+                class="phorma-props__field-type"
+                appendTo="body"
+                [options]="assertSeverities"
+                optionLabel="label"
+                optionValue="id"
+                [ngModel]="assertion.severity ?? 'error'"
+                (ngModelChange)="updateAssertion($index, { severity: $event })"
+                [ariaLabel]="'Assertion ' + ($index + 1) + ' severity'" size="small">
+                <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+              </p-select>
+              <button
+                type="button"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+                title="Remove assertion"
+                [attr.aria-label]="'Remove assertion ' + ($index + 1)"
+                (click)="removeAssertion($index)"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input phorma-props__input--mono"
+              [value]="assertion.expression"
+              (input)="onAssertionExpressionInput($index, $event)"
+              [attr.aria-label]="'Assertion ' + ($index + 1) + ' expression'"
+              [attr.aria-invalid]="expressionIssue('assertion', $index) ? true : null"
+              placeholder="len(rows) > 0"
+            />
+            @if (expressionIssue('assertion', $index); as issue) {
+              <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid" role="alert">
+                {{ expressionIssueText(issue) }}
+              </p>
+            }
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input"
+              [value]="assertion.message ?? ''"
+              (input)="updateAssertion($index, { message: inputValue($event) })"
+              [attr.aria-label]="'Assertion ' + ($index + 1) + ' message'"
+              placeholder="Explain what a breach means"
+            />
+          </div>
+        } @empty {
+          <p class="phorma-props__hint">
+            Every assertion is evaluated in order — none short-circuits — and each result lands
+            in the run's sync audit record.
+          </p>
+        }
+      </section>
+
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-assert-breach')">On breach</label>
+        <p-select
+          [inputId]="id('prop-assert-breach')"
+          class="phorma-props__select-full"
+          [options]="breachModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.onBreach ?? 'fail'"
+          (ngModelChange)="patchData({ onBreach: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        @if ((data.onBreach ?? 'fail') === 'route') {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-assert-failed-port')">Failed port</label>
+          <p-select
+            [inputId]="id('prop-assert-failed-port')"
+            class="phorma-props__select-full"
+            [options]="outPortOptions()"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="data.failedPortId ?? ''"
+            (ngModelChange)="patchData({ failedPortId: $event || undefined })"
+            appendTo="body" size="small">
+            <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+          </p-select>
+          <p class="phorma-props__hint">
+            With no wired port a breach falls back to failing the node.
+          </p>
+        }
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-assert-baseline')">Baseline state key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-assert-baseline')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.baselineStateKey ?? ''"
+          (input)="patchData({ baselineStateKey: inputValue($event) })"
+          placeholder="lastRowCount"
+        />
+        <p class="phorma-props__hint">
+          Read once and exposed to every assertion as <code>baseline</code>, for variance guards.
+        </p>
+      </section>
+    }
+
+    <!-- State Get -->
+    @if (stateGetData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-state-get-key')">State key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-state-get-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.key"
+          (input)="patchData({ key: inputValue($event) })"
+          placeholder="watermark:{{ '{' }}{{ '{' }}source{{ '}' }}{{ '}' }}"
+        />
+        <p class="phorma-props__hint">
+          Scoped to this workflow. {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} placeholders interpolate against the payload.
+        </p>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-state-get-result-key')">Result key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-state-get-result-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.resultKey ?? ''"
+          (input)="patchData({ resultKey: inputValue($event) })"
+          placeholder="state"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-state-get-default')">Value when absent</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-state-get-default')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.defaultValue ?? ''"
+          (input)="patchData({ defaultValue: inputValue($event) })"
+          placeholder="1970-01-01T00:00:00Z"
+        />
+      </section>
+    }
+
+    <!-- State Set -->
+    @if (stateSetData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-state-set-key')">State key</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-state-set-key')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.key"
+          (input)="patchData({ key: inputValue($event) })"
+          placeholder="watermark:{{ '{' }}{{ '{' }}source{{ '}' }}{{ '}' }}"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-state-set-expression')">Value expression</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-state-set-expression')"
+          type="text"
+          class="phorma-props__input phorma-props__input--mono"
+          [value]="data.valueExpression"
+          (input)="onStateValueExpressionInput($event)"
+          [attr.aria-invalid]="expressionIssue('state-value') ? true : null"
+          placeholder="max(map(rows, item.updated_at))"
+        />
+        @if (expressionIssue('state-value'); as issue) {
+          <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid" role="alert">
+            {{ expressionIssueText(issue) }}
+          </p>
+        }
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-state-set-semantics')">Semantics</label>
+        <p-select
+          [inputId]="id('prop-state-set-semantics')"
+          class="phorma-props__select-full"
+          [options]="stateSemantics"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.semantics ?? 'value'"
+          (ngModelChange)="patchData({ semantics: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-state-set-ttl')">Time to live (seconds)</label>
+        <p-inputnumber
+          [inputId]="id('prop-state-set-ttl')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="retention default"
+          [ngModel]="data.ttlSec ?? null"
+          (ngModelChange)="patchData({ ttlSec: numberOrUndefined($event) })"
+        />
+      </section>
+    }
+
+    <!-- Notify -->
+    @if (notifyData(); as data) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-notify-channel')">Channel</label>
+        <p-select
+          [inputId]="id('prop-notify-channel')"
+          class="phorma-props__select-full"
+          [options]="notifyChannels"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="data.channel"
+          (ngModelChange)="patchData({ channel: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        @if (data.channel === 'email') {
+          <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-notify-to')">Recipient</label>
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-notify-to')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.to ?? ''"
+            (input)="patchData({ to: inputValue($event) })"
+            placeholder="ops@example.com"
+          />
+        }
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-notify-subject')">Subject</label>
+        <input
+          pInputText
+          pSize="small"
+          [id]="id('prop-notify-subject')"
+          type="text"
+          class="phorma-props__input"
+          [value]="data.subject ?? ''"
+          (input)="patchData({ subject: inputValue($event) })"
+          placeholder="Sync finished for {{ '{' }}{{ '{' }}source{{ '}' }}{{ '}' }}"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-notify-body')">Body (markdown)</label>
+        <textarea
+          pTextarea
+          pSize="small"
+          [id]="id('prop-notify-body')"
+          class="phorma-props__textarea"
+          rows="4"
+          [value]="data.body ?? ''"
+          (input)="patchData({ body: inputValue($event) })"
+          placeholder="Empty sends the incoming payload"
+        ></textarea>
+        <p class="phorma-props__hint">
+          The trace records that a message was sent and a redacted target — never the subject
+          or the body.
+        </p>
+      </section>
+    }
+
+    <!-- Data node: fixture mode (http-request / sql-query) -->
+    @if (fixtureMode(); as mode) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-fixtures')">Fixtures</label>
+        <p-select
+          [inputId]="id('prop-fixtures')"
+          class="phorma-props__select-full"
+          [options]="fixtureModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="mode"
+          (ngModelChange)="patchData({ fixtures: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          Recorded responses are keyed by this node and its request, and are kept out of the
+          workflow file and the run history.
+        </p>
+      </section>
+    }
+
+    <!-- Data node: retry policy (http-request / sql-query / notify) -->
+    @if (retryPolicy(); as retry) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-retry-on')">Retry on</label>
+        <p-select
+          [inputId]="id('prop-retry-on')"
+          class="phorma-props__select-full"
+          [options]="retryOnModes"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="retry.retryOn ?? 'transient'"
+          (ngModelChange)="patchRetry({ retryOn: $event })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-retry-attempts')">Attempts</label>
+        <p-inputnumber
+          [inputId]="id('prop-retry-attempts')"
+          class="phorma-props__number"
+          size="small"
+          [min]="1"
+          [max]="5"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="3"
+          [ngModel]="retry.maxAttempts ?? null"
+          (ngModelChange)="patchRetry({ maxAttempts: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-retry-backoff')">Backoff (ms)</label>
+        <p-inputnumber
+          [inputId]="id('prop-retry-backoff')"
+          class="phorma-props__number"
+          size="small"
+          [min]="0"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="1000"
+          [ngModel]="retry.backoffMs ?? null"
+          (ngModelChange)="patchRetry({ backoffMs: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-retry-max-backoff')">Backoff ceiling (ms)</label>
+        <p-inputnumber
+          [inputId]="id('prop-retry-max-backoff')"
+          class="phorma-props__number"
+          size="small"
+          [min]="0"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="30000"
+          [ngModel]="retry.maxBackoffMs ?? null"
+          (ngModelChange)="patchRetry({ maxBackoffMs: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__label phorma-props__label--gap" [for]="id('prop-retry-after-cap')">
+          Retry-After ceiling (ms)
+        </label>
+        <p-inputnumber
+          [inputId]="id('prop-retry-after-cap')"
+          class="phorma-props__number"
+          size="small"
+          [min]="0"
+          [showButtons]="false"
+          [useGrouping]="false"
+          placeholder="120000"
+          [ngModel]="retry.maxRetryAfterMs ?? null"
+          (ngModelChange)="patchRetry({ maxRetryAfterMs: numberOrUndefined($event) })"
+        />
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-retry-honor-after')"
+            [ngModel]="retry.honorRetryAfter ?? true"
+            (ngModelChange)="patchRetry({ honorRetryAfter: $event })"
+          />
+          Honour a server <code>Retry-After</code> header
+        </label>
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-retry-idempotent')"
+            [ngModel]="retry.idempotent ?? false"
+            (ngModelChange)="patchRetry({ idempotent: $event })"
+          />
+          Safe to repeat (idempotent)
+        </label>
+        <label class="phorma-props__check">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('prop-retry-disabled')"
+            [ngModel]="retry.disabled ?? false"
+            (ngModelChange)="patchRetry({ disabled: $event })"
+          />
+          Disable retries for this step
+        </label>
+        <p class="phorma-props__hint">
+          A step that is not marked idempotent is retried only on failures proving the request
+          never landed — never after a timeout or a 5xx.
+        </p>
+      </section>
+    }
+
+    <!-- Data node: error routing (http-request / sql-query / notify) -->
+    @if (errorPortRef(); as ref) {
+      <section class="phorma-props__section">
+        <label class="phorma-props__label" [for]="id('prop-data-error-port')">On error</label>
+        <p-select
+          [inputId]="id('prop-data-error-port')"
+          class="phorma-props__select-full"
+          [options]="outPortOptions()"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="ref.errorPortId"
+          (ngModelChange)="patchData({ errorPortId: $event || undefined })"
+          appendTo="body" size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <p class="phorma-props__hint">
+          Failures leave through this port instead of failing the run. With none selected the
+          run stops at this node.
         </p>
       </section>
     }

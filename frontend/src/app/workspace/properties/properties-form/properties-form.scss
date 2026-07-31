@@ -55,6 +55,45 @@
   font-weight: 700;
 }
 
+// Capability findings (Requirements 17.8, 17.9, 17.15) — inline problem list
+// for the selected node. Errors read in red, warnings in amber; neither ever
+// disables a control elsewhere in the form.
+.phorma-props__findings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.phorma-props__finding {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-red, #ef4444) 35%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 8%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.86rem;
+  line-height: 1.45;
+
+  i {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+    font-size: 0.8rem;
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  &--warning {
+    border-color: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 40%, transparent);
+    background: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 8%, transparent);
+
+    i {
+      color: var(--phorma-accent-amber, #fbbf24);
+    }
+  }
+}
+
 .phorma-props__section {
   display: flex;
   flex-direction: column;
@@ -155,6 +194,42 @@
 
 .phorma-props__select-full {
   width: 100%;
+}
+
+// ── Connection picker (Requirements 2.9, 19.4) ──────────────────────────────
+
+.phorma-props__conn-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+
+  &--disabled {
+    opacity: 0.55;
+  }
+}
+
+.phorma-props__conn-option-name {
+  font-size: 0.928rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-props__conn-option-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+
+  i {
+    color: var(--phorma-accent-amber, #fbbf24);
+    font-size: 0.78rem;
+  }
 }
 
 .phorma-props__portal-field {

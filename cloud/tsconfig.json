@@ -15,5 +15,8 @@
       "@phorma/engine": ["../engine/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "../engine/src/**/*.ts"]
+  "include": ["src/**/*.ts", "../engine/src/**/*.ts"],
+  // The engine's Vitest/fast-check test harness is not part of the worker bundle
+  // and its dev dependencies are not installed here.
+  "exclude": ["../engine/src/**/*.spec.ts", "../engine/src/test/**"]
 }

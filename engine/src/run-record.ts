@@ -66,6 +66,119 @@ export interface RunRecordUsage {
 }
 
 /**
+ * Per-run structured summary for data workflows — what a sync read, changed,
+ * wrote and skipped. Carried by the `sync-summary` run event and attached to
+ * {@link RunRecordSummary} by the recorder, so an operator can answer questions
+ * about a run without re-reading the trace.
+ *
+ * Metadata only: counts, keys and status codes. Never row contents, never
+ * parameter values, never secrets.
+ */
+export interface SyncSummary {
+  /** Rows/records read per source node id. */
+  sources: Record<string, { rows: number; pages?: number; truncated?: boolean }>;
+  considered: number;
+  changed: number;
+  written: number;
+  skipped: number;
+  failed: number;
+  /** Target response codes with counts, e.g. `{ '200': 98, '429': 2 }`. */
+  targetStatuses: Record<string, number>;
+  /** Guards evaluated, with breaches named. */
+  guards?: { name: string; passed: boolean; message?: string }[];
+  /** Watermark advanced by this run, when any. */
+  watermark?: { key: string; from?: string; to: string };
+}
+
+/** A fresh, all-zero {@link SyncSummary} for one run. */
+export function createSyncSummary(): SyncSummary {
+  return {
+    sources: {},
+    considered: 0,
+    changed: 0,
+    written: 0,
+    skipped: 0,
+    failed: 0,
+    targetStatuses: {},
+  };
+}
+
+/** Coerces an event-supplied count to a non-negative integer (total). */
+function count(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+/**
+ * Folds one {@link RunEvent} into the run's {@link SyncSummary} (in place).
+ *
+ * Total and metadata-only: every unrelated event type is ignored, and no
+ * branch reads row contents, parameter values or secrets. Call it for every
+ * emitted event so the accumulated totals are complete before the engine
+ * emits `sync-summary`.
+ *
+ * Invariants it maintains:
+ *  - Every count stays a non-negative integer.
+ *  - `considered = changed + skipped` after the delta stage (each `delta`
+ *    `state-written` event contributes one considered record and exactly one
+ *    of changed/skipped).
+ *  - `written + failed <= considered` — a write loop that reports more
+ *    records than any delta stage considered raises `considered` to match,
+ *    which is what happens when a workflow writes without a delta filter.
+ */
+export function accumulateSync(event: RunEvent, summary: SyncSummary): void {
+  switch (event.type) {
+    case 'sql-result': {
+      const source: SyncSummary['sources'][string] = { rows: count(event.rowCount) };
+      if (event.truncated) source.truncated = true;
+      summary.sources[event.nodeId] = source;
+      return;
+    }
+    case 'page-fetched': {
+      const source = (summary.sources[event.nodeId] ??= { rows: 0, pages: 0 });
+      source.rows = count(source.rows) + count(event.items);
+      source.pages = count(source.pages ?? 0) + 1;
+      return;
+    }
+    case 'http-response': {
+      const key = String(event.status);
+      summary.targetStatuses[key] = count(summary.targetStatuses[key] ?? 0) + 1;
+      return;
+    }
+    case 'state-written': {
+      if (event.semantics === 'delta') {
+        summary.considered += 1;
+        if (event.changed) summary.changed += 1;
+        else summary.skipped += 1;
+        return;
+      }
+      if (event.semantics === 'watermark' && event.changed) {
+        summary.watermark = {
+          key: event.key,
+          ...(event.from === undefined ? {} : { from: event.from }),
+          to: event.to ?? '',
+        };
+      }
+      return;
+    }
+    case 'assert-passed':
+    case 'assert-breached':
+      // Guards are appended by the `assert` executor itself: Requirement 7.9
+      // wants exactly one entry per EVALUATED assertion, and these two events
+      // carry a per-node count and a per-breach notice rather than one event per
+      // assertion. Folding them here as well would double-count every breach.
+      return;
+    case 'loop-completed': {
+      summary.written += count(event.succeeded);
+      summary.failed += count(event.failed);
+      summary.considered = Math.max(summary.considered, summary.written + summary.failed);
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+/**
  * The list-view projection of a run — everything a run-history row needs
  * without loading the event log or graph snapshot.
  */
@@ -92,6 +205,12 @@ export interface RunRecordSummary {
   nodeCount: number;
   /** True when the event log was capped or payloads were clipped. */
   truncated?: boolean;
+  /**
+   * Present only when the run executed at least one data node (the engine
+   * emits `sync-summary` in that case, and only then). Agent-only run history
+   * keeps exactly the shape it had before the deterministic data path.
+   */
+  sync?: SyncSummary;
 }
 
 /** Coalesced replacement for the per-token `node-token` stream. */
@@ -481,6 +600,11 @@ export function createRunRecorder(meta: RunRecorderMeta): RunRecorder {
         summary.error = event.error;
         summary.endedAt = event.at;
         settled = true;
+        push(event);
+        return;
+      case 'sync-summary':
+        // Attached unchanged, and the event itself stays in the log.
+        summary.sync = event.summary;
         push(event);
         return;
       case 'run-stopped':

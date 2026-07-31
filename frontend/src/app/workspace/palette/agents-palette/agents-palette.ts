@@ -20,9 +20,25 @@ interface CategoryChip {
 }
 
 /**
+ * One rendered palette group. A category contributes its own group plus one per
+ * distinct `NodeCatalogEntry.section` it declares (e.g. `flow` → Flow, Data),
+ * so sub-sections keep their category accent colour.
+ */
+interface PaletteSection {
+  /** Unique render key (`category:label`). */
+  key: string;
+  category: NodeCategory;
+  label: string;
+  color: string;
+  /** True for the group that owns the MCP Servers sub-list. */
+  showMcpPresets: boolean;
+  entries: NodeCatalogEntry[];
+}
+
+/**
  * The Agents palette (left panel): every node type in the catalog, grouped by
- * section (Agents / Triggers / Tools / Flow), searchable, and draggable onto
- * the canvas.
+ * section (Agents / Triggers / Flow / Data / Tools), searchable, and draggable
+ * onto the canvas.
  */
 @Component({
   selector: 'app-agents-palette',
@@ -84,23 +100,48 @@ export class AgentsPalette {
     return sections.some(section => section.entries.length > 0) || this.mcpPresets().length > 0;
   });
 
-  /** Sections with their (filtered) entries; empty sections are dropped. */
-  protected readonly sections = computed(() => {
+  /**
+   * Sections with their (filtered) entries; empty sections are dropped. Entries
+   * declaring a `section` split into their own group, rendered after the
+   * category's own group — which places `Data` between `Flow` and `Tools`.
+   */
+  protected readonly sections = computed<PaletteSection[]>(() => {
     const q = this.query().trim().toLowerCase();
     const active = this.activeCategories();
-    return NODE_CATEGORY_SECTIONS.map(section => ({
-      ...section,
-      color: NODE_CATEGORY_COLORS[section.category],
-      entries: NODE_CATALOG.filter(entry => entry.category === section.category)
-        .filter(entry => (active.size === 0 || active.has(entry.category)))
-        .filter(
-          entry =>
-            q.length === 0 ||
-            entry.label.toLowerCase().includes(q) ||
-            entry.description.toLowerCase().includes(q) ||
-            entry.keywords?.some(keyword => keyword.includes(q)),
-        ),
-    })).filter(section => section.entries.length > 0);
+    const matches = (entry: NodeCatalogEntry): boolean =>
+      q.length === 0 ||
+      entry.label.toLowerCase().includes(q) ||
+      entry.description.toLowerCase().includes(q) ||
+      (entry.keywords?.some(keyword => keyword.includes(q)) ?? false);
+
+    const result: PaletteSection[] = [];
+    for (const { category, label } of NODE_CATEGORY_SECTIONS) {
+      const color = NODE_CATEGORY_COLORS[category];
+      // The category's own group first, then each declared sub-section in
+      // catalog order.
+      const groups = new Map<string, NodeCatalogEntry[]>([[label, []]]);
+      for (const entry of NODE_CATALOG) {
+        if (entry.category !== category) continue;
+        if (active.size > 0 && !active.has(entry.category)) continue;
+        if (!matches(entry)) continue;
+        const groupLabel = entry.section ?? label;
+        const group = groups.get(groupLabel);
+        if (group) group.push(entry);
+        else groups.set(groupLabel, [entry]);
+      }
+      for (const [groupLabel, entries] of groups) {
+        if (entries.length === 0) continue;
+        result.push({
+          key: `${category}:${groupLabel}`,
+          category,
+          label: groupLabel,
+          color,
+          showMcpPresets: category === 'tool' && groupLabel === label,
+          entries,
+        });
+      }
+    }
+    return result;
   });
 
   protected onSearchInput(event: Event): void {

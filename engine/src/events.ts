@@ -8,7 +8,7 @@
  */
 
 import type { ModelUsage } from './model.js';
-import type { RunSource } from './run-record.js';
+import type { RunSource, SyncSummary } from './run-record.js';
 
 /** One nested workflow frame in a root-to-leaf event scope path. */
 export interface RunScope {
@@ -71,6 +71,48 @@ type RunEventPayload =
   | { type: 'subworkflow-started'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; input: string; at: number }
   | { type: 'subworkflow-completed'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; output: string; at: number }
   | { type: 'subworkflow-failed'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; error: string; at: number }
+  // Deterministic data path (EPIC P1): every data node's I/O is auditable from
+  // the event stream alone. These carry METADATA ONLY — never headers, never
+  // SQL parameter values, never secrets. A request or response body appears
+  // only when the node opted into body capture AND the Redactor has run.
+  // Data-node retries deliberately reuse `node-retrying` above, so the trace
+  // panel needs no new rendering path.
+  | { type: 'http-request'; runId: string; nodeId: string; nodeName: string;
+      method: string; url: string; attempt: number;
+      /** Present only with `persistRequestBody`, post-redaction. */
+      body?: string; at: number }
+  | { type: 'http-response'; runId: string; nodeId: string; status: number;
+      durationMs: number; byteCount: number; truncated?: boolean;
+      /** Present only with `persistResponseBody`, post-redaction. */
+      body?: string;
+      /** True when the response came from a fixture, with `durationMs: 0` (P1-13). */
+      replayed?: boolean; at: number }
+  | { type: 'page-fetched'; runId: string; nodeId: string; page: number;
+      items: number; hasMore: boolean; at: number }
+  | { type: 'sql-query'; runId: string; nodeId: string; nodeName: string;
+      driver: string; /** Statement text; parameter VALUES are never included. */
+      statement: string; paramCount: number; at: number }
+  | { type: 'sql-result'; runId: string; nodeId: string; rowCount: number;
+      durationMs: number; truncated?: boolean;
+      /** True when the rows came from a fixture, with `durationMs: 0` (P1-13). */
+      replayed?: boolean; at: number }
+  | { type: 'state-read'; runId: string; nodeId: string; key: string;
+      found: boolean; at: number }
+  | { type: 'state-written'; runId: string; nodeId: string; key: string;
+      semantics: 'value' | 'delta' | 'watermark'; changed: boolean;
+      /** Watermark semantics only: the previous watermark, when one existed. */
+      from?: string;
+      /** Watermark semantics only: the watermark this write advanced to. */
+      to?: string; at: number }
+  | { type: 'assert-passed'; runId: string; nodeId: string; nodeName: string;
+      checked: number; at: number }
+  | { type: 'assert-breached'; runId: string; nodeId: string; nodeName: string;
+      assertion: string; message: string; severity: 'error' | 'warn';
+      routed: boolean; at: number }
+  | { type: 'notify-sent'; runId: string; nodeId: string; channel: string;
+      target: string; at: number }
+  /** Emitted exactly once, immediately before the terminal event, when a run executed a data node. */
+  | { type: 'sync-summary'; runId: string; summary: SyncSummary; at: number }
   | { type: 'run-paused'; runId: string; nodeId?: string; at: number }
   | { type: 'run-resumed'; runId: string; at: number }
   | { type: 'run-completed'; runId: string; output: string; at: number }

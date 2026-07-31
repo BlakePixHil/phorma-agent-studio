@@ -1,0 +1,62 @@
+<div class="phorma-connections">
+  <section class="phorma-connections__section">
+    <label class="phorma-connections__label">
+      Connections
+      <span class="phorma-connections__label-actions">
+        <button
+          type="button"
+          class="phorma-connections__icon-btn"
+          title="New connection"
+          aria-label="New connection"
+          (click)="newConnection()"
+        >
+          <i class="ti ti-plus" aria-hidden="true"></i>
+        </button>
+      </span>
+    </label>
+
+    @if (connections.connections().length > 0) {
+      <ul class="phorma-connections__list">
+        @for (connection of connections.connections(); track connection.id) {
+          <li>
+            <button type="button" class="phorma-connections__list-item" (click)="editConnection(connection)">
+              <i class="ti ti-plug-connected phorma-connections__list-icon" aria-hidden="true"></i>
+              <span class="phorma-connections__list-meta">
+                <span class="phorma-connections__list-title">{{ connection.name }}</span>
+                <span class="phorma-connections__list-sub">
+                  {{ connection.type }} · updated {{ connection.updatedAt | date: 'MMM d, HH:mm' }}
+                </span>
+                @if (usedBy().get(connection.id); as count) {
+                  @if (count > 0) {
+                    <span class="phorma-connections__used-by">
+                      <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+                      Used by {{ count }} {{ count === 1 ? 'workflow' : 'workflows' }}
+                    </span>
+                  }
+                }
+              </span>
+              <span class="phorma-connections__row-actions">
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-connections__row-btn phorma-connections__row-btn--danger"
+                  title="Delete connection"
+                  aria-label="Delete connection"
+                  (click)="deleteConnection(connection, $event)"
+                  (keydown.enter)="deleteConnection(connection, $event)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </span>
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    } @else {
+      <p class="phorma-connections__empty">
+        No connections yet. A connection stores credentials outside the workflow — create one to give
+        an HTTP request, SQL query or notification a base address and secrets.
+      </p>
+    }
+  </section>
+</div>

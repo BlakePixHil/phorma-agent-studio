@@ -21,6 +21,83 @@ export interface WorkflowPort {
   role: PortRole;
 }
 
+/**
+ * Every node kind the canvas and this engine understand. Structural twin of
+ * `WorkflowNodeKind` in `frontend/src/app/core/workflow.model.ts`.
+ *
+ * `WorkflowNode.kind` stays a plain `string` at the package boundary so the
+ * studio's richer graphs remain structurally assignable; this union is the
+ * vocabulary used by catalogs, capability validation and the executor switch.
+ */
+export type WorkflowNodeKind =
+  | 'agent'
+  | 'manual-trigger'
+  | 'schedule-trigger'
+  | 'webhook-trigger'
+  | 'portal-trigger'
+  | 'http-tool'
+  | 'web-search-tool'
+  | 'mcp-tool'
+  | 'router'
+  | 'parallel'
+  | 'aggregator'
+  | 'approval-gate'
+  | 'for-each'
+  | 'wait-event'
+  | 'ask-user'
+  | 'execute-workflow'
+  | 'error-handler'
+  // ── Phase 1: deterministic data path ──────────────────────────────────────
+  | 'http-request' // P1-2  flow step (distinct from the existing 'http-tool')
+  | 'sql-query' // P1-6
+  | 'transform' // P1-4
+  | 'aggregate' // P1-5
+  | 'assert' // P1-9
+  | 'state-get' // P1-8
+  | 'state-set' // P1-8
+  | 'notify'; // P1-10
+
+/**
+ * Kinds that execute in the graph walk AND may perform external I/O. Used by
+ * capability validation, the redaction pipeline and fixtures.
+ */
+export const DATA_NODE_KINDS: readonly WorkflowNodeKind[] = [
+  'http-request',
+  'sql-query',
+  'transform',
+  'aggregate',
+  'assert',
+  'state-get',
+  'state-set',
+  'notify',
+] as const;
+
+/** Data nodes that reach outside the run (fixtures + egress declaration). */
+export const DATA_IO_KINDS: readonly WorkflowNodeKind[] = [
+  'http-request',
+  'sql-query',
+  'notify',
+] as const;
+
+/**
+ * A data node exposes message ports only. `tool-link` edges to a data node are
+ * rejected — determinism depends on the graph walk owning these steps, never a
+ * model's choice ("data nodes are not tools").
+ *
+ * Forward-compatible seam: exposing a CONFIGURED data node to an agent later
+ * means adding a `tools`-role port and a ToolHost adapter that calls the SAME
+ * executor function, so executors stay pure `(node, payload, ctx)` functions
+ * that never read graph topology.
+ */
+export function isDataNode(node: WorkflowNode): boolean {
+  return (DATA_NODE_KINDS as readonly string[]).includes(node.kind);
+}
+
+/** True when a `tool-link` edge is illegal for this endpoint. */
+export function rejectsToolLink(node: WorkflowNode): boolean {
+  return isDataNode(node);
+}
+
 export type ModelProviderId =
   | 'anthropic'
   | 'openai'
@@ -50,6 +127,12 @@ export interface ForEachNodeData {
    * the whole run.
    */
   continueOnError?: boolean;
+  /**
+   * P1-7: when > 1, the loop yields ARRAYS of up to `batchSize` items instead
+   * of single items, so a target API's "max 100 per call" limit is one config
+   * field instead of a subgraph. 0/1/absent = today's per-item behaviour.
+   */
+  batchSize?: number;
 }
 
 /** Configuration for a `wait-event` flow node. */
@@ -185,16 +268,34 @@ export interface PortalTriggerData {
  * network drops, timeouts) are retried BY DEFAULT (one retry, 1s backoff);
  * this object tunes or disables that behaviour per node.
  */
-export interface AgentRetryPolicy {
-  /** Total attempts including the first (default 2, i.e. one retry). */
+export interface NodeRetryPolicy {
+  /** Total attempts including the first (default 2 for agents, 3 for data I/O). */
   maxAttempts?: number;
   /** Base backoff before the first retry, doubled per attempt (default 1000). */
   backoffMs?: number;
-  /** `transient` (default) retries 429/5xx/network only; `all` retries everything. */
-  retryOn?: 'transient' | 'all';
+  /** Backoff ceiling per attempt (default 30_000). */
+  maxBackoffMs?: number;
+  /** `transient` (default) retries 429/5xx/network only; `all` retries everything; `none` disables. */
+  retryOn?: 'transient' | 'all' | 'none';
   /** True disables automatic retries for this node. */
   disabled?: boolean;
+  /**
+   * Declares the step safe to repeat. Non-idempotent steps are retried ONLY on
+   * errors that prove the request never landed (connect/DNS/TLS), never on a
+   * 5xx or a timeout.
+   */
+  idempotent?: boolean;
+  /** Honour a `Retry-After` header when present (default true). */
+  honorRetryAfter?: boolean;
+  /** Ceiling applied to a server-provided Retry-After (default 120_000). */
+  maxRetryAfterMs?: number;
 }
+
+/**
+ * @deprecated Use {@link NodeRetryPolicy}. Kept as an alias so existing specs
+ * and agent-only call sites keep working unchanged.
+ */
+export type AgentRetryPolicy = NodeRetryPolicy;
 
 /** Secondary model used when the primary model still fails after retries. */
 export interface AgentFallbackModel {
@@ -253,6 +354,257 @@ export interface AgentNodeData {
    * Rendered into the system prompt in array order.
    */
   skills?: AgentSkill[];
+}
+
+// ── Phase 1 data nodes: shared vocabulary ────────────────────────────────────
+
+/** Anything that reads a `{{path}}`-interpolated template against the payload. */
+export type PayloadTemplate = string;
+
+/**
+ * SQL driver families. Host support is declared in the capability matrix.
+ * Re-exported by `engine/src/connections.ts` so connection and node data share
+ * exactly one definition.
+ */
+export type SqlDriver = 'postgres' | 'mysql' | 'mssql' | 'sqlite';
+
+/** Fixture mode for the two I/O node kinds (P1-13). */
+export type FixtureMode = 'off' | 'record' | 'replay' | 'replay-or-record';
+
+/**
+ * Field-level redaction rule applied to every persisted payload (P1-12).
+ * `path` matches a dotted JSON path; `key` matches any property name;
+ * `pattern` is a bounded regex source applied to string values.
+ */
+export interface RedactionRule {
+  kind: 'path' | 'key' | 'pattern';
+  value: string;
+  /** Replacement. Default `'[redacted]'`. `hash` stores an fnv1a fingerprint. */
+  replace?: 'mask' | 'hash' | 'drop';
+}
+
+// ── P1-2 http-request ────────────────────────────────────────────────────────
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+
+export interface HttpRequestNodeData {
+  connectionId?: string;
+  method: HttpMethod;
+  /** Path appended to the connection's `config.baseUrl`, or an absolute URL. */
+  url: PayloadTemplate;
+  query?: { key: string; value: PayloadTemplate }[];
+  /** Non-secret headers only. Auth comes from the connection, never from here. */
+  headers?: { key: string; value: PayloadTemplate }[];
+  bodyMode?: 'none' | 'json' | 'text' | 'form';
+  /** Template rendered then (for `json`) parsed to validate before sending. */
+  body?: PayloadTemplate;
+  /** Extra codes treated as success. Default: 2xx. */
+  successCodes?: number[];
+  /** Dotted path selecting what lands in the outgoing payload. */
+  resultPath?: string;
+  /** Key the result is wrapped under. Default: replace the payload. */
+  resultKey?: string;
+  responseMode?: 'json' | 'text';
+  pagination?: PaginationConfig;
+  /** Idempotency key template; sent as `Idempotency-Key` and used by the retry classifier. */
+  idempotencyKey?: PayloadTemplate;
+  retry?: NodeRetryPolicy;
+  timeoutSec?: number;
+  /** Opt-in payload capture for the trace. Off by default. */
+  persistRequestBody?: boolean;
+  persistResponseBody?: boolean;
+  fixtures?: FixtureMode;
+  errorPortId?: string;
+}
+
+/** P1-7: paginated fetch. The node loops until exhausted or `maxPages`. */
+export type PaginationConfig =
+  | { mode: 'none' }
+  | {
+      mode: 'cursor';
+      cursorPath: string;
+      cursorParam: string;
+      itemsPath: string;
+      maxPages: number;
+    }
+  | {
+      mode: 'page';
+      pageParam: string;
+      sizeParam?: string;
+      pageSize?: number;
+      startPage?: number;
+      itemsPath: string;
+      maxPages: number;
+    }
+  | {
+      mode: 'offset';
+      offsetParam: string;
+      limitParam: string;
+      limit: number;
+      itemsPath: string;
+      maxPages: number;
+    }
+  | { mode: 'link-header'; rel?: string; itemsPath: string; maxPages: number };
+
+// ── P1-6 sql-query ───────────────────────────────────────────────────────────
+
+export interface SqlQueryNodeData {
+  connectionId?: string;
+  /** Mirrors the connection's driver; validated to match at push time. */
+  driver?: SqlDriver;
+  /**
+   * Parameterised statement. Named parameters (`:name`) ONLY — the properties
+   * panel offers no way to concatenate payload text into SQL.
+   */
+  statement: string;
+  /** Parameter name -> expression evaluated against the payload. */
+  params?: { name: string; expression: string }[];
+  maxRows?: number;
+  statementTimeoutMs?: number;
+  /** Default `rows`. */
+  resultKey?: string;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+  errorPortId?: string;
+  /** Off by default. */
+  persistRows?: boolean;
+}
+
+// ── P1-4 transform ───────────────────────────────────────────────────────────
+
+export interface TransformNodeData {
+  /** Applied to each element when set, otherwise to the whole payload. */
+  itemsPath?: string;
+  mode?: 'record' | 'array';
+  fields: TransformField[];
+  /** Named lookup tables addressable as `lookup('name', key)` in expressions. */
+  lookups?: Record<string, Record<string, string | number | boolean>>;
+  /** True keeps unmapped source fields; false (default) emits only `fields`. */
+  passthrough?: boolean;
+  /** Wraps an array projection under this key; absent emits a bare array. */
+  resultKey?: string;
+}
+
+export interface TransformField {
+  /** Dotted target path; `a.b` creates nested objects. */
+  target: string;
+  /** Expression in the engine grammar. */
+  expression: string;
+  cast?: 'string' | 'number' | 'integer' | 'boolean' | 'date-iso';
+  /** Used when the expression yields null/undefined. */
+  default?: string | number | boolean | null;
+  /** Fail the node when the result is null/undefined after `default`. */
+  required?: boolean;
+}
+
+// ── P1-5 aggregate ───────────────────────────────────────────────────────────
+
+export interface AggregateNodeData {
+  op: 'group' | 'join' | 'pivot';
+  itemsPath?: string;
+  group?: GroupSpec;
+  join?: JoinSpec;
+  pivot?: PivotSpec;
+  resultKey?: string;
+}
+
+export interface GroupSpec {
+  /** Dotted source paths. */
+  by: string[];
+  metrics: AggregateMetric[];
+}
+
+export interface AggregateMetric {
+  name: string;
+  fn: 'count' | 'countIf' | 'sum' | 'min' | 'max' | 'avg' | 'first' | 'distinct';
+  /** Source path for value-taking fns; ignored by `count`. */
+  path?: string;
+  /** Predicate expression for `countIf`, evaluated per row. */
+  where?: string;
+}
+
+export interface JoinSpec {
+  leftPath: string;
+  rightPath: string;
+  leftKey: string;
+  rightKey: string;
+  type: 'inner' | 'left';
+  /** Prefix applied to right-hand fields on collision. Default `right_`. */
+  collisionPrefix?: string;
+}
+
+export interface PivotSpec {
+  /** Path to grouped rows. */
+  rowsPath?: string;
+  /** e.g. `['group','bucket']` -> `'A_x'`. */
+  keyFields: string[];
+  /** e.g. `'n'`. */
+  valueField: string;
+  /** Default `'_'`. */
+  separator?: string;
+  /** Emitted for pivot columns absent from the data. */
+  fillValue?: number | string | null;
+  /**
+   * Pivot column vocabulary. Every declared column absent from the grouped rows
+   * is emitted as `fillValue` (Requirement 6.9).
+   */
+  columns?: string[];
+}
+
+// ── P1-9 assert ──────────────────────────────────────────────────────────────
+
+export interface AssertNodeData {
+  assertions: Assertion[];
+  /** `fail` (default) fails the node; `route` sends it out the Failed port. */
+  onBreach?: 'fail' | 'route';
+  failedPortId?: string;
+  /** Comparison baseline for variance guards, read from the state store. */
+  baselineStateKey?: string;
+}
+
+export interface Assertion {
+  /** Shown in the breach message and the sync audit record. */
+  name: string;
+  /** Boolean expression that MUST hold. */
+  expression: string;
+  /** Optional human explanation surfaced on breach. */
+  message?: string;
+  severity?: 'error' | 'warn';
+}
+
+// ── P1-8 state nodes ─────────────────────────────────────────────────────────
+
+export interface StateGetNodeData {
+  /** Key template, interpolated against the payload. */
+  key: PayloadTemplate;
+  /** Default `state`. */
+  resultKey?: string;
+  /** Emitted when the key is absent. */
+  defaultValue?: string;
+}
+
+export interface StateSetNodeData {
+  key: PayloadTemplate;
+  /** Expression producing the value to store. */
+  valueExpression: string;
+  /** Time-to-live in seconds. Absent = retention policy default. */
+  ttlSec?: number;
+  /** `delta` writes a content hash; `watermark` keeps a monotonic maximum. */
+  semantics?: 'value' | 'delta' | 'watermark';
+}
+
+// ── P1-10 notify ─────────────────────────────────────────────────────────────
+
+export interface NotifyNodeData {
+  channel: 'email' | 'webhook' | 'chat-webhook';
+  connectionId?: string;
+  /** Email recipient. */
+  to?: PayloadTemplate;
+  subject?: PayloadTemplate;
+  /** Markdown body template. */
+  body?: PayloadTemplate;
+  retry?: NodeRetryPolicy;
+  errorPortId?: string;
 }
 
 export interface WorkflowNode {

@@ -2,8 +2,17 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import type { RunEvent, RunRecord, RunRecordSummary, UsageLedgerEntry } from '@phorma/engine';
+import {
+  CLOUDFLARE_CAPABILITIES,
+  validateAgainstCapabilities,
+  type ConnectionSummary,
+  type RunEvent,
+  type RunRecord,
+  type RunRecordSummary,
+  type UsageLedgerEntry,
+} from '@phorma/engine';
 
+import { ConnectionStoreService } from './connection-store.service';
 import { DeployConfigService, BYO_CONFIG_FILENAME } from './deploy-config.service';
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
@@ -22,6 +31,18 @@ import type {
 } from './portal.model';
 
 export type CloudConnectionState = 'disconnected' | 'connecting' | 'connected';
+
+/**
+ * Drops the local-only projection fields (`secretsPresent`, `usedByWorkflowIds`)
+ * from a `ConnectionSummary`, leaving exactly the `Connection` metadata shape
+ * the worker's push route accepts. Never carries a secret value either way.
+ */
+function toConnectionMetadata(summary: ConnectionSummary): Omit<ConnectionSummary, 'secretsPresent' | 'usedByWorkflowIds'> {
+  const { secretsPresent, usedByWorkflowIds, ...metadata } = summary;
+  void secretsPresent;
+  void usedByWorkflowIds;
+  return metadata;
+}
 
 /** Default Phorma Cloud runtime URL (override via the hidden setting). */
 export const PHORMA_CLOUD_DEFAULT_URL = 'https://dev.phoma-labs.com';
@@ -49,6 +70,7 @@ export class CloudService {
   private readonly versions = inject(WorkflowVersionsService);
   private readonly clerk = inject(ClerkService);
   private readonly deployConfig = inject(DeployConfigService);
+  private readonly connectionStore = inject(ConnectionStoreService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -374,6 +396,28 @@ export class CloudService {
     }
 
     try {
+      // Requirement 3.6: the worker's connection inventory comes ONLY from
+      // this dedicated route — names, types and auth modes, never a secret
+      // value. Pushed before validation so the Capability_Validator checks
+      // the SAME inventory `WorkerConnectionStore` will resolve against.
+      await this.pushConnectionMetadata(base);
+
+      // Requirement 17.11: validate against Worker_Host's own capability
+      // record and its own connection inventory, after default materialisation
+      // and before the deployment request. Any error finding aborts the push.
+      const connections = await this.fetchConnectionInventory(base);
+      const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, connections);
+      const errors = findings.filter(finding => finding.severity === 'error');
+      if (errors.length > 0) {
+        this.reportCapabilityFindings(findings);
+        this.toast.error(
+          'Push aborted',
+          `${errors.length} problem${errors.length === 1 ? '' : 's'} would prevent this workflow ` +
+            `from running on ${CLOUDFLARE_CAPABILITIES.label}. See the Problems console.`,
+        );
+        return;
+      }
+
       const response = await fetch(`${base}/workflow`, {
         method: 'POST',
         headers: await this.headers(),
@@ -387,6 +431,52 @@ export class CloudService {
       this.toast.success('Workflow pushed', `"${spec.name}" is live in the cloud.`);
     } catch (error) {
       this.toast.error('Push failed', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * Pushes every locally known connection's METADATA to the worker's
+   * dedicated route (Requirements 2.2, 3.6): names, types, non-secret
+   * `config` and `secretKeys` NAMES only — never a secret value. The worker
+   * pairs each entry with its own `CONN_*` secrets at resolve time.
+   */
+  private async pushConnectionMetadata(base: string): Promise<void> {
+    const summaries = await this.connectionStore.list();
+    const connections = summaries.map(toConnectionMetadata);
+    const response = await fetch(`${base}/connections`, {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ connections }),
+    });
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(detail?.error ?? `Could not push connection metadata (HTTP ${response.status}).`);
+    }
+  }
+
+  /**
+   * Reads back the Worker_Host connection inventory — the same
+   * `ConnectionSummary[]` `WorkerConnectionStore.list()` produces, carrying
+   * secret-present counts and no secret value — for push-time validation
+   * (Requirement 17.11).
+   */
+  private async fetchConnectionInventory(base: string): Promise<ConnectionSummary[]> {
+    const response = await fetch(`${base}/connections`, { headers: await this.headers() });
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(
+        detail?.error ?? `Could not read the worker's connection inventory (HTTP ${response.status}).`,
+      );
+    }
+    const body = (await response.json()) as { connections?: ConnectionSummary[] };
+    return Array.isArray(body.connections) ? body.connections : [];
+  }
+
+  /** Every returned finding, oldest first, into the Problems console. */
+  private reportCapabilityFindings(findings: { severity: 'error' | 'warning'; message: string }[]): void {
+    this.terminal.open('problems');
+    for (const finding of findings) {
+      this.terminal.append('problems', finding.severity === 'error' ? 'error' : 'warning', finding.message);
     }
   }
 

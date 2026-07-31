@@ -246,6 +246,8 @@ export class CanvasGraphRenderer {
   private breakpointNodes = new Set<string>();
   /** Node ids carrying a configuration warning badge. */
   private warningNodes = new Set<string>();
+  /** Node ids carrying a capability-error finding badge (Requirement 17.8). */
+  private capabilityErrorNodes = new Set<string>();
   /** Selected connection (edge) ids — drawn highlighted. */
   private selectedEdges = new Set<string>();
   /** Edge id currently hovered (its wire is brightened). */
@@ -382,6 +384,18 @@ export class CanvasGraphRenderer {
   /** Node ids showing a configuration warning badge. */
   setWarningNodes(ids: Iterable<string>): void {
     this.warningNodes = new Set(ids);
+    this.dirty = true;
+  }
+
+  /**
+   * Node ids showing a capability-error outline (Requirement 17.8): a node
+   * whose kind, SQL driver, connection, or expression the active host
+   * cannot run. Drawn in `wireError` red rather than the amber
+   * `setWarningNodes` dashed ring, so an authoring-time error reads
+   * distinctly from a "this still needs configuring" warning.
+   */
+  setCapabilityErrorNodes(ids: Iterable<string>): void {
+    this.capabilityErrorNodes = new Set(ids);
     this.dirty = true;
   }
 
@@ -1398,6 +1412,19 @@ export class CanvasGraphRenderer {
     if (this.warningNodes.has(n.id) && !sel && !edit) {
       ctx.save();
       ctx.strokeStyle = this.theme.wireWarning;
+      ctx.lineWidth = 1.5 / this.sc;
+      ctx.setLineDash([5 / this.sc, 3 / this.sc]);
+      this.roundRect(ctx, n.x - 2, n.y - 2, n.w + 4, n.h + 4, 9);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Capability-error outline (Requirement 17.8) - a red dashed ring for a
+    // node the active host cannot run at all. Takes precedence over the
+    // amber configuration-warning ring when both would otherwise apply.
+    if (this.capabilityErrorNodes.has(n.id) && !sel && !edit) {
+      ctx.save();
+      ctx.strokeStyle = this.theme.wireError;
       ctx.lineWidth = 1.5 / this.sc;
       ctx.setLineDash([5 / this.sc, 3 / this.sc]);
       this.roundRect(ctx, n.x - 2, n.y - 2, n.w + 4, n.h + 4, 9);

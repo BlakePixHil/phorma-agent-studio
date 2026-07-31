@@ -6,11 +6,13 @@
 //! mobile targets reuse the same entry point.
 
 mod commands;
+mod data;
 mod llm;
 mod mcp;
 mod oauth;
 mod ollama;
 mod process;
+mod sql;
 
 /// Builds and runs the Phorma Agent Studio desktop application.
 ///
@@ -41,6 +43,8 @@ pub fn run() {
             llm::has_secret,
             llm::llm_proxy_stream,
             llm::cancel_llm_stream,
+            data::data_request,
+            sql::sql_query,
             process::run_streamed_command,
             mcp::http_request,
             mcp::mcp_connect,

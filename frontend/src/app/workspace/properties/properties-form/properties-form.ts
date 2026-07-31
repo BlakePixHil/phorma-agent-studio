@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -25,16 +26,46 @@ import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import { CloudService } from '../../../core/cloud.service';
-import { terminalLeafNodes, toPortalSlug, type PortalField } from '@phorma/engine';
+import { ConnectionStoreService } from '../../../core/connection-store.service';
+import { PanelRegistryService } from '../../../core/panel-registry.service';
+import { TauriService } from '../../../core/tauri.service';
+import {
+  BROWSER_CAPABILITIES,
+  TAURI_DESKTOP_CAPABILITIES,
+  terminalLeafNodes,
+  toPortalSlug,
+  validateAgainstCapabilities,
+  validateExpression,
+  type CapabilityFinding,
+  type ConnectionSummary,
+  type PortalField,
+} from '@phorma/engine';
 import type {
+  AggregateMetric,
+  AggregateNodeData,
   ApprovalGateData,
   AskUserNodeData,
+  Assertion,
+  AssertNodeData,
   ExecuteWorkflowNodeData,
+  FixtureMode,
   ForEachNodeData,
+  GroupSpec,
+  HttpRequestNodeData,
   HttpToolData,
+  JoinSpec,
   McpToolData,
+  NodeRetryPolicy,
+  NotifyNodeData,
+  PaginationConfig,
+  PivotSpec,
   PortalTriggerData,
   ScheduleTriggerData,
+  SqlQueryNodeData,
+  StateGetNodeData,
+  StateSetNodeData,
+  TransformField,
+  TransformNodeData,
   WaitEventNodeData,
   WebhookTriggerData,
   WorkflowGraph,
@@ -42,6 +73,179 @@ import type {
 } from '../../../core/workflow.model';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+// ── Data nodes (deterministic data path) ────────────────────────────────────
+// Option tables for the data-node controls. Each list is scoped to exactly one
+// node kind's field, so no control can leak into a kind that lacks the field.
+
+/** `http-request` allows HEAD as well, unlike the agent-facing HTTP tool. */
+const DATA_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] as const;
+
+interface Choice<T extends string> {
+  id: T;
+  label: string;
+}
+
+const BODY_MODES: Choice<'none' | 'json' | 'text' | 'form'>[] = [
+  { id: 'none', label: 'No body' },
+  { id: 'json', label: 'JSON' },
+  { id: 'text', label: 'Text' },
+  { id: 'form', label: 'Form encoded' },
+];
+
+const RESPONSE_MODES: Choice<'json' | 'text'>[] = [
+  { id: 'json', label: 'Parse as JSON' },
+  { id: 'text', label: 'Keep as text' },
+];
+
+const PAGINATION_MODES: Choice<PaginationConfig['mode']>[] = [
+  { id: 'none', label: 'Single request' },
+  { id: 'cursor', label: 'Cursor / token' },
+  { id: 'page', label: 'Page number' },
+  { id: 'offset', label: 'Offset and limit' },
+  { id: 'link-header', label: 'Link header' },
+];
+
+const FIXTURE_MODES: Choice<FixtureMode>[] = [
+  { id: 'off', label: 'Live calls' },
+  { id: 'record', label: 'Record responses' },
+  { id: 'replay', label: 'Replay recordings' },
+  { id: 'replay-or-record', label: 'Replay, else record' },
+];
+
+const RETRY_ON_MODES: Choice<'transient' | 'all' | 'none'>[] = [
+  { id: 'transient', label: 'Transient failures (429, 5xx, network)' },
+  { id: 'all', label: 'Every failure' },
+  { id: 'none', label: 'Never retry' },
+];
+
+const SQL_DRIVERS: Choice<'postgres' | 'mysql' | 'mssql' | 'sqlite'>[] = [
+  { id: 'postgres', label: 'PostgreSQL' },
+  { id: 'mysql', label: 'MySQL / MariaDB' },
+  { id: 'mssql', label: 'SQL Server' },
+  { id: 'sqlite', label: 'SQLite' },
+];
+
+const TRANSFORM_MODES: Choice<'record' | 'array'>[] = [
+  { id: 'record', label: 'One record' },
+  { id: 'array', label: 'Array of records' },
+];
+
+const TRANSFORM_CASTS: Choice<'' | NonNullable<TransformField['cast']>>[] = [
+  { id: '', label: 'No cast' },
+  { id: 'string', label: 'String' },
+  { id: 'number', label: 'Number' },
+  { id: 'integer', label: 'Integer' },
+  { id: 'boolean', label: 'Boolean' },
+  { id: 'date-iso', label: 'ISO date' },
+];
+
+const AGGREGATE_OPS: Choice<AggregateNodeData['op']>[] = [
+  { id: 'group', label: 'Group and summarise' },
+  { id: 'join', label: 'Join two lists' },
+  { id: 'pivot', label: 'Pivot into columns' },
+];
+
+const METRIC_FNS: Choice<AggregateMetric['fn']>[] = [
+  { id: 'count', label: 'count' },
+  { id: 'countIf', label: 'countIf' },
+  { id: 'sum', label: 'sum' },
+  { id: 'min', label: 'min' },
+  { id: 'max', label: 'max' },
+  { id: 'avg', label: 'avg' },
+  { id: 'first', label: 'first' },
+  { id: 'distinct', label: 'distinct' },
+];
+
+const JOIN_TYPES: Choice<JoinSpec['type']>[] = [
+  { id: 'inner', label: 'Inner (matches only)' },
+  { id: 'left', label: 'Left (keep unmatched left rows)' },
+];
+
+const ASSERT_SEVERITIES: Choice<'error' | 'warn'>[] = [
+  { id: 'error', label: 'Error' },
+  { id: 'warn', label: 'Warning' },
+];
+
+const BREACH_MODES: Choice<'fail' | 'route'>[] = [
+  { id: 'fail', label: 'Fail the node' },
+  { id: 'route', label: 'Route out the Failed port' },
+];
+
+const STATE_SEMANTICS: Choice<'value' | 'delta' | 'watermark'>[] = [
+  { id: 'value', label: 'Value (store as given)' },
+  { id: 'delta', label: 'Delta hash (detect changes)' },
+  { id: 'watermark', label: 'Watermark (monotonic maximum)' },
+];
+
+const NOTIFY_CHANNELS: Choice<'email' | 'webhook' | 'chat-webhook'>[] = [
+  { id: 'email', label: 'Email' },
+  { id: 'webhook', label: 'Webhook' },
+  { id: 'chat-webhook', label: 'Chat webhook' },
+];
+
+/** Kinds carrying a `retry` policy. Nothing else renders the retry block. */
+const RETRY_KINDS = new Set(['http-request', 'sql-query', 'notify']);
+/** Kinds carrying a `fixtures` mode — the two that perform real I/O. */
+const FIXTURE_KINDS = new Set(['http-request', 'sql-query']);
+/** Kinds carrying an `errorPortId`. `assert` uses `failedPortId` instead. */
+const ERROR_PORT_KINDS = new Set(['http-request', 'sql-query', 'notify']);
+/** Kinds carrying a `connectionId`. */
+const CONNECTION_KINDS = new Set(['http-request', 'sql-query', 'notify']);
+
+/**
+ * One connection choice for the picker (Requirements 2.9, 19.4): the display
+ * fields off `ConnectionSummary` plus a precomputed usability flag, so the
+ * template never has to re-derive it. Never carries a secret value.
+ */
+interface ConnectionOption {
+  id: string;
+  label: string;
+  type: string;
+  secretsPresent: number;
+  secretsTotal: number;
+  /** True when the host cannot use this connection as is (missing secrets). */
+  disabled: boolean;
+}
+
+// ── Expression validation (Requirement 19.3) ────────────────────────────────
+
+/** Milliseconds of quiet typing before an expression field is validated. */
+const EXPRESSION_DEBOUNCE_MS = 300;
+
+/** Field families carrying an engine expression, one debounce timer each. */
+type ExpressionFieldKind = 'transform' | 'sql-param' | 'metric' | 'assertion' | 'state-value';
+
+/** A rejected expression: the engine's message and its zero-based position. */
+interface ExpressionIssue {
+  readonly message: string;
+  /** Absent when the rejection applies to the whole source, not one character. */
+  readonly position?: number;
+}
+
+/** Fresh pagination config with the design's defaults for the chosen mode. */
+function defaultPagination(mode: PaginationConfig['mode']): PaginationConfig {
+  switch (mode) {
+    case 'cursor':
+      return { mode, cursorPath: '', cursorParam: 'cursor', itemsPath: '', maxPages: 100 };
+    case 'page':
+      return {
+        mode,
+        pageParam: 'page',
+        sizeParam: 'per_page',
+        pageSize: 100,
+        startPage: 1,
+        itemsPath: '',
+        maxPages: 100,
+      };
+    case 'offset':
+      return { mode, offsetParam: 'offset', limitParam: 'limit', limit: 100, itemsPath: '', maxPages: 100 };
+    case 'link-header':
+      return { mode, rel: 'next', itemsPath: '', maxPages: 100 };
+    default:
+      return { mode: 'none' };
+  }
+}
 
 /**
  * `cronstrue` renders "0 9 * * 1-5" as "At 09:00 AM, Monday through Friday".
@@ -225,6 +429,9 @@ export class PropertiesForm {
   private readonly oauth = inject(McpOAuthService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly cloud = inject(CloudService);
+  private readonly connectionStore = inject(ConnectionStoreService);
+  private readonly panels = inject(PanelRegistryService);
+  private readonly tauri = inject(TauriService);
 
   /**
    * Prefix for generated input ids. The side panel and the expanded dialog can
@@ -384,6 +591,41 @@ export class PropertiesForm {
   protected readonly executeWorkflowData = computed<ExecuteWorkflowNodeData | null>(() => {
     const node = this.node();
     return node?.kind === 'execute-workflow' ? (node.data as ExecuteWorkflowNodeData) : null;
+  });
+
+  // Data nodes. Same narrowing pattern: one accessor per kind, so a section
+  // renders only for the kind whose data actually carries those fields.
+  protected readonly httpRequestData = computed<HttpRequestNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'http-request' ? (node.data as HttpRequestNodeData) : null;
+  });
+  protected readonly sqlQueryData = computed<SqlQueryNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'sql-query' ? (node.data as SqlQueryNodeData) : null;
+  });
+  protected readonly transformData = computed<TransformNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'transform' ? (node.data as TransformNodeData) : null;
+  });
+  protected readonly aggregateData = computed<AggregateNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'aggregate' ? (node.data as AggregateNodeData) : null;
+  });
+  protected readonly assertData = computed<AssertNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'assert' ? (node.data as AssertNodeData) : null;
+  });
+  protected readonly stateGetData = computed<StateGetNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'state-get' ? (node.data as StateGetNodeData) : null;
+  });
+  protected readonly stateSetData = computed<StateSetNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'state-set' ? (node.data as StateSetNodeData) : null;
+  });
+  protected readonly notifyData = computed<NotifyNodeData | null>(() => {
+    const node = this.node();
+    return node?.kind === 'notify' ? (node.data as NotifyNodeData) : null;
   });
 
   // ── Portal trigger (EPIC 9) ─────────────────────────────────────────────────
@@ -1053,5 +1295,694 @@ export class PropertiesForm {
     } catch (error) {
       this.toast.error('Could not remove secret', error instanceof Error ? error.message : String(error));
     }
+  }
+
+  // ── Data nodes ─────────────────────────────────────────────────────────────
+
+  protected readonly dataHttpMethods = [...DATA_HTTP_METHODS];
+  protected readonly bodyModes = BODY_MODES;
+  protected readonly responseModes = RESPONSE_MODES;
+  protected readonly paginationModes = PAGINATION_MODES;
+  protected readonly fixtureModes = FIXTURE_MODES;
+  protected readonly retryOnModes = RETRY_ON_MODES;
+  protected readonly sqlDrivers = SQL_DRIVERS;
+  protected readonly transformModes = TRANSFORM_MODES;
+  protected readonly transformCasts = TRANSFORM_CASTS;
+  protected readonly aggregateOps = AGGREGATE_OPS;
+  protected readonly metricFns = METRIC_FNS;
+  protected readonly joinTypes = JOIN_TYPES;
+  protected readonly assertSeverities = ASSERT_SEVERITIES;
+  protected readonly breachModes = BREACH_MODES;
+  protected readonly stateSemantics = STATE_SEMANTICS;
+  protected readonly notifyChannels = NOTIFY_CHANNELS;
+
+  /**
+   * Connection reference for the three kinds that carry one. Returns `null` for
+   * every other kind so the control never renders where the field is absent.
+   */
+  protected readonly connectionRef = computed<{ connectionId: string } | null>(() => {
+    const node = this.node();
+    if (!node || !CONNECTION_KINDS.has(node.kind)) return null;
+    const data = node.data as { connectionId?: string };
+    return { connectionId: data.connectionId ?? '' };
+  });
+
+  /**
+   * The local host's capability record — Desktop when running inside Tauri,
+   * Browser preview otherwise. Local runs never target the worker record, so
+   * the picker (Requirement 19.4) and the future run-time gate (task 20.7)
+   * both read from here.
+   */
+  protected readonly activeHostCapabilities = computed(() =>
+    this.tauri.isDesktop ? TAURI_DESKTOP_CAPABILITIES : BROWSER_CAPABILITIES,
+  );
+
+  /** Every locally known connection, secret-free. Refreshed on selection. */
+  protected readonly connectionSummaries = signal<ConnectionSummary[]>([]);
+
+  /**
+   * Reloads the connection inventory whenever a connection-bearing node is
+   * selected, so the picker reflects secrets stored (or removed) since the
+   * last selection. `untracked` guards the signal write, matching the
+   * `secretFlagsRefresher` pattern above.
+   */
+  protected readonly connectionListRefresher = effect(() => {
+    const ref = this.connectionRef();
+    if (!ref) return;
+    untracked(() => {
+      void this.connectionStore
+        .list()
+        .then(list => this.connectionSummaries.set(list))
+        .catch(() => this.connectionSummaries.set([]));
+    });
+  });
+
+  /**
+   * Requirements 2.9, 19.4: every locally known connection whose `type` the
+   * active host declares, with its name, type, and secret-presence count —
+   * never a secret value. A connection missing one or more declared secrets is
+   * flagged `disabled` so the template can mark it unusable without hiding it.
+   */
+  protected readonly connectionOptions = computed<ConnectionOption[]>(() => {
+    const capabilities = this.activeHostCapabilities();
+    return this.connectionSummaries()
+      .filter(summary => (capabilities.connectionTypes as readonly string[]).includes(summary.type))
+      .map(summary => ({
+        id: summary.id,
+        label: `${summary.name} (${summary.id})`,
+        type: summary.type,
+        secretsPresent: summary.secretsPresent,
+        secretsTotal: summary.secretKeys.length,
+        disabled: summary.secretsPresent < summary.secretKeys.length,
+      }));
+  });
+
+  /**
+   * Requirement 19.4: true when the node's stored `connectionId` is non-empty
+   * but matches no listed value — the second "mark as unusable" case, distinct
+   * from a listed-but-incomplete connection. The stored id is never changed
+   * because of this; it only drives a hint in the template.
+   */
+  protected readonly connectionUnmatched = computed(() => {
+    const ref = this.connectionRef();
+    if (!ref || !ref.connectionId) return false;
+    return !this.connectionOptions().some(option => option.id === ref.connectionId);
+  });
+
+  /**
+   * Requirements 17.8, 17.9, 17.15: capability findings for the SELECTED
+   * node, validated against the active host's capability record and the
+   * local connection inventory. Only the current graph is walked — a
+   * selected node is always on the graph the currently open document
+   * renders, never inside an embedded sub-workflow (those open as their own
+   * read-only tab), so `subWorkflows` play no part here. A plain
+   * `computed()` driven by the same graph/selection/connection signals the
+   * rest of the form already reads, so it lands well inside the 500 ms
+   * window Requirement 17.9 allows without a dedicated debounce. Findings
+   * are surfaced inline only — see {@link nodeCapabilityFindings} — and
+   * never disable a control, matching Requirement 17.8's "editing action
+   * available" guarantee.
+   */
+  protected readonly nodeCapabilityFindings = computed<CapabilityFinding[]>(() => {
+    const node = this.node();
+    if (!node) return [];
+    const graph = this.workflow.graph();
+    const capabilities = this.activeHostCapabilities();
+    const connections = this.connectionSummaries();
+    return validateAgainstCapabilities({ graph }, capabilities, connections).filter(
+      finding => finding.nodeId === node.id,
+    );
+  });
+
+  /** Opens the Connections panel (create/rename/delete lives there). */
+  protected openConnectionsPanel(): void {
+    const tab = this.panels.tabs().find(t => t.id === 'connections');
+    const side = tab?.side ?? 'left';
+    this.panels.setActive(side, 'connections');
+    if (side === 'left') this.panels.collapsedLeft.set(false);
+    else this.panels.collapsedRight.set(false);
+  }
+
+  /** Retry policy of the selected node, or `null` when the kind has none. */
+  protected readonly retryPolicy = computed<NodeRetryPolicy | null>(() => {
+    const node = this.node();
+    if (!node || !RETRY_KINDS.has(node.kind)) return null;
+    return (node.data as { retry?: NodeRetryPolicy }).retry ?? {};
+  });
+
+  /** Fixture mode of the selected node, or `null` when the kind has none. */
+  protected readonly fixtureMode = computed<FixtureMode | null>(() => {
+    const node = this.node();
+    if (!node || !FIXTURE_KINDS.has(node.kind)) return null;
+    return (node.data as { fixtures?: FixtureMode }).fixtures ?? 'off';
+  });
+
+  /** Error-routing target for the kinds carrying `errorPortId`. */
+  protected readonly errorPortRef = computed<{ errorPortId: string } | null>(() => {
+    const node = this.node();
+    if (!node || !ERROR_PORT_KINDS.has(node.kind)) return null;
+    const data = node.data as { errorPortId?: string };
+    return { errorPortId: data.errorPortId ?? '' };
+  });
+
+  /** Outbound ports of the selected node, offered as routing targets. */
+  protected readonly outPortOptions = computed(() => {
+    const node = this.node();
+    if (!node) return [];
+    return [
+      { id: '', label: 'None — fail the node' },
+      ...node.ports
+        .filter(port => port.role === 'message-out')
+        .map(port => ({ id: port.id, label: port.name })),
+    ];
+  });
+
+  protected patchRetry(patch: Partial<NodeRetryPolicy>): void {
+    const current = this.retryPolicy();
+    if (!current) return;
+    this.patchData({ retry: { ...current, ...patch } });
+  }
+
+  /** p-inputnumber emits `null` when cleared; an absent field means "default". */
+  protected numberOrUndefined(value: number | null): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  }
+
+  /** Comma-separated rendering of a string list field. */
+  protected csvText(list: readonly string[] | undefined): string {
+    return (list ?? []).join(', ');
+  }
+
+  private parseCsv(text: string): string[] {
+    return text
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  /** Comma-separated rendering of the `successCodes` number list. */
+  protected numberCsvText(list: readonly number[] | undefined): string {
+    return (list ?? []).join(', ');
+  }
+
+  private parseNumberCsv(text: string): number[] {
+    return this.parseCsv(text)
+      .map(part => Number(part))
+      .filter(value => Number.isFinite(value));
+  }
+
+  // ── Debounced expression validation (Requirement 19.3) ──
+  //
+  // Every expression field writes its text straight into the node on each
+  // keystroke, so the entered text is always retained. Validation is the only
+  // debounced part: `validateExpression` runs 300 ms after the last keystroke
+  // and its result decides whether a message sits under the field.
+
+  /** Rejections currently shown, keyed by field family and row index. */
+  private readonly expressionIssues = signal<Readonly<Record<string, ExpressionIssue>>>({});
+
+  /** Pending debounce timers, one per expression field. */
+  private readonly expressionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** Guards the reset effect so a data edit alone does not clear the messages. */
+  private expressionNodeId: string | null = null;
+
+  /**
+   * A different node means different fields: drop every pending timer and
+   * message so no rejection is attributed to the newly selected node.
+   */
+  protected readonly expressionResetter = effect(() => {
+    const nodeId = this.selection.selectedNodeId();
+    untracked(() => {
+      if (nodeId === this.expressionNodeId) return;
+      this.expressionNodeId = nodeId;
+      this.resetExpressionValidation();
+    });
+  });
+
+  private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    // A timer that fires after teardown would write to a destroyed component.
+    this.destroyRef.onDestroy(() => this.cancelExpressionTimers());
+  }
+
+  private expressionKey(field: ExpressionFieldKind, index?: number): string {
+    return index === undefined ? field : `${field}:${index}`;
+  }
+
+  /** The rejection shown for one expression field, or `null` while it is ok. */
+  protected expressionIssue(field: ExpressionFieldKind, index?: number): ExpressionIssue | null {
+    return this.expressionIssues()[this.expressionKey(field, index)] ?? null;
+  }
+
+  /** Message plus zero-based position, as displayed under the field. */
+  protected expressionIssueText(issue: ExpressionIssue): string {
+    return issue.position === undefined
+      ? issue.message
+      : `${issue.message} (position ${issue.position})`;
+  }
+
+  /**
+   * Schedules `validateExpression` for one field, 300 ms after this keystroke.
+   * `optional` marks a field where empty text means "no expression at all" (the
+   * `countIf` predicate), so clearing it removes the message rather than
+   * reporting the empty-source rejection.
+   */
+  private checkExpressionLater(
+    field: ExpressionFieldKind,
+    index: number | undefined,
+    source: string,
+    optional = false,
+  ): void {
+    const key = this.expressionKey(field, index);
+    const pending = this.expressionTimers.get(key);
+    if (pending !== undefined) clearTimeout(pending);
+    this.expressionTimers.set(
+      key,
+      setTimeout(() => {
+        this.expressionTimers.delete(key);
+        this.setExpressionIssue(key, this.issueFor(source, optional));
+      }, EXPRESSION_DEBOUNCE_MS),
+    );
+  }
+
+  /** `validateExpression` is documented as throwing for no input at all. */
+  private issueFor(source: string, optional: boolean): ExpressionIssue | null {
+    if (optional && !source.trim()) return null;
+    let result: ReturnType<typeof validateExpression>;
+    try {
+      result = validateExpression(source);
+    } catch (error) {
+      return { message: error instanceof Error ? error.message : String(error) };
+    }
+    if (result.ok) return null;
+    return result.position === undefined
+      ? { message: result.error }
+      : { message: result.error, position: result.position };
+  }
+
+  private setExpressionIssue(key: string, issue: ExpressionIssue | null): void {
+    this.expressionIssues.update(current => {
+      if (issue === null) {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: issue };
+    });
+  }
+
+  private cancelExpressionTimers(): void {
+    for (const timer of this.expressionTimers.values()) clearTimeout(timer);
+    this.expressionTimers.clear();
+  }
+
+  /**
+   * Drops every pending check and message. Called on a selection change and
+   * whenever a row is added, removed or reordered, since the messages are keyed
+   * by row index and would otherwise point at the wrong expression.
+   */
+  private resetExpressionValidation(): void {
+    this.cancelExpressionTimers();
+    if (Object.keys(this.expressionIssues()).length) this.expressionIssues.set({});
+  }
+
+  // ── http-request ──
+
+  /** Pagination mode with `none` as the default for an unconfigured node. */
+  protected readonly paginationMode = computed<PaginationConfig['mode']>(
+    () => this.httpRequestData()?.pagination?.mode ?? 'none',
+  );
+
+  /** Mode-specific pagination views, so each control reads a narrowed config. */
+  protected readonly cursorPagination = computed(() => {
+    const pagination = this.httpRequestData()?.pagination;
+    return pagination?.mode === 'cursor' ? pagination : null;
+  });
+  protected readonly pagePagination = computed(() => {
+    const pagination = this.httpRequestData()?.pagination;
+    return pagination?.mode === 'page' ? pagination : null;
+  });
+  protected readonly offsetPagination = computed(() => {
+    const pagination = this.httpRequestData()?.pagination;
+    return pagination?.mode === 'offset' ? pagination : null;
+  });
+  protected readonly linkHeaderPagination = computed(() => {
+    const pagination = this.httpRequestData()?.pagination;
+    return pagination?.mode === 'link-header' ? pagination : null;
+  });
+
+  /** Switching mode replaces the config: each mode has its own required keys. */
+  protected onPaginationModeChange(mode: PaginationConfig['mode']): void {
+    if (!this.httpRequestData()) return;
+    this.patchData({ pagination: defaultPagination(mode) });
+  }
+
+  protected patchPagination(patch: Record<string, unknown>): void {
+    const pagination = this.httpRequestData()?.pagination;
+    if (!pagination || pagination.mode === 'none') return;
+    this.patchData({ pagination: { ...pagination, ...patch } as PaginationConfig });
+  }
+
+  protected onSuccessCodesInput(event: Event): void {
+    const codes = this.parseNumberCsv(this.inputValue(event));
+    this.patchData({ successCodes: codes.length ? codes : undefined });
+  }
+
+  /** Query-string and header pairs share one editor shape. */
+  private httpPairs(field: 'query' | 'headers'): { key: string; value: string }[] {
+    return [...(this.httpRequestData()?.[field] ?? [])];
+  }
+
+  protected addHttpPair(field: 'query' | 'headers'): void {
+    if (!this.httpRequestData()) return;
+    this.patchData({ [field]: [...this.httpPairs(field), { key: '', value: '' }] });
+  }
+
+  protected updateHttpPair(
+    field: 'query' | 'headers',
+    index: number,
+    patch: Partial<{ key: string; value: string }>,
+  ): void {
+    const pairs = this.httpPairs(field);
+    if (!pairs[index]) return;
+    pairs[index] = { ...pairs[index], ...patch };
+    this.patchData({ [field]: pairs });
+  }
+
+  protected removeHttpPair(field: 'query' | 'headers', index: number): void {
+    const pairs = this.httpPairs(field);
+    if (!pairs[index]) return;
+    pairs.splice(index, 1);
+    this.patchData({ [field]: pairs });
+  }
+
+  // ── sql-query ──
+
+  protected addSqlParam(): void {
+    const data = this.sqlQueryData();
+    if (!data) return;
+    this.patchData({ params: [...(data.params ?? []), { name: '', expression: '' }] });
+  }
+
+  protected updateSqlParam(index: number, patch: Partial<{ name: string; expression: string }>): void {
+    const params = [...(this.sqlQueryData()?.params ?? [])];
+    if (!params[index]) return;
+    params[index] = { ...params[index], ...patch };
+    this.patchData({ params });
+  }
+
+  /** Stores the typed text, then schedules its validation. */
+  protected onSqlParamExpressionInput(index: number, event: Event): void {
+    const text = this.inputValue(event);
+    this.updateSqlParam(index, { expression: text });
+    this.checkExpressionLater('sql-param', index, text);
+  }
+
+  protected removeSqlParam(index: number): void {
+    const params = [...(this.sqlQueryData()?.params ?? [])];
+    if (!params[index]) return;
+    params.splice(index, 1);
+    this.patchData({ params });
+    this.resetExpressionValidation();
+  }
+
+  // ── transform ──
+
+  /**
+   * Mapped fields, always an array. An older imported spec can omit `fields`
+   * even though the type declares it, and `@for` over `undefined` throws.
+   */
+  protected readonly transformFields = computed<TransformField[]>(
+    () => this.transformData()?.fields ?? [],
+  );
+
+  protected addTransformField(): void {
+    const data = this.transformData();
+    if (!data) return;
+    this.patchData({ fields: [...(data.fields ?? []), { target: '', expression: '' }] });
+  }
+
+  protected updateTransformField(index: number, patch: Partial<TransformField>): void {
+    const fields = [...(this.transformData()?.fields ?? [])];
+    if (!fields[index]) return;
+    fields[index] = { ...fields[index], ...patch };
+    this.patchData({ fields });
+  }
+
+  /** Stores the typed text, then schedules its validation. */
+  protected onTransformExpressionInput(index: number, event: Event): void {
+    const text = this.inputValue(event);
+    this.updateTransformField(index, { expression: text });
+    this.checkExpressionLater('transform', index, text);
+  }
+
+  protected removeTransformField(index: number): void {
+    const fields = [...(this.transformData()?.fields ?? [])];
+    if (!fields[index]) return;
+    fields.splice(index, 1);
+    this.patchData({ fields });
+    this.resetExpressionValidation();
+  }
+
+  protected moveTransformField(index: number, delta: number): void {
+    const fields = [...(this.transformData()?.fields ?? [])];
+    const target = index + delta;
+    if (!fields[index] || target < 0 || target >= fields.length) return;
+    [fields[index], fields[target]] = [fields[target], fields[index]];
+    this.patchData({ fields });
+    this.resetExpressionValidation();
+  }
+
+  /** A cast of `''` means "leave the evaluated value as it is". */
+  protected onTransformCast(index: number, cast: string): void {
+    this.updateTransformField(index, { cast: (cast || undefined) as TransformField['cast'] });
+  }
+
+  /** A default may be stored as a number or boolean by an imported spec. */
+  protected transformDefaultText(field: TransformField): string {
+    return field.default === undefined || field.default === null ? '' : String(field.default);
+  }
+
+  /** The literal default is typed as text and stored as text, or cleared. */
+  protected onTransformDefault(index: number, event: Event): void {
+    const text = this.inputValue(event);
+    this.updateTransformField(index, { default: text.length ? text : undefined });
+  }
+
+  /**
+   * Lookup tables are a nested map, so they are edited as JSON. The draft keeps
+   * the typed text while it is unparseable, which is why it lives in a signal
+   * instead of being derived from the node data.
+   */
+  protected readonly lookupsDraft = signal<string | null>(null);
+  protected readonly lookupsError = signal<string | null>(null);
+
+  /** Drop the draft whenever the selection changes. */
+  protected readonly lookupsResetter = effect(() => {
+    this.node();
+    untracked(() => {
+      this.lookupsDraft.set(null);
+      this.lookupsError.set(null);
+    });
+  });
+
+  protected lookupsText(): string {
+    const draft = this.lookupsDraft();
+    if (draft !== null) return draft;
+    const lookups = this.transformData()?.lookups;
+    return lookups && Object.keys(lookups).length ? JSON.stringify(lookups, null, 2) : '';
+  }
+
+  protected onLookupsInput(event: Event): void {
+    const text = this.inputValue(event);
+    this.lookupsDraft.set(text);
+    if (!text.trim()) {
+      this.lookupsError.set(null);
+      this.patchData({ lookups: undefined });
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        this.lookupsError.set('Expected a JSON object of named tables.');
+        return;
+      }
+      this.lookupsError.set(null);
+      this.patchData({ lookups: parsed as TransformNodeData['lookups'] });
+    } catch (error) {
+      this.lookupsError.set(error instanceof Error ? error.message : 'Invalid JSON.');
+    }
+  }
+
+  // ── aggregate ──
+
+  protected readonly groupSpec = computed<GroupSpec | null>(() => {
+    const data = this.aggregateData();
+    return data?.op === 'group' ? (data.group ?? { by: [], metrics: [] }) : null;
+  });
+  protected readonly joinSpec = computed<JoinSpec | null>(() => {
+    const data = this.aggregateData();
+    if (data?.op !== 'join') return null;
+    return (
+      data.join ?? { leftPath: '', rightPath: '', leftKey: '', rightKey: '', type: 'inner' }
+    );
+  });
+  protected readonly pivotSpec = computed<PivotSpec | null>(() => {
+    const data = this.aggregateData();
+    if (data?.op !== 'pivot') return null;
+    return data.pivot ?? { keyFields: [], valueField: '' };
+  });
+
+  /** Selecting an operation materialises that operation's spec if it is absent. */
+  protected onAggregateOpChange(op: AggregateNodeData['op']): void {
+    const data = this.aggregateData();
+    if (!data) return;
+    const patch: Record<string, unknown> = { op };
+    if (op === 'group' && !data.group) patch['group'] = { by: [], metrics: [] };
+    if (op === 'join' && !data.join) {
+      patch['join'] = { leftPath: '', rightPath: '', leftKey: '', rightKey: '', type: 'inner' };
+    }
+    if (op === 'pivot' && !data.pivot) patch['pivot'] = { keyFields: [], valueField: '' };
+    this.patchData(patch);
+  }
+
+  protected patchGroup(patch: Partial<GroupSpec>): void {
+    const group = this.groupSpec();
+    if (!group) return;
+    this.patchData({ group: { ...group, ...patch } });
+  }
+
+  protected patchJoin(patch: Partial<JoinSpec>): void {
+    const join = this.joinSpec();
+    if (!join) return;
+    this.patchData({ join: { ...join, ...patch } });
+  }
+
+  protected patchPivot(patch: Partial<PivotSpec>): void {
+    const pivot = this.pivotSpec();
+    if (!pivot) return;
+    this.patchData({ pivot: { ...pivot, ...patch } });
+  }
+
+  protected onGroupByInput(event: Event): void {
+    this.patchGroup({ by: this.parseCsv(this.inputValue(event)) });
+  }
+
+  protected onPivotKeyFieldsInput(event: Event): void {
+    this.patchPivot({ keyFields: this.parseCsv(this.inputValue(event)) });
+  }
+
+  protected onPivotColumnsInput(event: Event): void {
+    const columns = this.parseCsv(this.inputValue(event));
+    this.patchPivot({ columns: columns.length ? columns : undefined });
+  }
+
+  /** A numeric-looking fill value is stored as a number, anything else as text. */
+  protected onPivotFillValueInput(event: Event): void {
+    const text = this.inputValue(event).trim();
+    if (!text) {
+      this.patchPivot({ fillValue: undefined });
+      return;
+    }
+    const numeric = Number(text);
+    this.patchPivot({ fillValue: Number.isFinite(numeric) ? numeric : text });
+  }
+
+  protected pivotFillValueText(pivot: PivotSpec): string {
+    return pivot.fillValue === undefined || pivot.fillValue === null ? '' : String(pivot.fillValue);
+  }
+
+  /** Group metrics, always an array (see `transformFields`). */
+  protected readonly groupMetrics = computed<AggregateMetric[]>(
+    () => this.groupSpec()?.metrics ?? [],
+  );
+
+  protected addMetric(): void {
+    const group = this.groupSpec();
+    if (!group) return;
+    const index = (group.metrics ?? []).length + 1;
+    this.patchGroup({ metrics: [...(group.metrics ?? []), { name: `metric${index}`, fn: 'count' }] });
+  }
+
+  protected updateMetric(index: number, patch: Partial<AggregateMetric>): void {
+    const group = this.groupSpec();
+    if (!group) return;
+    const metrics = [...(group.metrics ?? [])];
+    if (!metrics[index]) return;
+    metrics[index] = { ...metrics[index], ...patch };
+    this.patchGroup({ metrics });
+  }
+
+  /**
+   * Stores the typed predicate, then schedules its validation. The predicate is
+   * optional, so an empty field carries no rejection.
+   */
+  protected onMetricWhereInput(index: number, event: Event): void {
+    const text = this.inputValue(event);
+    this.updateMetric(index, { where: text });
+    this.checkExpressionLater('metric', index, text, true);
+  }
+
+  protected removeMetric(index: number): void {
+    const group = this.groupSpec();
+    if (!group) return;
+    const metrics = [...(group.metrics ?? [])];
+    if (!metrics[index]) return;
+    metrics.splice(index, 1);
+    this.patchGroup({ metrics });
+    this.resetExpressionValidation();
+  }
+
+  // ── assert ──
+
+  /** Assertions, always an array (see `transformFields`). */
+  protected readonly assertions = computed<Assertion[]>(
+    () => this.assertData()?.assertions ?? [],
+  );
+
+  protected addAssertion(): void {
+    const data = this.assertData();
+    if (!data) return;
+    const index = (data.assertions ?? []).length + 1;
+    this.patchData({
+      assertions: [
+        ...(data.assertions ?? []),
+        { name: `check${index}`, expression: '', severity: 'error' } satisfies Assertion,
+      ],
+    });
+  }
+
+  protected updateAssertion(index: number, patch: Partial<Assertion>): void {
+    const assertions = [...(this.assertData()?.assertions ?? [])];
+    if (!assertions[index]) return;
+    assertions[index] = { ...assertions[index], ...patch };
+    this.patchData({ assertions });
+  }
+
+  /** Stores the typed text, then schedules its validation. */
+  protected onAssertionExpressionInput(index: number, event: Event): void {
+    const text = this.inputValue(event);
+    this.updateAssertion(index, { expression: text });
+    this.checkExpressionLater('assertion', index, text);
+  }
+
+  protected removeAssertion(index: number): void {
+    const assertions = [...(this.assertData()?.assertions ?? [])];
+    if (!assertions[index]) return;
+    assertions.splice(index, 1);
+    this.patchData({ assertions });
+    this.resetExpressionValidation();
+  }
+
+  // ── state-set ──
+
+  /** Stores the typed text, then schedules its validation. */
+  protected onStateValueExpressionInput(event: Event): void {
+    const text = this.inputValue(event);
+    this.patchData({ valueExpression: text });
+    this.checkExpressionLater('state-value', undefined, text);
   }
 }

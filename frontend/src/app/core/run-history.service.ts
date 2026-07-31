@@ -11,11 +11,15 @@ import {
   type WorkflowGraph,
 } from '@phorma/engine';
 
+import type { RunRetention } from './data-path-settings';
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { ModelPricingService } from './model-pricing.service';
 
 /** How many finished runs each workflow keeps locally; oldest are pruned. */
-const RUN_HISTORY_LIMIT = 50;
+export const RUN_HISTORY_LIMIT = 50;
+
+/** Retention applied when a run carries no workflow-level override. */
+const DEFAULT_RETENTION: RunRetention = { keepRuns: RUN_HISTORY_LIMIT, maxAgeMs: null };
 
 /**
  * Local run history (EPIC 1) — persists every LOCAL run to IndexedDB as a
@@ -38,6 +42,7 @@ export class RunHistoryService {
   private recorder: RunRecorder | null = null;
   private activeRunId: string | null = null;
   private activeWorkflowId: string | null = null;
+  private activeRetention: RunRetention = DEFAULT_RETENTION;
 
   /** Local run records, newest first (refreshed after every persist). */
   readonly localRuns = signal<RunRecord[]>([]);
@@ -65,9 +70,12 @@ export class RunHistoryService {
     workflowName: string;
     graph: WorkflowGraph;
     subWorkflows?: Record<string, EmbeddedWorkflow>;
+    /** `WorkflowSettings.retention` resolved by the caller. Absent = host default. */
+    retention?: RunRetention;
   }): void {
+    const { retention, ...recorderMeta } = meta;
     this.recorder = createRunRecorder({
-      ...meta,
+      ...recorderMeta,
       source: 'manual',
       environment: 'local',
       // BYO providers without usage accounting (OpenAI, Anthropic, Bedrock,
@@ -76,6 +84,7 @@ export class RunHistoryService {
     });
     this.activeRunId = meta.runId;
     this.activeWorkflowId = meta.workflowId;
+    this.activeRetention = retention ?? DEFAULT_RETENTION;
   }
 
   /** Feeds one engine event into the active recorder (no-op when idle). */
@@ -96,13 +105,15 @@ export class RunHistoryService {
     if (recorder.settled) {
       this.recorder = null;
       this.activeRunId = null;
-      void this.persist(recorder, this.activeWorkflowId);
+      const retention = this.activeRetention;
+      void this.persist(recorder, this.activeWorkflowId, retention);
       // Usage ledger (EPIC 2): one compact row per settled run, separate
       // from run records so cost analytics survive the history prune.
       void this.storage
         .saveUsage(usageLedgerEntryOf(recorder.summary()))
         .catch(() => undefined);
       this.activeWorkflowId = null;
+      this.activeRetention = DEFAULT_RETENTION;
     }
   }
 
@@ -134,11 +145,15 @@ export class RunHistoryService {
     await this.refresh();
   }
 
-  private async persist(recorder: RunRecorder, pruneKey?: string | null): Promise<void> {
+  private async persist(
+    recorder: RunRecorder,
+    pruneKey?: string | null,
+    retention: RunRetention = DEFAULT_RETENTION,
+  ): Promise<void> {
     try {
       await this.storage.saveRun(recorder.snapshot());
       if (pruneKey !== undefined) {
-        await this.storage.pruneRuns(pruneKey, RUN_HISTORY_LIMIT);
+        await this.storage.pruneRuns(pruneKey, retention.keepRuns, retention.maxAgeMs);
       }
       await this.refresh();
     } catch {

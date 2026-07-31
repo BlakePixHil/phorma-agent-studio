@@ -9,6 +9,10 @@
  *
  * HTTP surface (all under /agents/workflow-agent/{instance}):
  *   POST /workflow   — upload/replace the workflow spec (studio "Push")
+ *   POST /connections — replace the connection metadata inventory (names,
+ *                      types, auth modes — never a secret value)
+ *   GET  /connections — this worker's connection inventory as
+ *                      `ConnectionSummary[]` (name, type, secretsPresent)
  *   POST /trigger    — start a run { input?: string, source?: 'eval' } → { runId }
  *   POST /events     — deliver an external event to a suspended Wait-for-Event
  *                      node: { correlationKey, payload? } → { ok, delivered }.
@@ -53,11 +57,46 @@ import {
 } from './portal-registry';
 import { mintPortalToken, type PortalTokenRecord } from './portal-auth';
 import { WORKER_BUILD } from './build-info';
+// The SSRF guard is shared with the data path (`createWorkerDataFetcher`), so
+// hosted tool egress and hosted data egress can never drift apart.
+import {
+  WORKER_HOST_LABEL,
+  WorkerSqlHost,
+  assertPublicHttpUrl,
+  createWorkerDataFetcher,
+} from './data-host';
+import { WorkerConnectionStore, connectionMetadataFromPush } from './connections';
+// Decisions about a pushed spec (retention bounds, notification targeting) live
+// in one dependency-free module; this file owns the effects they describe.
+import {
+  NOTIFY_DETAIL_CHARS,
+  NOTIFY_MAX_ATTEMPTS,
+  NOTIFY_TIMEOUT_MS,
+  dataPathSettings,
+  notificationDetail,
+  notificationEndpoint,
+  notificationTriggerFor,
+  notificationWanted,
+  resolveRunRetention,
+  type NotifyTrigger,
+  type RunRetention,
+  type WorkflowNotificationPolicy,
+} from './run-wiring';
+import {
+  DurableFixtureStore,
+  DurableWorkflowStateStore,
+  ensureWorkflowStateTable,
+  type DurableSqlExecutor,
+} from './workflow-state';
 
 import {
+  CLOUDFLARE_CAPABILITIES,
+  DEFAULT_MAX_RESPONSE_BYTES,
   FetchModelClient,
   HttpMcpClient,
+  applyConnectionAuth,
   buildHttpToolRequest,
+  createRedactor,
   httpToolDefinition,
   performWebSearch,
   sanitizeToolName,
@@ -72,13 +111,20 @@ import {
   resolveResponderNodeId,
   suggestPortalSlug,
   trimPortalHistory,
+  validateAgainstCapabilities,
   validatePortal,
   PORTAL_DEFAULT_RATE_LIMIT_PER_MIN,
   type PortalTriggerData,
   type PortalTurn,
   type PortalValidation,
+  // Aliased: `Connection` is already the partyserver WebSocket type in here.
+  type Connection as DataConnection,
+  type DataFetcher,
+  type DataRequest,
   type JournalEntry,
   type ModelProviderId,
+  type Redactor,
+  type ResolvedConnection,
   type ResolvedTool,
   type RunEvent,
   type RunHandle,
@@ -128,6 +174,15 @@ export interface Env extends TenantEnv, PortalRegistryEnv {
   BEDROCK_REGION?: string;
   /** Remote Ollama/OpenAI-compatible server, if you host one. */
   OLLAMA_BASE_URL?: string;
+  /**
+   * Connection secrets (Requirement 3.5). One variable per
+   * `Connection.secretKeys` entry, named by the engine's
+   * `workerSecretName(connectionId, secretKey)` — always `CONN_` prefixed,
+   * always `^[A-Z][A-Z0-9_]*$` — and set through `CloudService.putWorkerSecret`
+   * (`wrangler secret put`, value on stdin). `WorkerConnectionStore` is the only
+   * reader; nothing else in the worker may touch these.
+   */
+  [connectionSecret: `CONN_${string}`]: string | undefined;
 }
 
 /** Cumulative usage for one run (summed across node-usage events). */
@@ -136,6 +191,8 @@ interface RunUsage {
   outputTokens: number;
   costUsd: number;
 }
+
+
 
 interface WorkflowAgentState {
   spec: WorkflowSpec | null;
@@ -157,6 +214,14 @@ interface WorkflowAgentState {
    * effects) until execution reaches the first unfinished node.
    */
   activeRun?: { runId: string; input: string; startedAt: number } | null;
+  /**
+   * Connection METADATA delivered by the dedicated push route (Requirement 3.6):
+   * names, types and auth modes, never a secret value. `WorkerConnectionStore`
+   * pairs each entry with the `CONN_*` worker secrets at resolve time; a
+   * connection that was never pushed simply does not exist on this worker
+   * (Requirement 3.11).
+   */
+  connections?: DataConnection[] | null;
   /**
    * Set ONLY on session instances (`{workflowId}#s{sessionId}`), which serve
    * one visitor conversation on a published portal. Its presence is what makes
@@ -280,6 +345,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // SEPARATE from the runs table so cost analytics survive run-history
     // pruning. `usage` is the RunRecordSummary.usage JSON (totals + per-node
     // and per-model rollups). Works hosted AND BYO (no D1 needed).
+    // Durable workflow state + fixtures (P1-8 / P1-13): one table serving
+    // `RunOptions.state` and, under the `fx:` namespace, `RunOptions.fixtures`.
+    // Deliberately separate from `runs`/`run_events`, so run-history pruning
+    // and the run-retention limits never touch a workflow's state or fixtures.
+    ensureWorkflowStateTable(this.stateSql);
     this.sql`
       CREATE TABLE IF NOT EXISTS usage_ledger (
         run_id TEXT PRIMARY KEY,
@@ -292,6 +362,117 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         usage TEXT NOT NULL
       )
     `;
+  }
+
+  /**
+   * `this.sql` as a plain value. The state store holds the tagged executor
+   * rather than the Agent, which keeps it testable against any SQLite handle.
+   */
+  private readonly stateSql: DurableSqlExecutor = <T>(
+    strings: TemplateStringsArray,
+    ...values: (string | number | boolean | null)[]
+  ): T[] => this.sql<T>(strings, ...values);
+
+  private stateStore: DurableWorkflowStateStore | null = null;
+  /** Shared outbound HTTP for data nodes and workflow notifications (18.5). */
+  private dataFetcher: DataFetcher | null = null;
+  /** Shared SQL host: `postgres` and `mysql` only (18.5). */
+  private sqlHost: WorkerSqlHost | null = null;
+  /**
+   * Invalid retention settings and rejected redaction rules seen on this
+   * instance, surfaced on `GET /status` (Requirements 15.13, 15.16).
+   */
+  private readonly settingsIssues: string[] = [];
+
+  /**
+   * `RunOptions.state` for runs in this instance: durable per-workflow state in
+   * the DO's `workflow_state` table (Requirements 12.1, 18.5).
+   */
+  private workflowStateHost(): DurableWorkflowStateStore {
+    this.ensureTables();
+    this.stateStore ??= new DurableWorkflowStateStore({ sql: this.stateSql });
+    return this.stateStore;
+  }
+
+  /**
+   * `RunOptions.fixtures`: the `fx:` namespace of the same table, scoped to the
+   * workflow being run (Requirement 16.10). Not cached, because the instance's
+   * spec — and therefore its workflow id — can be replaced by a push.
+   */
+  private fixtureHost(workflowId: string): DurableFixtureStore {
+    return new DurableFixtureStore(this.workflowStateHost(), workflowId);
+  }
+
+  /**
+   * `RunOptions.dataFetch` for data nodes and for workflow-level notifications
+   * (Requirement 18.5). Egress always goes through `assertPublicHttpUrl`, and
+   * the response-byte and request-timeout caps live in the fetcher, so no caller
+   * can opt out of either.
+   */
+  private dataFetchHost(): DataFetcher {
+    this.dataFetcher ??= createWorkerDataFetcher();
+    return this.dataFetcher;
+  }
+
+  /**
+   * `RunOptions.sql`: `supports` answers true for `postgres` and `mysql` only,
+   * so a `mssql`/`sqlite` node fails with a clear message before a statement is
+   * submitted (Requirements 18.5, 18.9, 18.10). Driver wire implementations are
+   * injected, and none is bound on this worker yet.
+   */
+  private sqlQueryHost(): WorkerSqlHost {
+    this.sqlHost ??= new WorkerSqlHost();
+    return this.sqlHost;
+  }
+
+  /** Pushed connection metadata as `WorkerConnectionStore` wants it. */
+  private connectionMetadata(): Map<string, DataConnection> {
+    return connectionMetadataFromPush(this.state.connections ?? []);
+  }
+
+  /**
+   * `RunOptions.connections`: metadata from the push route paired with the
+   * `CONN_*` worker secrets, with OAuth tokens cached in the same
+   * `workflow_state` table under `oauth:{connectionId}` (Requirements 3.5-3.7,
+   * 3.10, 3.11). Built per run, because a push can replace both the metadata and
+   * the workflow id that scopes the token cache.
+   */
+  private connectionHost(workflowId: string): WorkerConnectionStore {
+    return new WorkerConnectionStore(
+      this.env as unknown as Readonly<Record<string, unknown>>,
+      this.connectionMetadata(),
+      this.workflowStateHost(),
+      { workflowId },
+    );
+  }
+
+  /**
+   * Records an invalid retention setting or a rejected redaction rule
+   * (Requirements 15.13, 15.16). Reported rather than fatal: the run proceeds
+   * under the host defaults, and the operator sees the reason in `wrangler tail`
+   * and on `GET /status`.
+   */
+  private reportSettingsIssue(message: string): void {
+    if (this.settingsIssues.includes(message)) return;
+    this.settingsIssues.push(message);
+    if (this.settingsIssues.length > 20) this.settingsIssues.shift();
+    console.error(`[phorma] ${message}`);
+  }
+
+  /**
+   * Effective run-history retention (Requirements 15.12, 15.13).
+   *
+   * `keepRuns` and `maxAgeDays` override the host default of
+   * {@link WorkflowAgent.RUN_HISTORY_LIMIT} only while they are positive
+   * integers inside their supported ranges; anything else is ignored, reported,
+   * and replaced by the default.
+   */
+  private runRetention(): RunRetention {
+    return resolveRunRetention(
+      dataPathSettings(this.state.spec).retention,
+      WorkflowAgent.RUN_HISTORY_LIMIT,
+      message => this.reportSettingsIssue(`${WORKER_HOST_LABEL}: ${message}`),
+    );
   }
 
   private handle: RunHandle | null = null;
@@ -325,7 +506,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   /** Public events of the current portal run, replayed to a late subscriber. */
   private portalReplay: PortalEvent[] = [];
 
-  /** How many finished runs each workflow keeps; oldest are pruned. */
+  /**
+   * Host default for how many finished runs each workflow keeps; oldest are
+   * pruned. `WorkflowSettings.retention.keepRuns` overrides it while it is a
+   * valid setting (Requirements 15.12, 15.13).
+   */
   private static readonly RUN_HISTORY_LIMIT = 50;
   /** Usage-ledger retention: rows older than this are pruned at settle. */
   private static readonly USAGE_LEDGER_MAX_AGE_MS = 366 * 24 * 60 * 60 * 1000;
@@ -350,6 +535,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       if (!spec || spec.version !== 1 || !Array.isArray(spec.graph?.nodes)) {
         return json({ error: 'Body must be a version-1 WorkflowSpec.' }, 400);
       }
+      // Deploy-time capability gate (Requirements 17.12, 17.15): the SAME
+      // validator and the SAME connection inventory the studio checks at push
+      // time (Requirement 17.11, `CloudService.pushWorkflow`), run again here so
+      // a direct/older/misbehaving client can never deploy a spec this worker
+      // cannot run. An error finding aborts before `setState`/`rescheduleCron`
+      // run, so a previously deployed workflow is left completely unchanged.
+      // Warning-only findings never block the deployment.
+      const connections = await this.connectionHost(spec.id).list();
+      const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, connections);
+      if (findings.some(finding => finding.severity === 'error')) {
+        return json({ error: 'Workflow is not deployable to this worker.', findings }, 400);
+      }
       // Re-arm the schedule-trigger cron (if any) for the new spec.
       await this.rescheduleCron(spec);
       this.setState({
@@ -360,6 +557,27 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         ownerId: this.state.ownerId ?? auth.userId,
       });
       return json({ ok: true, name: spec.name });
+    }
+
+    // The dedicated connection-metadata push route (Requirement 3.6). Carries
+    // NAMES only: `connectionMetadataFromPush` drops anything value-shaped, and
+    // the secrets themselves arrive separately as `CONN_*` worker secrets.
+    if (request.method === 'POST' && path.endsWith('/connections')) {
+      const body = (await request.json().catch(() => ({}))) as unknown;
+      const connections = [...connectionMetadataFromPush(body).values()];
+      this.setState({ ...this.state, connections });
+      return json({ ok: true, connections: connections.map(connection => connection.id) });
+    }
+
+    // Read-back of this worker's connection inventory: names, types and how
+    // many of each connection's declared secrets are actually set as `CONN_*`
+    // worker secrets — never a value. Consulted by `CloudService.pushWorkflow`
+    // (Requirement 17.11) to run the Capability_Validator against the SAME
+    // inventory `WorkerConnectionStore` will resolve against at run time.
+    if (request.method === 'GET' && path.endsWith('/connections')) {
+      const workflowId = this.state.spec?.id ?? '';
+      const connections = await this.connectionHost(workflowId).list();
+      return json({ connections });
     }
 
     if (request.method === 'POST' && path.endsWith('/trigger')) {
@@ -452,6 +670,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         monthUsage: this.currentMonthUsage(),
         /** Correlation keys the current run is suspended on. */
         pendingWaits: [...this.waits.keys()],
+        /** Connection ids this worker holds metadata for (never a secret). */
+        connections: (this.state.connections ?? []).map(connection => connection.id),
+        /**
+         * Invalid retention settings, rejected redaction rules and undelivered
+         * workflow notifications (Requirements 13.7, 15.13, 15.16).
+         */
+        settingsIssues: [...this.settingsIssues],
       });
     }
 
@@ -738,6 +963,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       graph: structuredClone(spec.graph),
       subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
     });
+    // Redaction (P1-12). Built per run from the workflow's retention settings and
+    // seeded further at run time with every resolved connection secret. It sits
+    // in FRONT of the recorder — which is what clips a payload at 64 KB — so a
+    // secret can never be persisted, not even inside a clipped fragment
+    // (Requirement 15.10). Rejected rules are reported, never fatal (15.16).
+    const retention = dataPathSettings(spec).retention;
+    const redactor = createRedactor({
+      rules: Array.isArray(retention?.redact) ? retention.redact : [],
+      noPersistNodeIds: Array.isArray(retention?.noPersistNodeIds) ? retention.noPersistNodeIds : [],
+    });
+    for (const ruleError of redactor.ruleErrors) this.reportSettingsIssue(ruleError);
+
     // Keep the existing graph column, but store a versioned portable envelope.
     // Old rows containing a raw graph remain readable through decodeRunSnapshot.
     const recordGraphJson = encodeRunSnapshot(spec.graph, spec.subWorkflows);
@@ -812,11 +1049,27 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       return envKey ? ((this.env[envKey] as string | undefined) ?? null) : null;
     });
 
+    // Deterministic data path (P1). Every capability the data nodes need is
+    // injected here and nowhere else, so the engine stays dependency-free and a
+    // node that needs something this host cannot supply fails with a message
+    // naming the host (Requirements 18.1, 18.5).
+    const workflowId = spec.id ?? '';
+    const connections = this.connectionHost(workflowId);
+    const dataFetch = this.dataFetchHost();
+
     const handle = startRun({
       runId,
       graph,
       input,
       source: recordedSource,
+      workflowId,
+      connections,
+      dataFetch,
+      sql: this.sqlQueryHost(),
+      state: this.workflowStateHost(),
+      fixtures: this.fixtureHost(workflowId),
+      redact: value => redactor.scrub(value),
+      capabilities: CLOUDFLARE_CAPABILITIES,
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows. Embedded graphs share the
       // parent run's execution counter, so they must participate in the scan.
@@ -854,7 +1107,9 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
           runUsage.outputTokens += event.usage.outputTokens ?? 0;
           runUsage.costUsd += event.usage.costUsd ?? 0;
         }
-        recorder.record(event);
+        // Requirement 15.10: the persistence path — and only the persistence
+        // path — is redacted, ahead of the recorder's own 64 KB clipping.
+        recorder.record(redactor.event(event));
         // Crash tolerance: refresh the summary row at node boundaries so an
         // evicted-and-never-resumed run still shows up (as 'running') in
         // history. Event rows are flushed once, when the run settles.
@@ -865,7 +1120,12 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         ) {
           this.persistRunSummary(recorder.summary(), recordGraphJson);
         }
+        // Monitors (and the portal projection) keep full in-memory fidelity for
+        // the operator watching the run live.
         this.relay(event);
+        // Workflow-level notifications are HOST behaviour: the DO watches its
+        // own event stream (Requirements 13.7, 13.10).
+        this.notifyOnRunEvent(event, spec, { connections, dataFetch, redactor });
       },
       requestApproval: (_nodeId, _message, _payload, requestId) =>
         new Promise<boolean>(resolve => {
@@ -1024,6 +1284,128 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     return { graph, subWorkflows };
   }
 
+  // ── Workflow-level notifications (P1-10) ───────────────────────────────────
+
+  /**
+   * Watches the run's own event stream and delivers the workflow notification
+   * policy (Requirements 13.7, 13.10).
+   *
+   * This is deliberately HOST behaviour, not engine behaviour: the DO already
+   * sees every event, so a policy needs no node on the canvas. A policy that
+   * does not name the trigger for this event issues no outbound request at all.
+   *
+   * Fire-and-forget: the run's outcome is reported whether or not the delivery
+   * lands (Requirement 13.7).
+   */
+  private notifyOnRunEvent(
+    event: RunEvent,
+    spec: WorkflowSpec,
+    host: { connections: WorkerConnectionStore; dataFetch: DataFetcher; redactor: Redactor },
+  ): void {
+    const trigger = notificationTriggerFor(event);
+    if (trigger === undefined) return;
+    const policy = dataPathSettings(spec).notifications;
+    // Requirement 13.10: no policy, or a policy that does not subscribe to this
+    // trigger, means no notification and no request.
+    if (!notificationWanted(policy, trigger)) return;
+
+    // `waitUntil` keeps the invocation alive until the delivery settles: a
+    // terminal event fires as the run unwinds, and without it the isolate can be
+    // torn down mid-POST — the notification would silently vanish.
+    this.ctx.waitUntil(
+      this.deliverWorkflowNotification(trigger, event, policy, spec, host).catch(() => undefined),
+    );
+  }
+
+  /**
+   * One notification, at most {@link NOTIFY_MAX_ATTEMPTS} attempts, through the
+   * same `DataFetcher` the data nodes use — so the egress guard, the response cap
+   * and the per-attempt timeout are identical (Requirements 13.7, 18.5).
+   *
+   * The body carries run metadata and a redacted reason only: never a node
+   * output, never a resolved secret.
+   */
+  private async deliverWorkflowNotification(
+    trigger: NotifyTrigger,
+    event: RunEvent,
+    policy: WorkflowNotificationPolicy,
+    spec: WorkflowSpec,
+    host: { connections: WorkerConnectionStore; dataFetch: DataFetcher; redactor: Redactor },
+  ): Promise<void> {
+    const connectionId = policy.connectionId?.trim();
+    let conn: ResolvedConnection | undefined;
+    if (connectionId) {
+      try {
+        conn = await host.connections.resolve(connectionId);
+      } catch (error) {
+        // An unresolvable connection means no delivery, never a partial one.
+        this.reportSettingsIssue(
+          `Workflow notification for "${trigger}" was not delivered: ` +
+            `${host.redactor.scrub(messageOf(error))}`,
+        );
+        return;
+      }
+      // Requirement 15.2: registered before anything is emitted or persisted
+      // about this delivery.
+      host.redactor.addLiterals(Object.values(conn.secrets));
+    }
+
+    const to = (policy.to ?? '').trim();
+    const endpoint = notificationEndpoint(to, conn);
+    if (!endpoint) {
+      this.reportSettingsIssue(
+        `Workflow notification for "${trigger}" has no delivery target: set settings.notifications.to ` +
+          `to an https URL, or give the connection a notifyUrl or baseUrl.`,
+      );
+      return;
+    }
+
+    const body = JSON.stringify({
+      trigger,
+      runId: 'runId' in event ? event.runId : null,
+      workflowId: spec.id ?? null,
+      workflowName: spec.name,
+      environment: 'cloud',
+      // Recipient only when the endpoint is the provider, not the recipient.
+      to: to === endpoint ? undefined : to || undefined,
+      detail: host.redactor.scrub(notificationDetail(event)).slice(0, NOTIFY_DETAIL_CHARS),
+      at: Date.now(),
+    });
+
+    // Auth last, exactly as the engine's request builder orders it, so the
+    // connection always wins over the message's own headers.
+    const request: DataRequest = applyConnectionAuth(
+      {
+        url: endpoint,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        timeoutMs: NOTIFY_TIMEOUT_MS,
+        maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+      },
+      conn,
+    );
+
+    let detail = 'no attempt was made';
+    for (let attempt = 1; attempt <= NOTIFY_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await host.dataFetch(request);
+        if (response.status >= 200 && response.status <= 299) return;
+        detail = `HTTP ${response.status}`;
+      } catch (error) {
+        // A transport message can echo the target's own text, so it is scrubbed
+        // before it can reach `GET /status` or a log line.
+        detail = host.redactor.scrub(messageOf(error));
+      }
+      if (attempt < NOTIFY_MAX_ATTEMPTS) {
+        await new Promise<void>(resolve => setTimeout(resolve, 250 * attempt));
+      }
+    }
+    this.reportSettingsIssue(
+      `Workflow notification for "${trigger}" failed after ${NOTIFY_MAX_ATTEMPTS} attempts (${detail}).`,
+    );
+  }
+
   /** True when any graph sharing this run's execution budget contains ForEach. */
   private hasForEach(
     graph: WorkflowSpec['graph'],
@@ -1063,18 +1445,36 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
   }
 
-  /** Drops runs (and their events) beyond the retention limit, oldest first. */
+  /**
+   * Drops runs (and their events) beyond the workflow's retention bounds:
+   * everything past the `keepRuns` most recent, then everything older than
+   * `maxAgeDays` (Requirement 15.12). Both come from
+   * `WorkflowSettings.retention` when they are valid and from the host default
+   * of {@link WorkflowAgent.RUN_HISTORY_LIMIT} otherwise (Requirement 15.13).
+   *
+   * `workflow_state` — and with it the `fx:` fixtures — is a different table on
+   * purpose, so pruning history never touches a workflow's state or fixtures
+   * (Requirement 16.10).
+   */
   private pruneRunHistory(): void {
+    const { keepRuns, maxAgeMs } = this.runRetention();
     const doomed = [
       ...this.sql<{ run_id: string }>`
         SELECT run_id FROM runs
         ORDER BY started_at DESC
-        LIMIT -1 OFFSET ${WorkflowAgent.RUN_HISTORY_LIMIT}
+        LIMIT -1 OFFSET ${keepRuns}
       `,
     ];
-    for (const row of doomed) {
-      this.sql`DELETE FROM run_events WHERE run_id = ${row.run_id}`;
-      this.sql`DELETE FROM runs WHERE run_id = ${row.run_id}`;
+    if (maxAgeMs !== null) {
+      doomed.push(
+        ...this.sql<{ run_id: string }>`
+          SELECT run_id FROM runs WHERE started_at < ${Date.now() - maxAgeMs}
+        `,
+      );
+    }
+    for (const runId of new Set(doomed.map(row => row.run_id))) {
+      this.sql`DELETE FROM run_events WHERE run_id = ${runId}`;
+      this.sql`DELETE FROM runs WHERE run_id = ${runId}`;
     }
   }
 
@@ -1704,6 +2104,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   }
 }
 
+/** An error's message, without leaking a non-Error's internals. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -1785,50 +2190,6 @@ function renderFieldSummary(fields?: Record<string, string | number | boolean>):
 /** Hosted egress limits for user-defined tool calls. */
 const TOOL_RESPONSE_MAX_BYTES = 256 * 1024;
 const TOOL_TIMEOUT_MS = 30_000;
-
-/**
- * SSRF guard for hosted mode: blocks URLs that resolve to private, loopback,
- * link-local, or metadata address space by hostname shape. (Workers cannot
- * resolve DNS ahead of fetch, so this is a best-effort literal check — the
- * platform additionally blocks direct RFC1918 access from Workers.)
- */
-function assertPublicHttpUrl(raw: string): void {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(`Blocked tool URL (unparseable): ${raw.slice(0, 100)}`);
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`Blocked tool URL (protocol ${url.protocol}) — only http/https allowed.`);
-  }
-  const host = url.hostname.toLowerCase();
-  const blockedHosts = ['localhost', 'metadata.google.internal'];
-  if (blockedHosts.includes(host) || host.endsWith('.internal') || host.endsWith('.local')) {
-    throw new Error(`Blocked tool URL (internal host): ${host}`);
-  }
-  // Literal IPv4 checks: loopback, RFC1918, link-local/metadata, CGNAT.
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    const blocked =
-      a === 127 ||
-      a === 10 ||
-      a === 0 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254) ||
-      (a === 100 && b >= 64 && b <= 127);
-    if (blocked) throw new Error(`Blocked tool URL (private address): ${host}`);
-  }
-  // IPv6 loopback/link-local/unique-local literals.
-  if (host.includes(':')) {
-    const bare = host.replace(/^\[|\]$/g, '');
-    if (bare === '::1' || bare.startsWith('fe80') || bare.startsWith('fc') || bare.startsWith('fd')) {
-      throw new Error(`Blocked tool URL (private IPv6): ${host}`);
-    }
-  }
-}
 
 /** fetch with a timeout + response size cap (hosted tool egress). */
 async function guardedFetchText(

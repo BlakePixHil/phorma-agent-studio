@@ -37,7 +37,7 @@
   </div>
 
   <div class="phorma-palette__scroll">
-    @for (section of sections(); track section.category) {
+    @for (section of sections(); track section.key) {
       <section class="phorma-palette__section" [style.--section-color]="section.color">
         <header class="phorma-palette__heading">
           <span class="phorma-palette__dot" aria-hidden="true"></span>
@@ -61,7 +61,7 @@
           }
         </div>
 
-        @if (section.category === 'tool' && mcpPresets().length > 0) {
+        @if (section.showMcpPresets && mcpPresets().length > 0) {
           <div class="phorma-palette__subheading">MCP Servers</div>
           <div class="phorma-palette__grid">
             @for (preset of mcpPresets(); track preset.id) {

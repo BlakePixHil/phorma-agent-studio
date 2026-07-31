@@ -9,8 +9,16 @@
 
 import type {
   AgentNodeData,
+  AggregateNodeData,
+  AssertNodeData,
+  HttpRequestNodeData,
   McpToolData,
   NodeCategory,
+  NotifyNodeData,
+  SqlQueryNodeData,
+  StateGetNodeData,
+  StateSetNodeData,
+  TransformNodeData,
   WorkflowNode,
   WorkflowNodeData,
   WorkflowNodeKind,
@@ -31,6 +39,12 @@ export interface NodeCatalogEntry {
   kind: WorkflowNodeKind;
   /** Extra search terms for the palette filter. */
   keywords?: string[];
+  /**
+   * Palette sub-section this entry belongs to. Absent means the section named
+   * after its `category` (see `NODE_CATEGORY_SECTIONS`). Data nodes set `Data`
+   * so they group together while keeping the sky `flow` accent on canvas.
+   */
+  section?: string;
   /** Default display name for freshly dropped nodes. */
   defaultName: string;
   /** Port blueprint; ids are generated fresh per instance. */
@@ -65,6 +79,15 @@ const AGENT_PORTS: NodeCatalogEntry['ports'] = [
 ];
 
 const TOOL_PORTS: NodeCatalogEntry['ports'] = [{ name: 'Tool', role: 'tools' }];
+
+/** Palette sub-section holding the deterministic data nodes. */
+export const DATA_SECTION_LABEL = 'Data';
+
+/** The `In` → `Out` blueprint shared by the pure data nodes. */
+const DATA_IN_OUT: NodeCatalogEntry['ports'] = [
+  { name: 'In', role: 'message-in' },
+  { name: 'Out', role: 'message-out' },
+];
 
 export const NODE_CATALOG: NodeCatalogEntry[] = [
   // ── Agents ─────────────────────────────────────────────────────────────────
@@ -388,6 +411,145 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     defaultName: 'Error Handler',
     ports: [{ name: 'Error', role: 'message-out' }],
     defaultData: () => ({}),
+  },
+
+  // ── Data ───────────────────────────────────────────────────────────────────
+  // Deterministic steps executed by the graph walk, never chosen by an agent.
+  // They keep `category: 'flow'` (and its sky accent) but group under their own
+  // `Data` palette section, rendered between Flow and Tools.
+  {
+    id: 'data-http-request',
+    label: 'HTTP Request (step)',
+    description: 'Calls an HTTP API as a deterministic step — no agent involved.',
+    icon: 'ti ti-api',
+    category: 'flow',
+    kind: 'http-request',
+    section: DATA_SECTION_LABEL,
+    keywords: ['api', 'rest', 'fetch', 'sync', 'integration', 'request'],
+    defaultName: 'HTTP Request',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Response', role: 'message-out' },
+      { name: 'On error', role: 'message-out' },
+    ],
+    defaultData: (): HttpRequestNodeData => ({
+      method: 'GET',
+      url: '',
+      responseMode: 'json',
+      bodyMode: 'none',
+      pagination: { mode: 'none' },
+      retry: { maxAttempts: 3, backoffMs: 1000, idempotent: true, honorRetryAfter: true },
+      fixtures: 'off',
+    }),
+  },
+  {
+    id: 'data-sql-query',
+    label: 'SQL Query',
+    description: 'Runs a parameterised SQL statement against a connection and returns its rows.',
+    icon: 'ti ti-database-search',
+    category: 'flow',
+    kind: 'sql-query',
+    section: DATA_SECTION_LABEL,
+    keywords: ['sql', 'database', 'query', 'rows', 'postgres', 'mysql', 'select'],
+    defaultName: 'SQL Query',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Rows', role: 'message-out' },
+      { name: 'On error', role: 'message-out' },
+    ],
+    defaultData: (): SqlQueryNodeData => ({
+      statement: '',
+      params: [],
+      maxRows: 10_000,
+      resultKey: 'rows',
+      fixtures: 'off',
+    }),
+  },
+  {
+    id: 'data-transform',
+    label: 'Transform',
+    description: 'Maps, casts and renames payload fields with expressions.',
+    icon: 'ti ti-transform',
+    category: 'flow',
+    kind: 'transform',
+    section: DATA_SECTION_LABEL,
+    keywords: ['map', 'shape', 'field', 'rename', 'cast', 'project'],
+    defaultName: 'Transform',
+    ports: DATA_IN_OUT,
+    defaultData: (): TransformNodeData => ({ fields: [], mode: 'record' }),
+  },
+  {
+    id: 'data-aggregate',
+    label: 'Aggregate',
+    description: 'Groups, joins or pivots rows into summary records.',
+    icon: 'ti ti-chart-bar',
+    category: 'flow',
+    kind: 'aggregate',
+    section: DATA_SECTION_LABEL,
+    keywords: ['group', 'join', 'pivot', 'sum', 'count', 'summarise'],
+    defaultName: 'Aggregate',
+    ports: DATA_IN_OUT,
+    defaultData: (): AggregateNodeData => ({ op: 'group', group: { by: [], metrics: [] } }),
+  },
+  {
+    id: 'data-assert',
+    label: 'Assert',
+    description: 'Guards the run — checks conditions before anything is written.',
+    icon: 'ti ti-shield-check',
+    category: 'flow',
+    kind: 'assert',
+    section: DATA_SECTION_LABEL,
+    keywords: ['guard', 'check', 'validate', 'expect', 'threshold'],
+    defaultName: 'Assert',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Passed', role: 'message-out' },
+      { name: 'Failed', role: 'message-out' },
+    ],
+    defaultData: (): AssertNodeData => ({ assertions: [], onBreach: 'fail' }),
+  },
+  {
+    id: 'data-state-get',
+    label: 'State Get',
+    description: 'Reads a durable per-workflow state value, such as a sync watermark.',
+    icon: 'ti ti-bookmark',
+    category: 'flow',
+    kind: 'state-get',
+    section: DATA_SECTION_LABEL,
+    keywords: ['state', 'read', 'watermark', 'cursor', 'memory', 'durable'],
+    defaultName: 'State Get',
+    ports: DATA_IN_OUT,
+    defaultData: (): StateGetNodeData => ({ key: '', resultKey: 'state' }),
+  },
+  {
+    id: 'data-state-set',
+    label: 'State Set',
+    description: 'Writes a durable per-workflow value, delta hash or watermark.',
+    icon: 'ti ti-bookmark-plus',
+    category: 'flow',
+    kind: 'state-set',
+    section: DATA_SECTION_LABEL,
+    keywords: ['state', 'write', 'watermark', 'delta', 'checkpoint', 'durable'],
+    defaultName: 'State Set',
+    ports: DATA_IN_OUT,
+    defaultData: (): StateSetNodeData => ({ key: '', valueExpression: '', semantics: 'value' }),
+  },
+  {
+    id: 'data-notify',
+    label: 'Notify',
+    description: 'Sends an email, webhook or chat message about the run.',
+    icon: 'ti ti-bell',
+    category: 'flow',
+    kind: 'notify',
+    section: DATA_SECTION_LABEL,
+    keywords: ['notify', 'alert', 'email', 'webhook', 'chat', 'message'],
+    defaultName: 'Notify',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Sent', role: 'message-out' },
+      { name: 'On error', role: 'message-out' },
+    ],
+    defaultData: (): NotifyNodeData => ({ channel: 'webhook' }),
   },
 ];
 

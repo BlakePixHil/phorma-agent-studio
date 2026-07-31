@@ -67,11 +67,19 @@ fn keyring_entry(provider: &str) -> Result<keyring::Entry, String> {
 /// arbitrary keys can't be written/read via the generic secret commands.
 const MCP_SECRET_PREFIX: &str = "mcp:";
 
+/// Prefix for connection-scoped secrets in the keychain. Sits alongside
+/// `MCP_SECRET_PREFIX` so the generic secret commands stay namespaced. Entry
+/// names have the form `conn:{connectionId}:{secretKey}` and reuse the same
+/// chunked `store_secret_value` / `clear_secret_value` path.
+const CONNECTION_SECRET_PREFIX: &str = "conn:";
+
 fn validate_secret_key(key: &str) -> Result<(), String> {
-    if key.starts_with(MCP_SECRET_PREFIX) {
+    if key.starts_with(MCP_SECRET_PREFIX) || key.starts_with(CONNECTION_SECRET_PREFIX) {
         Ok(())
     } else {
-        Err(format!("Secret key must start with '{MCP_SECRET_PREFIX}'."))
+        Err(format!(
+            "Secret key must start with '{MCP_SECRET_PREFIX}' or '{CONNECTION_SECRET_PREFIX}'."
+        ))
     }
 }
 
@@ -132,6 +140,31 @@ fn store_secret_value(base: &str, value: &str) -> Result<(), String> {
     keyring_entry(base)?
         .set_password(&format!("{CHUNK_MANIFEST_PREFIX}{}", chunks.len()))
         .map_err(|error| format!("Could not store the key: {error}"))
+}
+
+/// Keychain entry name for one connection secret field, matching
+/// `connectionSecretName` in `engine/src/connections.ts`.
+fn connection_secret_name(connection_id: &str, secret_key: &str) -> String {
+    format!("{CONNECTION_SECRET_PREFIX}{connection_id}:{secret_key}")
+}
+
+/// Reads one connection secret through the shared chunked keychain path.
+///
+/// The only door the data path uses to reach a connection secret, so there is
+/// exactly one storage format and one namespace check. The value stays in Rust:
+/// callers apply it to an outbound request and never return it to the webview.
+///
+/// # Errors
+///
+/// Returns a user-facing error when the keychain is unreadable or the stored
+/// chunk manifest is corrupt. A key that was never stored yields `Ok(None)`.
+pub(crate) fn read_connection_secret(
+    connection_id: &str,
+    secret_key: &str,
+) -> Result<Option<String>, String> {
+    let name = connection_secret_name(connection_id, secret_key);
+    validate_secret_key(&name)?;
+    read_secret_value(&name)
 }
 
 /// Reads a secret, reassembling chunked values. `None` when nothing is stored.
@@ -416,9 +449,10 @@ struct GeminiModelsResponse {
 
 /// Stores (or clears, when empty) a generic secret in the OS keychain.
 ///
-/// Used for MCP server env vars — the key must be `mcp:`-prefixed (e.g.
-/// `mcp:{nodeId}:{envVarName}`). The value never leaves Rust except when
-/// `get_secret` resolves it internally for `mcp_connect`.
+/// Used for MCP server env vars (`mcp:{nodeId}:{envVarName}`) and connection
+/// secrets (`conn:{connectionId}:{secretKey}`); the key must carry one of those
+/// two prefixes. The value never leaves Rust except when `get_secret` resolves
+/// it internally for `mcp_connect` or the data-path commands.
 ///
 /// # Errors
 ///
@@ -596,5 +630,145 @@ fn cleanup_stream(request_id: &str) {
         if let Some(map) = guard.as_mut() {
             map.remove(request_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Entry base used by the keychain-backed tests. Inside the accepted `conn:`
+    /// namespace and named for a connection id no operator would create, so a
+    /// test run can never touch a real connection secret.
+    fn test_base(secret_key: &str) -> String {
+        connection_secret_name("conn-rust-unit-test", secret_key)
+    }
+
+    /// Whether this machine exposes a usable credential store, probed under the
+    /// very entry the caller is about to use: that keeps two tests running in
+    /// parallel off each other's entries, and clears anything an interrupted run
+    /// left behind. Headless build agents often have no credential store, and a
+    /// driver test must not fail for that reason, so the keychain-backed tests
+    /// skip when the probe fails.
+    fn keychain_ready(base: &str) -> bool {
+        match store_secret_value(base, "probe-value") {
+            Ok(()) => clear_secret_value(base).is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    #[test]
+    fn accepts_mcp_and_connection_prefixes() {
+        assert!(validate_secret_key("mcp:node-1:API_TOKEN").is_ok());
+        assert!(validate_secret_key("conn:conn-crm:apiKey").is_ok());
+    }
+
+    #[test]
+    fn rejects_any_other_prefix_naming_both_accepted_ones() {
+        for key in ["", "anthropic", "conn", "mcp", "CONN:x:y", " conn:x:y", "other:x"] {
+            let error = validate_secret_key(key).expect_err("key must be rejected");
+            assert!(error.contains("mcp:"), "message names the mcp prefix: {error}");
+            assert!(error.contains("conn:"), "message names the conn prefix: {error}");
+        }
+    }
+
+    #[test]
+    fn connection_secret_name_matches_the_engine_entry_shape() {
+        let name = connection_secret_name("conn-crm", "apiKey");
+        assert_eq!(name, "conn:conn-crm:apiKey");
+        assert!(validate_secret_key(&name).is_ok());
+    }
+
+    /// Requirement 3.9: a key outside the two accepted prefixes is rejected
+    /// before the keychain is touched at all, so no entry appears for it.
+    #[test]
+    fn a_rejected_key_creates_no_keychain_entry() {
+        if !keychain_ready(&test_base("rejection")) {
+            eprintln!("skipped: no usable OS keychain in this environment");
+            return;
+        }
+        let key = "other:rust-unit-test:value";
+        assert!(set_secret(key.to_owned(), "a-value-long-enough".to_owned()).is_err());
+        assert!(
+            matches!(
+                keyring_entry(key).expect("entry").get_password(),
+                Err(keyring::Error::NoEntry)
+            ),
+            "a rejected key must leave no entry behind"
+        );
+    }
+
+    /// Requirement 3.1: a value longer than one entry is split into chunks of at
+    /// most `MAX_SECRET_CHARS` characters that a read reassembles into the
+    /// identical value, and replacing it leaves no orphaned chunk.
+    #[test]
+    fn a_long_secret_round_trips_through_the_chunked_keychain_path() {
+        let base = test_base("dsn");
+        if !keychain_ready(&base) {
+            eprintln!("skipped: no usable OS keychain in this environment");
+            return;
+        }
+
+        // Four entries' worth, with a multi-byte character in every repetition so
+        // a byte-wise split would come back corrupt rather than identical.
+        let long = "aé9-".repeat(MAX_SECRET_CHARS);
+        assert_eq!(long.chars().count(), MAX_SECRET_CHARS * 4);
+
+        store_secret_value(&base, &long).expect("long value stored");
+        assert_eq!(
+            keyring_entry(&base).expect("entry").get_password().ok(),
+            Some(format!("{CHUNK_MANIFEST_PREFIX}4")),
+            "the primary entry holds the chunk manifest, not the value"
+        );
+        assert_eq!(
+            read_secret_value(&base).expect("read back").as_deref(),
+            Some(long.as_str()),
+            "the reassembled value is identical to the stored one"
+        );
+
+        // A shorter replacement collapses back to a single entry and clears the
+        // chunks the previous value spilled into.
+        store_secret_value(&base, "single-entry-value").expect("short value stored");
+        assert_eq!(
+            read_secret_value(&base).expect("read back").as_deref(),
+            Some("single-entry-value")
+        );
+        for index in 0..4 {
+            assert!(
+                matches!(
+                    keyring_entry(&chunk_entry_name(&base, index))
+                        .expect("entry")
+                        .get_password(),
+                    Err(keyring::Error::NoEntry)
+                ),
+                "chunk {index} must not survive the replacement"
+            );
+        }
+
+        clear_secret_value(&base).expect("cleared");
+        assert!(read_secret_value(&base).expect("read back").is_none());
+    }
+
+    /// The data path's only door to a connection secret: same chunked storage,
+    /// same namespace check, `None` for a key that was never stored.
+    #[test]
+    fn read_connection_secret_reads_the_chunked_entry_and_reports_absence() {
+        if !keychain_ready(&test_base("password")) {
+            eprintln!("skipped: no usable OS keychain in this environment");
+            return;
+        }
+        let long = "x".repeat(MAX_SECRET_CHARS + 7);
+        store_secret_value(&test_base("password"), &long).expect("stored");
+
+        assert_eq!(
+            read_connection_secret("conn-rust-unit-test", "password").expect("read"),
+            Some(long)
+        );
+        assert_eq!(
+            read_connection_secret("conn-rust-unit-test", "never-stored").expect("read"),
+            None
+        );
+
+        clear_secret_value(&test_base("password")).expect("cleared");
     }
 }

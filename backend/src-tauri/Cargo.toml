@@ -30,7 +30,32 @@ serde_json = "1"
 # and browser CORS rules never apply.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2", "json"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "macros"] }
+tokio = { version = "1", features = ["sync", "macros", "net", "time", "io-util"] }
+tokio-util = { version = "=0.7.19", default-features = false, features = ["compat"] }
+# `sql-query` nodes (design §13): parameterised statements are bound by the
+# driver, never interpolated. sqlx covers three of the four driver families
+# behind one API; MSSQL/TDS has no sqlx backend since 0.7, so tiberius covers
+# it. Exact versions: a driver is the component with database write access, so
+# the version that was reviewed is the version that ships.
+sqlx = { version = "=0.8.6", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "mysql",
+    "sqlite",
+    "chrono",
+    "uuid",
+    "json",
+    "bigdecimal",
+] }
+tiberius = { version = "=0.12.3", default-features = false, features = [
+    "tds73",
+    "rustls",
+    "chrono",
+] }
+# Temporal columns are rendered as ISO-8601 text, which needs the same chrono
+# both drivers decode into.
+chrono = { version = "=0.4.45", default-features = false, features = ["std", "clock"] }
 # Provider API keys live in the OS keychain (Windows Credential Manager /
 # macOS Keychain / Secret Service).
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }

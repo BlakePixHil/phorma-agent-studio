@@ -1,0 +1,268 @@
+:host {
+  display: contents;
+}
+
+/* ── Overlay + card — mirrors .phorma-skill-editor / .phorma-credits ────── */
+.phorma-conn-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 7, 18, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.phorma-conn-editor__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--p-content-background, rgba(20, 22, 30, 0.92));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  color: var(--p-text-color, #f8fafc);
+}
+
+.phorma-conn-editor__header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+
+  > div {
+    flex: 1 1 auto;
+  }
+}
+
+.phorma-conn-editor__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--p-text-muted-color);
+  font-size: 18px;
+}
+
+.phorma-conn-editor h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.phorma-conn-editor__header p {
+  margin: 6px 0 0;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+.phorma-conn-editor__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+  min-height: 0;
+}
+
+.phorma-conn-editor__row {
+  display: flex;
+  gap: 10px;
+
+  > .phorma-conn-editor__field {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+.phorma-conn-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.phorma-conn-editor__field-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.phorma-conn-editor__label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.928rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-conn-editor__optional {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+.phorma-conn-editor__id {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: -0.3rem 0 0;
+  font-size: 0.8rem;
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
+  color: var(--p-text-muted-color);
+}
+
+.phorma-conn-editor__input {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.82rem;
+
+  &:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+  }
+
+  &--mono {
+    font-family: var(--phorma-font-mono, ui-monospace, monospace);
+  }
+}
+
+.phorma-conn-editor__select {
+  width: 100%;
+}
+
+.phorma-conn-editor__select-full {
+  width: 100%;
+  display: block;
+}
+
+.phorma-conn-editor__number {
+  width: 100%;
+}
+
+.phorma-conn-editor__pair {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+
+  .phorma-conn-editor__input {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+.phorma-conn-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.phorma-conn-editor__hint {
+  margin: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+  line-height: 1.5;
+}
+
+.phorma-conn-editor__error {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-conn-editor__warn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--phorma-accent-amber, #f59e0b) 12%, transparent);
+  font-size: 0.8rem;
+  color: var(--phorma-accent-amber, #f59e0b);
+}
+
+.phorma-conn-editor__mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--phorma-card-border);
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  &--danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+.phorma-conn-editor__secret-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.phorma-conn-editor__secret-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  width: 9rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
+}
+
+.phorma-conn-editor__ok {
+  color: var(--phorma-accent-green, #22c55e);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.phorma-conn-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 16px;
+}
+
+.phorma-conn-editor__spacer {
+  flex: 1;
+}

@@ -34,6 +34,7 @@ const DEFAULT_TABS: PanelTab[] = [
   { id: 'workflows',  label: 'Workflows',  icon: 'ti ti-topology-star-3', side: 'left', order: 1, visible: true },
   { id: 'runs',       label: 'Runs',       icon: 'ti ti-history',    side: 'left',  order: 2, visible: true },
   { id: 'skills',     label: 'Skills',     icon: 'ti ti-books',      side: 'left',  order: 3, visible: false },
+  { id: 'connections', label: 'Connections', icon: 'ti ti-plug-connected', side: 'left', order: 4, visible: false },
   { id: 'prompt',     label: 'Prompt',     icon: 'ti ti-message-2',  side: 'right', order: 0, visible: true },
   { id: 'properties', label: 'Properties', icon: 'ti ti-adjustments', side: 'right', order: 1, visible: true },
   { id: 'usage',      label: 'Usage',      icon: 'ti ti-chart-bar',  side: 'right', order: 2, visible: false },

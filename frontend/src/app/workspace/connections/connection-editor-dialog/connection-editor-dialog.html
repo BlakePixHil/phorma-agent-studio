@@ -1,0 +1,548 @@
+@if (dialog.visible()) {
+  <div class="phorma-conn-editor" role="presentation" (click)="dialog.close()">
+    <section
+      class="phorma-conn-editor__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Connection editor"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-conn-editor__header">
+        <span class="phorma-conn-editor__icon">
+          <i class="ti ti-plug-connected" aria-hidden="true"></i>
+        </span>
+        <div>
+          <h2>{{ isEditing() ? 'Edit connection' : 'New connection' }}</h2>
+          <p>
+            A connection stores credentials outside the workflow. Only its <code>id</code> is ever
+            saved in a node — no secret value travels with the workflow file.
+          </p>
+        </div>
+      </header>
+
+      <div class="phorma-conn-editor__body">
+        <!-- ── Metadata ── -->
+        <div class="phorma-conn-editor__row">
+          <div class="phorma-conn-editor__field">
+            <label class="phorma-conn-editor__label" for="conn-name">Name</label>
+            <input
+              id="conn-name"
+              type="text"
+              class="phorma-conn-editor__input"
+              [value]="name()"
+              (input)="onNameInput($event)"
+              placeholder="e.g. CRM production"
+              maxlength="100"
+            />
+            @if (nameError(); as error) {
+              <p class="phorma-conn-editor__error">
+                <i class="ti ti-alert-triangle" aria-hidden="true"></i> {{ error }}
+              </p>
+            }
+          </div>
+
+          <div class="phorma-conn-editor__field">
+            <label class="phorma-conn-editor__label" for="conn-type">Type</label>
+            <p-select
+              inputId="conn-type"
+              class="phorma-conn-editor__select"
+              [options]="connectionTypes"
+              optionLabel="label"
+              optionValue="id"
+              [ngModel]="type()"
+              (ngModelChange)="onTypeChange($event)"
+              appendTo="body"
+              size="small"
+            />
+          </div>
+        </div>
+
+        @if (editingConnection(); as connection) {
+          <p class="phorma-conn-editor__id">
+            <i class="ti ti-key" aria-hidden="true"></i> {{ connection.id }}
+          </p>
+        }
+
+        <!-- ── Non-secret config ── -->
+        <div class="phorma-conn-editor__field">
+          <div class="phorma-conn-editor__field-head">
+            <span class="phorma-conn-editor__label">Config</span>
+            <button
+              type="button"
+              class="phorma-conn-editor__mini-btn"
+              title="Add a config entry"
+              aria-label="Add a config entry"
+              (click)="addConfigRow()"
+            >
+              <i class="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+          @for (row of configRows(); track $index) {
+            <div class="phorma-conn-editor__pair">
+              <input
+                type="text"
+                class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                [value]="row.key"
+                (input)="updateConfigRow($index, { key: $any($event.target).value })"
+                [attr.aria-label]="'Config key ' + ($index + 1)"
+                placeholder="baseUrl"
+              />
+              <input
+                type="text"
+                class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                [value]="row.value"
+                (input)="updateConfigRow($index, { value: $any($event.target).value })"
+                [attr.aria-label]="'Config value ' + ($index + 1)"
+                placeholder="https://api.example.com"
+              />
+              <button
+                type="button"
+                class="phorma-conn-editor__mini-btn phorma-conn-editor__mini-btn--danger"
+                title="Remove"
+                [attr.aria-label]="'Remove config entry ' + ($index + 1)"
+                (click)="removeConfigRow($index)"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+          } @empty {
+            <p class="phorma-conn-editor__hint">
+              Non-secret values only — base URL, host, region, driver. Secrets live below.
+            </p>
+          }
+        </div>
+
+        @if (type() === 'sql') {
+          <div class="phorma-conn-editor__field">
+            <label class="phorma-conn-editor__label">Write access</label>
+            <label class="phorma-conn-editor__check">
+              <p-checkbox
+                [binary]="true"
+                size="small"
+                [ngModel]="allowWrites()"
+                (ngModelChange)="onAllowWritesChange($event)"
+              />
+              Allow write statements on this connection
+            </label>
+            <p class="phorma-conn-editor__hint">
+              Off by default. A read-only credential stays safe even if a workflow's SQL is a write.
+            </p>
+          </div>
+
+          <div class="phorma-conn-editor__row">
+            <div class="phorma-conn-editor__field">
+              <label class="phorma-conn-editor__label" for="conn-limit-rows">Max rows</label>
+              <p-inputnumber
+                inputId="conn-limit-rows"
+                class="phorma-conn-editor__number"
+                [showButtons]="false"
+                [useGrouping]="false"
+                placeholder="10000"
+                [ngModel]="limits().maxRows ?? null"
+                (ngModelChange)="patchLimits({ maxRows: numberOrUndefined($event) })"
+              />
+            </div>
+            <div class="phorma-conn-editor__field">
+              <label class="phorma-conn-editor__label" for="conn-limit-timeout">Statement timeout (ms)</label>
+              <p-inputnumber
+                inputId="conn-limit-timeout"
+                class="phorma-conn-editor__number"
+                [showButtons]="false"
+                [useGrouping]="false"
+                placeholder="30000"
+                [ngModel]="limits().statementTimeoutMs ?? null"
+                (ngModelChange)="patchLimits({ statementTimeoutMs: numberOrUndefined($event) })"
+              />
+            </div>
+          </div>
+        }
+
+        <!-- ── Auth ── -->
+        <div class="phorma-conn-editor__field">
+          <label class="phorma-conn-editor__label" for="conn-auth-mode">Auth mode</label>
+          <p-select
+            inputId="conn-auth-mode"
+            class="phorma-conn-editor__select-full"
+            [options]="authModes"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="authMode()"
+            (ngModelChange)="onAuthModeChange($event)"
+            appendTo="body"
+            size="small"
+          />
+          <p class="phorma-conn-editor__hint">
+            Auth is applied by the host at run time and always overrides anything a node's headers try
+            to set. Field names below declare which secret keys the auth mode reads — save them under
+            Secrets once the connection exists.
+          </p>
+        </div>
+
+        @switch (authMode()) {
+          @case ('bearer') {
+            <div class="phorma-conn-editor__field">
+              <label class="phorma-conn-editor__label" for="conn-auth-secretkey">Secret key name</label>
+              <input
+                id="conn-auth-secretkey"
+                type="text"
+                class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                [value]="authField('secretKey')"
+                (input)="patchAuthDraft({ secretKey: $any($event.target).value })"
+                placeholder="apiKey"
+              />
+            </div>
+          }
+          @case ('basic') {
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-user">User secret key</label>
+                <input
+                  id="conn-auth-user"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('userSecretKey')"
+                  (input)="patchAuthDraft({ userSecretKey: $any($event.target).value })"
+                  placeholder="user"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-pass">Password secret key</label>
+                <input
+                  id="conn-auth-pass"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('passwordSecretKey')"
+                  (input)="patchAuthDraft({ passwordSecretKey: $any($event.target).value })"
+                  placeholder="password"
+                />
+              </div>
+            </div>
+          }
+          @case ('header') {
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-header">Header name</label>
+                <input
+                  id="conn-auth-header"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('header')"
+                  (input)="patchAuthDraft({ header: $any($event.target).value })"
+                  placeholder="X-Api-Key"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-header-secret">Secret key name</label>
+                <input
+                  id="conn-auth-header-secret"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('secretKey')"
+                  (input)="patchAuthDraft({ secretKey: $any($event.target).value })"
+                  placeholder="apiKey"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-header-prefix">
+                  Prefix <span class="phorma-conn-editor__optional">optional</span>
+                </label>
+                <input
+                  id="conn-auth-header-prefix"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('prefix')"
+                  (input)="patchAuthDraft({ prefix: $any($event.target).value })"
+                  placeholder="Bearer "
+                />
+              </div>
+            </div>
+          }
+          @case ('query') {
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-param">Query parameter</label>
+                <input
+                  id="conn-auth-param"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('param')"
+                  (input)="patchAuthDraft({ param: $any($event.target).value })"
+                  placeholder="api_key"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-query-secret">Secret key name</label>
+                <input
+                  id="conn-auth-query-secret"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('secretKey')"
+                  (input)="patchAuthDraft({ secretKey: $any($event.target).value })"
+                  placeholder="apiKey"
+                />
+              </div>
+            </div>
+          }
+          @case ('oauth2-client-credentials') {
+            <div class="phorma-conn-editor__field">
+              <label class="phorma-conn-editor__label" for="conn-auth-tokenurl">Token URL</label>
+              <input
+                id="conn-auth-tokenurl"
+                type="text"
+                class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                [value]="authField('tokenUrl')"
+                (input)="patchAuthDraft({ tokenUrl: $any($event.target).value })"
+                placeholder="https://auth.example.com/oauth/token"
+              />
+            </div>
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-clientid">Client ID secret key</label>
+                <input
+                  id="conn-auth-clientid"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('clientIdSecretKey')"
+                  (input)="patchAuthDraft({ clientIdSecretKey: $any($event.target).value })"
+                  placeholder="clientId"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-clientsecret">Client secret key</label>
+                <input
+                  id="conn-auth-clientsecret"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('clientSecretKey')"
+                  (input)="patchAuthDraft({ clientSecretKey: $any($event.target).value })"
+                  placeholder="clientSecret"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-scope">
+                  Scope <span class="phorma-conn-editor__optional">optional</span>
+                </label>
+                <input
+                  id="conn-auth-scope"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('scope')"
+                  (input)="patchAuthDraft({ scope: $any($event.target).value })"
+                  placeholder="read write"
+                />
+              </div>
+            </div>
+          }
+          @case ('oauth2-refresh') {
+            <div class="phorma-conn-editor__field">
+              <label class="phorma-conn-editor__label" for="conn-auth-refresh-tokenurl">Token URL</label>
+              <input
+                id="conn-auth-refresh-tokenurl"
+                type="text"
+                class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                [value]="authField('tokenUrl')"
+                (input)="patchAuthDraft({ tokenUrl: $any($event.target).value })"
+                placeholder="https://auth.example.com/oauth/token"
+              />
+            </div>
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-refresh-clientid">Client ID secret key</label>
+                <input
+                  id="conn-auth-refresh-clientid"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('clientIdSecretKey')"
+                  (input)="patchAuthDraft({ clientIdSecretKey: $any($event.target).value })"
+                  placeholder="clientId"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-refresh-clientsecret">Client secret key</label>
+                <input
+                  id="conn-auth-refresh-clientsecret"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('clientSecretKey')"
+                  (input)="patchAuthDraft({ clientSecretKey: $any($event.target).value })"
+                  placeholder="clientSecret"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-refresh-token">Refresh token secret key</label>
+                <input
+                  id="conn-auth-refresh-token"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('refreshTokenSecretKey')"
+                  (input)="patchAuthDraft({ refreshTokenSecretKey: $any($event.target).value })"
+                  placeholder="refreshToken"
+                />
+              </div>
+            </div>
+          }
+          @case ('aws-sigv4') {
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-service">Service</label>
+                <input
+                  id="conn-auth-service"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('service')"
+                  (input)="patchAuthDraft({ service: $any($event.target).value })"
+                  placeholder="execute-api"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-region">Region</label>
+                <input
+                  id="conn-auth-region"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('region')"
+                  (input)="patchAuthDraft({ region: $any($event.target).value })"
+                  placeholder="us-east-1"
+                />
+              </div>
+            </div>
+            <div class="phorma-conn-editor__row">
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-accesskey">Access key secret key</label>
+                <input
+                  id="conn-auth-accesskey"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('accessKeySecretKey')"
+                  (input)="patchAuthDraft({ accessKeySecretKey: $any($event.target).value })"
+                  placeholder="accessKeyId"
+                />
+              </div>
+              <div class="phorma-conn-editor__field">
+                <label class="phorma-conn-editor__label" for="conn-auth-secretkeyaws">Secret key secret key</label>
+                <input
+                  id="conn-auth-secretkeyaws"
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="authField('secretKeySecretKey')"
+                  (input)="patchAuthDraft({ secretKeySecretKey: $any($event.target).value })"
+                  placeholder="secretAccessKey"
+                />
+              </div>
+            </div>
+          }
+        }
+
+        <!-- ── Secrets ── -->
+        @if (editingConnection(); as connection) {
+          <div class="phorma-conn-editor__field">
+            <span class="phorma-conn-editor__label">Secrets</span>
+
+            @if (!secretsSupported) {
+              <p class="phorma-conn-editor__warn">
+                <i class="ti ti-lock" aria-hidden="true"></i>
+                Secret storage requires the desktop app or a deployed worker — this host has no
+                connection secret store, so secret entry is disabled here.
+              </p>
+            } @else {
+              @for (key of connection.secretKeys; track key) {
+                <div class="phorma-conn-editor__secret-row">
+                  <label class="phorma-conn-editor__secret-label">
+                    {{ key }}
+                    @if (secretConfigured(key)) {
+                      <i class="ti ti-circle-check phorma-conn-editor__ok" title="Stored" aria-hidden="true"></i>
+                    }
+                  </label>
+                  <input
+                    type="password"
+                    class="phorma-conn-editor__input"
+                    [placeholder]="secretConfigured(key) ? '••••••••  (replace stored value)' : 'Enter value'"
+                    [value]="secretDrafts()[key] || ''"
+                    (input)="onSecretInput(key, $event)"
+                    (keydown.enter)="saveSecret(key)"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    class="phorma-conn-editor__mini-btn"
+                    [disabled]="secretDrafts()[key] === undefined"
+                    (click)="saveSecret(key)"
+                    title="Save"
+                    aria-label="Save secret"
+                  >
+                    <i class="ti ti-check" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="phorma-conn-editor__mini-btn phorma-conn-editor__mini-btn--danger"
+                    (click)="removeSecretField(key)"
+                    title="Remove this secret field"
+                    aria-label="Remove this secret field"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                </div>
+              } @empty {
+                <p class="phorma-conn-editor__hint">No secret fields declared yet.</p>
+              }
+
+              <div class="phorma-conn-editor__pair">
+                <input
+                  type="text"
+                  class="phorma-conn-editor__input phorma-conn-editor__input--mono"
+                  [value]="newSecretName()"
+                  (input)="onNewSecretNameInput($event)"
+                  placeholder="secret field name, e.g. apiKey"
+                  aria-label="New secret field name"
+                />
+                <button
+                  type="button"
+                  class="phorma-conn-editor__mini-btn"
+                  [disabled]="!newSecretName().trim()"
+                  (click)="addSecretField()"
+                  title="Declare secret field"
+                  aria-label="Declare secret field"
+                >
+                  <i class="ti ti-plus" aria-hidden="true"></i>
+                </button>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="phorma-conn-editor__hint">Save the connection first to add secret values.</p>
+        }
+      </div>
+
+      <footer class="phorma-conn-editor__actions">
+        @if (isEditing()) {
+          <button
+            type="button"
+            pButton
+            severity="danger"
+            [text]="true"
+            size="small"
+            [disabled]="deleting()"
+            (click)="remove()"
+          >
+            <i class="ti ti-trash" aria-hidden="true"></i>
+            {{ deleting() ? 'Deleting…' : 'Delete' }}
+          </button>
+        }
+        <span class="phorma-conn-editor__spacer"></span>
+        <p-button
+          [text]="true"
+          severity="secondary"
+          size="small"
+          label="Close"
+          (onClick)="dialog.close()"
+        />
+        <p-button
+          size="small"
+          [label]="saving() ? 'Saving…' : (isEditing() ? 'Save changes' : 'Create connection')"
+          [disabled]="saving()"
+          (onClick)="save()"
+        />
+      </footer>
+    </section>
+  </div>
+}

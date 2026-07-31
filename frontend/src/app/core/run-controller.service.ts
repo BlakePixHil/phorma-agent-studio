@@ -1,8 +1,20 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 
 import {
+  applyConnectionAuth,
+  BROWSER_CAPABILITIES,
+  createRedactor,
+  DEFAULT_MAX_RESPONSE_BYTES,
   startRun,
+  TAURI_DESKTOP_CAPABILITIES,
+  validateAgainstCapabilities,
   withEstimatedCost,
+  type CapabilityFinding,
+  type ConnectionSummary,
+  type DataRequest,
+  type HostCapabilities,
+  type Redactor,
+  type ResolvedConnection,
   type RunEvent,
   type RunHandle,
   type RunNodeState,
@@ -10,19 +22,38 @@ import {
 } from '@phorma/engine';
 
 import { AgentStreamService } from './agent-stream.service';
+import { ConnectionStoreService } from './connection-store.service';
+import {
+  messageOf,
+  notificationDetail,
+  notificationEndpoint,
+  notificationTriggerFor,
+  notificationWanted,
+  NOTIFY_DETAIL_CHARS,
+  NOTIFY_MAX_ATTEMPTS,
+  NOTIFY_TIMEOUT_MS,
+  resolveRunRetention,
+  type NotifyTrigger,
+  type WorkflowNotificationPolicy,
+} from './data-path-settings';
+import { DataFetchService } from './data-fetch.service';
+import { FixtureStoreService } from './fixture-store.service';
 import { ModelTransportService } from './model-transport.service';
 import { ModelPricingService } from './model-pricing.service';
 import { PanelRegistryService } from './panel-registry.service';
-import { RunHistoryService } from './run-history.service';
+import { RUN_HISTORY_LIMIT, RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
+import { SqlHostService } from './sql-host.service';
+import { TauriService } from './tauri.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
+import { WorkflowStateService } from './workflow-state.service';
 import { WorkflowService } from './workflow.service';
 import { ToastService } from '../shared/toast/toast.service';
 import { CreditsDialogService } from '../workspace/cloud/credits-dialog.service';
 import { PhormaCloudService } from './phorma-cloud.service';
 import { describeRunEvent, traceFromRunLog } from './run-trace';
-import { portBaseId } from './workflow.model';
+import { portBaseId, type WorkflowGraph, type WorkflowSpec } from './workflow.model';
 
 /**
  * Matches the "Monthly credits exhausted" 402 surfaced by the Phorma Cloud
@@ -145,6 +176,12 @@ export class RunControllerService {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
   private readonly pricing = inject(ModelPricingService);
+  private readonly tauri = inject(TauriService);
+  private readonly connectionStore = inject(ConnectionStoreService);
+  private readonly dataFetch = inject(DataFetchService);
+  private readonly sqlHost = inject(SqlHostService);
+  private readonly workflowState = inject(WorkflowStateService);
+  private readonly fixtureStore = inject(FixtureStoreService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -255,7 +292,18 @@ export class RunControllerService {
 
   // ── Controls (toolbar + Runs panel) ────────────────────────────────────────
 
-  /** Starts a run of the active workflow. */
+  /**
+   * Starts a run of the active workflow.
+   *
+   * Requirement 17.9: before `startRun` is ever called, the Capability_Validator
+   * runs against the active local host's capability record and its local
+   * connection inventory. Requirement 17.10: any `error` finding blocks the run
+   * entirely — no `startRun` call, no `RunHistoryService.beginRun` call, no run
+   * record created — and every finding is surfaced. `terminal.setPhase(
+   * 'starting')` guards this async gap so a second click cannot race a fresh
+   * validation pass while one is already in flight (`running()` treats
+   * 'starting' the same as 'running').
+   */
   start(): void {
     if (this.running()) return;
     const portableSpec = this.workflow.exportActiveSpec();
@@ -269,6 +317,65 @@ export class RunControllerService {
       return;
     }
 
+    this.terminal.setPhase('starting');
+    void this.validateAndStart(portableSpec, graph);
+  }
+
+  /**
+   * Requirements 17.9, 17.10, 17.15: validates the graph (top level plus
+   * every embedded sub-workflow) against the active local host's capability
+   * record before anything else runs. A `warning`-only result never blocks
+   * the run; any `error` finding does, with no `startRun` call and no run
+   * record created.
+   */
+  private async validateAndStart(
+    portableSpec: WorkflowSpec | null,
+    graph: WorkflowGraph,
+  ): Promise<void> {
+    const capabilities = this.tauri.isDesktop ? TAURI_DESKTOP_CAPABILITIES : BROWSER_CAPABILITIES;
+    let connections: ConnectionSummary[] = [];
+    try {
+      connections = await this.connectionStore.list();
+    } catch {
+      // An unreadable local inventory means every connectionId is unresolved,
+      // which the validator reports as a finding — never a silent skip.
+      connections = [];
+    }
+
+    const findings = validateAgainstCapabilities(
+      { graph, subWorkflows: portableSpec?.subWorkflows },
+      capabilities,
+      connections,
+    );
+    const errors = findings.filter(finding => finding.severity === 'error');
+    if (errors.length > 0) {
+      this.terminal.setPhase('idle');
+      this.reportCapabilityFindings(findings);
+      this.toast.error(
+        'Run blocked',
+        `${errors.length} problem${errors.length === 1 ? '' : 's'} would prevent this workflow ` +
+          `from running on ${capabilities.label}. See the Problems console.`,
+      );
+      return;
+    }
+
+    this.startValidatedRun(portableSpec, graph, capabilities);
+  }
+
+  /** Every returned finding, oldest first, into the Problems console. */
+  private reportCapabilityFindings(findings: CapabilityFinding[]): void {
+    this.terminal.open('problems');
+    for (const finding of findings) {
+      this.console('problems', finding.severity === 'error' ? 'error' : 'warning', finding.message);
+    }
+  }
+
+  /** The original run-start sequence, run only once validation has passed. */
+  private startValidatedRun(
+    portableSpec: WorkflowSpec | null,
+    graph: WorkflowGraph,
+    capabilities: HostCapabilities,
+  ): void {
     this.resetRunState();
     this.viewingHistoricalRunId.set(null);
     this.runCounter += 1;
@@ -278,24 +385,58 @@ export class RunControllerService {
     // user can keep editing the canvas while the run executes.
     const graphSnapshot = structuredClone(graph);
     const doc = this.workflow.activeDoc();
+    const workflowId = doc?.workflowId ?? '';
     // The complete portable registry is captured once. No run callback reads
     // the mutable workflow library, so edits made while running cannot alter
     // a later child frame.
     const subWorkflows = portableSpec?.subWorkflows
       ? structuredClone(portableSpec.subWorkflows)
       : undefined;
+
+    // Redaction (P1-12), built per run from the workflow's retention
+    // settings and seeded further at run time with every resolved
+    // connection secret. It sits IN FRONT of the run-history recorder, so a
+    // secret can never be persisted, not even inside a clipped fragment
+    // (Requirement 15.10). Rejected rules are reported, never fatal (15.16).
+    const settings = portableSpec?.settings ?? doc?.settings;
+    const retentionSettings = settings?.retention;
+    const redactor = createRedactor({
+      rules: Array.isArray(retentionSettings?.redact) ? retentionSettings.redact : [],
+      noPersistNodeIds: Array.isArray(retentionSettings?.noPersistNodeIds)
+        ? retentionSettings.noPersistNodeIds
+        : [],
+    });
+    for (const ruleError of redactor.ruleErrors) {
+      this.console('problems', 'warning', ruleError);
+    }
+    const retention = resolveRunRetention(retentionSettings, RUN_HISTORY_LIMIT, message =>
+      this.console('problems', 'warning', message),
+    );
+
     this.runHistory.beginRun({
       runId,
       workflowId: doc?.workflowId ?? null,
       workflowName: doc?.name ?? 'Untitled Workflow',
       graph: graphSnapshot,
       subWorkflows,
+      retention,
     });
+
+    const notificationPolicy = settings?.notifications;
 
     const handle = startRun({
       runId,
       graph: graphSnapshot,
       input: this.runInput().trim(),
+      // ── Deterministic data path (P1) ────────────────────────────────────
+      workflowId,
+      connections: this.connectionStore.forWorkflow(workflowId),
+      dataFetch: this.dataFetch.fetch,
+      sql: this.sqlHost,
+      state: this.workflowState,
+      fixtures: this.fixtureStore,
+      redact: value => redactor.scrub(value),
+      capabilities,
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
       maxExecutions:
@@ -328,8 +469,14 @@ export class RunControllerService {
       // History records ONLY from the local engine's emit — cloud-monitor
       // events reach apply() directly and are persisted by the DO instead.
       emit: event => {
-        this.runHistory.record(event);
+        // Requirement 15.10: the persistence path — and only the
+        // persistence path — is redacted, ahead of the recorder's own 64 KB
+        // clipping. The live canvas below (`apply`) keeps full fidelity.
+        this.runHistory.record(redactor.event(event));
         this.apply(event);
+        // Workflow-level notifications watch the run's own event stream
+        // (Requirements 13.7, 13.10).
+        this.notifyOnRunEvent(event, workflowId, doc?.name ?? 'Untitled Workflow', notificationPolicy, redactor);
       },
       requestApproval: (nodeId, message, payload, requestId) =>
         new Promise<boolean>(resolve => {
@@ -1078,6 +1225,132 @@ export class RunControllerService {
           agentPorts.has(portBaseId(conn.outputId)) &&
           toolPorts.has(portBaseId(conn.inputId)),
       )?.id ?? null
+    );
+  }
+
+  // ── Workflow-level notifications (P1-10) ────────────────────────────────────
+
+  /**
+   * Watches the run's own event stream and delivers the workflow
+   * notification policy (Requirements 13.7, 13.10).
+   *
+   * Deliberately HOST behaviour, not engine behaviour: the run controller
+   * already sees every event, so a policy needs no node on the canvas. A
+   * policy that does not name the trigger for this event issues no outbound
+   * request at all. Fire-and-forget: the run's outcome is reported whether
+   * or not the delivery lands.
+   */
+  private notifyOnRunEvent(
+    event: RunEvent,
+    workflowId: string,
+    workflowName: string,
+    policy: WorkflowNotificationPolicy | undefined,
+    redactor: Redactor,
+  ): void {
+    const trigger = notificationTriggerFor(event);
+    if (trigger === undefined) return;
+    // Requirement 13.10: no policy, or a policy that does not subscribe to
+    // this trigger, means no notification and no request.
+    if (!notificationWanted(policy, trigger)) return;
+
+    void this.deliverWorkflowNotification(trigger, event, policy, workflowId, workflowName, redactor).catch(
+      () => undefined,
+    );
+  }
+
+  /**
+   * One notification, at most {@link NOTIFY_MAX_ATTEMPTS} attempts, through
+   * the same `DataFetcher` the data nodes use — so the egress guard, the
+   * response cap and the per-attempt timeout are identical (Requirements
+   * 13.7, 18.5).
+   *
+   * The body carries run metadata and a redacted reason only: never a node
+   * output, never a resolved secret.
+   */
+  private async deliverWorkflowNotification(
+    trigger: NotifyTrigger,
+    event: RunEvent,
+    policy: WorkflowNotificationPolicy,
+    workflowId: string,
+    workflowName: string,
+    redactor: Redactor,
+  ): Promise<void> {
+    const connectionId = policy.connectionId?.trim();
+    let conn: ResolvedConnection | undefined;
+    if (connectionId) {
+      try {
+        conn = await this.connectionStore.forWorkflow(workflowId).resolve(connectionId);
+      } catch (error) {
+        // An unresolvable connection means no delivery, never a partial one.
+        this.console(
+          'problems',
+          'warning',
+          `Workflow notification for "${trigger}" was not delivered: ${redactor.scrub(messageOf(error))}`,
+        );
+        return;
+      }
+      // Requirement 15.2: registered before anything is emitted or persisted
+      // about this delivery.
+      redactor.addLiterals(Object.values(conn.secrets));
+    }
+
+    const to = (policy.to ?? '').trim();
+    const endpoint = notificationEndpoint(to, conn);
+    if (!endpoint) {
+      this.console(
+        'problems',
+        'warning',
+        `Workflow notification for "${trigger}" has no delivery target: set the notification recipient ` +
+          `to an https URL, or give the connection a notifyUrl or baseUrl.`,
+      );
+      return;
+    }
+
+    const body = JSON.stringify({
+      trigger,
+      runId: 'runId' in event ? event.runId : null,
+      workflowId: workflowId || null,
+      workflowName,
+      environment: 'local',
+      // Recipient only when the endpoint is the provider, not the recipient.
+      to: to === endpoint ? undefined : to || undefined,
+      detail: redactor.scrub(notificationDetail(event)).slice(0, NOTIFY_DETAIL_CHARS),
+      at: Date.now(),
+    });
+
+    // Auth last, exactly as the engine's request builder orders it, so the
+    // connection always wins over the message's own headers.
+    const request: DataRequest = applyConnectionAuth(
+      {
+        url: endpoint,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        timeoutMs: NOTIFY_TIMEOUT_MS,
+        maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+      },
+      conn,
+    );
+
+    let detail = 'no attempt was made';
+    for (let attempt = 1; attempt <= NOTIFY_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await this.dataFetch.fetch(request);
+        if (response.status >= 200 && response.status <= 299) return;
+        detail = `HTTP ${response.status}`;
+      } catch (error) {
+        // A transport message can echo the target's own text, so it is
+        // scrubbed before it can reach a console line.
+        detail = redactor.scrub(messageOf(error));
+      }
+      if (attempt < NOTIFY_MAX_ATTEMPTS) {
+        await new Promise<void>(resolve => setTimeout(resolve, 250 * attempt));
+      }
+    }
+    this.console(
+      'problems',
+      'warning',
+      `Workflow notification for "${trigger}" failed after ${NOTIFY_MAX_ATTEMPTS} attempts (${detail}).`,
     );
   }
 

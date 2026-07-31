@@ -20,8 +20,67 @@
  *  - Cycles are permitted but bounded by an execution budget.
  */
 
+import type {
+  ConnectionStore,
+  DataFetcher,
+  DataRequest,
+  DataResponse,
+  FixtureStore,
+  HostCapabilities,
+  SqlHost,
+  SqlRequest,
+  SqlResult,
+  TransportFailureKind,
+  WorkflowStateStore,
+} from './data-host.js';
+import {
+  DataTransportError,
+  HttpStatusError,
+  HTTP_BODY_PREVIEW_MAX_CHARS,
+} from './data-host.js';
+import type { ResolvedConnection } from './connections.js';
+import {
+  applyConnectionAuth,
+  buildDataRequest,
+  createPaginationLoop,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  isPaginated,
+  joinUrl,
+  registerConnectionSecrets,
+  selectResult,
+} from './data-http.js';
+import {
+  claimIdempotent,
+  compareWatermark,
+  contentHash,
+  idempotencyStateKey,
+  scopedStateKey,
+  STATE_TTL_MAX_SEC,
+  STATE_TTL_MIN_SEC,
+} from './state.js';
+import {
+  createHttpFixtureSession,
+  createSqlFixtureSession,
+  httpRequestFingerprint,
+  sqlRequestFingerprint,
+  type FixtureSession,
+} from './fixtures.js';
+import {
+  isWriteStatement,
+  reconcileSqlParameters,
+  resolveSqlLimits,
+  validateSqlStatement,
+  type DeclaredSqlParameter,
+} from './sql-statement.js';
+import {
+  compileExpression,
+  type CompiledExpression,
+  type EvalContext,
+  type Json,
+} from './expr.js';
 import type { RunEvent, RunEventSink, RunScope } from './events.js';
-import type { RunSource } from './run-record.js';
+import type { RunSource, SyncSummary } from './run-record.js';
+import { accumulateSync, createSyncSummary } from './run-record.js';
 import { RunGate, RunStoppedError } from './gate.js';
 import {
   isTransientModelError,
@@ -29,18 +88,30 @@ import {
   type ModelClient,
   type ToolCall,
 } from './model.js';
+import { batchItems, runAggregate, runTransform } from './data-nodes.js';
 import { extractItems, interpolatePayload, mergePayloads } from './payload.js';
+import { decideRetry, normalisePolicy, type RetryReason } from './retry.js';
 import { resolveAgentTools, type ResolvedTool, type ToolHost } from './tools.js';
 import {
   isAgentNode,
+  isDataNode,
   nodeForConnector,
   portBaseId,
   type AgentNodeData,
   type AskUserNodeData,
+  type AssertNodeData,
+  type Assertion,
   type EmbeddedWorkflow,
   type ExecuteWorkflowNodeData,
   type ForEachNodeData,
+  type HttpRequestNodeData,
   type ModelProviderId,
+  type NodeRetryPolicy,
+  type NotifyNodeData,
+  type SqlDriver,
+  type SqlQueryNodeData,
+  type StateGetNodeData,
+  type StateSetNodeData,
   type WaitEventNodeData,
   type WorkflowConnection,
   type WorkflowGraph,
@@ -57,6 +128,48 @@ const MAX_RETRY_ATTEMPTS = 5;
 const DEFAULT_RETRY_BACKOFF_MS = 1000;
 /** Extra execution budget granted to the workflow error handler's subtree. */
 const ERROR_HANDLER_BUDGET_BONUS = 25;
+/** Extra success statuses an `http-request` node may declare (Requirement 8.11). */
+const MAX_SUCCESS_CODES = 20;
+/** Most assertions one `assert` node may declare (Requirement 7.1). */
+const MAX_ASSERTIONS = 50;
+/** Longest accepted assertion name (Requirement 7.10). */
+const MAX_ASSERTION_NAME_CHARS = 100;
+/** Effective per-attempt delivery timeout for a `notify` node (Requirement 13.2). */
+const NOTIFY_TIMEOUT_MS = 30_000;
+/** The only channels a `notify` node may declare (Requirements 13.1, 13.9). */
+const NOTIFY_CHANNELS: ReadonlySet<string> = new Set<NotifyNodeData['channel']>([
+  'email',
+  'webhook',
+  'chat-webhook',
+]);
+/** The only drivers a `sql-query` node may resolve to (Requirement 10.5). */
+const SQL_DRIVERS: ReadonlySet<string> = new Set<SqlDriver>([
+  'postgres',
+  'mysql',
+  'mssql',
+  'sqlite',
+]);
+
+/**
+ * One `http-request` attempt's result: the node's outgoing payload, or the
+ * `skipped` marker meaning another owner holds this write's idempotency claim
+ * so no request was issued (Requirement 12.14).
+ */
+type HttpAttemptOutcome = { readonly skipped: true } | { readonly output: string; readonly skipped?: false };
+
+/**
+ * One accepted assertion of an `assert` node: its trimmed name, its compiled
+ * expression and its resolved severity. Every field is settled before the first
+ * assertion is evaluated, so a rejection can never happen mid-evaluation
+ * (Requirement 7.10).
+ */
+interface PreparedAssertion {
+  readonly name: string;
+  readonly compiled: CompiledExpression;
+  readonly severity: 'error' | 'warn';
+  /** The declared message, when the author wrote one. */
+  readonly message?: string;
+}
 /** Context window assumed when no lookup is available for a model. */
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 /** Fraction of the context window that triggers compression. */
@@ -249,6 +362,27 @@ export interface RunOptions {
    * hosts resume an interrupted run without repeating side effects.
    */
   journal?: RunJournal;
+
+  // ── Data-path host capabilities (design §2.5) ───────────────────────────
+  // All optional: a host omits what it cannot do, and a node that needs a
+  // missing capability fails with a message naming the host and capability.
+
+  /** P1-1: resolves a connection reference to its secret values. */
+  connections?: ConnectionStore;
+  /** P1-2/P1-7/P1-10: outbound HTTP for DATA nodes (distinct from `tools`). */
+  dataFetch?: DataFetcher;
+  /** P1-6: parameterised SQL execution, one implementation per driver family. */
+  sql?: SqlHost;
+  /** P1-8: durable workflow-scoped key/value store. */
+  state?: WorkflowStateStore;
+  /** P1-13: fixture record/replay for `http-request` and `sql-query`. */
+  fixtures?: FixtureStore;
+  /** Workflow id used to scope state and fixtures. Defaults to `''`. */
+  workflowId?: string;
+  /** P1-12: redaction applied by the host before persistence. */
+  redact?: (value: string) => string;
+  /** Declared host capability set, used for run-time guardrails. */
+  capabilities?: HostCapabilities;
 }
 
 export interface RunHandle {
@@ -317,6 +451,154 @@ interface WorkflowFrame {
   journalPrefix: string;
 }
 
+/**
+ * Run-wide sync audit state (P1-11). Shared by the top-level run and every
+ * nested frame, so a data node inside a sub-workflow lands in the same
+ * summary as one on the top-level canvas.
+ */
+interface SyncRunState {
+  summary: SyncSummary;
+  /** True once any data node executed (including a journal replay of one). */
+  dataNodeExecuted: boolean;
+  /** Guards the exactly-once `sync-summary` emission. */
+  emitted: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared retry wrapper for non-model steps (design §6, P1-3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Character cap for the redacted description on a `node-retrying` event. */
+export const RETRY_ERROR_DESCRIPTION_MAX_CHARS = 512;
+
+/** What one scheduled retry tells the trace. */
+export interface NodeRetryNotice {
+  /** 1-based number of the attempt that just failed. */
+  attempt: number;
+  /** Normalised attempt budget for the node. */
+  maxAttempts: number;
+  delayMs: number;
+  reason: RetryReason;
+  /** Redacted, clipped error description. */
+  error: string;
+}
+
+/**
+ * The (injectable) surface the retry loop needs. Everything except `onRetry`
+ * and `sleep` has a sane default, so a test can drive the loop with two lambdas
+ * while the engine wires the real gate, clock and redactor.
+ */
+export interface NodeRetryContext {
+  /** Called exactly once per SCHEDULED retry, before the delay begins. */
+  onRetry(notice: NodeRetryNotice): void;
+  /** Pause/stop-aware sleep — the engine passes `RunGate.sleep`. */
+  sleep(ms: number): Promise<void>;
+  /** Resolves once the run is running again; rejects when it was stopped. */
+  awaitResume?(): Promise<void>;
+  /** True when the run has been stopped. */
+  stopped?(): boolean;
+  now?(): number;
+  random?(): number;
+  /** Renders an error for the event, already redacted. */
+  describe?(error: unknown): string;
+}
+
+/**
+ * Name-based `RunStoppedError` test: an error can cross a bundle or realm
+ * boundary and lose its prototype identity while keeping its contract.
+ */
+function isRunStopped(error: unknown): boolean {
+  if (error instanceof RunStoppedError) return true;
+  const candidate = error as { name?: unknown } | null;
+  return !!candidate && typeof candidate === 'object' && candidate.name === 'RunStoppedError';
+}
+
+/**
+ * Renders a failed attempt for the `node-retrying` event: a short, structured
+ * description, redacted FIRST and clipped second (clipping first could hand a
+ * secret's tail to the trace).
+ *
+ * A response body never appears here — only the status — because the body has
+ * not necessarily been through the redaction pipeline at this point.
+ */
+export function describeRetryError(error: unknown, redact?: (value: string) => string): string {
+  const candidate = error as
+    | { name?: unknown; status?: unknown; kind?: unknown; message?: unknown }
+    | null;
+  let raw: string;
+  if (candidate && typeof candidate === 'object' && candidate.name === 'HttpStatusError') {
+    raw = `HTTP ${String(candidate.status)}`;
+  } else if (
+    candidate &&
+    typeof candidate === 'object' &&
+    candidate.name === 'DataTransportError' &&
+    typeof candidate.kind === 'string'
+  ) {
+    raw = `${candidate.kind}: ${error instanceof Error ? error.message : String(error)}`;
+  } else {
+    raw = error instanceof Error ? error.message : String(error);
+  }
+  const scrubbed = redact ? redact(raw) : raw;
+  return scrubbed.length > RETRY_ERROR_DESCRIPTION_MAX_CHARS
+    ? `${scrubbed.slice(0, RETRY_ERROR_DESCRIPTION_MAX_CHARS)}…`
+    : scrubbed;
+}
+
+/** Folds the decision reason into the event's single `error` field. */
+export function formatRetryEventError(description: string, reason: RetryReason): string {
+  return `${description} (retry reason: ${reason})`;
+}
+
+/**
+ * The retry loop itself, lifted out of the engine so it is testable without a
+ * graph: invoke the body, ask `decideRetry`, announce the retry, sleep through
+ * the caller's pause/stop-aware sleep, try again.
+ *
+ * Bounds come entirely from `decideRetry`, which refuses once
+ * `attempt >= maxAttempts`, so the loop needs no second counter — and the final
+ * failure emits no `node-retrying` event (requirement 11.13).
+ *
+ * Stop always wins: a `RunStoppedError` from the body or from the pending delay
+ * propagates immediately, with no further event and no further attempt.
+ */
+export async function runWithNodeRetry<T>(
+  policy: NodeRetryPolicy | undefined,
+  body: (attempt: number) => Promise<T>,
+  ctx: NodeRetryContext,
+): Promise<T> {
+  const resolved = normalisePolicy(policy);
+  const now = ctx.now ?? ((): number => Date.now());
+  const random = ctx.random ?? ((): number => Math.random());
+  const describe = ctx.describe ?? ((error: unknown): string => describeRetryError(error));
+
+  for (let attempt = 1; ; attempt++) {
+    // Loop invariant: attempt <= resolved.maxAttempts, and every earlier
+    // attempt failed with a decision of retry = true.
+    try {
+      return await body(attempt);
+    } catch (error) {
+      if (isRunStopped(error)) throw error;
+
+      const decision = decideRetry({ error, attempt, policy: resolved, nowMs: now(), random });
+      if (!decision.retry) throw error;
+
+      ctx.onRetry({
+        attempt,
+        maxAttempts: resolved.maxAttempts,
+        delayMs: decision.delayMs,
+        reason: decision.reason,
+        error: describe(error),
+      });
+
+      // Stop unwinds mid-sleep (RunGate.sleep throws); a run paused DURING the
+      // delay must also finish pausing before the next attempt starts.
+      await ctx.sleep(decision.delayMs);
+      if (ctx.stopped?.() === true) throw new RunStoppedError();
+      if (ctx.awaitResume) await ctx.awaitResume();
+    }
+  }
+}
+
 /** Starts a run. Events flow through `options.emit`; control via the handle. */
 export function startRun(options: RunOptions): RunHandle {
   const gate = new RunGate();
@@ -345,6 +627,8 @@ class WorkflowRun {
   private readonly scope: RunScope[];
   /** Stable prefix that isolates nested journal keys. */
   private readonly journalPrefix: string;
+  /** Sync audit accumulation, shared with every nested frame. */
+  private readonly syncState: SyncRunState;
   /** True when the workflow-level timeout stopped the run. */
   private timedOut = false;
   /** Workflow-timeout bookkeeping (paused time doesn't count). */
@@ -358,9 +642,15 @@ class WorkflowRun {
     private gate: RunGate,
     frame?: WorkflowFrame,
     executionState?: SharedExecutionState,
+    syncState?: SyncRunState,
   ) {
     this.scope = frame?.scope ?? [];
     this.journalPrefix = frame?.journalPrefix ?? '';
+    this.syncState = syncState ?? {
+      summary: createSyncSummary(),
+      dataNodeExecuted: false,
+      emitted: false,
+    };
     this.executionState = executionState ?? {
       executions: 0,
       maxExecutions: Math.max(1, options.maxExecutions ?? MAX_NODE_EXECUTIONS),
@@ -420,6 +710,7 @@ class WorkflowRun {
 
     const start = this.startNode();
     if (!start) {
+      this.emitSyncSummary();
       this.emit({
         type: 'run-failed',
         runId,
@@ -434,6 +725,7 @@ class WorkflowRun {
 
     try {
       await this.executeNode(start, input);
+      this.emitSyncSummary();
       this.emit({
         type: 'run-completed',
         runId,
@@ -454,6 +746,9 @@ class WorkflowRun {
       // the failure — notifications, cleanup, escalation — before the run
       // settles as failed. Its own failures never mask the original error.
       await this.runErrorHandler(message);
+      // After the error handler, so a data node inside it still counts, and
+      // immediately before the terminal event with nothing in between.
+      this.emitSyncSummary();
       this.emit({ type: 'run-failed', runId, error: message, at: Date.now() });
     } finally {
       this.disarmWorkflowTimeout();
@@ -535,6 +830,9 @@ class WorkflowRun {
     }
 
     const { runId, journal } = this.options;
+    // A run that touched any data node gets a sync audit record — including a
+    // resumed run whose data nodes replay from the journal.
+    if (isDataNode(node)) this.syncState.dataNodeExecuted = true;
     this.emit({ type: 'node-started', runId, nodeId: node.id, nodeName: node.name, at: Date.now() });
 
     // Replay normally short-circuits the node body entirely: no model/tool
@@ -661,8 +959,11 @@ class WorkflowRun {
    * semantics so mistakes stay loud.
    */
   private errorRoutePortId(node: WorkflowNode): string | null {
-    if (!isAgentNode(node) && node.kind !== 'execute-workflow') return null;
-    const errorPortId = (node.data as AgentNodeData | ExecuteWorkflowNodeData).errorPortId;
+    // Data nodes join agents and Execute Workflow here: a wired "On error"
+    // port routes the failure onward, an unwired one keeps fail-fast semantics
+    // (Requirement 1.6 and 1.8).
+    if (!isAgentNode(node) && node.kind !== 'execute-workflow' && !isDataNode(node)) return null;
+    const errorPortId = (node.data as { errorPortId?: string } | undefined)?.errorPortId;
     if (!errorPortId) return null;
     if (!node.ports.some(port => port.id === errorPortId && port.role === 'message-out')) {
       return null;
@@ -728,6 +1029,48 @@ class WorkflowRun {
           payload,
           executionKey ?? this.nextExecutionKey(node, payload),
         );
+      case 'http-request': {
+        const key = executionKey ?? this.nextExecutionKey(node, payload);
+        const outcome = await this.withNodeRetry(node, attempt =>
+          this.runHttpRequest(node, payload, attempt, key),
+        );
+        // `executeNode` short-circuits a journal-replayed node before it ever
+        // reaches here, so a resumed run never re-claims a completed write
+        // (design §8.3).
+        if (outcome.skipped === true) return this.skipLostClaim(payload);
+        return this.routeAwayFromErrorPort(node, outcome.output);
+      }
+      case 'sql-query': {
+        const key = executionKey ?? this.nextExecutionKey(node, payload);
+        const output = await this.withNodeRetry(node, () => this.runSqlQuery(node, payload, key));
+        return this.routeAwayFromErrorPort(node, output);
+      }
+      case 'transform':
+        // Pure and never retried: the same node data, payload and `nowMs`
+        // always reach the same output, so a second attempt could only repeat
+        // it (design §5.2, Requirement 5.14). `runTransform` never reads or
+        // writes graph topology, only `ctx.$`/`ctx.$text`.
+        return this.routeAwayFromErrorPort(node, runTransform(node, payload, this.exprContext(payload)));
+      case 'aggregate':
+        // Same purity argument as `transform` (design §5.3).
+        return this.routeAwayFromErrorPort(node, runAggregate(node, payload, this.exprContext(payload)));
+      case 'assert':
+        // A guard is pure and never retried: the same payload always reaches the
+        // same verdict, so a second attempt could only repeat it.
+        return this.runAssert(node, payload);
+      case 'state-get':
+        // State reads and writes go straight to the host store: the store's own
+        // `compareAndSet` is the atomicity boundary, so there is nothing here a
+        // retry loop could make safer (design §6 wraps only the network kinds).
+        return { output: await this.runStateGet(node, payload) };
+      case 'state-set':
+        return { output: await this.runStateSet(node, payload) };
+      case 'notify': {
+        // Delivery is a network call, so it shares the retry loop of §6; the
+        // payload leaves unchanged either way (Requirement 13.1).
+        const output = await this.withNodeRetry(node, () => this.runNotify(node, payload));
+        return this.routeAwayFromErrorPort(node, output);
+      }
       case 'execute-workflow': {
         const output = await this.runSubWorkflow(
           node,
@@ -751,6 +1094,1390 @@ class WorkflowRun {
         }
         return { output: payload };
     }
+  }
+
+  /**
+   * Wraps a non-model node body (`http-request`, `sql-query`, `notify`) in the
+   * shared, rate-limit-aware retry loop of design §6.
+   *
+   * The node's own `NodeRetryPolicy` is normalised once; `decideRetry` owns
+   * every decision; each scheduled retry emits exactly one `node-retrying`
+   * event whose description has been through the host's redactor; and the delay
+   * runs through `RunGate.sleep`, so Stop unwinds it immediately and Pause
+   * holds the next attempt back.
+   *
+   * `this.gate` is read per call on purpose: the workflow error handler swaps in
+   * a fresh gate after a stop or timeout.
+   */
+  private async withNodeRetry<T>(
+    node: WorkflowNode,
+    body: (attempt: number) => Promise<T>,
+  ): Promise<T> {
+    const policy = (node.data as { retry?: NodeRetryPolicy } | undefined)?.retry;
+    return runWithNodeRetry(policy, body, {
+      onRetry: notice => {
+        this.emit({
+          type: 'node-retrying',
+          runId: this.options.runId,
+          nodeId: node.id,
+          nodeName: node.name,
+          attempt: notice.attempt,
+          maxAttempts: notice.maxAttempts,
+          delayMs: notice.delayMs,
+          // `node-retrying` is reused verbatim for data nodes (design §7), so
+          // the reason rides along in the single `error` field.
+          error: formatRetryEventError(notice.error, notice.reason),
+          at: Date.now(),
+        });
+      },
+      sleep: ms => this.gate.sleep(ms),
+      stopped: () => this.gate.stopped,
+      // Already paused, so `checkpoint` blocks until Resume/Step without
+      // re-triggering this node's breakpoint (that fires only while running).
+      awaitResume: () =>
+        this.gate.paused ? this.gate.checkpoint(node.id) : Promise.resolve(),
+      describe: error => describeRetryError(error, this.options.redact),
+    });
+  }
+
+  // ── Data-node shared helpers (design §5) ───────────────────────────────────
+
+  /**
+   * Fails a data node for an absent `RunOptions` capability BEFORE it performs
+   * any outbound HTTP, SQL, state or fixture call, naming the node, the missing
+   * member and the host label when one was declared (Requirements 8.1, 18.2).
+   */
+  private missingCapability(node: WorkflowNode, member: string, what: string): Error {
+    const host = this.options.capabilities?.label;
+    return new Error(
+      `Step "${node.name}" needs the "${member}" capability to ${what}, which ` +
+        `${host ? `the ${host} host` : 'this host'} does not provide.`,
+    );
+  }
+
+  /**
+   * Resolves a node's optional connection reference, seeding the host's
+   * Redactor with every resolved secret before the caller builds a request
+   * (Requirement 2.13). `connections` is required only when the node names one
+   * (Requirement 18.8).
+   */
+  private async resolveNodeConnection(
+    node: WorkflowNode,
+    connectionId: string | undefined,
+  ): Promise<ResolvedConnection | undefined> {
+    const id = (connectionId ?? '').trim();
+    if (id.length === 0) return undefined;
+
+    const store = this.options.connections;
+    if (!store) throw this.missingCapability(node, 'connections', `resolve connection "${id}"`);
+
+    const conn = await store.resolve(id);
+    // Hosts wire `redact` as a closure over their Redactor; when they expose
+    // `addLiterals` alongside it, every resolved secret is registered before a
+    // single request is constructed or a single event emitted.
+    const redactor = this.options.redact as unknown as
+      | { addLiterals?: (values: readonly string[]) => void }
+      | undefined;
+    if (redactor && typeof redactor.addLiterals === 'function') {
+      registerConnectionSecrets(redactor as { addLiterals(values: readonly string[]): void }, conn);
+    }
+    return conn;
+  }
+
+  /** Applies the host's redactor when one was supplied; identity otherwise. */
+  private scrub(value: string): string {
+    const redact = this.options.redact;
+    if (!redact) return value;
+    try {
+      return redact(value);
+    } catch {
+      // A host redactor that throws must never turn a successful step into a
+      // failed one; the unredacted value is not emitted either way.
+      return '[redacted]';
+    }
+  }
+
+  /**
+   * The evaluation context a data node's expressions see: the payload parsed as
+   * JSON (`undefined` when it is not JSON), the raw text, and the single clock
+   * `now()` reads. Nothing else — that is what keeps a data node reproducible
+   * across the three hosts (Requirement 1.5).
+   */
+  private exprContext(payload: string): EvalContext {
+    return { $: parseJsonPayload(payload), $text: payload, nowMs: Date.now() };
+  }
+
+  /**
+   * Success never flows through a declared "On error" port: routing is
+   * restricted to the node's regular `message-out` ports, exactly as agents are
+   * treated (Requirement 1.6).
+   */
+  private routeAwayFromErrorPort(
+    node: WorkflowNode,
+    output: string,
+  ): { output: string; viaPortIds?: Set<string> } {
+    const errorPortId = (node.data as { errorPortId?: string } | undefined)?.errorPortId;
+    if (!errorPortId || !node.ports.some(port => port.id === errorPortId)) return { output };
+    const regular = node.ports
+      .filter(port => port.role === 'message-out' && port.id !== errorPortId)
+      .map(port => port.id);
+    return { output, viaPortIds: new Set(regular) };
+  }
+
+  /**
+   * The 0-based occurrence index encoded in an execution key
+   * (`nodeId|payloadHash|occurrence`). Fixture identity reuses it so a fixture
+   * addresses one node execution, and every retry of that execution addresses
+   * the same fixture (Requirement 16.2).
+   */
+  private occurrenceOf(executionKey: string): number {
+    const tail = executionKey.slice(executionKey.lastIndexOf('|') + 1);
+    const occurrence = Number.parseInt(tail, 10);
+    return Number.isInteger(occurrence) && occurrence >= 0 ? occurrence : 0;
+  }
+
+  // ── §5.1 http-request ──────────────────────────────────────────────────────
+
+  /**
+   * The request's rendered `Idempotency-Key`, read case-insensitively so the
+   * claimed state key is byte-identical to the header the target receives —
+   * including the trim and the 255-character cap `buildDataRequest` applied
+   * (Requirement 8.8). Undefined when the node sends no key.
+   */
+  private idempotencyKeyOf(request: DataRequest): string | undefined {
+    for (const [name, value] of Object.entries(request.headers ?? {})) {
+      if (name.toLowerCase() !== 'idempotency-key') continue;
+      return value.length > 0 ? value : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Claims the write under the `idem:` namespace (design §8.3). Resolves true
+   * when this run owns the write and the outbound call may proceed.
+   *
+   * A single atomic `compareAndSet` decides ownership, so of two runs racing
+   * for the same rendered key — the classic cron fire overlapping a manual
+   * trigger — exactly one issues the request (Requirement 12.13). The claim is
+   * taken only when the host provides durable state and the node renders a
+   * key: without either there is nothing to claim, and the request proceeds
+   * exactly as it did before.
+   *
+   * A store that rejects propagates: ownership is unproven, so the node fails
+   * rather than risk a duplicate write.
+   */
+  private async claimHttpWrite(node: WorkflowNode, request: DataRequest): Promise<boolean> {
+    const state = this.options.state;
+    if (!state) return true;
+
+    const key = this.idempotencyKeyOf(request);
+    if (key === undefined) return true;
+
+    const workflowId = this.options.workflowId ?? '';
+    const owned = await claimIdempotent(key, state, { workflowId });
+    // Metadata only: the scoped key and whether another owner already held it.
+    this.emit({
+      type: 'state-read',
+      runId: this.options.runId,
+      nodeId: node.id,
+      key: scopedStateKey(workflowId, idempotencyStateKey(key)),
+      found: !owned,
+      at: Date.now(),
+    });
+    return owned;
+  }
+
+  /**
+   * The node's result when another owner holds the claim: the incoming payload
+   * unchanged, and no out-port followed.
+   *
+   * Suppressing the success path is what keeps the second half of Requirement
+   * 12.14 true — a downstream `state-set` with `delta` semantics would write
+   * the record's delta hash and mark it synced, and this run performed no
+   * write, so the delta key must stay untouched for a later run to classify the
+   * record as changed again (Requirement 12.12). `Sync_Summary.skipped` counts
+   * the record once; `considered` rises with it so the audit record keeps
+   * `considered = changed + skipped` (Requirement 14.8).
+   */
+  private skipLostClaim(payload: string): { output: string; viaPortIds: Set<string> } {
+    this.syncState.summary.considered += 1;
+    this.syncState.summary.skipped += 1;
+    return { output: payload, viaPortIds: new Set<string>() };
+  }
+
+  /**
+   * Executes one `http-request` attempt: guards, the idempotency claim,
+   * fixtures, the paginated fetch loop, success classification and result
+   * selection (design §5.1, §8.3).
+   *
+   * Called through {@link withNodeRetry}, so a fresh pagination loop starts per
+   * attempt and every failure it throws is classified by `decideRetry`. The
+   * journal entry is written by `executeNode` from the returned output, so a
+   * resumed run replays this node instead of repeating the call (Requirement
+   * 8.19).
+   */
+  private async runHttpRequest(
+    node: WorkflowNode,
+    payload: string,
+    attempt: number,
+    executionKey: string,
+  ): Promise<HttpAttemptOutcome> {
+    const data = node.data as HttpRequestNodeData;
+
+    // Capability first: no connection is resolved and no secret is read on a
+    // host that cannot issue the request at all (Requirements 8.1, 18.2).
+    const fetcher = this.options.dataFetch;
+    if (!fetcher) throw this.missingCapability(node, 'dataFetch', 'run HTTP Request steps');
+
+    const conn = await this.resolveNodeConnection(node, data.connectionId);
+    const occurrence = this.occurrenceOf(executionKey);
+    const paginated = isPaginated(data.pagination);
+    const loop = createPaginationLoop(data.pagination);
+    // The write is claimed once per node execution: on the first page of the
+    // first attempt only, so a retry re-sends the identical key it already owns
+    // (Requirement 8.8) rather than losing the claim to itself.
+    let claimPending = attempt === 1;
+
+    while (loop.canRequest()) {
+      // Every detectable authoring error (empty url, non-http scheme, a `json`
+      // body template that does not render JSON) throws here, before any I/O.
+      const request = buildDataRequest(node, payload, conn, loop.cursor);
+
+      if (claimPending) {
+        // After construction, so a malformed step burns no idempotency key, and
+        // before the first outbound call, so the loser never writes (§8.3).
+        claimPending = false;
+        if (!(await this.claimHttpWrite(node, request))) return { skipped: true };
+      }
+
+      const { response, replayed, session } = await this.fetchHttpPage(
+        node,
+        data,
+        request,
+        payload,
+        occurrence,
+        attempt,
+        fetcher,
+      );
+
+      if (!this.isSuccessStatus(response.status, data.successCodes)) {
+        // No part of the response merges into the payload: the retry classifier
+        // of §6 and the "On error" routing of Requirement 1 take it from here.
+        throw new HttpStatusError(
+          response.status,
+          response.headers ?? {},
+          this.scrub(clipText(response.body ?? '', HTTP_BODY_PREVIEW_MAX_CHARS)),
+        );
+      }
+
+      // A recorded fixture reproduces the response the node accepted, so a
+      // replay of a `replay-or-record` step cannot pin a transient failure.
+      if (!replayed) await this.recordHttpFixture(session, response);
+
+      const parsed = this.parseHttpBody(node, data, response);
+      if (!paginated) {
+        // Mode `none`: exactly one request, no accumulation, no `page-fetched`.
+        return { output: selectResult(data, parsed, payload) };
+      }
+
+      const outcome = loop.accept(parsed, response.headers);
+      this.emit({
+        type: 'page-fetched',
+        runId: this.options.runId,
+        nodeId: node.id,
+        page: outcome.event.page,
+        items: outcome.event.items,
+        hasMore: outcome.event.hasMore,
+        at: Date.now(),
+      });
+    }
+
+    // Loop invariant on exit: `pages <= maxPages` and `items` holds the items of
+    // pages 1..pages in fetch order (Requirement 9.14).
+    return { output: selectResult(data, loop.result(), payload) };
+  }
+
+  /**
+   * Performs (or replays) one page request, emitting exactly one
+   * `http-request` event per attempt and one `http-response` event per received
+   * response, with bodies included only when the node opted in and the host's
+   * redactor has processed them (Requirements 8.9, 8.10, 16.9).
+   */
+  private async fetchHttpPage(
+    node: WorkflowNode,
+    data: HttpRequestNodeData,
+    request: DataRequest,
+    payload: string,
+    occurrence: number,
+    attempt: number,
+    fetcher: DataFetcher,
+  ): Promise<{
+    response: DataResponse;
+    replayed: boolean;
+    session: FixtureSession<DataResponse>;
+  }> {
+    const session = createHttpFixtureSession({
+      mode: data.fixtures,
+      workflowId: this.options.workflowId ?? '',
+      nodeId: node.id,
+      nodeName: node.name,
+      payload,
+      occurrence,
+      requestFingerprint: httpRequestFingerprint(request),
+      store: this.options.fixtures,
+    });
+
+    // Read before the request event so a `replay` miss fails the node without
+    // announcing a request that was never issued.
+    const replay = await session.read();
+
+    this.emit({
+      type: 'http-request',
+      runId: this.options.runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      method: request.method,
+      url: this.scrub(request.url),
+      attempt,
+      ...(data.persistRequestBody && request.body !== undefined
+        ? { body: this.scrub(request.body) }
+        : {}),
+      at: Date.now(),
+    });
+
+    const response = replay ? replay.value : await this.dispatchHttpRequest(request, fetcher);
+
+    this.emit({
+      type: 'http-response',
+      runId: this.options.runId,
+      nodeId: node.id,
+      status: response.status,
+      durationMs: replay ? 0 : Math.max(0, Math.round(response.durationMs ?? 0)),
+      byteCount: Math.max(0, Math.round(response.byteCount ?? 0)),
+      ...(response.truncated ? { truncated: true } : {}),
+      ...(data.persistResponseBody ? { body: this.scrub(response.body ?? '') } : {}),
+      ...(replay ? { replayed: true } : {}),
+      at: Date.now(),
+    });
+
+    return { response, replayed: replay !== undefined, session };
+  }
+
+  /**
+   * Issues the request and enforces the effective per-attempt timeout even on a
+   * host that ignores `timeoutMs`: an attempt that has not completed within it
+   * fails as a `timeout` transport failure (Requirement 8.20).
+   */
+  private async dispatchHttpRequest(
+    request: DataRequest,
+    fetcher: DataFetcher,
+  ): Promise<DataResponse> {
+    const timeoutMs = request.timeoutMs;
+    if (!Number.isFinite(timeoutMs) || (timeoutMs as number) <= 0) return fetcher(request);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        fetcher(request),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new DataTransportError(
+                  'timeout',
+                  `The request did not complete within ${Math.round((timeoutMs as number) / 1000)}s.`,
+                ),
+              ),
+            timeoutMs as number,
+          );
+          (timer as { unref?: () => void }).unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Records the live response when the node's fixture mode writes. A store that
+   * is absent, rejects, or is handed an oversized fixture produces a warning and
+   * the live response still becomes the node's output (Requirement 16.12).
+   */
+  private async recordHttpFixture(
+    session: FixtureSession<DataResponse>,
+    response: DataResponse,
+  ): Promise<void> {
+    if (!session.writes) return;
+    const outcome = await session.write(response);
+    if (outcome.stored || !outcome.warning) return;
+    const sink = (globalThis as { console?: { warn?: (message: string) => void } }).console;
+    sink?.warn?.(outcome.warning);
+  }
+
+  /**
+   * 200-299, plus the at most 20 listed `successCodes` that are integers in
+   * 100-599 (Requirement 8.11).
+   */
+  private isSuccessStatus(status: number, successCodes: number[] | undefined): boolean {
+    if (status >= 200 && status <= 299) return true;
+    if (!Array.isArray(successCodes)) return false;
+    return successCodes
+      .slice(0, MAX_SUCCESS_CODES)
+      .some(code => Number.isInteger(code) && code >= 100 && code <= 599 && code === status);
+  }
+
+  /**
+   * Parses the response per `responseMode` (default `json`). A body that does
+   * not parse as JSON fails the node with a message saying whether it was
+   * truncated, so the "On error" routing of Requirement 1 applies
+   * (Requirement 8.21). An empty body in `json` mode is `null` — a 204 is not a
+   * parse failure.
+   */
+  private parseHttpBody(
+    node: WorkflowNode,
+    data: HttpRequestNodeData,
+    response: DataResponse,
+  ): unknown {
+    const body = typeof response.body === 'string' ? response.body : '';
+    if (data.responseMode === 'text') return body;
+    if (body.trim().length === 0) return null;
+    try {
+      return JSON.parse(body) as unknown;
+    } catch (error) {
+      throw new Error(
+        `Step "${node.name}" response body was not valid JSON ` +
+          `(${response.truncated ? 'the body was truncated at the response byte cap' : 'the body was not truncated'}): ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // ── §5.4 sql-query ─────────────────────────────────────────────────────────
+
+  /**
+   * Executes one `sql-query` attempt (design §5.4).
+   *
+   * Everything that can be decided without the database is decided first, in a
+   * fixed order, and every one of those failures happens with the target
+   * database untouched: the host must be able to run SQL at all, the statement
+   * must be free of `{{` template tokens, the driver must be one the host
+   * declares support for, a write needs `allowWrites` on the connection, the
+   * declared parameters must match the statement, and every parameter
+   * expression must evaluate to a bindable scalar.
+   *
+   * Parameter VALUES never leave this method: they go to the driver as bound
+   * parameters, and neither the `sql-query` nor the `sql-result` event carries
+   * one (Requirements 10.4, 10.8).
+   *
+   * Called through {@link withNodeRetry}, so a rejection is classified by
+   * `decideRetry` and a final failure routes out the node's "On error" port.
+   */
+  private async runSqlQuery(
+    node: WorkflowNode,
+    payload: string,
+    executionKey: string,
+  ): Promise<string> {
+    const data = (node.data ?? {}) as SqlQueryNodeData;
+
+    // Capability first: no connection is resolved and no secret is read on a
+    // host that cannot run SQL at all (Requirements 10.5, 18.2).
+    const host = this.options.sql;
+    const declared = typeof data.driver === 'string' ? data.driver.trim() : '';
+    if (!host) {
+      throw this.missingCapability(
+        node,
+        'sql',
+        `run ${declared.length > 0 ? declared : 'SQL'} queries`,
+      );
+    }
+
+    // The statement is checked before the connection is resolved: a `{{` token
+    // is an authoring error, not a credential problem (Requirement 10.2).
+    const statement = typeof data.statement === 'string' ? data.statement : '';
+    const invalid = validateSqlStatement(statement);
+    if (invalid) throw new Error(`Step "${node.name}" cannot run its query. ${invalid}`);
+
+    const conn = await this.resolveNodeConnection(node, data.connectionId);
+    if (!conn) {
+      throw new Error(
+        `Step "${node.name}" has no connection selected. Choose the SQL connection ` +
+          'that holds the credentials for this query.',
+      );
+    }
+
+    const driver = this.resolveSqlDriver(node, host, data, conn);
+
+    // Conservative write classification: a false positive asks the operator to
+    // enable writes, a false negative would mutate a read-only source
+    // (Requirements 2.10, 10.6).
+    if (isWriteStatement(statement) && conn.allowWrites !== true) {
+      throw new Error(
+        `Step "${node.name}" runs a statement classified as a write, but connection ` +
+          `"${conn.id}" is read-only. Enable writes on that connection to allow it.`,
+      );
+    }
+
+    const mismatch = reconcileSqlParameters(statement, data.params);
+    if (mismatch) throw new Error(`Step "${node.name}" cannot run its query. ${mismatch}`);
+
+    const params = this.bindSqlParameters(node, data.params, payload);
+    const limits = resolveSqlLimits(
+      { maxRows: data.maxRows, statementTimeoutMs: data.statementTimeoutMs },
+      conn.limits,
+    );
+    const request: SqlRequest = { driver, connection: conn, statement, params, ...limits };
+
+    const session = createSqlFixtureSession({
+      mode: data.fixtures,
+      workflowId: this.options.workflowId ?? '',
+      nodeId: node.id,
+      nodeName: node.name,
+      payload,
+      occurrence: this.occurrenceOf(executionKey),
+      // Parameter values are part of the fixture identity but the fingerprint
+      // is a hash, so no value is recoverable from the key.
+      requestFingerprint: sqlRequestFingerprint(statement, params),
+      store: this.options.fixtures,
+    });
+    // Read before the query event so a `replay` miss fails the node without
+    // announcing a statement that was never submitted.
+    const replay = await session.read();
+
+    this.emit({
+      type: 'sql-query',
+      runId: this.options.runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      driver,
+      statement: this.scrub(statement),
+      paramCount: Object.keys(params).length,
+      at: Date.now(),
+    });
+
+    const result = replay ? replay.value : await this.dispatchSqlQuery(node, host, request);
+    if (!replay) await this.recordSqlFixture(session, result);
+
+    // The host owns the caps, but the node's postcondition is `rows <= maxRows`
+    // either way, so a host that over-delivers is trimmed and reported as
+    // truncated rather than silently handing an oversized result downstream
+    // (Requirement 10.11).
+    const returned = Array.isArray(result.rows) ? result.rows : [];
+    const rows = returned.length > limits.maxRows ? returned.slice(0, limits.maxRows) : returned;
+    const truncated = result.truncated === true || rows.length < returned.length;
+
+    this.emit({
+      type: 'sql-result',
+      runId: this.options.runId,
+      nodeId: node.id,
+      rowCount: rows.length,
+      durationMs: replay ? 0 : Math.max(0, Math.round(result.durationMs ?? 0)),
+      ...(truncated ? { truncated: true } : {}),
+      ...(replay ? { replayed: true } : {}),
+      at: Date.now(),
+    });
+
+    const resultKey = (data.resultKey ?? '').trim() || 'rows';
+    // Bracket access throughout: the result object is an index signature, and
+    // the Studio compiles this file with `noPropertyAccessFromIndexSignature`.
+    const output: Record<string, unknown> = { [resultKey]: rows, ['rowCount']: rows.length };
+    if (truncated) output['truncated'] = true;
+    return JSON.stringify(output);
+  }
+
+  /**
+   * Resolves the driver from node data, falling back to the connection's
+   * `driver` config entry, and consults `SqlHost.supports` before any query is
+   * submitted (Requirements 10.5, 18.9, 18.10).
+   */
+  private resolveSqlDriver(
+    node: WorkflowNode,
+    host: SqlHost,
+    data: SqlQueryNodeData,
+    conn: ResolvedConnection,
+  ): SqlDriver {
+    const fromNode = typeof data.driver === 'string' ? data.driver.trim() : '';
+    const fromConnection = (conn.config?.['driver'] ?? '').trim();
+    const candidate = (fromNode.length > 0 ? fromNode : fromConnection).toLowerCase();
+    const label = this.options.capabilities?.label;
+    const hostName = label ? `the ${label} host` : 'this host';
+
+    if (!SQL_DRIVERS.has(candidate)) {
+      throw new Error(
+        `Step "${node.name}" has no usable SQL driver: ` +
+          `"${candidate.length > 0 ? candidate : '(none)'}" is not one of postgres, mysql, mssql ` +
+          `or sqlite, so ${hostName} cannot run it.`,
+      );
+    }
+
+    const driver = candidate as SqlDriver;
+    if (!host.supports(driver)) {
+      throw new Error(
+        `Step "${node.name}" needs a ${driver} driver, which ${hostName} does not provide. ` +
+          'See the host capability matrix for the drivers it supports.',
+      );
+    }
+    return driver;
+  }
+
+  /**
+   * Evaluates each declared parameter expression against the payload in
+   * declaration order and keeps only bindable scalars (Requirement 10.4).
+   *
+   * A failing expression or a non-scalar result fails the node here, before the
+   * statement is submitted, so no parameter is bound at all (Requirement 10.13).
+   * A payload value never becomes statement text: it leaves as a bound
+   * parameter, which is why `'; DROP TABLE …` binds as a harmless string.
+   */
+  private bindSqlParameters(
+    node: WorkflowNode,
+    declared: readonly DeclaredSqlParameter[] | undefined,
+    payload: string,
+  ): Record<string, string | number | boolean | null> {
+    const params = declared ?? [];
+    if (params.length === 0) return {};
+
+    const ctx = this.exprContext(payload);
+    const bound: Record<string, string | number | boolean | null> = {};
+    for (const param of params) {
+      let value: Json;
+      try {
+        value = compileExpression(param.expression).evaluate(ctx);
+      } catch (error) {
+        throw new Error(
+          `Step "${node.name}" cannot bind SQL parameter "${param.name}": ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+        bound[param.name] = value;
+        continue;
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        bound[param.name] = value;
+        continue;
+      }
+      throw new Error(
+        `Step "${node.name}" cannot bind SQL parameter "${param.name}": the expression ` +
+          `evaluated to ${describeJsonKind(value)}, and only a string, number, boolean or ` +
+          'null can be bound.',
+      );
+    }
+    return bound;
+  }
+
+  /**
+   * Submits the statement and enforces the effective `statementTimeoutMs` even
+   * on a host that ignores it: a statement that has not completed within it
+   * fails as a `timeout` transport failure naming the node and the effective
+   * timeout (Requirement 10.14). A rejection from the host is re-described with
+   * the node, the driver and the connection, keeping its transport class so the
+   * retry classifier still sees it (Requirement 10.15).
+   */
+  private async dispatchSqlQuery(
+    node: WorkflowNode,
+    host: SqlHost,
+    request: SqlRequest,
+  ): Promise<SqlResult> {
+    const timeoutMs = request.statementTimeoutMs;
+    const query = (async (): Promise<SqlResult> => {
+      try {
+        return await host.query(request);
+      } catch (error) {
+        throw this.sqlQueryFailure(node, request, error);
+      }
+    })();
+
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return query;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        query,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new DataTransportError(
+                  'timeout',
+                  `Step "${node.name}" did not complete its ${request.driver} query within ` +
+                    `${timeoutMs}ms.`,
+                ),
+              ),
+            timeoutMs,
+          );
+          (timer as { unref?: () => void }).unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Re-describes a driver rejection with the node, the driver and the
+   * connection, keeping a transport failure's `kind` so a retry stays as safe as
+   * it was (Requirement 10.15). The driver's own message goes through the host
+   * redactor: a connection string in a driver error is exactly the value the
+   * Redactor exists for.
+   */
+  private sqlQueryFailure(node: WorkflowNode, request: SqlRequest, error: unknown): unknown {
+    const detail = this.scrub(error instanceof Error ? error.message : String(error));
+    const message =
+      `Step "${node.name}" failed to run its ${request.driver} query on connection ` +
+      `"${request.connection.id}": ${detail}`;
+
+    if (error instanceof DataTransportError) return new DataTransportError(error.kind, message);
+    const candidate = error as { name?: unknown; kind?: unknown } | null;
+    if (
+      !!candidate &&
+      typeof candidate === 'object' &&
+      candidate.name === 'DataTransportError' &&
+      typeof candidate.kind === 'string'
+    ) {
+      return new DataTransportError(candidate.kind as TransportFailureKind, message);
+    }
+    return new Error(message);
+  }
+
+  /**
+   * Records the live result when the node's fixture mode writes. A store that is
+   * absent, rejects, or is handed an oversized fixture produces a warning and
+   * the live result still becomes the node's output (Requirement 16.12).
+   */
+  private async recordSqlFixture(
+    session: FixtureSession<SqlResult>,
+    result: SqlResult,
+  ): Promise<void> {
+    if (!session.writes) return;
+    const outcome = await session.write(result);
+    if (outcome.stored || !outcome.warning) return;
+    const sink = (globalThis as { console?: { warn?: (message: string) => void } }).console;
+    sink?.warn?.(outcome.warning);
+  }
+
+  // ── §5.6 assert ────────────────────────────────────────────────────────────
+
+  /**
+   * Runs an `assert` node: the guard that stands between a source read and a
+   * write (design §5.6).
+   *
+   * Every assertion is evaluated exactly once in declaration order with no
+   * short-circuit, so an operator reads the full verdict instead of the first
+   * breach (Requirement 7.1). A holding guard returns the incoming payload
+   * byte-identically and routes through the `Passed` port only; a breached
+   * `error` guard either fails the node before the write step or routes out a
+   * wired `Failed` port, and a breached `warn` guard changes no routing at all
+   * (Requirements 7.2, 7.4, 7.5, 7.7).
+   *
+   * Nothing here reads a clock or a random source: the only inputs are the node
+   * data, the payload and the baseline value, and the payload is read, never
+   * written (Requirement 7.11).
+   */
+  private async runAssert(
+    node: WorkflowNode,
+    payload: string,
+  ): Promise<{ output: string; viaPortIds: Set<string> }> {
+    const data = (node.data ?? {}) as AssertNodeData;
+
+    // Every rejection lands before the baseline read, before the first
+    // evaluation and before a single guard entry is appended to the audit
+    // record (Requirement 7.10).
+    const assertions = this.prepareAssertions(node, data);
+
+    const template = typeof data.baselineStateKey === 'string' ? data.baselineStateKey.trim() : '';
+    const baseline =
+      template.length > 0 ? await this.readAssertBaseline(node, template, payload) : undefined;
+    const ctx = this.assertContext(payload, baseline);
+
+    // Whether a breach routes is decided before the loop: routing needs
+    // `onBreach: 'route'` AND a `failedPortId` that names a wired `message-out`
+    // port, and a `warn` breach never routes (Requirements 7.3, 7.5, 7.6).
+    const routedPortId = data.onBreach === 'route' ? this.wiredFailedPortId(node, data) : null;
+
+    const guards = (this.syncState.summary.guards ??= []);
+    const breaches: PreparedAssertion[] = [];
+
+    for (const assertion of assertions) {
+      // Loop invariant: `breaches` holds exactly the breached `error`
+      // assertions among those already evaluated, in declaration order.
+      const held = assertionHolds(this.evaluateAssertion(node, assertion, ctx));
+      // One audit entry per evaluated assertion, holding or breached, for both
+      // breach outcomes (Requirement 7.9).
+      guards.push({
+        name: assertion.name,
+        passed: held,
+        ...(assertion.message === undefined ? {} : { message: assertion.message }),
+      });
+      if (held) continue;
+
+      this.emit({
+        type: 'assert-breached',
+        runId: this.options.runId,
+        nodeId: node.id,
+        nodeName: node.name,
+        assertion: assertion.name,
+        // The expression source stands in for an undeclared message, so a
+        // breach is always self-explanatory (Requirement 7.3).
+        message: assertion.message ?? assertion.compiled.source,
+        severity: assertion.severity,
+        routed: assertion.severity === 'error' && routedPortId !== null,
+        at: Date.now(),
+      });
+      if (assertion.severity === 'error') breaches.push(assertion);
+    }
+
+    if (breaches.length === 0) {
+      this.emit({
+        type: 'assert-passed',
+        runId: this.options.runId,
+        nodeId: node.id,
+        nodeName: node.name,
+        checked: assertions.length,
+        at: Date.now(),
+      });
+      return { output: payload, viaPortIds: this.assertPassedPorts(node, data) };
+    }
+
+    if (routedPortId) {
+      // The breach report carries the payload unchanged, so a repair branch can
+      // still work with what the source actually returned (Requirement 7.5).
+      return {
+        output: JSON.stringify({ breaches: breaches.map(breach => breach.name), input: payload }),
+        viaPortIds: new Set([routedPortId]),
+      };
+    }
+
+    const first = breaches[0];
+    throw new Error(
+      `Step "${node.name}" stopped on guard "${first.name}": ` +
+        `${first.message ?? first.compiled.source}`,
+    );
+  }
+
+  /**
+   * Accepts the node's assertion list or fails the node, naming the rejected
+   * assertion or field (Requirement 7.10).
+   *
+   * Compiling every expression up front is what makes "no guard entry, no
+   * output payload" true for a broken node: an assertion that cannot compile is
+   * found before the first one is evaluated.
+   */
+  private prepareAssertions(node: WorkflowNode, data: AssertNodeData): PreparedAssertion[] {
+    const declared = Array.isArray(data.assertions) ? data.assertions : [];
+    if (declared.length === 0) {
+      throw new Error(
+        `Step "${node.name}" declares no assertions. Add at least one guard expression, ` +
+          'or remove the step.',
+      );
+    }
+    if (declared.length > MAX_ASSERTIONS) {
+      throw new Error(
+        `Step "${node.name}" declares ${declared.length} assertions, more than the ` +
+          `${MAX_ASSERTIONS} a guard may evaluate.`,
+      );
+    }
+
+    const prepared: PreparedAssertion[] = [];
+    const seen = new Set<string>();
+    for (const [index, raw] of declared.entries()) {
+      const assertion = (raw ?? {}) as Assertion;
+      const position = index + 1;
+      const name = typeof assertion.name === 'string' ? assertion.name.trim() : '';
+      if (name.length === 0) {
+        throw new Error(`Step "${node.name}" assertion ${position} has no name.`);
+      }
+      if (name.length > MAX_ASSERTION_NAME_CHARS) {
+        throw new Error(
+          `Step "${node.name}" assertion ${position} has a ${name.length}-character name, ` +
+            `longer than the ${MAX_ASSERTION_NAME_CHARS} characters allowed.`,
+        );
+      }
+      if (seen.has(name)) {
+        throw new Error(
+          `Step "${node.name}" declares assertion "${name}" more than once. ` +
+            'Give every guard a distinct name.',
+        );
+      }
+      seen.add(name);
+
+      const source = typeof assertion.expression === 'string' ? assertion.expression : '';
+      let compiled: CompiledExpression;
+      try {
+        compiled = compileExpression(source);
+      } catch (error) {
+        throw new Error(
+          `Step "${node.name}" cannot compile assertion "${name}": ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      prepared.push({
+        name,
+        compiled,
+        severity: assertion.severity === 'warn' ? 'warn' : 'error',
+        ...(typeof assertion.message === 'string' && assertion.message.trim().length > 0
+          ? { message: assertion.message }
+          : {}),
+      });
+    }
+    return prepared;
+  }
+
+  /**
+   * Evaluates one prepared assertion. A compiled expression can still exhaust
+   * its step or depth budget, and that is a node failure naming the assertion
+   * rather than a silent breach — a guard that could not be decided must not
+   * read as one that held.
+   */
+  private evaluateAssertion(
+    node: WorkflowNode,
+    assertion: PreparedAssertion,
+    ctx: EvalContext,
+  ): Json {
+    try {
+      return assertion.compiled.evaluate(ctx);
+    } catch (error) {
+      throw new Error(
+        `Step "${node.name}" could not evaluate assertion "${assertion.name}": ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Reads the baseline value exactly once, before any assertion runs
+   * (Requirement 7.8). The key template is interpolated against the payload and
+   * scoped by workflow, so two workflows never share a baseline.
+   *
+   * A key that holds nothing, or holds a value that does not parse as JSON,
+   * yields `null` — a variance guard against a missing baseline then compares
+   * against `null` instead of failing the run. `state` is required only because
+   * the node declared a baseline key (Requirement 18.8).
+   */
+  private async readAssertBaseline(
+    node: WorkflowNode,
+    template: string,
+    payload: string,
+  ): Promise<Json> {
+    const state = this.options.state;
+    if (!state) {
+      throw this.missingCapability(node, 'state', `read the baseline "${template}"`);
+    }
+    const key = interpolatePayload(template, payload);
+    const entry = await state.get(scopedStateKey(this.options.workflowId ?? '', key));
+    if (!entry || typeof entry.value !== 'string') return null;
+    return parseJsonPayload(entry.value) ?? null;
+  }
+
+  /**
+   * The context an assertion sees: the payload, the raw text, and the baseline
+   * addressable as `baseline` (design §5.6).
+   *
+   * A bare identifier is shorthand for `$.identifier`, so the baseline is bound
+   * by shallow-copying the payload root with `baseline` added — a copy, so the
+   * incoming payload's objects stay structurally unchanged (Requirement 7.11).
+   * A payload that is not a JSON object cannot carry the binding, so its root
+   * becomes `{ baseline }`; the raw payload is still addressable as `$text`.
+   */
+  private assertContext(payload: string, baseline: Json | undefined): EvalContext {
+    const ctx = this.exprContext(payload);
+    if (baseline === undefined) return ctx;
+    const root = ctx.$;
+    const merged: Json =
+      typeof root === 'object' && root !== null && !Array.isArray(root)
+        ? { ...root, baseline }
+        : { baseline };
+    return { ...ctx, $: merged };
+  }
+
+  /**
+   * The node's declared `failedPortId`, but only when it names a `message-out`
+   * port of this node that at least one handoff leaves from. Anything else
+   * yields null, which sends the breach down the fail path instead of dropping
+   * it into an unwired port (Requirement 7.6).
+   */
+  private wiredFailedPortId(node: WorkflowNode, data: AssertNodeData): string | null {
+    const failedPortId = (data.failedPortId ?? '').trim();
+    if (failedPortId.length === 0) return null;
+    if (!node.ports.some(port => port.id === failedPortId && port.role === 'message-out')) {
+      return null;
+    }
+    const wired = this.options.graph.connections.some(
+      conn => conn.kind === 'handoff' && portBaseId(conn.outputId) === failedPortId,
+    );
+    return wired ? failedPortId : null;
+  }
+
+  /**
+   * The ports a holding guard routes through: every `message-out` port except
+   * the one reserved for breaches (Requirements 7.2, 7.7).
+   *
+   * The breach port is the declared `failedPortId` when it names one; otherwise
+   * the port named `Failed`, and otherwise the second out-port of the blueprint
+   * — the same positional reading the approval gate uses. A success must not
+   * reach the `Failed` branch just because the author left `failedPortId` unset.
+   */
+  private assertPassedPorts(node: WorkflowNode, data: AssertNodeData): Set<string> {
+    const outs = node.ports.filter(port => port.role === 'message-out');
+    const declared = (data.failedPortId ?? '').trim();
+    const breachPortId =
+      outs.find(port => port.id === declared)?.id ??
+      outs.find(port => port.name.trim().toLowerCase() === 'failed')?.id ??
+      (outs.length > 1 ? outs[1].id : undefined);
+    const errorPortId = (data as { errorPortId?: string }).errorPortId;
+    return new Set(
+      outs
+        .filter(port => port.id !== breachPortId && port.id !== errorPortId)
+        .map(port => port.id),
+    );
+  }
+
+  // ── §5.8 state nodes ───────────────────────────────────────────────────────
+
+  /**
+   * Runs a `state-get` node: one scoped read, one `state-read` event, and the
+   * value merged into the payload under `resultKey` (design §5.8).
+   *
+   * The key template is interpolated against the payload and scoped by
+   * workflow, so two workflows sharing a key name never see each other's value
+   * (Requirement 12.2). An absent or expired key falls back to `defaultValue`,
+   * and to `null` when the node declares none; the merged value is parsed as
+   * JSON when it parses and merged as text otherwise, so a stored record stays
+   * addressable as `{{state.field}}` downstream (Requirement 12.5).
+   */
+  private async runStateGet(node: WorkflowNode, payload: string): Promise<string> {
+    const data = (node.data ?? {}) as StateGetNodeData;
+
+    // Capability first: a host without durable state reads nothing, writes
+    // nothing and emits no state event (Requirement 12.4).
+    const store = this.requireStateStore(node, 'read durable workflow state');
+    const key = this.scopedNodeStateKey(node, data.key, payload);
+
+    const entry = await store.get(key);
+    const stored = entry && typeof entry.value === 'string' ? entry.value : undefined;
+    // Metadata only: the scoped key and whether the key held a value.
+    this.emit({
+      type: 'state-read',
+      runId: this.options.runId,
+      nodeId: node.id,
+      key,
+      found: stored !== undefined,
+      at: Date.now(),
+    });
+
+    const fallback = typeof data.defaultValue === 'string' ? data.defaultValue : undefined;
+    const source = stored ?? fallback;
+    const value = source === undefined ? null : tryParseJson(source);
+    const resultKey = (data.resultKey ?? '').trim() || 'state';
+    return mergePayloads(payload, JSON.stringify({ [resultKey]: value }));
+  }
+
+  /**
+   * Runs a `state-set` node: the evaluated value stored under the three
+   * semantics of design §5.8, then exactly one `state-written` event carrying
+   * the write decision (Requirement 12.9).
+   *
+   *  - `value` (the default) stores the JSON serialisation and always reports
+   *    `changed` (Requirement 12.6).
+   *  - `delta` stores the `fnv1a` content hash and reports `changed` only when
+   *    the key is absent or the hash moved — so run state holds a fingerprint,
+   *    never a shadow copy of the record (Requirement 12.7).
+   *  - `watermark` is monotonic: it advances only when `compareWatermark` orders
+   *    the new value above the stored one, which makes replaying a set of writes
+   *    in any order converge on the same value (Requirement 12.8).
+   *
+   * The payload leaves unchanged apart from the merged `stateChanged` flag, so a
+   * downstream step can branch on whether anything actually moved.
+   */
+  private async runStateSet(node: WorkflowNode, payload: string): Promise<string> {
+    const data = (node.data ?? {}) as StateSetNodeData;
+    const semantics: 'value' | 'delta' | 'watermark' =
+      data.semantics === 'delta' || data.semantics === 'watermark' ? data.semantics : 'value';
+
+    const store = this.requireStateStore(node, 'write durable workflow state');
+    const key = this.scopedNodeStateKey(node, data.key, payload);
+    // Evaluated before the read, so an uncompilable or undecidable expression
+    // fails the node without touching the store and without an event.
+    const value = this.evaluateStateValue(node, data.valueExpression, payload);
+    const ttl = this.stateTtlOptions(data.ttlSec);
+
+    let changed: boolean;
+    let from: string | undefined;
+    let advancedTo: string | undefined;
+
+    switch (semantics) {
+      case 'delta': {
+        const next = contentHash(value);
+        const previous = await store.get(key);
+        changed = !previous || previous.value !== next;
+        if (changed) await store.set(key, next, ttl);
+        break;
+      }
+      case 'watermark': {
+        const next = this.watermarkValue(node, value);
+        const previous = await store.get(key);
+        const held = previous && typeof previous.value === 'string' ? previous.value : undefined;
+        from = held;
+        changed = held === undefined || compareWatermark(next, held) > 0;
+        if (changed) {
+          await store.set(key, next, ttl);
+          advancedTo = next;
+        }
+        break;
+      }
+      default: {
+        await store.set(key, JSON.stringify(value) ?? 'null', ttl);
+        changed = true;
+        break;
+      }
+    }
+
+    this.emit({
+      type: 'state-written',
+      runId: this.options.runId,
+      nodeId: node.id,
+      key,
+      semantics,
+      changed,
+      ...(from === undefined ? {} : { from }),
+      ...(advancedTo === undefined ? {} : { to: advancedTo }),
+      at: Date.now(),
+    });
+
+    return mergePayloads(payload, JSON.stringify({ stateChanged: changed }));
+  }
+
+  /**
+   * The host's state store, or a failure naming the node and the missing
+   * capability. Called before a key is rendered, so a host without durable
+   * state performs no read and no write (Requirements 12.4, 18.8).
+   */
+  private requireStateStore(node: WorkflowNode, what: string): WorkflowStateStore {
+    const state = this.options.state;
+    if (!state) throw this.missingCapability(node, 'state', what);
+    return state;
+  }
+
+  /**
+   * The node's key template interpolated against the payload and scoped by
+   * workflow (Requirement 12.2). A template that renders to nothing is an
+   * authoring error rather than a write to the workflow's empty key.
+   */
+  private scopedNodeStateKey(
+    node: WorkflowNode,
+    template: string | undefined,
+    payload: string,
+  ): string {
+    const source = typeof template === 'string' ? template : '';
+    const key = interpolatePayload(source, payload).trim();
+    if (key.length === 0) {
+      throw new Error(
+        `Step "${node.name}" has no state key. Set a key such as "wm:jobs", ` +
+          'optionally with {{field}} tokens from the payload.',
+      );
+    }
+    return scopedStateKey(this.options.workflowId ?? '', key);
+  }
+
+  /**
+   * Evaluates a `state-set` value expression through the shared evaluator, so a
+   * stored value depends on nothing but the payload and the run clock
+   * (Requirement 1.5). Both the compile and the evaluation failure name the node.
+   */
+  private evaluateStateValue(
+    node: WorkflowNode,
+    source: string | undefined,
+    payload: string,
+  ): Json {
+    let compiled: CompiledExpression;
+    try {
+      compiled = compileExpression(typeof source === 'string' ? source : '');
+    } catch (error) {
+      throw new Error(
+        `Step "${node.name}" cannot compile its value expression: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    try {
+      return compiled.evaluate(this.exprContext(payload));
+    } catch (error) {
+      throw new Error(
+        `Step "${node.name}" could not evaluate its value expression: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * The string form a watermark is stored and compared in: a non-empty string
+   * or a finite number. Anything else — null from an empty page, a boolean, a
+   * record — would make the monotonic order meaningless, so the node fails
+   * before the read instead of storing a value no later run can advance past.
+   */
+  private watermarkValue(node: WorkflowNode, value: Json): string {
+    if (typeof value === 'string' && value.length > 0) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    throw new Error(
+      `Step "${node.name}" cannot advance its watermark: the value expression evaluated to ` +
+        `${describeWatermarkKind(value)}, and a watermark must be a timestamp, an ` +
+        'identifier or a finite number.',
+    );
+  }
+
+  /**
+   * The `set` options for an explicit `ttlSec`. An absent, non-integer or
+   * out-of-range value is left to the host, which applies the namespace default
+   * (Requirement 12.18).
+   */
+  private stateTtlOptions(ttlSec: number | undefined): { ttlSec: number } | undefined {
+    if (typeof ttlSec !== 'number' || !Number.isInteger(ttlSec)) return undefined;
+    if (ttlSec < STATE_TTL_MIN_SEC || ttlSec > STATE_TTL_MAX_SEC) return undefined;
+    return { ttlSec };
+  }
+
+  // ── §5.7 notify ────────────────────────────────────────────────────────────
+
+  /**
+   * Runs a `notify` node: one rendered message delivered through the host's
+   * `DataFetcher`, then exactly one `notify-sent` event (design §5.7).
+   *
+   * A notify node is a PASS-THROUGH step: it adds no field to the payload and
+   * removes none, so wiring an alert into a sync changes nothing downstream
+   * (Requirements 13.1, 13.4). Everything decidable without the network is
+   * decided first — the host must be able to issue requests at all, the channel
+   * must be one of the three, an email needs a connection and a non-empty
+   * recipient — and every one of those failures happens with no outbound
+   * request issued and no secret read (Requirements 13.8, 13.9).
+   *
+   * Delivery always goes through HTTP: an `email` channel posts to the resolved
+   * connection's provider API, which is what keeps an SMTP client out of the
+   * engine (Requirement 13.5).
+   *
+   * Called through {@link withNodeRetry}, so a rejection is classified by
+   * `decideRetry` and a final failure routes out the node's "On error" port.
+   */
+  private async runNotify(node: WorkflowNode, payload: string): Promise<string> {
+    const data = (node.data ?? {}) as NotifyNodeData;
+
+    // Capability first: no connection is resolved and no secret is read on a
+    // host that cannot deliver at all (Requirements 13.8, 18.2).
+    const fetcher = this.options.dataFetch;
+    if (!fetcher) throw this.missingCapability(node, 'dataFetch', 'deliver Notify steps');
+
+    const channel = typeof data.channel === 'string' ? data.channel.trim() : '';
+    if (!NOTIFY_CHANNELS.has(channel)) {
+      throw new Error(
+        `Step "${node.name}" has no usable notification channel: ` +
+          `"${channel.length > 0 ? channel : '(none)'}" is not one of email, webhook ` +
+          'or chat-webhook.',
+      );
+    }
+
+    // Rendered before the connection is resolved, so an empty recipient is
+    // reported as the authoring error it is rather than a credential problem.
+    // An unresolved `{{path}}` token is left verbatim by `interpolatePayload`
+    // (Requirement 13.2).
+    const to = interpolatePayload(data.to ?? '', payload).trim();
+    const connectionId = (data.connectionId ?? '').trim();
+    if (channel === 'email') {
+      if (connectionId.length === 0) {
+        throw new Error(
+          `Step "${node.name}" sends email but has no connection selected. Choose the ` +
+            'connection that holds the email provider credentials.',
+        );
+      }
+      if (to.length === 0) {
+        throw new Error(
+          `Step "${node.name}" sends email but its recipient rendered empty. Set a ` +
+            'recipient, optionally with {{field}} tokens from the payload.',
+        );
+      }
+    }
+
+    const conn = await this.resolveNodeConnection(node, connectionId);
+    const message = {
+      ...(to.length > 0 ? { to } : {}),
+      ...(typeof data.subject === 'string' && data.subject.length > 0
+        ? { subject: interpolatePayload(data.subject, payload) }
+        : {}),
+      // An absent body resolves to the whole incoming payload (Requirement 13.2).
+      body: interpolatePayload(
+        typeof data.body === 'string' && data.body.length > 0 ? data.body : '{{input}}',
+        payload,
+      ),
+    };
+
+    const url = this.notifyEndpoint(node, channel, to, conn);
+    // Auth last, exactly as `buildDataRequest` orders it, so the connection wins
+    // over anything the message carries (Requirement 8.6).
+    const request = applyConnectionAuth(
+      {
+        url,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(message),
+        timeoutMs: NOTIFY_TIMEOUT_MS,
+        maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+      },
+      conn,
+    );
+
+    const response = await this.dispatchHttpRequest(request, fetcher);
+    if (response.status < 200 || response.status > 299) {
+      // No `notify-sent` for a rejected attempt, and the payload is untouched:
+      // the retry classifier of §6 and the "On error" routing of Requirement 1
+      // take it from here (Requirement 13.3).
+      throw new HttpStatusError(
+        response.status,
+        response.headers ?? {},
+        this.scrub(clipText(response.body ?? '', HTTP_BODY_PREVIEW_MAX_CHARS)),
+      );
+    }
+
+    // Metadata only: the channel and the masked target. Never the subject, never
+    // the body, never a resolved secret (Requirement 13.4).
+    this.emit({
+      type: 'notify-sent',
+      runId: this.options.runId,
+      nodeId: node.id,
+      channel,
+      target: this.scrub(maskNotifyTarget(to.length > 0 ? to : url)),
+      at: Date.now(),
+    });
+
+    return payload;
+  }
+
+  /**
+   * The URL the notification is posted to.
+   *
+   * A webhook addresses itself: the rendered `to` is the hook url when the
+   * author supplied one, and the connection's endpoint otherwise — which is how
+   * a hook url that is itself a secret stays out of the spec. An email always
+   * goes to the connection's provider API, never to the recipient address
+   * (Requirement 13.5).
+   */
+  private notifyEndpoint(
+    node: WorkflowNode,
+    channel: string,
+    to: string,
+    conn: ResolvedConnection | undefined,
+  ): string {
+    const configured = notifyConnectionEndpoint(conn);
+    const url = channel === 'email' ? configured : /^https?:\/\//i.test(to) ? to : configured;
+    if (!url) {
+      throw new Error(
+        `Step "${node.name}" has no notification endpoint: set an https url on the step` +
+          `${conn ? ` or a "baseUrl" on connection "${conn.id}"` : ''}.`,
+      );
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error(
+        `Step "${node.name}" cannot deliver to "${url}": a notification endpoint must be ` +
+          'an http or https url.',
+      );
+    }
+    return url;
   }
 
   // ── Node behaviours ────────────────────────────────────────────────────────
@@ -1199,20 +2926,32 @@ class WorkflowRun {
    * Iterations run sequentially by default. Bounded concurrency is opt-in
    * and must be used with care: aggregators inside a loop body are keyed by
    * node id, so concurrent iterations sharing one would collide.
+   *
+   * Batch mode (`batchSize` an integer in 2..10000) changes exactly one thing:
+   * item materialisation. `batchItems` regroups the source list into batches,
+   * so one iteration carries an ARRAY of items and the loop reports the batch
+   * count as `loop-started.total` and the batch as `loop-iteration.item`
+   * (Requirements 9.8, 9.9, 9.11). Everything downstream — the body subgraph,
+   * the results/exceptions aggregate, concurrency — is indexed by iteration and
+   * needs no further change.
    */
   private async runForEach(
     node: WorkflowNode,
     payload: string,
   ): Promise<{ output: string; viaPortIds: Set<string> }> {
     const data = node.data as ForEachNodeData;
-    const items = extractItems(payload, data.itemsPath);
-    if (!items) {
+    const source = extractItems(payload, data.itemsPath);
+    if (!source) {
       throw new Error(
         `ForEach "${node.name}" needs a JSON array to iterate` +
           (data.itemsPath ? ` (items path "${data.itemsPath}")` : '') +
           '. The incoming payload does not contain one.',
       );
     }
+
+    // One element per iteration: a single item, or a batch of items. An absent
+    // or out-of-range `batchSize` returns `source` itself (Requirement 9.9).
+    const items: readonly unknown[] = batchItems(source, data.batchSize);
 
     const outs = node.ports.filter(port => port.role === 'message-out');
     const bodyPort = outs[0];
@@ -1459,6 +3198,7 @@ class WorkflowRun {
         journalPrefix: `${frameId}/`,
       },
       this.executionState,
+      this.syncState,
     );
 
     try {
@@ -1621,12 +3361,120 @@ class WorkflowRun {
   }
 
   private emit(event: RunEvent): void {
+    // Accumulate before forwarding, so every emitted event is already folded
+    // into the summary by the time the terminal `sync-summary` goes out.
+    accumulateSync(event, this.syncState.summary);
     try {
       this.options.emit(this.scope.length > 0 ? { ...event, scope: [...this.scope] } : event);
     } catch {
       // Event sinks must never break a run.
     }
   }
+
+  /**
+   * Emits the run's `sync-summary` exactly once, immediately before the
+   * terminal event, and only when the run executed a data node. Agent-only
+   * runs emit nothing here, which is what keeps their history unchanged.
+   */
+  private emitSyncSummary(): void {
+    if (!this.syncState.dataNodeExecuted || this.syncState.emitted) return;
+    this.syncState.emitted = true;
+    this.emit({
+      type: 'sync-summary',
+      runId: this.options.runId,
+      summary: this.syncState.summary,
+      at: Date.now(),
+    });
+  }
+}
+
+/**
+ * The payload as JSON for an expression context, or `undefined` when it is not
+ * JSON at all — which is exactly what `EvalContext.$` means, so `$.a.b` resolves
+ * to null instead of faulting.
+ */
+function parseJsonPayload(payload: string): Json | undefined {
+  try {
+    return JSON.parse(payload) as Json;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether an assertion result counts as holding: everything except `false`,
+ * `null`, `0` and the empty string (Requirement 7.1). An empty array or object
+ * holds — emptiness is what the guard's own expression is there to test.
+ */
+function assertionHolds(value: Json): boolean {
+  if (value === null || value === false) return false;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') return value.length > 0;
+  return true;
+}
+
+/** Names the kind of a value a SQL parameter cannot bind, for the failure message. */
+function describeJsonKind(value: unknown): string {
+  if (Array.isArray(value)) return 'an array';
+  if (value === undefined) return 'no value';
+  if (typeof value === 'object') return 'an object';
+  if (typeof value === 'number') return 'a value that is not a finite number';
+  return `a ${typeof value}`;
+}
+
+/**
+ * The delivery endpoint a connection declares, read from the non-secret config
+ * only: an explicit `notifyUrl`, otherwise `baseUrl` optionally joined with a
+ * `notifyPath`. Empty when the connection declares neither.
+ */
+function notifyConnectionEndpoint(conn: ResolvedConnection | undefined): string {
+  if (!conn) return '';
+  const config = conn.config ?? {};
+  const explicit = (config['notifyUrl'] ?? '').trim();
+  if (explicit.length > 0) return explicit;
+  const baseUrl = (config['baseUrl'] ?? '').trim();
+  if (baseUrl.length === 0) return '';
+  const path = (config['notifyPath'] ?? '').trim();
+  return path.length > 0 ? joinUrl(baseUrl, path) : baseUrl;
+}
+
+/**
+ * The target as `notify-sent` reports it: enough to tell two recipients apart,
+ * never enough to reconstruct one (Requirement 13.4).
+ *
+ * An email keeps its first local character and its domain; a url keeps its
+ * origin and masks the rest, because a hook url's path IS the credential for
+ * every chat provider worth naming. Anything else is masked the same way an
+ * email local part is.
+ */
+function maskNotifyTarget(target: string): string {
+  const value = target.trim();
+  if (value.length === 0) return '';
+
+  const at = value.lastIndexOf('@');
+  if (at > 0 && at < value.length - 1) {
+    const local = value.slice(0, at);
+    return `${local.slice(0, 1)}***${value.slice(at)}`;
+  }
+
+  const url = /^(https?:\/\/[^/?#]+)([/?#].*)?$/i.exec(value);
+  if (url) {
+    const origin = url[1] ?? value;
+    const rest = url[2] ?? '';
+    return rest.length === 0 || rest === '/' ? origin : `${origin}/***`;
+  }
+
+  return value.length <= 1 ? '***' : `${value.slice(0, 1)}***`;
+}
+
+/** Names the kind of a value that cannot serve as a watermark, for the failure message. */
+function describeWatermarkKind(value: Json): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  if (typeof value === 'object') return 'an object';
+  if (typeof value === 'boolean') return 'a boolean';
+  if (typeof value === 'string') return 'an empty string';
+  return 'a value that is not a finite number';
 }
 
 /** Parses a string as JSON when possible; otherwise returns it unchanged. */

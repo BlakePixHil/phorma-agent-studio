@@ -35,6 +35,10 @@
         <app-skills-panel />
       </ng-template>
 
+      <ng-template sidePanelPane tabId="connections">
+        <app-connections-panel />
+      </ng-template>
+
       <ng-template sidePanelPane tabId="prompt">
         <app-prompt-panel />
       </ng-template>
@@ -123,6 +127,10 @@
       <ng-template sidePanelPane tabId="skills">
         <app-skills-panel />
       </ng-template>
+
+      <ng-template sidePanelPane tabId="connections">
+        <app-connections-panel />
+      </ng-template>
     </app-sidebar>
   </div>
 
@@ -175,6 +183,9 @@
 
   <!-- ── Skill editor (create/edit library skills — EPIC 6) ── -->
   <app-skill-editor-dialog />
+
+  <!-- ── Connection editor (create/edit/delete credential connections — P1-1) ── -->
+  <app-connection-editor-dialog />
 
   <!-- ── Persistent workflow version history — EPIC 7 ── -->
   <app-version-history-dialog />

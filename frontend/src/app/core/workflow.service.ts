@@ -15,6 +15,7 @@ import {
   emptyGraph,
   findNodeForConnector,
   portBaseId,
+  toolLinkRejection,
   WORKFLOW_SPEC_VERSION,
   type EmbeddedWorkflow,
   type GraphPosition,
@@ -692,6 +693,14 @@ export class WorkflowService {
     if (source.node.id === target.node.id) return null;
     if (!canConnectPorts(source.port.role, target.port.role)) return null;
 
+    const kind = edgeKindForPorts(source.port.role, target.port.role);
+    // A data node is never an agent's tool — reject before touching the graph.
+    const toolLinkReason = toolLinkRejection(
+      { node: source.node, role: source.port.role },
+      { node: target.node, role: target.port.role },
+    );
+    if (toolLinkReason) return null;
+
     const duplicate = graph.connections.some(
       conn => conn.outputId === outputId && conn.inputId === inputId,
     );
@@ -701,7 +710,7 @@ export class WorkflowService {
       id: `conn-${Date.now().toString(36)}-${graph.connections.length}`,
       outputId,
       inputId,
-      kind: edgeKindForPorts(source.port.role, target.port.role),
+      kind,
     };
     this.mutateGraph(current => ({
       ...current,
