@@ -1,38 +1,65 @@
-# Phorma Agent Studio — Copilot Instructions
+# Phorma Agent Studio - Copilot Instructions
 
 ## Before You Start
-Read `agent.md` in the project root for the full product vision, target audience, and core vocabulary before writing any code or making design decisions. Then read `.github/agent-memory.md` — the global agent memory — for accumulated gotchas and verified practices.
 
-## Project Context
-- **Stack:** Angular 20 + Tailwind CSS v4 + PrimeNG v20 + Tauri v2 + Cloudflare Workers (Agents SDK)
-- **Architecture:** Agent orchestration platform — workflows of AI agents composed on an infinite Canvas2D surface, executed by a shared TypeScript run engine (`engine/`) that runs both in-app (local debug) and in a Cloudflare Durable Object (deployed). Rust backend proxies LLM calls and stores secrets.
-- **Dev port:** 7322 (Phorma Code uses 7321)
+The canonical, tool-agnostic guidance lives in `.kiro/steering/`. Read these first, in order:
 
-## Coding Conventions
-1. **Angular:** Use standalone components with OnPush change detection. Use signals over RxJS where possible.
-2. **Styling:** Use Tailwind CSS v4 utility classes. CSS variables are defined in `src/styles.scss`.
-3. **State:** Prefer signals (`signal()`, `computed()`, `effect()`) for local state. Use `PanelRegistryService` for shared sidebar/panel state.
-4. **Sidebar/Panel System:** Collapse state lives in `PanelRegistryService` (`collapsedLeft`/`collapsedRight` signals). Both sidebars receive all pane templates in `app.html` — only those matching `sideTabs()` render.
-5. **Icons:** Tabler icons ONLY (`ti ti-*` classes). Never use PrimeIcons (`pi pi-*`) — the package is removed. PrimeNG built-in icons must be overridden via icon templates/`pt`.
-6. **Prompts:** All agent prompts are markdown. Render previews sanitized (marked + DOMPurify), never raw `innerHTML`.
-7. **Engine purity:** Code in `engine/` must have zero Angular/Tauri/DOM dependencies — it runs in the browser AND in Cloudflare Workers. Model/network access goes through the injected transport.
-8. **Web compatibility:** Never call Tauri APIs directly from domain code — go through `TauriService` and guard with `isDesktop`. The app must function under plain `ng serve`.
+1. `agent.md` - product vision, target audience, core vocabulary.
+2. `.kiro/steering/conventions.md` - coding rules (Angular, styling, PrimeNG, engine purity).
+3. `.kiro/steering/structure.md` - repo map, structural twins, registry pattern, DI hazards.
+4. `.kiro/steering/tech.md` - stack, install/run/verify commands, budgets.
+5. `.kiro/steering/workflow.md` - how to work here: memory protocol, verification bar, bug-fix flow.
+6. `.github/agent-memory.md` - accumulated gotchas and verified practices.
 
-## Language & Tone
-- Be concise and precise. Avoid generic advice.
-- Use proper Markdown formatting with backticks for filenames and symbols.
-- When implementing features, break down the request into smaller concepts before editing files.
+Area detail as needed: `.kiro/steering/frontend-ui.md`, `engine.md`, `desktop-rust.md`,
+`cloud-worker.md`, `testing.md`, `release.md`, `skills.md`.
 
-## Agent Rules
-- Always read `agent.md`, `copilot-instructions.md`, and `.github/agent-memory.md` at the start of a conversation.
-- After completing a feature: if you learned a gotcha, repeated task, or verified practice a future agent should know, APPEND a terse dated bullet to `.github/agent-memory.md` under the right topic heading. Prune entries you discover to be wrong.
+Do not duplicate those rules into this file. Add a rule to the matching steering file so every tool
+sees it; keep this file for Copilot-specific behaviour only.
+
+## The short version
+
+- **Stack:** Angular 20 + Tailwind v4 + PrimeNG 20 + Tauri v2 + Cloudflare Workers (Agents SDK).
+  Dev port 7322 (Phorma Code owns 7321).
+- **Architecture:** agent workflows composed on a Canvas2D surface, executed by one shared
+  TypeScript engine (`engine/`) that runs in-app for local debug and in a Cloudflare Durable Object
+  when deployed. Rust proxies LLM calls and stores secrets.
+- Standalone Angular components, OnPush, signals over RxJS.
+- Tabler icons only (`ti ti-*`). PrimeIcons is uninstalled.
+- Prompts are markdown, rendered sanitized (`marked` + DOMPurify), never raw `innerHTML`.
+- `engine/` has zero Angular/Tauri/DOM dependencies. Model and network access go through injected
+  transports.
+- Never call Tauri APIs from domain code - go through `TauriService`, guarded by `isDesktop`. The app
+  must work under plain `ng serve`.
+- `engine/src/types.ts` and `frontend/src/app/core/workflow.model.ts` are structural twins - change
+  both or neither.
+- `npm install --legacy-peer-deps` in `frontend/`.
+- Never use the em dash. Use a plain hyphen.
+
+## Copilot-specific rules
+
 - Default to the Explore subagent for fast read-only codebase exploration before making changes.
-- Prefer `replace_string_in_file` over `insert_edit_into_file` for edits (it's faster).
-- When editing, include 3–5 lines of surrounding context to ensure unambiguous matches.
-- Use `npm install --legacy-peer-deps` when installing Node packages.
-- Never use the em dash "—". Use plain dash "-" instead.
-- When making technical decisions, do not give much weight to development cost.
-- When doing bug fixes, always start with reproducing the bug in an E2E setting as closely aligned with how an end user will use it. This makes sure you find the real problem so your fix will actually solve it.
-- When E2E testing in the browser, read `docs/e2e-testing.md` FIRST. Build workflow state programmatically via `window.__phormaTest` (dev-only harness) - never construct graphs by synthetic drag-and-drop; reserve pixel interaction for the behavior actually under test.
-- When end-to-end testing a product, be picky about the UI you see and be obsessed with pixel perfection.
-- Apply that same high standard to engineering excellence: lint, test failure, and test flakiness. If you see one, even if it is not caused by what you are working on right now, still get it fixed.
+- Prefer `replace_string_in_file` over `insert_edit_into_file` (it is faster). Include 3-5 lines of
+  surrounding context so the match is unambiguous.
+- After a `send_to_terminal` reply to a backgrounded command completes, the next `run_in_terminal`
+  call resets cwd to the repo root - re-`cd` explicitly.
+- Be concise and precise; skip generic advice. Use backticks for filenames and symbols. Break a
+  request into smaller concepts before editing files.
+
+## Non-negotiable working agreement
+
+- After completing a feature, APPEND a terse dated bullet to `.github/agent-memory.md` under the
+  right topic heading if you learned a gotcha, repeated task, verified practice, or dead end. Prune
+  entries you find to be wrong. If the learning is a durable rule, put it in the matching
+  `.kiro/steering/` file instead.
+- Do not give much weight to development cost when making technical decisions.
+- Bug fixes start with an end-to-end reproduction that matches real user interaction, so the fix
+  addresses the real cause.
+- Before browser E2E, read `docs/e2e-testing.md`. Build workflow state programmatically through
+  `window.__phormaTest` (dev-only harness); never construct graphs by synthetic drag-and-drop.
+  Reserve pixel interaction for the behaviour actually under test.
+- Be picky about the UI: pixel imperfections are defects. Apply the same standard to engineering
+  hygiene - a lint error, test failure, or flaky test you encounter gets fixed even if you did not
+  cause it.
+- Verify before claiming done: `frontend` production build (the only budget check), `engine` vitest,
+  `cloud` `npm run check`, `cargo check`.

@@ -542,3 +542,111 @@
 }
 
 
+/* ── Context strip ─────────────────────────────────────────────────────────
+   What the assistant can see, above the input. The active workflow is always
+   present; extra tabs are added from the document tab right-click menu. Wraps
+   rather than scrolls, so a narrow sidebar still shows every chip. */
+.phorma-chat__context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-chat__context-icon {
+  font-size: 0.928rem;
+  opacity: 0.75;
+}
+
+.phorma-chat__context-label {
+  margin-right: 0.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.786rem;
+}
+
+/* Chip + remove control share one pill; the chip owns the rounded left edge. */
+.phorma-chat__context-item {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
+
+  &--active {
+    border-color: color-mix(in srgb, var(--p-primary-color) 45%, var(--phorma-card-border));
+    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  }
+}
+
+.phorma-chat__context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.15rem 0.4rem;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  font: inherit;
+  color: var(--p-text-color);
+  cursor: pointer;
+
+  > i {
+    flex-shrink: 0;
+    font-size: 0.857rem;
+    opacity: 0.7;
+  }
+
+  &:hover { color: var(--p-primary-color); }
+}
+
+.phorma-chat__context-name {
+  min-width: 0;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Same unsaved-dot vocabulary as the document tabs. */
+.phorma-chat__context-dirty {
+  flex-shrink: 0;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 50%;
+  background: var(--p-primary-color);
+}
+
+.phorma-chat__context-count {
+  flex-shrink: 0;
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+  font-size: 0.786rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-chat__context-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.25rem 0 0.1rem;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+
+  > i { font-size: 0.786rem; }
+
+  &:hover { color: var(--phorma-accent-red, #ef4444); }
+}
+
+.phorma-chat__context-hint {
+  font-size: 0.786rem;
+  opacity: 0.7;
+}

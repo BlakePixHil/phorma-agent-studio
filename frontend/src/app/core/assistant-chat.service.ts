@@ -160,7 +160,7 @@ export class AssistantChatService {
           onText: text => this.streamingText.set(text),
         });
         this.appendTurn({
-          ...this.assistantTurn(mode, model, answer || 'No answer produced.'),
+          ...this.assistantTurn(mode, model, this.withTurnNotes(answer || 'No answer produced.')),
           status: this.builder.wasCancelled ? 'cancelled' : 'ok',
         });
       } else if (mode === 'plan') {
@@ -187,7 +187,11 @@ export class AssistantChatService {
           onActivity: line => this.activity.update(lines => [...lines, line]),
         });
         this.appendTurn({
-          ...this.assistantTurn(mode, model, this.builder.wasCancelled ? 'Stopped.' : summary),
+          ...this.assistantTurn(
+            mode,
+            model,
+            this.builder.wasCancelled ? 'Stopped.' : this.withTurnNotes(summary),
+          ),
           status: this.builder.wasCancelled ? 'cancelled' : 'ok',
         });
       }
@@ -290,6 +294,14 @@ export class AssistantChatService {
         ...current,
         attachment: { ...attachment, appliedAt: Date.now() },
       }));
+      // Requirements 7.5 and 11.2: permanent effects and failed steps belong
+      // in the transcript, not only in the review bar.
+      const notes = this.withTurnNotes('');
+      if (notes.length > 0) {
+        this.appendTurn(
+          this.assistantTurn(turn.mode, turn.modelRef ?? this.resolvedModel(), notes),
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.appendTurn({
@@ -356,6 +368,27 @@ export class AssistantChatService {
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
+
+  /**
+   * Appends the two things a turn summary must not hide: effects the Revert
+   * control cannot undo (Requirement 7.5) and actions that failed
+   * (Requirement 11.2). Both go into the persisted turn text, so they survive
+   * in the transcript rather than only in the transient activity feed.
+   */
+  private withTurnNotes(text: string): string {
+    const sections = [text.trim()];
+    const permanent = this.builder.lastTurnNonRevertableEffects;
+    if (permanent.length > 0) {
+      sections.push(
+        ['**Not covered by Revert:**', ...permanent.map(line => `- ${line}`)].join('\n'),
+      );
+    }
+    const failures = this.builder.lastTurnFailures;
+    if (failures.length > 0) {
+      sections.push(['**Did not work:**', ...failures.map(line => `- ${line}`)].join('\n'));
+    }
+    return sections.filter(section => section.length > 0).join('\n\n');
+  }
 
   private assistantTurn(mode: AssistantMode, model: ChatModelRef, text: string): ChatTurn {
     const usage = this.builder.lastTurnUsage;

@@ -88,6 +88,14 @@
   white-space: nowrap;
 }
 
+// Marks a non-active tab the assistant can also see. Only ever rendered for
+// added tabs: the active one is context by definition and needs no badge.
+.phorma-doc-tab__context-mark {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--p-primary-color);
+}
+
 // Trailing slot holds either the unsaved dot or the close button.
 .phorma-doc-tab__trailing {
   position: relative;

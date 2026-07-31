@@ -22,7 +22,10 @@ import type { AssistantMode, ChatTurn } from '../../../core/assistant-chat.model
 import { MigrationImportService } from '../../../core/migration/migration-import.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { AssistantContextService, type AssistantContextItem } from '../../../core/assistant-context.service';
 import { SettingsService } from '../../../core/settings.service';
+import { StudioActionRegistryService } from '../../../core/studio-actions/studio-action-registry.service';
+import { WorkflowService } from '../../../core/workflow.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import {
@@ -63,6 +66,9 @@ export class AssistantChat {
   private readonly sanitizer = inject(DomSanitizer);
   private readonly transport = inject(ModelTransportService);
   private readonly settings = inject(SettingsService);
+  private readonly actions = inject(StudioActionRegistryService);
+  protected readonly context = inject(AssistantContextService);
+  private readonly workflow = inject(WorkflowService);
 
   /** Wide layout (expanded dialog) vs compact (sidebar panel). */
   readonly wide = input(false);
@@ -227,6 +233,9 @@ export class AssistantChat {
           return `Remove ${op.node ?? 'node'}`;
         case 'disconnect':
           return `Disconnect ${op.connection ?? 'connection'}`;
+        case 'action':
+          // Requirement 4.4: every op, including Action_Ops, gets a line.
+          return op.action ? this.actions.describe(op.action, op.args ?? {}) : 'Studio action';
         default:
           return String(op.op);
       }
@@ -255,6 +264,28 @@ export class AssistantChat {
     const usd =
       usage.costUsd < 0.01 ? `$${usage.costUsd.toFixed(4)}` : `$${usage.costUsd.toFixed(2)}`;
     return usage.estimated ? `${usd} (est.)` : usd;
+  }
+
+  // ── Context strip ────────────────────────────────────────────────────────
+
+  /** Tooltip explaining why a workflow is in context and what it carries. */
+  protected contextTitle(item: AssistantContextItem): string {
+    const size = `${item.nodes} ${item.nodes === 1 ? 'node' : 'nodes'}, ${item.connections} ${
+      item.connections === 1 ? 'connection' : 'connections'
+    }`;
+    const why = item.active
+      ? 'The workflow you are looking at is always in context.'
+      : 'Added from the document tab menu. Click to open it.';
+    return `${item.name} - ${size}\n${why}`;
+  }
+
+  /** Clicking a context chip brings that workflow to the front. */
+  protected focusContext(item: AssistantContextItem): void {
+    this.workflow.activateDocument(item.docId);
+  }
+
+  protected removeContext(item: AssistantContextItem): void {
+    this.context.remove(item.docId);
   }
 
   protected openSubscribe(): void {

@@ -3,6 +3,8 @@
 Welcome! This document is the source of truth for what Phorma Agent Studio is, who it serves, and the vocabulary and architecture every contributor (human or AI) must share. Read this before writing any code.
 
 > **AI agents:** after reading this file, also read [.github/agent-memory.md](.github/agent-memory.md) — the global repo memory. It holds accumulated learnings, gotchas, and verified practices from previous work on this codebase. If you finish a feature and learned something a future agent should know, append it there.
+>
+> The canonical engineering guidance (conventions, repo structure, commands, area-specific detail, testing, release) lives in [.kiro/steering/](.kiro/steering/). Kiro loads it automatically; other tools should read it. Add new durable rules there rather than duplicating them per tool. This file stays the product source of truth and is inlined by `.kiro/steering/product.md`.
 
 ---
 

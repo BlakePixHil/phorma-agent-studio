@@ -381,18 +381,24 @@ export class CloudService {
     return resolved;
   }
 
-  async pushWorkflow(): Promise<void> {
+  /**
+   * Uploads the active spec to its WorkflowAgent instance. Resolves true only
+   * when the worker accepted it - callers that need the outcome (the studio
+   * assistant's deploy action) must not infer success from the absence of a
+   * throw, because every failure path here is a toast.
+   */
+  async pushWorkflow(): Promise<boolean> {
     if (this.workflow.activeDoc()?.readOnly) {
       this.toast.warning('Preview is read-only', 'Restore this version before pushing it to the cloud.');
-      return;
+      return false;
     }
     const rawSpec = this.workflow.exportActiveSpec();
-    if (!rawSpec) return;
+    if (!rawSpec) return false;
     const spec = this.materializeDefaults(rawSpec);
     const base = this.instanceUrl(spec.id);
     if (!base) {
       this.toast.warning('Set the worker URL', 'Enter your deployed worker URL first.');
-      return;
+      return false;
     }
 
     try {
@@ -415,7 +421,7 @@ export class CloudService {
           `${errors.length} problem${errors.length === 1 ? '' : 's'} would prevent this workflow ` +
             `from running on ${CLOUDFLARE_CAPABILITIES.label}. See the Problems console.`,
         );
-        return;
+        return false;
       }
 
       const response = await fetch(`${base}/workflow`, {
@@ -429,8 +435,10 @@ export class CloudService {
       }
       await this.versions.recordDeploy(rawSpec).catch(() => undefined);
       this.toast.success('Workflow pushed', `"${spec.name}" is live in the cloud.`);
+      return true;
     } catch (error) {
       this.toast.error('Push failed', error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 

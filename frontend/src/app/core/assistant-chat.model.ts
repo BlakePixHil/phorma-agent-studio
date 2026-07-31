@@ -15,9 +15,18 @@ import type { ModelProviderId } from './workflow.model';
 /** How the AI responds to a turn. */
 export type AssistantMode = 'ask' | 'plan' | 'agent';
 
-/** One operation in a Plan-mode edit plan (the model's JSON output). */
+/**
+ * One operation in a Plan-mode edit plan (the model's JSON output).
+ *
+ * `action` is the general form: any Studio_Action id plus its arguments, which
+ * is how Plan mode reaches the eval, run, workflow, skill, connection, portal,
+ * usage, settings and navigation surfaces. The five graph forms
+ * (`add | connect | update | remove | disconnect`) are kept verbatim because
+ * chat threads persisted before the Action_Registry existed still contain them
+ * and must replay with their original behaviour (Requirement 4.3).
+ */
 export interface PlanOp {
-  op: 'add' | 'connect' | 'update' | 'remove' | 'disconnect';
+  op: 'add' | 'connect' | 'update' | 'remove' | 'disconnect' | 'action';
   // add
   ref?: string;
   type?: string;
@@ -32,6 +41,9 @@ export interface PlanOp {
   node?: string;
   // disconnect
   connection?: string;
+  // action - a Studio_Action id and its arguments
+  action?: string;
+  args?: Record<string, unknown>;
 }
 
 /** A complete Plan-mode edit plan (summary + ordered ops). */

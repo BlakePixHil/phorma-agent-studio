@@ -1,6 +1,7 @@
 <div class="phorma-doc-tabs" role="tablist" aria-label="Open workflows">
   <!-- Reorderable workflow tabs. -->
   <div
+    #tabStrip
     class="phorma-doc-tabs__list"
     cdkDropList
     cdkDropListOrientation="horizontal"
@@ -15,9 +16,19 @@
         [attr.aria-selected]="activeDocId() === doc.docId"
         (click)="openDocument(doc)"
         (auxclick)="onAuxClick($event, doc)"
+        (contextmenu)="onTabContextMenu(doc)"
       >
         <i class="ti ti-topology-star-3 phorma-doc-tab__icon" aria-hidden="true"></i>
         <span class="phorma-doc-tab__label">{{ doc.name }}</span>
+
+        <!-- Marks a non-active tab the assistant can also see. -->
+        @if (inAssistantContext(doc) && activeDocId() !== doc.docId) {
+          <i
+            class="ti ti-eye phorma-doc-tab__context-mark"
+            title="In the assistant's context"
+            aria-hidden="true"
+          ></i>
+        }
 
         <!-- Trailing affordance: the unsaved dot shows by default; hovering
              the tab swaps it for the close button (VS Code style). For clean
@@ -59,4 +70,12 @@
   >
     <i class="ti ti-plus phorma-doc-tab__icon" aria-hidden="true"></i>
   </button>
+
+  <!--
+    Right-click menu for workflow tabs: assistant context, then close.
+    NOTE: the explicit [target] is required — without one PrimeNG v20 never
+    binds its contextmenu listener and the menu never renders. The strip is the
+    target; (contextmenu) on each tab sets `contextDoc`.
+  -->
+  <p-contextmenu [target]="tabStripTarget()" [model]="tabContextMenuItems()" appendTo="body" />
 </div>

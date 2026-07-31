@@ -4,7 +4,9 @@ A premium desktop canvas for **designing, debugging, and deploying multi-agent A
 
 Built with **Tauri 2.0 (Rust)** + **Angular 20**, **PrimeNG**, **Tailwind CSS v4**, a custom **Canvas 2D** infinite-canvas renderer, and a framework-free **TypeScript run engine** that executes workflows both locally and in a **Cloudflare Durable Object** when deployed.
 
-> Read [agent.md](agent.md) for the product vision and vocabulary. AI agents should also read [.github/agent-memory.md](.github/agent-memory.md).
+> Read [agent.md](agent.md) for the product vision and vocabulary. AI agents should also read
+> [.kiro/steering/](.kiro/steering/) (conventions, structure, commands, testing, release) and
+> [.github/agent-memory.md](.github/agent-memory.md) (accumulated gotchas).
 
 ```
 phorma-agent-studio/

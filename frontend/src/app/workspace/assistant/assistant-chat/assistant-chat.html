@@ -162,6 +162,49 @@
 
   <!-- ── Composer ── -->
   <div class="phorma-chat__composer">
+    <!-- What the assistant can see. The active workflow is always here; extra
+         tabs are added from the document tab right-click menu. -->
+    <div class="phorma-chat__context">
+      <i class="ti ti-eye phorma-chat__context-icon" aria-hidden="true"></i>
+      <span class="phorma-chat__context-label">Context</span>
+      @for (item of context.items(); track item.docId) {
+        <!-- Chip and its remove control are SIBLINGS in a wrapper: a button
+             inside a button is invalid HTML and breaks keyboard nav. -->
+        <span
+          class="phorma-chat__context-item"
+          [class.phorma-chat__context-item--active]="item.active"
+        >
+          <button
+            type="button"
+            class="phorma-chat__context-chip"
+            [title]="contextTitle(item)"
+            (click)="focusContext(item)"
+          >
+            <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+            <span class="phorma-chat__context-name">{{ item.name }}</span>
+            @if (item.dirty) {
+              <span class="phorma-chat__context-dirty" title="Unsaved changes"></span>
+            }
+            <span class="phorma-chat__context-count">{{ item.nodes }}</span>
+          </button>
+          @if (!item.active) {
+            <button
+              type="button"
+              class="phorma-chat__context-remove"
+              [attr.aria-label]="'Remove ' + item.name + ' from context'"
+              title="Remove from context"
+              (click)="removeContext(item)"
+            >
+              <i class="ti ti-x" aria-hidden="true"></i>
+            </button>
+          }
+        </span>
+      }
+      @if (context.extras().length === 0) {
+        <span class="phorma-chat__context-hint">right-click a tab to add another</span>
+      }
+    </div>
+
     <div class="phorma-chat__input-wrap" [class.phorma-chat__input-wrap--busy]="chat.busy()">
       <textarea
         #chatInput
