@@ -104,6 +104,15 @@ export class CloudService {
   readonly connection = signal<CloudConnectionState>('disconnected');
   readonly deploying = signal(false);
   readonly connected = computed(() => this.connection() === 'connected');
+  /**
+   * Deployment status of the active workflow on the current provider's
+   * instance, for the Cloud dialog's status indicator. `null` means unknown
+   * (never checked, or the worker was unreachable) - never read as "not
+   * deployed".
+   */
+  readonly deployedStatus = signal<{ hasWorkflow: boolean; savedAt: string | null } | null>(null);
+  /** True while {@link refreshStatus} has a request in flight. */
+  readonly statusLoading = signal(false);
 
   private socket: WebSocket | null = null;
   private deployCounter = 0;
@@ -434,6 +443,7 @@ export class CloudService {
         throw new Error(detail?.error ?? `HTTP ${response.status}`);
       }
       await this.versions.recordDeploy(rawSpec).catch(() => undefined);
+      this.deployedStatus.set({ hasWorkflow: true, savedAt: new Date().toISOString() });
       this.toast.success('Workflow pushed', `"${spec.name}" is live in the cloud.`);
       return true;
     } catch (error) {
@@ -485,6 +495,63 @@ export class CloudService {
     this.terminal.open('problems');
     for (const finding of findings) {
       this.terminal.append('problems', finding.severity === 'error' ? 'error' : 'warning', finding.message);
+    }
+  }
+
+  // ── Deployment status ─────────────────────────────────────────────────────
+
+  /**
+   * Reads whether `workflowId` currently has a deployed spec on the active
+   * provider's instance, for the Cloud dialog's status indicator. Leaves
+   * {@link deployedStatus} at `null` (unknown) rather than claiming "not
+   * deployed" when the worker cannot be reached.
+   */
+  async refreshStatus(workflowId: string): Promise<void> {
+    const base = this.instanceUrl(workflowId);
+    if (!base || !this.configured()) {
+      this.deployedStatus.set(null);
+      return;
+    }
+    this.statusLoading.set(true);
+    try {
+      const response = await fetch(`${base}/status`, { headers: await this.headers() });
+      if (!response.ok) {
+        this.deployedStatus.set(null);
+        return;
+      }
+      const body = (await response.json()) as { hasWorkflow?: boolean; savedAt?: string | null };
+      this.deployedStatus.set({ hasWorkflow: body.hasWorkflow === true, savedAt: body.savedAt ?? null });
+    } catch {
+      this.deployedStatus.set(null);
+    } finally {
+      this.statusLoading.set(false);
+    }
+  }
+
+  /**
+   * Removes the deployed spec from `workflowId`'s instance (Cloud dialog's
+   * "Remove from cloud" action). The instance itself, its run history, usage
+   * ledger and connection metadata are untouched - pushing again needs no
+   * other setup.
+   */
+  async removeWorkflow(workflowId: string): Promise<boolean> {
+    const base = this.instanceUrl(workflowId);
+    if (!base) return false;
+    try {
+      const response = await fetch(`${base}/workflow`, {
+        method: 'DELETE',
+        headers: await this.headers(),
+      });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(detail?.error ?? `Could not remove the workflow (HTTP ${response.status}).`);
+      }
+      this.deployedStatus.set({ hasWorkflow: false, savedAt: null });
+      this.toast.success('Removed from cloud', `"${this.workflow.activeName()}" is no longer deployed.`);
+      return true;
+    } catch (error) {
+      this.toast.error('Remove failed', error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 

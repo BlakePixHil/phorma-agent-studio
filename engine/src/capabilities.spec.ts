@@ -23,6 +23,7 @@ const FEATURE_FLAGS = [
   'fixtures',
   'privateNetworkEgress',
   'stdioMcp',
+  'mcpOAuth',
 ] as const;
 
 const RECORDS: ReadonlyArray<readonly [string, HostCapabilities]> = [
@@ -41,7 +42,7 @@ describe('host capability records', () => {
     expect(new Set(RECORDS.map(([, record]) => record.id)).size).toBe(3);
   });
 
-  it.each(RECORDS)('%s declares an id, a label and all five feature flags', (_name, record) => {
+  it.each(RECORDS)('%s declares an id, a label and all six feature flags', (_name, record) => {
     expect(record.id.length).toBeGreaterThan(0);
     expect(record.label.length).toBeGreaterThan(0);
     expect(Object.keys(record.features).sort()).toEqual([...FEATURE_FLAGS].sort());
@@ -97,5 +98,11 @@ describe('host capability records', () => {
     expect(CLOUDFLARE_CAPABILITIES.features.cron).toBe(true);
     expect(TAURI_DESKTOP_CAPABILITIES.features.cron).toBe(false);
     expect(BROWSER_CAPABILITIES.features.cron).toBe(false);
+  });
+
+  it('makes mcpOAuth false only on the worker - an OAuth session never leaves the device that signed in', () => {
+    expect(TAURI_DESKTOP_CAPABILITIES.features.mcpOAuth).toBe(true);
+    expect(BROWSER_CAPABILITIES.features.mcpOAuth).toBe(true);
+    expect(CLOUDFLARE_CAPABILITIES.features.mcpOAuth).toBe(false);
   });
 });

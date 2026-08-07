@@ -651,6 +651,14 @@ export interface McpPreset {
   /** Secret env vars the server expects (values stored in the OS keychain). */
   envSchema: McpEnvField[];
   /**
+   * Preset id of a remote (`sse`) equivalent of this local server, when one
+   * exists. Only meaningful on a `stdio` preset: it is what lets the studio
+   * offer a concrete fix ("use X instead") when a workflow carrying this node
+   * is bound for a host that cannot spawn a local process, rather than just
+   * reporting that the node is undeployable.
+   */
+  remoteAlternativeId?: string;
+  /**
    * User-provided trailing positional arguments (e.g. an allowed directory).
    * Appended to `args` in order when the node is instantiated and editable
    * from the properties panel. Not secrets.
@@ -667,13 +675,38 @@ export interface McpPreset {
  */
 export const MCP_PRESETS: McpPreset[] = [
   {
+    id: 'email-remote',
+    label: 'Email (send-only)',
+    description:
+      'Send email through Resend’s hosted MCP server with an API key. Runs in the cloud, so scheduled and deployed workflows can send mail. Sending needs a verified domain; it cannot read an existing inbox.',
+    icon: 'ti ti-mail-forward',
+    transport: 'sse',
+    url: 'https://mcp.resend.com/mcp',
+    // Bearer rather than OAuth deliberately: a static token is the ONLY MCP
+    // credential a deployed worker can resolve today (`MCP_<AUTHKEY>` worker
+    // secret). An OAuth session would not survive the trip to the cloud.
+    authKey: 'RESEND_API_KEY',
+    keywords: ['email', 'mail', 'send', 'resend', 'smtp', 'remote', 'cloud', 'notify'],
+    envSchema: [
+      {
+        name: 'RESEND_API_KEY',
+        label: 'Resend API key',
+        description:
+          'Create one at resend.com/api-keys, and verify your sending domain at resend.com/domains. Sent as a bearer token to the Resend MCP server.',
+        secret: true,
+        placeholder: 're_…',
+      },
+    ],
+  },
+  {
     id: 'email',
     label: 'Email',
     description:
-      'Read, search, send, reply, and forward email across Gmail, Outlook, Yahoo, and iCloud. Uses an app password — no OAuth setup.',
+      'Read, search, send, reply, and forward email across Gmail, Outlook, Yahoo, and iCloud with an app password. Runs locally, so it cannot be deployed to the cloud — use the remote “Email (send-only)” server for scheduled workflows.',
     icon: 'ti ti-mail',
     command: 'npx',
     args: ['--yes', '@n24q02m/better-email-mcp@latest'],
+    remoteAlternativeId: 'email-remote',
     keywords: ['email', 'imap', 'smtp', 'inbox', 'mail', 'gmail', 'outlook', 'send'],
     envSchema: [
       {
@@ -805,6 +838,62 @@ export const MCP_PRESETS: McpPreset[] = [
         description: 'Your workspace/team ID (starts with T).',
         secret: false,
         placeholder: 'T01234567',
+      },
+    ],
+  },
+  {
+    id: 'atlassian-remote',
+    label: 'Jira & Confluence (OAuth)',
+    description:
+      'Atlassian’s official Rovo MCP server, authorized by signing in with your Atlassian account. The sign-in session stays on this device, so deployed and scheduled workflows can’t authenticate with it yet. Local runs only.',
+    icon: 'ti ti-brand-jira',
+    transport: 'sse',
+    // Atlassian's official remote endpoint. Supports dynamic client
+    // registration, so no guided `oauthSetup` step is needed.
+    url: 'https://mcp.atlassian.com/v1/mcp/authv2',
+    authMode: 'oauth',
+    keywords: [
+      'jira', 'confluence', 'atlassian', 'rovo', 'issue', 'ticket', 'sprint',
+      'backlog', 'jql', 'board', 'epic', 'story', 'remote', 'oauth', 'cloud',
+    ],
+    envSchema: [],
+  },
+  {
+    id: 'jira',
+    label: 'Jira',
+    description:
+      'Search issues with JQL, read and create issues, add comments, and transition status. Runs locally, so it cannot be deployed to the cloud.',
+    icon: 'ti ti-brand-jira',
+    command: 'uvx',
+    args: ['mcp-atlassian'],
+    remoteAlternativeId: 'atlassian-remote',
+    keywords: [
+      'jira', 'atlassian', 'issue', 'ticket', 'bug', 'sprint', 'backlog',
+      'jql', 'board', 'project', 'epic', 'story',
+    ],
+    envSchema: [
+      {
+        name: 'JIRA_URL',
+        label: 'Jira site URL',
+        description:
+          'Your Atlassian Cloud site. For Server/Data Center use the base URL of your instance (v8.14+).',
+        secret: false,
+        placeholder: 'https://your-company.atlassian.net',
+      },
+      {
+        name: 'JIRA_USERNAME',
+        label: 'Account email',
+        description: 'The Atlassian account email the API token belongs to.',
+        secret: false,
+        placeholder: 'you@company.com',
+      },
+      {
+        name: 'JIRA_API_TOKEN',
+        label: 'API token',
+        description:
+          'Create one at id.atlassian.com/manage-profile/security/api-tokens. Server/Data Center users paste a personal access token instead.',
+        secret: true,
+        placeholder: 'ATATT…',
       },
     ],
   },
@@ -959,6 +1048,53 @@ export const MCP_PRESETS: McpPreset[] = [
 export function findMcpPreset(id: string): McpPreset | undefined {
   return MCP_PRESETS.find(preset => preset.id === id);
 }
+
+/**
+ * Where an MCP server runs, and whether a deployed worker can actually
+ * authenticate it. This is the single most consequential fact about an MCP
+ * node - a local server cannot be deployed at all, and an OAuth session never
+ * reaches a deployed worker either - so it is shown as an icon everywhere a
+ * server or node appears rather than spelled into labels.
+ */
+export type McpTransportKind = 'local' | 'remote' | 'oauth';
+
+/**
+ * `local` unless the transport is explicitly remote; a remote server using
+ * interactive OAuth is `oauth` (its session cannot reach a deployed worker -
+ * see the engine's `mcpOAuth` capability), everything else remote is
+ * `remote`. Matches `defaultData()`.
+ */
+export function mcpTransportKind(transport: string | undefined, authMode?: string): McpTransportKind {
+  if (transport !== 'sse') return 'local';
+  return authMode === 'oauth' ? 'oauth' : 'remote';
+}
+
+/**
+ * Tabler icon for a transport. Remote deliberately has NO entry: it is drawn
+ * with the Phorma Cloud glyph (`app-phorma-cloud-icon`) so "runs in our cloud"
+ * carries the product's own mark. Canvas painting, which has no DOM, uses
+ * {@link MCP_TRANSPORT_CANVAS_ICON} instead.
+ */
+export const MCP_LOCAL_ICON = 'ti ti-device-desktop';
+
+/** Sign-in (OAuth) transport icon: a remote server, but deliberately not the
+ * cloud glyph - its session is not something a deployed worker can use. */
+export const MCP_OAUTH_ICON = 'ti ti-key';
+
+/** Canvas-only glyphs: Canvas2D paints from the icon font, so it needs a
+ * Tabler class for every transport. `ti-cloud` stands in for the SVG mark. */
+export const MCP_TRANSPORT_CANVAS_ICON: Record<McpTransportKind, string> = {
+  local: MCP_LOCAL_ICON,
+  remote: 'ti ti-cloud',
+  oauth: MCP_OAUTH_ICON,
+};
+
+/** Tooltip / aria text explaining what a transport means for deployment. */
+export const MCP_TRANSPORT_LABEL: Record<McpTransportKind, string> = {
+  local: 'Local server - runs on this machine, cannot be deployed to the cloud',
+  remote: 'Remote server - runs in the cloud, works in deployed workflows',
+  oauth: 'Sign-in (OAuth) server - the signed-in session stays on this device, so it cannot be deployed or scheduled',
+};
 
 /** Prefix used for synthesized catalog entries derived from MCP presets. */
 const MCP_PRESET_PREFIX = 'mcp-preset:';

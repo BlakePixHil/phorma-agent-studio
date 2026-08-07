@@ -228,31 +228,36 @@ export class SettingsService {
     await this.setMcpSecret(nodeId, envKey, '');
   }
 
+  /** Whether one scope's env var currently has a stored value. */
+  private async hasMcpSecret(scope: McpSecretScope, envKey: string): Promise<boolean> {
+    if (!this.tauri.isDesktop) {
+      return !!this.browserMcpSecrets()[this.mcpSecretKey(scope, envKey)];
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<boolean>('has_secret', { key: this.mcpSecretKey(scope, envKey) });
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Refreshes the `mcpSecretsConfigured` flags for a scope's env vars.
    * Call when the selected node changes (node scope) or when the Settings
    * Integrations page opens (preset scope) so configured badges are accurate.
+   *
+   * Writes only the keys it resolved, via `update`. Several of these run
+   * concurrently by design (the canvas fires node scope + preset scope for
+   * every MCP node in one pass), and each awaits its own keychain round-trips
+   * - so cloning the map up front and `set`ting it at the end would let the
+   * last one to finish silently discard every flag the others had resolved.
    */
   async refreshMcpSecretFlagsScoped(scope: McpSecretScope, envKeys: string[]): Promise<void> {
-    const next = { ...this.mcpSecretsConfigured() };
-    if (this.tauri.isDesktop) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      for (const envKey of envKeys) {
-        try {
-          next[this.mcpFlagKey(scope, envKey)] = await invoke<boolean>('has_secret', {
-            key: this.mcpSecretKey(scope, envKey),
-          });
-        } catch {
-          next[this.mcpFlagKey(scope, envKey)] = false;
-        }
-      }
-    } else {
-      const secrets = this.browserMcpSecrets();
-      for (const envKey of envKeys) {
-        next[this.mcpFlagKey(scope, envKey)] = !!secrets[this.mcpSecretKey(scope, envKey)];
-      }
+    const resolved: Record<string, boolean> = {};
+    for (const envKey of envKeys) {
+      resolved[this.mcpFlagKey(scope, envKey)] = await this.hasMcpSecret(scope, envKey);
     }
-    this.mcpSecretsConfigured.set(next);
+    this.mcpSecretsConfigured.update(current => ({ ...current, ...resolved }));
   }
 
   /** Refreshes node-scoped configured flags (properties panel badges). */

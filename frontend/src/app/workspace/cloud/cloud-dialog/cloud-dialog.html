@@ -183,6 +183,34 @@
               {{ cloud.connection() }}
             </span>
           </div>
+          <div class="phorma-cloud__row">
+            @if (cloud.deployedStatus(); as deployStatus) {
+              @if (deployStatus.hasWorkflow) {
+                <p-button
+                  styleClass="phorma-cloud__btn"
+                  [text]="true"
+                  severity="danger"
+                  size="small"
+                  icon="ti ti-cloud-off"
+                  label="Remove from cloud"
+                  (onClick)="removeFromCloud()"
+                />
+              }
+              <span
+                class="phorma-cloud__status"
+                [class.phorma-cloud__status--on]="deployStatus.hasWorkflow"
+              >
+                <i class="ti ti-point-filled" aria-hidden="true"></i>
+                @if (deployStatus.hasWorkflow) {
+                  Deployed {{ deployStatus.savedAt | date: 'MMM d, HH:mm' }}
+                } @else {
+                  Not deployed
+                }
+              </span>
+            } @else if (cloud.statusLoading()) {
+              <span class="phorma-cloud__hint">Checking deployment status…</span>
+            }
+          </div>
           @if (provider() === 'phorma') {
             <p class="phorma-cloud__hint">
               While watching, Run in the Runs panel starts your agents in Phorma Cloud and

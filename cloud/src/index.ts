@@ -37,7 +37,7 @@ function corsHeaders(env: Env, request: Request): Record<string, string> {
   }
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     ...(origin !== '*' ? { Vary: 'Origin' } : {}),
   };

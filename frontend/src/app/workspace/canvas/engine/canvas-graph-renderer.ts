@@ -75,6 +75,15 @@ export interface RendererNode {
   skillGlyph?: string;
   /** Icon font for {@link skillGlyph}. */
   skillFont?: string;
+  /**
+   * Transport glyph for an `mcp-tool` node, painted immediately left of the
+   * `mcp-tool` kind badge. Local vs remote decides whether the workflow can be
+   * deployed at all, so it reads at a glance on the canvas rather than only in
+   * the properties panel.
+   */
+  transportGlyph?: string;
+  /** Icon font for {@link transportGlyph}. */
+  transportFont?: string;
 }
 
 export interface RendererEdge {
@@ -1335,11 +1344,15 @@ export class CanvasGraphRenderer {
         }
       }
 
-      // Kind badge (right-aligned pill; sits left of the edit button when present).
+      // Kind badge (right-aligned pill; sits left of the edit button when
+      // present). An mcp-tool node prefixes its transport glyph inside the same
+      // pill, so "local vs remote" reads without opening the node.
       ctx.font = '600 8px Nunito, system-ui, sans-serif';
       ctx.textBaseline = 'middle';
       const badgeText = n.kind;
-      const bw = ctx.measureText(badgeText).width + 8;
+      const hasTransport = !!(n.transportGlyph && n.transportFont);
+      const transportW = hasTransport ? 10 : 0;
+      const bw = ctx.measureText(badgeText).width + 8 + transportW;
       const bh = 13;
       const badgeRight = n.x + n.w - 8 - (n.drillable ? EDIT_BTN_SIZE + 6 : 0);
       const bx = badgeRight - bw;
@@ -1351,8 +1364,14 @@ export class CanvasGraphRenderer {
       ctx.fill();
       ctx.restore();
       ctx.fillStyle = n.accent;
+      if (hasTransport) {
+        ctx.font = `9px "${n.transportFont}"`;
+        ctx.textAlign = 'left';
+        ctx.fillText(n.transportGlyph!, bx + 4, by + bh / 2 + 0.5);
+        ctx.font = '600 8px Nunito, system-ui, sans-serif';
+      }
       ctx.textAlign = 'center';
-      ctx.fillText(badgeText, bx + bw / 2, by + bh / 2 + 0.5);
+      ctx.fillText(badgeText, bx + transportW + (bw - transportW) / 2, by + bh / 2 + 0.5);
       ctx.textAlign = 'left';
 
       // Skill-count pill (EPIC 6) — a compact book+count chip left of the

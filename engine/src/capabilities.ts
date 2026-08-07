@@ -96,6 +96,7 @@ export const TAURI_DESKTOP_CAPABILITIES: HostCapabilities = {
     fixtures: true,
     privateNetworkEgress: true,
     stdioMcp: true,
+    mcpOAuth: true,
   },
 };
 
@@ -116,6 +117,7 @@ export const BROWSER_CAPABILITIES: HostCapabilities = {
     fixtures: true,
     privateNetworkEgress: false,
     stdioMcp: false,
+    mcpOAuth: true,
   },
 };
 
@@ -142,6 +144,7 @@ export const CLOUDFLARE_CAPABILITIES: HostCapabilities = {
     fixtures: true,
     privateNetworkEgress: false,
     stdioMcp: false,
+    mcpOAuth: false,
   },
 };
 
@@ -174,6 +177,13 @@ export interface CapabilityFinding {
   subWorkflowId?: string;
   /** Display name of that sub-workflow, when nested and readable. */
   subWorkflowName?: string;
+  /**
+   * Set by callers that validate against a DEPLOY target rather than the host
+   * the workflow is running on now, so the UI can say "blocks deployment"
+   * instead of "blocks this run". Never set by
+   * {@link validateAgainstCapabilities} itself.
+   */
+  deployOnly?: boolean;
 }
 
 /**
@@ -351,6 +361,31 @@ function validateGraph(
     // Rule 2: the SQL driver must be declared for this host.
     if (node.kind === 'sql-query' && data) {
       validateSqlDriver(label(node), data, summary, capabilities, report);
+    }
+
+    // An `mcp-tool` node with a local (stdio) server needs a host that can
+    // actually spawn one - only the desktop capability record declares
+    // `stdioMcp` (Requirement 17.3). Catching this here turns a runtime
+    // `CloudToolHost` crash (at trigger time, from any trigger source) into a
+    // push-time Problems console entry.
+    if (node.kind === 'mcp-tool' && data && data['transport'] === 'stdio' && !capabilities.features.stdioMcp) {
+      report(
+        `${label(node)} (mcp-tool) uses a local (stdio) server, which cannot run on ` +
+          `${capabilities.label}. Use a remote MCP server URL instead.`,
+      );
+    }
+
+    // An `mcp-tool` node authenticated via interactive OAuth stores its session
+    // on the device that signed in (desktop keychain / browser localStorage) -
+    // a deployed worker's `CloudToolHost` only ever resolves a static bearer
+    // token, never an OAuth session. Without this rule the node passes
+    // validation and fails at run time with an unhelpful HTTP 401 from the MCP
+    // server instead of a push-time explanation.
+    if (node.kind === 'mcp-tool' && data && data['authMode'] === 'oauth' && !capabilities.features.mcpOAuth) {
+      report(
+        `${label(node)} (mcp-tool) uses interactive OAuth sign-in, which cannot run on ` +
+          `${capabilities.label} - the signed-in session never reaches the deployed worker.`,
+      );
     }
 
     // Rule 4: every expression in the node must compile.

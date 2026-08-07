@@ -10,6 +10,7 @@
  *    streamable HTTP via {@link HttpMcpClient}.
  */
 
+import type { ResolvedConnection } from './connections.js';
 import type { ToolDefinition } from './model.js';
 import type { WorkflowNode } from './types.js';
 
@@ -66,25 +67,53 @@ export async function resolveAgentTools(
 
 // ── Built-in tool schemas (HTTP request, web search) ─────────────────────────
 
-/** Default definition for an `http-tool` node. */
+/**
+ * One named argument an `http-tool` call accepts, spliced into `{{name}}`
+ * placeholders in both the url and the body template. Declaring `params`
+ * lets a single call carry more than one dynamic value (e.g. a url path
+ * segment AND a JSON body) — something the single `{{input}}` token cannot
+ * do, since the exact same value would have to appear in both places.
+ */
+export interface HttpToolParam {
+  /** Also the `{{name}}` placeholder token — keep it identifier-safe. */
+  name: string;
+  description?: string;
+  /** Default true. */
+  required?: boolean;
+}
+
+/**
+ * Default definition for an `http-tool` node. With no declared `params`, the
+ * call takes a single free-form `input` string (backward compatible with
+ * every node created before `params` existed). Declaring `params` replaces
+ * that with one named string property per entry.
+ */
 export function httpToolDefinition(node: WorkflowNode): ToolDefinition {
-  const data = node.data as { method?: string; url?: string };
+  const data = node.data as { method?: string; url?: string; params?: HttpToolParam[] };
+  const params = (data.params ?? []).filter(param => param?.name?.trim());
+  const properties: Record<string, { type: string; description?: string }> = {};
+  const required: string[] = [];
+  if (params.length > 0) {
+    for (const param of params) {
+      properties[param.name] = {
+        type: 'string',
+        ...(param.description ? { description: param.description } : {}),
+      };
+      if (param.required !== false) required.push(param.name);
+    }
+  } else {
+    properties['input'] = {
+      type: 'string',
+      description: 'Interpolated into the {{input}} placeholder of the URL and body template.',
+    };
+    required.push('input');
+  }
   return {
     name: sanitizeToolName(node.name),
     description:
       `${data.method ?? 'GET'} ${data.url ?? '(no URL configured)'}` +
       (node.description ? ` — ${node.description}` : ''),
-    parameters: {
-      type: 'object',
-      properties: {
-        input: {
-          type: 'string',
-          description:
-            'Interpolated into the {{input}} placeholder of the URL and body template.',
-        },
-      },
-      required: ['input'],
-    },
+    parameters: { type: 'object', properties, required },
   };
 }
 
@@ -103,7 +132,24 @@ export function webSearchToolDefinition(node: WorkflowNode): ToolDefinition {
   };
 }
 
-/** Builds the concrete HTTP request an `http-tool` call should perform. */
+/**
+ * Substitutes a `{{baseUrl}}` token in a built `http-tool` request's url with
+ * a resolved connection's `config.baseUrl` — a plain string-replace
+ * convention (not engine template syntax) that lets a tool node's url
+ * reference the connection's site address without hardcoding it into every
+ * node. A no-op when the connection declares no `baseUrl`.
+ */
+export function withConnectionBaseUrl(url: string, conn: ResolvedConnection | undefined): string {
+  const baseUrl = conn?.config?.['baseUrl'];
+  return baseUrl ? url.split('{{baseUrl}}').join(baseUrl) : url;
+}
+
+/**
+ * Builds the concrete HTTP request an `http-tool` call should perform.
+ * Connection auth (when the node carries a `connectionId`) is layered on by
+ * the HOST afterwards via `applyConnectionAuth` from `data-http.js` — this
+ * function stays host-free, mirroring `buildDataRequest`.
+ */
 export function buildHttpToolRequest(
   node: WorkflowNode,
   argumentsJson: string,
@@ -113,11 +159,25 @@ export function buildHttpToolRequest(
     url?: string;
     headers?: Record<string, string>;
     bodyTemplate?: string;
+    params?: HttpToolParam[];
   };
-  const args = safeParse(argumentsJson) as { input?: unknown };
-  const input = typeof args.input === 'string' ? args.input : JSON.stringify(args.input ?? '');
-  const interpolate = (value: string): string =>
-    value.split('{{input}}').join(input);
+  const args = safeParse(argumentsJson) as Record<string, unknown>;
+  const params = (data.params ?? []).filter(param => param?.name?.trim());
+
+  const interpolate = (value: string): string => {
+    if (params.length === 0) {
+      const raw = args['input'];
+      const input = typeof raw === 'string' ? raw : JSON.stringify(raw ?? '');
+      return value.split('{{input}}').join(input);
+    }
+    let out = value;
+    for (const param of params) {
+      const raw = args[param.name];
+      const rendered = typeof raw === 'string' ? raw : JSON.stringify(raw ?? '');
+      out = out.split(`{{${param.name}}}`).join(rendered);
+    }
+    return out;
+  };
 
   const method = (data.method ?? 'GET').toUpperCase();
   return {

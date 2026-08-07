@@ -58,8 +58,9 @@ Canonical for every tool and contributor. `.github/copilot-instructions.md` poin
   siblings in a flex wrapper and reveal the action on wrapper `:hover`.
 - The app has zero `p-dialog` usage - dialogs are bespoke overlays following the confirm-dialog
   pattern. Every dialog carries `role="dialog"` (global key handlers depend on that probe).
-- Overlay layering: expanded panels sit at `z-index: 75`, real dialogs at `80`. An expanded panel
-  is a bigger panel, not a modal, so confirms summoned from inside it must layer on top.
+- Overlay layering: expanded panels sit at `z-index: 75`, real dialogs at `80`, the confirm/prompt
+  dialog at `85`, the command palette at `90`. A confirm is routinely summoned from inside another
+  dialog (e.g. a delete action), so it must always outrank every real dialog, not just tie with it.
 
 ## State, storage, services
 

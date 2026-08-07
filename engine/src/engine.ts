@@ -122,6 +122,10 @@ import {
 const MAX_NODE_EXECUTIONS = 100;
 /** Default maximum model→tools→model rounds per agent execution. */
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
+/** Default character cap for a single tool result fed back to the model. */
+const DEFAULT_TOOL_RESULT_CAP_CHARS = 8000;
+/** Absolute ceiling for a per-agent tool-result cap override. */
+const MAX_TOOL_RESULT_CAP_CHARS = 200_000;
 /** Default retry policy: one automatic retry for transient model failures. */
 const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_ATTEMPTS = 5;
@@ -2797,8 +2801,16 @@ class WorkflowRun {
       }
     }
 
-    // Cap tool output so a huge response can't blow the context window.
-    if (result.length > 8000) result = `${result.slice(0, 8000)}\n…(truncated)`;
+    // Cap tool output so a huge response can't blow the context window. An
+    // agent may raise the cap via `toolResultCapChars` when it needs the full
+    // payload (e.g. paginated Slack/Jira responses whose cursor lives at the
+    // tail and would be lost under the default cap).
+    const requested = (agent.data as AgentNodeData).toolResultCapChars;
+    const cap =
+      typeof requested === 'number' && requested > 0
+        ? Math.min(Math.floor(requested), MAX_TOOL_RESULT_CAP_CHARS)
+        : DEFAULT_TOOL_RESULT_CAP_CHARS;
+    if (result.length > cap) result = `${result.slice(0, cap)}\n…(truncated)`;
 
     this.emit({
       type: 'tool-result',

@@ -148,12 +148,23 @@
 }
 
 .phorma-palette__subheading {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
   margin: 0.5rem 0 0.35rem 0.15rem;
   font-size: 0.857rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: color-mix(in srgb, var(--section-color, var(--p-primary-color)) 75%, var(--p-text-muted-color));
+}
+
+/* Transport glyph beside a sub-group heading. */
+.phorma-palette__transport {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.9rem;
+  line-height: 0;
 }
 
 .phorma-palette__grid {
@@ -266,6 +277,21 @@
   .phorma-palette__item:hover & {
     color: var(--section-color, var(--p-primary-color, #818cf8));
   }
+}
+
+/* Transport pip in a preset tile's top-right corner. Sits above the glow ring
+   (z-index 1 on `&::before`) or the hover halo paints over it. */
+.phorma-palette__transport-pip {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  line-height: 0;
+  color: var(--p-text-muted-color);
+  opacity: 0.75;
 }
 
 .phorma-palette__label {

@@ -37,7 +37,15 @@ import { CanvasStateService, MINIMAP_ANCHORS, type MinimapAnchor } from '../../.
 import { UsageAnalyticsService } from '../../../core/usage-analytics.service';
 import { THEME_PALETTES, type ThemePalette, type ThemePaletteId } from '../../../core/theme-palettes';
 import { THEME_MODE_LIST, type ThemeMode, type ThemeModeDef } from '../../../core/theme-modes';
-import { MCP_PRESETS, type McpPreset } from '../../../core/node-catalog';
+import {
+  MCP_LOCAL_ICON,
+  MCP_OAUTH_ICON,
+  MCP_PRESETS,
+  MCP_TRANSPORT_LABEL,
+  mcpTransportKind,
+  type McpPreset,
+  type McpTransportKind,
+} from '../../../core/node-catalog';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { InfoPopover } from '../../../shared/info-popover/info-popover';
@@ -520,13 +528,64 @@ export class SettingsDialog {
   // ── Integrations (custom template) ──────────────────────────────────────
 
   /**
-   * Presets that expose configurable secrets. Presets with no `envSchema`
-   * (e.g. Filesystem, Memory) have nothing to configure here, so they're
-   * omitted to avoid empty cards.
+   * Presets a user can act on from this page: those exposing secrets, plus
+   * OAuth ones.
+   *
+   * An OAuth preset has an EMPTY `envSchema` (its credential is an
+   * interactive session, not a pasted value), so filtering on `envSchema`
+   * alone hid it here entirely - and the canvas warning's "Configure in
+   * Settings - Integrations" deep-link then landed on a page with no sign of
+   * the server it was complaining about. They are listed with a pointer to the
+   * node's Connect button, which is where authorizing actually happens.
+   * Presets with neither (Filesystem, Memory) still have nothing to configure.
    */
   protected readonly mcpPresets: McpPreset[] = MCP_PRESETS.filter(
-    preset => preset.envSchema.length > 0,
+    preset => preset.envSchema.length > 0 || preset.authMode === 'oauth',
   );
+
+  protected readonly mcpTransportKind = mcpTransportKind;
+  protected readonly mcpTransportLabel = MCP_TRANSPORT_LABEL;
+  protected readonly mcpLocalIcon = MCP_LOCAL_ICON;
+  protected readonly mcpOauthIcon = MCP_OAUTH_ICON;
+
+  /**
+   * Integrations split by where the server runs AND whether a deployed worker
+   * can actually authenticate it: Remote (deployable) leads, then Sign-in
+   * (OAuth) servers - reachable from the cloud, but the session never leaves
+   * this device - then Local. All three are collapsible; a deep-linked card
+   * auto-expands its group via {@link integrationGroupOpen}.
+   */
+  protected readonly integrationGroups: {
+    kind: McpTransportKind;
+    label: string;
+    presets: McpPreset[];
+  }[] = (['remote', 'oauth', 'local'] as const)
+    .map(kind => ({
+      kind,
+      label:
+        kind === 'remote'
+          ? 'Remote MCP servers'
+          : kind === 'oauth'
+            ? 'Sign-in (OAuth) MCP servers'
+            : 'Local MCP servers',
+      presets: this.mcpPresets.filter(
+        preset => mcpTransportKind(preset.transport, preset.authMode) === kind,
+      ),
+    }))
+    .filter(group => group.presets.length > 0);
+
+  /** Whether each integration group's expander is open. Remote starts open;
+   *  a collapsed group auto-opens when a deep-linked card lands in it. */
+  protected readonly integrationGroupOpen = signal<Record<McpTransportKind, boolean>>({
+    remote: true,
+    oauth: true,
+    local: true,
+  });
+
+  protected onIntegrationGroupToggle(kind: McpTransportKind, event: Event): void {
+    const open = (event.target as HTMLDetailsElement | null)?.open ?? false;
+    this.integrationGroupOpen.update(current => ({ ...current, [kind]: open }));
+  }
 
   /** Unsaved integration credential inputs, keyed `'{presetId}:{envKey}'`. */
   protected readonly presetDrafts = signal<Record<string, string>>({});
@@ -652,6 +711,10 @@ export class SettingsDialog {
             if (!container) return;
             const target = container.querySelector(`#${CSS.escape(anchor)}`);
             if (target instanceof HTMLElement) {
+              // A card inside a collapsed expander is display:none, so expand
+              // its group first or scrollIntoView has nothing to reach.
+              const details = target.closest('details');
+              if (details instanceof HTMLDetailsElement && !details.open) details.open = true;
               target.scrollIntoView({ behavior: 'smooth', block: 'center' });
               // Briefly flash the card so the user notices it.
               target.classList.add('phorma-settings__integration--highlight');

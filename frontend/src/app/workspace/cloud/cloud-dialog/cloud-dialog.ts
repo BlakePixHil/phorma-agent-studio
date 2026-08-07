@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, untracked } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { CloudDialogService } from '../cloud-dialog.service';
 import { CloudService } from '../../../core/cloud.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
@@ -27,7 +28,7 @@ import { WorkflowService } from '../../../core/workflow.service';
 @Component({
   selector: 'app-cloud-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, ButtonModule, TooltipModule, PhormaCloudIcon],
+  imports: [DatePipe, DecimalPipe, ButtonModule, TooltipModule, PhormaCloudIcon],
   templateUrl: './cloud-dialog.html',
   styleUrl: './cloud-dialog.scss',
 })
@@ -39,17 +40,24 @@ export class CloudDialog {
   protected readonly phormaCloud = inject(PhormaCloudService);
   protected readonly tierLabel = tierLabel;
   private readonly settingsDialog = inject(SettingsDialogService);
+  private readonly confirmDialog = inject(ConfirmDialogService);
   protected readonly isDesktop = inject(TauriService).isDesktop;
 
   /** The chosen deploy target ('cloudflare' fallback keeps legacy behavior). */
   protected readonly provider = computed(() => this.settings.cloudProvider() ?? 'cloudflare');
 
   constructor() {
-    // Refresh the account chip whenever the dialog opens in Phorma mode.
+    // Refresh the account chip and the deployment status whenever the dialog
+    // opens - both providers deploy one instance per workflow, so the status
+    // check applies regardless of which one is active.
     effect(() => {
       if (!this.dialog.visible()) return;
-      if (this.provider() !== 'phorma') return;
-      untracked(() => void this.phormaCloud.refresh());
+      const workflowId = this.workflow.activeDoc()?.workflowId;
+      untracked(() => {
+        if (this.provider() === 'phorma') void this.phormaCloud.refresh();
+        this.cloud.deployedStatus.set(null);
+        if (workflowId) void this.cloud.refreshStatus(workflowId);
+      });
     });
   }
 
@@ -57,6 +65,22 @@ export class CloudDialog {
   protected openCloudSettings(): void {
     this.dialog.close();
     this.settingsDialog.open('cloud');
+  }
+
+  /** Confirms, then removes the active workflow's deployed spec. */
+  protected async removeFromCloud(): Promise<void> {
+    const workflowId = this.workflow.activeDoc()?.workflowId;
+    if (!workflowId) return;
+    const confirmed = await this.confirmDialog.confirm({
+      title: 'Remove from cloud?',
+      message:
+        `"${this.workflow.activeName()}" will stop running in the cloud immediately - scheduled ` +
+        `triggers, manual runs and the live monitor all need a fresh push afterward. Run history is kept.`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    await this.cloud.removeWorkflow(workflowId);
   }
 
   protected onUrlInput(event: Event): void {

@@ -618,13 +618,101 @@
           (input)="patchData({ bodyTemplate: inputValue($event) })"
           placeholder="JSON body — use the input placeholder to interpolate the agent's call"
         ></textarea>
+
+        <div class="phorma-props__row phorma-props__row--between phorma-props__label--gap">
+          <span class="phorma-props__label">Named parameters</span>
+          <button
+            type="button"
+            pButton
+            severity="secondary"
+            [text]="true"
+            size="small"
+            class="phorma-panel-icon-btn"
+            title="Add a named parameter"
+            aria-label="Add a named parameter"
+            (click)="addHttpToolParam()"
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        @for (param of httpToolParams(); track $index) {
+          <div class="phorma-props__portal-field">
+            <div class="phorma-props__row phorma-props__row--field-type">
+              <input
+                pInputText
+                pSize="small"
+                type="text"
+                class="phorma-props__input phorma-props__input--mono"
+                [value]="param.name"
+                (input)="updateHttpToolParam($index, { name: inputValue($event) })"
+                [attr.aria-label]="'Parameter ' + ($index + 1) + ' name'"
+                placeholder="issueKey"
+              />
+              <label class="phorma-props__check">
+                <p-checkbox
+                  [binary]="true"
+                  size="small"
+                  [inputId]="id('prop-http-param-required-' + $index)"
+                  [ngModel]="param.required !== false"
+                  (ngModelChange)="updateHttpToolParam($index, { required: $event })"
+                />
+                Required
+              </label>
+              <button
+                type="button"
+                pButton
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                class="phorma-input-icon-btn phorma-props__icon-btn--danger"
+                title="Remove parameter"
+                [attr.aria-label]="'Remove parameter ' + ($index + 1)"
+                (click)="removeHttpToolParam($index)"
+              >
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-props__input"
+              [value]="param.description ?? ''"
+              (input)="updateHttpToolParam($index, { description: inputValue($event) })"
+              [attr.aria-label]="'Parameter ' + ($index + 1) + ' description'"
+              placeholder="What the model should put here"
+            />
+          </div>
+        } @empty {
+          <p class="phorma-props__hint">
+            No named parameters yet - the call takes one free-form input string, spliced into
+            every input placeholder in the url and body above. Add parameters to give the model
+            more than one dynamic value at once (e.g. a url path segment AND a JSON body) - each
+            becomes its own named placeholder instead.
+          </p>
+        }
       </section>
     }
 
     <!-- MCP tool -->
     @if (mcpData(); as data) {
       <section class="phorma-props__section">
-        <label class="phorma-props__label">MCP server</label>
+        <label class="phorma-props__label">
+          MCP server
+          <span
+            class="phorma-props__transport"
+            [class.phorma-props__transport--remote]="mcpTransportKind(data.transport, data.authMode) === 'remote'"
+            [title]="mcpTransportLabel[mcpTransportKind(data.transport, data.authMode)]"
+          >
+            @if (mcpTransportKind(data.transport, data.authMode) === 'remote') {
+              <app-phorma-cloud-icon />
+            } @else if (mcpTransportKind(data.transport, data.authMode) === 'oauth') {
+              <i class="{{ mcpOauthIcon }}" aria-hidden="true"></i>
+            } @else {
+              <i class="{{ mcpLocalIcon }}" aria-hidden="true"></i>
+            }
+          </span>
+        </label>
         @if (!mcpPreset()) {
           <!-- Only generic MCP nodes choose a transport; presets fix it. -->
           <p-select
@@ -980,12 +1068,12 @@
                 type="button"
                 pButton
                 size="small"
-                class="phorma-props__btn phorma-props__btn--primary"
+                class="phorma-props__btn phorma-props__btn--primary phorma-btn-content"
                 [disabled]="oauthConnecting() || !data.url || (oauthSetup() && !oauthClientAvailable())"
                 (click)="connectOAuth()"
               >
                 <i class="ti ti-plug-connected" aria-hidden="true"></i>
-                {{ oauthConnecting() ? 'Connecting…' : oauthConnected() ? 'Reconnect' : 'Connect' }}
+                <span>{{ oauthConnecting() ? 'Connecting…' : oauthConnected() ? 'Reconnect' : 'Connect' }}</span>
               </button>
               @if (oauthConnected()) {
                 <button

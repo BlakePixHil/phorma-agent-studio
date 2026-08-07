@@ -297,6 +297,27 @@
     <p class="phorma-prompt__hint">
       Summarizes older tool rounds when the context window nears its limit.
     </p>
+
+    <div class="phorma-prompt__inline">
+      <label class="phorma-prompt__inline-label" [for]="id('tool-result-cap')">Tool result cap (chars)</label>
+      <p-inputnumber
+        [inputId]="id('tool-result-cap')"
+        class="phorma-prompt__number"
+        size="small"
+        [min]="0"
+        [max]="200000"
+        [showButtons]="false"
+        [useGrouping]="false"
+        placeholder="default (8000)"
+        [ngModel]="node.data.toolResultCapChars ?? null"
+        (ngModelChange)="onToolResultCapChange($event)"
+      />
+    </div>
+    <p class="phorma-prompt__hint">
+      Maximum characters of a single tool result fed back to the model. Raise this for
+      paginated list calls (Slack/Jira) whose cursor lives at the tail and would be lost
+      under the default cap. Max 200000.
+    </p>
   </section>
 }
 

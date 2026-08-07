@@ -19,13 +19,23 @@ import { SelectModule } from 'primeng/select';
 
 import { SelectionService } from '../../../core/selection.service';
 import { WorkflowService } from '../../../core/workflow.service';
-import { findCatalogEntryByKind, findMcpPreset, type McpEnvField } from '../../../core/node-catalog';
+import {
+  MCP_LOCAL_ICON,
+  MCP_OAUTH_ICON,
+  MCP_TRANSPORT_LABEL,
+  findCatalogEntryByKind,
+  findMcpPreset,
+  mcpTransportKind,
+  type McpEnvField,
+} from '../../../core/node-catalog';
 import { SettingsService } from '../../../core/settings.service';
 import { McpOAuthService } from '../../../core/mcp-oauth.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
+import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import { CloudService } from '../../../core/cloud.service';
+import { CapabilityFindingsService } from '../../../core/capability-findings.service';
 import { ConnectionStoreService } from '../../../core/connection-store.service';
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import { TauriService } from '../../../core/tauri.service';
@@ -53,6 +63,7 @@ import type {
   GroupSpec,
   HttpRequestNodeData,
   HttpToolData,
+  HttpToolParam,
   JoinSpec,
   McpToolData,
   NodeRetryPolicy,
@@ -191,7 +202,7 @@ const FIXTURE_KINDS = new Set(['http-request', 'sql-query']);
 /** Kinds carrying an `errorPortId`. `assert` uses `failedPortId` instead. */
 const ERROR_PORT_KINDS = new Set(['http-request', 'sql-query', 'notify']);
 /** Kinds carrying a `connectionId`. */
-const CONNECTION_KINDS = new Set(['http-request', 'sql-query', 'notify']);
+const CONNECTION_KINDS = new Set(['http-request', 'sql-query', 'notify', 'http-tool']);
 
 /**
  * One connection choice for the picker (Requirements 2.9, 19.4): the display
@@ -416,6 +427,7 @@ const CRON_PRESETS: CronPreset[] = [
     InputTextModule,
     SelectModule,
     TextareaModule,
+    PhormaCloudIcon,
   ],
   templateUrl: './properties-form.html',
   styleUrl: './properties-form.scss',
@@ -430,6 +442,7 @@ export class PropertiesForm {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly cloud = inject(CloudService);
   private readonly connectionStore = inject(ConnectionStoreService);
+  private readonly capabilityFindings = inject(CapabilityFindingsService);
   private readonly panels = inject(PanelRegistryService);
   private readonly tauri = inject(TauriService);
 
@@ -459,6 +472,11 @@ export class PropertiesForm {
     { id: 'stdio', label: 'Local process (stdio)' },
     { id: 'sse', label: 'Remote (SSE)' },
   ];
+
+  protected readonly mcpTransportKind = mcpTransportKind;
+  protected readonly mcpTransportLabel = MCP_TRANSPORT_LABEL;
+  protected readonly mcpLocalIcon = MCP_LOCAL_ICON;
+  protected readonly mcpOauthIcon = MCP_OAUTH_ICON;
 
   protected readonly node = computed(() => this.selection.selectedNode());
   protected readonly multiSelection = computed(() => this.selection.selectedNodes().length > 1);
@@ -568,6 +586,36 @@ export class PropertiesForm {
     const node = this.node();
     return node?.kind === 'http-tool' ? (node.data as HttpToolData) : null;
   });
+
+  /**
+   * Named http-tool params, always an array. Empty means the node still uses
+   * the single `input` placeholder (backward compatible default).
+   */
+  protected readonly httpToolParams = computed<HttpToolParam[]>(
+    () => this.httpData()?.params ?? [],
+  );
+
+  protected addHttpToolParam(): void {
+    const data = this.httpData();
+    if (!data) return;
+    this.patchData({
+      params: [...(data.params ?? []), { name: '', required: true } satisfies HttpToolParam],
+    });
+  }
+
+  protected updateHttpToolParam(index: number, patch: Partial<HttpToolParam>): void {
+    const params = [...(this.httpData()?.params ?? [])];
+    if (!params[index]) return;
+    params[index] = { ...params[index], ...patch };
+    this.patchData({ params });
+  }
+
+  protected removeHttpToolParam(index: number): void {
+    const params = [...(this.httpData()?.params ?? [])];
+    if (!params[index]) return;
+    params.splice(index, 1);
+    this.patchData({ params });
+  }
   protected readonly mcpData = computed<McpToolData | null>(() => {
     const node = this.node();
     return node?.kind === 'mcp-tool' ? (node.data as McpToolData) : null;
@@ -1409,9 +1457,15 @@ export class PropertiesForm {
     const graph = this.workflow.graph();
     const capabilities = this.activeHostCapabilities();
     const connections = this.connectionSummaries();
-    return validateAgainstCapabilities({ graph }, capabilities, connections).filter(
+    const local = validateAgainstCapabilities({ graph }, capabilities, connections).filter(
       finding => finding.nodeId === node.id,
     );
+    // Deploy-target findings ride along so an undeployable node says so while
+    // it is being authored, not first at push time.
+    return [
+      ...local,
+      ...this.capabilityFindings.deployFindings().filter(finding => finding.nodeId === node.id),
+    ];
   });
 
   /** Opens the Connections panel (create/rename/delete lives there). */

@@ -1,4 +1,4 @@
-import { inject, Injectable } from '@angular/core';
+import { inject, Injectable, signal } from '@angular/core';
 
 import {
   McpOAuthClient,
@@ -53,6 +53,14 @@ export class McpOAuthService {
   private readonly client = new McpOAuthClient(browserCrypto(), (input, init) =>
     this.routedFetch(input, init),
   );
+
+  /**
+   * Bumped on every successful connect/disconnect so components that cache
+   * their own copy of "is node X connected" (the canvas warning badge, most
+   * notably) know to refresh even though nothing about the workflow graph
+   * itself changed.
+   */
+  readonly connectionChangeTick = signal(0);
 
   /** The secret key under which a node's OAuth session JSON is stored. */
   private sessionKey(nodeId: string): string {
@@ -177,6 +185,7 @@ export class McpOAuthService {
       });
 
       await this.storeSession(nodeId, { tokens, metadata, client, resource, scopes });
+      this.connectionChangeTick.update(tick => tick + 1);
       return tokens.access_token;
     } finally {
       capture.cancel?.();
@@ -225,6 +234,7 @@ export class McpOAuthService {
   /** Clears a node's stored OAuth session (disconnect). */
   async disconnect(nodeId: string): Promise<void> {
     await this.settings.setMcpSecret(nodeId, this.sessionKey(nodeId), '');
+    this.connectionChangeTick.update(tick => tick + 1);
   }
 
   // ── Host-specific callback capture ─────────────────────────────────────────

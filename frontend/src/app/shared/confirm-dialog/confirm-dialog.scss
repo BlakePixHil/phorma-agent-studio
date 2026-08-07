@@ -5,7 +5,9 @@
 .phorma-confirm {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  // Above every real dialog (80) - a confirm is routinely summoned FROM one
+  // (e.g. the Cloud dialog's "Remove from cloud") and must always win.
+  z-index: 85;
   display: grid;
   place-items: center;
   padding: 24px;

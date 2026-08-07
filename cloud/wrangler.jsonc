@@ -19,6 +19,14 @@
 //      remains as a fallback for non-Clerk clients)
 //   4. npx wrangler deploy   (or use Deploy in the studio's Cloud dialog)
 //
+// Credentials a DEPLOYED workflow needs are separate worker secrets, because
+// the studio's own keychain never travels to the cloud:
+//   - Remote MCP node bearer tokens:  npx wrangler secret put MCP_<AUTHKEY>
+//     e.g. the "Email (remote)" preset's authKey RESEND_API_KEY becomes
+//     MCP_RESEND_API_KEY. Local (stdio) MCP servers cannot run here at all.
+//   - Connection secrets:  npx wrangler secret put CONN_<ID>_<KEY>
+//     (the exact name is in the error the run reports when one is missing)
+//
 // If you have MORE THAN ONE Cloudflare account, or you want a custom worker
 // name or a custom portal domain, set those in the studio under
 // Settings → Cloud. It writes a `wrangler.byo.jsonc` override (gitignored, so

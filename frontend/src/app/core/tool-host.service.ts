@@ -2,16 +2,19 @@ import { Injectable, inject } from '@angular/core';
 
 import {
   HttpMcpClient,
+  applyConnectionAuth,
   buildHttpToolRequest,
   httpToolDefinition,
   performWebSearch,
   sanitizeToolName,
   webSearchToolDefinition,
+  withConnectionBaseUrl,
   type ResolvedTool,
   type ToolHost,
   type WorkflowNode,
 } from '@phorma/engine';
 
+import { ConnectionStoreService } from './connection-store.service';
 import { McpOAuthService } from './mcp-oauth.service';
 import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
@@ -29,6 +32,7 @@ export class ToolHostService implements ToolHost {
   private readonly tauri = inject(TauriService);
   private readonly settings = inject(SettingsService);
   private readonly oauth = inject(McpOAuthService);
+  private readonly connections = inject(ConnectionStoreService);
 
   /** HTTP MCP clients, keyed by tool node id (reused across a run). */
   private readonly httpMcpClients = new Map<string, HttpMcpClient>();
@@ -55,7 +59,17 @@ export class ToolHostService implements ToolHost {
       case 'http-tool': {
         const request = buildHttpToolRequest(node, argumentsJson);
         if (!request.url) return 'Error: the HTTP tool has no URL configured.';
-        const response = await this.fetchText(request.url, request.method, request.headers, request.body);
+        const connectionId = (node.data as { connectionId?: string }).connectionId;
+        let authed = request;
+        if (connectionId) {
+          try {
+            const conn = await this.connections.resolve(connectionId);
+            authed = applyConnectionAuth({ ...request, url: withConnectionBaseUrl(request.url, conn) }, conn);
+          } catch (error) {
+            return `Error: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        }
+        const response = await this.fetchText(authed.url, authed.method, authed.headers, authed.body);
         return response;
       }
       case 'web-search-tool': {

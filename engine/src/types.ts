@@ -350,6 +350,13 @@ export interface AgentNodeData {
   /** True disables automatic context compression for long tool loops. */
   compressionDisabled?: boolean;
   /**
+   * Per-agent character cap for a single tool result fed back to the model.
+   * Absent = engine default (8000). Raise it when an agent needs whole
+   * paginated payloads (Slack/Jira list calls) whose cursor would otherwise
+   * be sliced off. Capped at 200000 to bound context cost.
+   */
+  toolResultCapChars?: number;
+  /**
    * Skills attached to this agent, embedded by value (see {@link AgentSkill}).
    * Rendered into the system prompt in array order.
    */

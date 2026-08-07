@@ -1,15 +1,21 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 
 import {
+  MCP_LOCAL_ICON,
+  MCP_OAUTH_ICON,
   MCP_PRESETS,
+  MCP_TRANSPORT_LABEL,
   NODE_CATALOG,
   NODE_CATEGORY_SECTIONS,
   PHORMA_NODE_MIME,
   mcpPresetEntryId,
+  mcpTransportKind,
+  type McpTransportKind,
   type NodeCatalogEntry,
   type McpPreset,
 } from '../../../core/node-catalog';
 import { NodeDragService } from '../../../core/node-drag.service';
+import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { NODE_CATEGORY_COLORS, type NodeCategory } from '../../../core/workflow.model';
 
 /** A selectable filter chip mapped to a node category. */
@@ -35,6 +41,15 @@ interface PaletteSection {
   entries: NodeCatalogEntry[];
 }
 
+/** MCP presets sharing a transport, rendered as a labelled sub-group. */
+interface McpPresetGroup {
+  kind: McpTransportKind;
+  label: string;
+  /** Tooltip explaining the deployment consequence of this transport. */
+  title: string;
+  presets: McpPreset[];
+}
+
 /**
  * The Agents palette (left panel): every node type in the catalog, grouped by
  * section (Agents / Triggers / Flow / Data / Tools), searchable, and draggable
@@ -43,6 +58,7 @@ interface PaletteSection {
 @Component({
   selector: 'app-agents-palette',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PhormaCloudIcon],
   templateUrl: './agents-palette.html',
   styleUrl: './agents-palette.scss',
 })
@@ -94,6 +110,33 @@ export class AgentsPalette {
     });
   });
 
+  /**
+   * Matching presets split by where they run, remote first. Deployability is
+   * the deciding factor when picking between two servers for the same product
+   * (Jira local vs remote), so the split is the grouping, not a footnote.
+   * Empty groups are dropped so a search never renders a bare heading.
+   */
+  protected readonly mcpGroups = computed<McpPresetGroup[]>(() => {
+    const presets = this.mcpPresets();
+    const order: McpTransportKind[] = ['remote', 'oauth', 'local'];
+    const labels: Record<McpTransportKind, string> = {
+      remote: 'Remote MCP',
+      oauth: 'Sign-in (OAuth) MCP',
+      local: 'Local MCP',
+    };
+    return order
+      .map(kind => ({
+        kind,
+        label: labels[kind],
+        title: MCP_TRANSPORT_LABEL[kind],
+        presets: presets.filter(preset => mcpTransportKind(preset.transport, preset.authMode) === kind),
+      }))
+      .filter(group => group.presets.length > 0);
+  });
+
+  protected readonly localIcon = MCP_LOCAL_ICON;
+  protected readonly oauthIcon = MCP_OAUTH_ICON;
+
   /** Whether any palette entries (catalog sections or presets) match the query. */
   protected readonly hasResults = computed(() => {
     const sections = this.sections();
@@ -108,6 +151,7 @@ export class AgentsPalette {
   protected readonly sections = computed<PaletteSection[]>(() => {
     const q = this.query().trim().toLowerCase();
     const active = this.activeCategories();
+    const hasPresetMatches = this.mcpPresets().length > 0;
     const matches = (entry: NodeCatalogEntry): boolean =>
       q.length === 0 ||
       entry.label.toLowerCase().includes(q) ||
@@ -130,13 +174,18 @@ export class AgentsPalette {
         else groups.set(groupLabel, [entry]);
       }
       for (const [groupLabel, entries] of groups) {
-        if (entries.length === 0) continue;
+        const ownsPresets = category === 'tool' && groupLabel === label;
+        // The MCP preset list lives inside the Tools group, so that group must
+        // survive a search that matches only presets - dropping it for having
+        // no catalog entries hid every preset and made searching "jira" (or any
+        // server name) return nothing at all.
+        if (entries.length === 0 && !(ownsPresets && hasPresetMatches)) continue;
         result.push({
           key: `${category}:${groupLabel}`,
           category,
           label: groupLabel,
           color,
-          showMcpPresets: category === 'tool' && groupLabel === label,
+          showMcpPresets: ownsPresets,
           entries,
         });
       }

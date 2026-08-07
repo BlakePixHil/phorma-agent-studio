@@ -9,6 +9,9 @@
  *
  * HTTP surface (all under /agents/workflow-agent/{instance}):
  *   POST /workflow   — upload/replace the workflow spec (studio "Push")
+ *   DELETE /workflow - remove the deployed spec (studio "Remove from cloud");
+ *                      refused while a run is in progress; run history,
+ *                      the usage ledger and connection metadata are kept
  *   POST /connections — replace the connection metadata inventory (names,
  *                      types, auth modes — never a secret value)
  *   GET  /connections — this worker's connection inventory as
@@ -102,6 +105,7 @@ import {
   sanitizeToolName,
   startRun,
   webSearchToolDefinition,
+  withConnectionBaseUrl,
   createRunRecorder,
   decodeRunSnapshot,
   encodeRunSnapshot,
@@ -183,6 +187,19 @@ export interface Env extends TenantEnv, PortalRegistryEnv {
    * reader; nothing else in the worker may touch these.
    */
   [connectionSecret: `CONN_${string}`]: string | undefined;
+  /**
+   * Bearer tokens for REMOTE (`sse`) MCP nodes: one per `authKey`, named
+   * `MCP_<AUTHKEY>` (authKey `RESEND_API_KEY` -> `MCP_RESEND_API_KEY`). Read
+   * only by the `resolveBearer` hook handed to `CloudToolHost`.
+   *
+   * Declared so the lookup is a typed contract rather than a cast. Note these
+   * are the ONLY MCP credential a deployed run can resolve: a local (stdio)
+   * server cannot be spawned here at all, and an interactive OAuth session is
+   * held in the studio's keychain with no path to a worker. That is why the
+   * capability record sets `stdioMcp: false` and remote presets meant for
+   * deployment authenticate with a static token.
+   */
+  [mcpBearer: `MCP_${string}`]: string | undefined;
 }
 
 /** Cumulative usage for one run (summed across node-usage events). */
@@ -559,6 +576,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       return json({ ok: true, name: spec.name });
     }
 
+    // Removes the deployed spec (studio "Remove from cloud"). The instance
+    // itself, its run history, usage ledger and connection metadata are
+    // untouched, so pushing again needs no other setup.
+    if (request.method === 'DELETE' && path.endsWith('/workflow')) {
+      if (this.handle) {
+        return json({ error: 'Stop the running run before removing this workflow.' }, 409);
+      }
+      await this.cancelScheduledRuns();
+      this.setState({ ...this.state, spec: null, savedAt: null });
+      return json({ ok: true });
+    }
+
     // The dedicated connection-metadata push route (Requirement 3.6). Carries
     // NAMES only: `connectionMetadataFromPush` drops anything value-shaped, and
     // the secrets themselves arrive separately as `CONN_*` worker secrets.
@@ -855,6 +884,20 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // Intentionally empty — waking the DO is the entire job.
   }
 
+  /**
+   * Cancels every armed CRON schedule without touching in-flight
+   * `waitTimedOut` / `workflowTimedOut` alarms - shared by `rescheduleCron`
+   * (re-arming for a freshly pushed spec) and DELETE /workflow (removing the
+   * deployed spec outright).
+   */
+  private async cancelScheduledRuns(): Promise<void> {
+    for (const schedule of this.getSchedules()) {
+      if (schedule.callback === 'scheduledRun') {
+        await this.cancelSchedule(schedule.id);
+      }
+    }
+  }
+
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
     // Portal session instances serve ONE visitor conversation. Arming cron
     // there would give every visitor their own recurring job.
@@ -864,11 +907,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // behaviour) also killed in-flight `waitTimedOut` / `workflowTimedOut`
     // alarms, so a spec push during a suspended run silently dropped its
     // timeouts and the run could hang forever.
-    for (const schedule of this.getSchedules()) {
-      if (schedule.callback === 'scheduledRun') {
-        await this.cancelSchedule(schedule.id);
-      }
-    }
+    await this.cancelScheduledRuns();
     // Hosted mode: cap active schedules by tier so background cron runs
     // can't burn quota 24/7.
     let scheduleBudget = Number.POSITIVE_INFINITY;
@@ -1085,9 +1124,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         // Remote MCP bearer tokens come from worker secrets named
         // `MCP_<AUTHKEY>` (e.g. authKey `GITHUB_TOKEN` -> secret MCP_GITHUB_TOKEN).
         resolveBearer: authKey => {
-          const value = this.env[`MCP_${authKey}` as keyof Env];
+          const value = this.env[`MCP_${authKey}`];
           return typeof value === 'string' && value.trim() ? value : null;
         },
+        // http-tool nodes reuse the SAME connection store as the deterministic
+        // data path, so an agent-callable HTTP tool can carry real auth
+        // (Basic/Bearer/etc.) without a secret ever living in node.data.
+        resolveConnection: connectionId => connections.resolve(connectionId),
       }),
       ollamaBaseUrl: this.env.OLLAMA_BASE_URL,
       bedrockRegion: this.env.BEDROCK_REGION,
@@ -2225,13 +2268,17 @@ class CloudToolHost implements ToolHost {
   private readonly restrictEgress: boolean;
   /** Resolves a remote MCP node's bearer token from worker secrets. */
   private readonly resolveBearer?: (authKey: string) => string | null;
+  /** Resolves an `http-tool` node's stored connection (base url + auth). */
+  private readonly resolveConnection?: (connectionId: string) => Promise<ResolvedConnection>;
 
   constructor(options?: {
     restrictEgress?: boolean;
     resolveBearer?: (authKey: string) => string | null;
+    resolveConnection?: (connectionId: string) => Promise<ResolvedConnection>;
   }) {
     this.restrictEgress = options?.restrictEgress ?? false;
     this.resolveBearer = options?.resolveBearer;
+    this.resolveConnection = options?.resolveConnection;
   }
 
   async listTools(node: WorkflowNode): Promise<Omit<ResolvedTool, 'nodeId'>[]> {
@@ -2245,10 +2292,16 @@ class CloudToolHost implements ToolHost {
         return [{ definition, nativeName: definition.name }];
       }
       case 'mcp-tool': {
-        const data = node.data as { transport?: string; url?: string };
+        const data = node.data as { transport?: string; url?: string; authMode?: string };
         if (data.transport === 'stdio') {
           throw new Error(
             `MCP node "${node.name}" uses a local (stdio) server — deployed workflows need a remote MCP URL.`,
+          );
+        }
+        if (data.authMode === 'oauth') {
+          throw new Error(
+            `MCP node "${node.name}" uses interactive OAuth sign-in - a deployed workflow can't reuse that ` +
+              `signed-in session. Use an MCP server authenticated with a static API token/bearer credential instead.`,
           );
         }
         if (!data.url) throw new Error(`MCP node "${node.name}" has no server URL.`);
@@ -2274,10 +2327,17 @@ class CloudToolHost implements ToolHost {
       case 'http-tool': {
         const request = buildHttpToolRequest(node, argumentsJson);
         if (!request.url) return 'Error: the HTTP tool has no URL configured.';
+        const connectionId = (node.data as { connectionId?: string }).connectionId;
+        let authedRequest = request;
         try {
+          if (connectionId) {
+            if (!this.resolveConnection) return 'Error: connections are not available on this host.';
+            const conn = await this.resolveConnection(connectionId);
+            authedRequest = applyConnectionAuth({ ...request, url: withConnectionBaseUrl(request.url, conn) }, conn);
+          }
           const result = await guardedFetchText(
-            request.url,
-            { method: request.method, headers: request.headers, body: request.body },
+            authedRequest.url,
+            { method: authedRequest.method, headers: authedRequest.headers, body: authedRequest.body },
             this.restrictEgress,
           );
           return result.ok ? result.text : `HTTP ${result.status}: ${result.text}`;

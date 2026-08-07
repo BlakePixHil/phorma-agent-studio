@@ -61,24 +61,46 @@
           }
         </div>
 
-        @if (section.showMcpPresets && mcpPresets().length > 0) {
-          <div class="phorma-palette__subheading">MCP Servers</div>
-          <div class="phorma-palette__grid">
-            @for (preset of mcpPresets(); track preset.id) {
-              <button
-                type="button"
-                class="phorma-palette__item"
-                draggable="true"
-                (dragstart)="onPresetDragStart($event, preset)"
-                (dragend)="onDragEnd()"
-                (click)="onPresetClick(preset)"
-                [title]="preset.description + ' (click or drag to add)'"
-              >
-                <i class="phorma-palette__icon {{ preset.icon }}" aria-hidden="true"></i>
-                <span class="phorma-palette__label">{{ preset.label }}</span>
-              </button>
-            }
-          </div>
+        @if (section.showMcpPresets) {
+          @for (group of mcpGroups(); track group.kind) {
+            <div class="phorma-palette__subheading" [title]="group.title">
+              <span class="phorma-palette__transport" aria-hidden="true">
+                @if (group.kind === 'remote') {
+                  <app-phorma-cloud-icon />
+                } @else if (group.kind === 'oauth') {
+                  <i class="{{ oauthIcon }}"></i>
+                } @else {
+                  <i class="{{ localIcon }}"></i>
+                }
+              </span>
+              {{ group.label }}
+            </div>
+            <div class="phorma-palette__grid">
+              @for (preset of group.presets; track preset.id) {
+                <button
+                  type="button"
+                  class="phorma-palette__item"
+                  draggable="true"
+                  (dragstart)="onPresetDragStart($event, preset)"
+                  (dragend)="onDragEnd()"
+                  (click)="onPresetClick(preset)"
+                  [title]="preset.description + ' (click or drag to add)'"
+                >
+                  <i class="phorma-palette__icon {{ preset.icon }}" aria-hidden="true"></i>
+                  <span class="phorma-palette__transport-pip" aria-hidden="true">
+                    @if (group.kind === 'remote') {
+                      <app-phorma-cloud-icon />
+                    } @else if (group.kind === 'oauth') {
+                      <i class="{{ oauthIcon }}"></i>
+                    } @else {
+                      <i class="{{ localIcon }}"></i>
+                    }
+                  </span>
+                  <span class="phorma-palette__label">{{ preset.label }}</span>
+                </button>
+              }
+            </div>
+          }
         }
       </section>
     }

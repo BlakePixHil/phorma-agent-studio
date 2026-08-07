@@ -496,64 +496,118 @@
                       These credentials are the application defaults - every node created from
                       the preset uses them unless overridden on the node itself.
                     </p>
-                    @for (preset of mcpPresets; track preset.id) {
-                      <div class="phorma-settings__integration" [attr.id]="'integration-' + preset.id">
-                        <div class="phorma-settings__integration-head">
-                          <i class="{{ preset.icon }}" aria-hidden="true"></i>
-                          <div>
-                            <h5>{{ preset.label }}</h5>
-                            <p>{{ preset.description }}</p>
-                          </div>
-                        </div>
-                        @for (field of preset.envSchema; track field.name) {
-                          <div class="phorma-settings__row">
-                            <span class="phorma-settings__row-label">
-                              {{ field.label }}
-                              @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
-                                <i
-                                  class="ti ti-circle-check phorma-settings__ok"
-                                  pTooltip="Configured"
-                                  tooltipPosition="top"
-                                  aria-hidden="true"
-                                ></i>
-                              }
-                            </span>
-                            <input
-                              [type]="field.secret ? 'password' : 'text'"
-                              class="phorma-settings__input"
-                              [placeholder]="settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)] ? '••••••••  (stored)' : (field.placeholder ?? '')"
-                              [value]="presetDrafts()[preset.id + ':' + field.name] || ''"
-                              (input)="onPresetDraftInput(preset.id, field.name, $event)"
-                              (keydown.enter)="savePresetSecret(preset, field.name)"
-                              autocomplete="off"
-                              [attr.aria-label]="preset.label + ' ' + field.label"
-                            />
-                            <p-button
-                              styleClass="phorma-settings__btn"
-                              size="small"
-                              label="Save"
-                              [disabled]="presetDrafts()[preset.id + ':' + field.name] === undefined"
-                              (onClick)="savePresetSecret(preset, field.name)"
-                            />
-                            @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
-                              <p-button
-                                styleClass="phorma-settings__btn phorma-settings__btn--icon"
-                                [text]="true"
-                                severity="danger"
-                                size="small"
-                                icon="ti ti-trash"
-                                pTooltip="Remove stored value"
-                                tooltipPosition="top"
-                                (onClick)="clearPresetSecret(preset, field.name)"
-                                ariaLabel="Remove stored value"
-                              />
+
+                    <!-- Integrations grouped by where the server runs; deployability
+                         is the deciding factor when picking between two servers for
+                         the same product, so Remote leads. Each group is a collapsible
+                         expander; a deep-linked card auto-expands its group. -->
+                    @for (group of integrationGroups; track group.kind) {
+                      <details
+                        class="phorma-settings__integration-group"
+                        [open]="integrationGroupOpen()[group.kind]"
+                        (toggle)="onIntegrationGroupToggle(group.kind, $event)"
+                      >
+                        <summary class="phorma-settings__integration-summary">
+                          <i class="ti ti-chevron-right phorma-settings__integration-caret" aria-hidden="true"></i>
+                          <span class="phorma-settings__integration-glyph" aria-hidden="true">
+                            @if (group.kind === 'remote') {
+                              <app-phorma-cloud-icon />
+                            } @else if (group.kind === 'oauth') {
+                              <i class="{{ mcpOauthIcon }}"></i>
+                            } @else {
+                              <i class="{{ mcpLocalIcon }}"></i>
                             }
-                          </div>
-                          @if (field.description) {
-                            <p class="phorma-settings__hint">{{ field.description }}</p>
+                          </span>
+                          <span>{{ group.label }}</span>
+                          <span class="phorma-settings__integration-count">{{ group.presets.length }}</span>
+                        </summary>
+
+                        <div class="phorma-settings__integration-body">
+                          @for (preset of group.presets; track preset.id) {
+                            <div class="phorma-settings__integration" [attr.id]="'integration-' + preset.id">
+                              <div class="phorma-settings__integration-head">
+                                <i class="{{ preset.icon }}" aria-hidden="true"></i>
+                                <div>
+                                  <h5>{{ preset.label }}</h5>
+                                  <p>{{ preset.description }}</p>
+                                </div>
+                                <!-- The tag floats right of the head flex row, so it clears the
+                                     description no matter how long either is. -->
+                                <span
+                                  class="phorma-settings__transport"
+                                  [class.phorma-settings__transport--remote]="
+                                    mcpTransportKind(preset.transport, preset.authMode) === 'remote'
+                                  "
+                                  [pTooltip]="mcpTransportLabel[mcpTransportKind(preset.transport, preset.authMode)]"
+                                  tooltipPosition="top"
+                                >
+                                  @if (mcpTransportKind(preset.transport, preset.authMode) === 'remote') {
+                                    <app-phorma-cloud-icon />
+                                  } @else if (mcpTransportKind(preset.transport, preset.authMode) === 'oauth') {
+                                    <i class="{{ mcpOauthIcon }}" aria-hidden="true"></i>
+                                  } @else {
+                                    <i class="{{ mcpLocalIcon }}" aria-hidden="true"></i>
+                                  }
+                                </span>
+                              </div>
+                              @if (preset.authMode === 'oauth') {
+                                <p class="phorma-settings__integration-note">
+                                  This server is authorized per node, not here: add it to a workflow,
+                                  select the node, and use <strong>Connect</strong> in its Properties.
+                                </p>
+                              }
+                              @for (field of preset.envSchema; track field.name) {
+                                <div class="phorma-settings__row">
+                                  <span class="phorma-settings__row-label">
+                                    {{ field.label }}
+                                    @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
+                                      <i
+                                        class="ti ti-circle-check phorma-settings__ok"
+                                        pTooltip="Configured"
+                                        tooltipPosition="top"
+                                        aria-hidden="true"
+                                      ></i>
+                                    }
+                                  </span>
+                                  <input
+                                    [type]="field.secret ? 'password' : 'text'"
+                                    class="phorma-settings__input"
+                                    [placeholder]="settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)] ? '••••••••  (stored)' : (field.placeholder ?? '')"
+                                    [value]="presetDrafts()[preset.id + ':' + field.name] || ''"
+                                    (input)="onPresetDraftInput(preset.id, field.name, $event)"
+                                    (keydown.enter)="savePresetSecret(preset, field.name)"
+                                    autocomplete="off"
+                                    [attr.aria-label]="preset.label + ' ' + field.label"
+                                  />
+                                  <p-button
+                                    styleClass="phorma-settings__btn"
+                                    size="small"
+                                    label="Save"
+                                    [disabled]="presetDrafts()[preset.id + ':' + field.name] === undefined"
+                                    (onClick)="savePresetSecret(preset, field.name)"
+                                  />
+                                  @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
+                                    <p-button
+                                      styleClass="phorma-settings__btn phorma-settings__btn--icon"
+                                      [text]="true"
+                                      severity="danger"
+                                      size="small"
+                                      icon="ti ti-trash"
+                                      pTooltip="Remove stored value"
+                                      tooltipPosition="top"
+                                      (onClick)="clearPresetSecret(preset, field.name)"
+                                      ariaLabel="Remove stored value"
+                                    />
+                                  }
+                                </div>
+                                @if (field.description) {
+                                  <p class="phorma-settings__hint">{{ field.description }}</p>
+                                }
+                              }
+                            </div>
                           }
-                        }
-                      </div>
+                        </div>
+                      </details>
                     }
                   }
 

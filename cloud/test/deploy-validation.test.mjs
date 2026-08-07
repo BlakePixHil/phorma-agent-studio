@@ -133,6 +133,14 @@ async function status(mf, workflowId) {
   return { status: response.status, body: await response.json() };
 }
 
+async function removeWorkflow(mf, workflowId) {
+  const response = await mf.dispatchFetch(
+    `http://localhost/agents/workflow-agent/${encodeURIComponent(workflowId)}/workflow`,
+    { method: 'DELETE' },
+  );
+  return { status: response.status, body: await response.json() };
+}
+
 // ── Build the exact deploy bundle, then run it under Miniflare ─────────────
 
 const wranglerBin = fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url));
@@ -160,6 +168,20 @@ const mf = new Miniflare({
 });
 
 try {
+  // ── The gateway's CORS preflight must allow every method a route uses ────
+  // (regression: DELETE /workflow shipped before the OPTIONS handler in
+  // index.ts knew about it, so a browser blocked it before the request ever
+  // reached the worker).
+  console.log('\nOPTIONS preflight CORS headers');
+  {
+    const response = await mf.dispatchFetch(
+      'http://localhost/agents/workflow-agent/wf-cors-check/workflow',
+      { method: 'OPTIONS' },
+    );
+    const allowed = response.headers.get('Access-Control-Allow-Methods') ?? '';
+    check('OPTIONS preflight allows DELETE', allowed.includes('DELETE'), allowed);
+  }
+
   // ── Requirement 17.12: an error finding rejects with every finding ───────
   console.log('\nAn error finding on POST /workflow');
   {
@@ -218,6 +240,24 @@ try {
     check('a clean spec deploys (200)', accepted.status === 200, JSON.stringify(accepted.body));
     const after = await status(mf, workflowId);
     check('the spec is stored', after.body.name === 'Clean push', JSON.stringify(after.body));
+  }
+
+  // ── DELETE /workflow removes the deployed spec (studio "Remove from cloud") ──
+  console.log('\nDELETE /workflow');
+  {
+    const workflowId = 'wf-deploy-validation-remove';
+    const pushed = await push(mf, workflowId, validSpec(workflowId, 'Removable push'));
+    check('the spec deploys first (200)', pushed.status === 200, JSON.stringify(pushed.body));
+
+    const removed = await removeWorkflow(mf, workflowId);
+    check(
+      'the removal responds ok',
+      removed.status === 200 && removed.body?.ok === true,
+      JSON.stringify(removed.body),
+    );
+
+    const after = await status(mf, workflowId);
+    check('hasWorkflow is false after removal', after.body.hasWorkflow === false, JSON.stringify(after.body));
   }
 } finally {
   await mf.dispose();

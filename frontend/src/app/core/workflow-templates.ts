@@ -11,6 +11,7 @@
 import type {
   AgentNodeData,
   ForEachNodeData,
+  HttpToolData,
   NodeCategory,
   WaitEventNodeData,
   WorkflowConnection,
@@ -487,6 +488,280 @@ function buildIasWorkflow(): WorkflowSpec {
   };
 }
 
+// ── Template: Jira Time-Log Safety Net ───────────────────────────────────────
+
+/**
+ * End-of-day Jira safety net: fires on a schedule (~7pm Melbourne, Mon-Fri),
+ * checks whether the user already logged time today, and if not, logs a full
+ * day against one random eligible ticket and emails a report.
+ *
+ * Two schedule triggers cover Melbourne's DST switch (cron has no timezone
+ * concept): Oct-Mar fires at 08:00 UTC (19:00 AEDT), Apr-Sep at 09:00 UTC
+ * (19:00 AEST). Both feed the same agent, so only one fires on any given
+ * evening (± a few days' drift right at the actual DST switchover date).
+ *
+ * The Jira calls are `http-tool` nodes wired to a stored Connection
+ * (Settings → Connections: Basic auth, Atlassian account email + API token),
+ * not an MCP server - the official remote Jira MCP server is OAuth-only, and
+ * an OAuth session never reaches a deployed worker (`mcpOAuth` capability in
+ * engine/src/capabilities.ts), so it cannot run on a schedule. A `{{baseUrl}}`
+ * token in each tool's url is filled in from the connection at call time
+ * (`withConnectionBaseUrl` in engine/src/tools.ts) - the site URL is set once
+ * on the connection, not on every node. `Add Worklog` needs both a url path
+ * segment (the issue key) AND a JSON body, which is exactly what
+ * `HttpToolData.params` (named tokens) exists for; the other two calls still
+ * use the single `input` default.
+ *
+ * There is no reliable "today" without a real clock: a schedule trigger's
+ * fired input is always empty, and no prompt gets today's date injected. The
+ * `Get Current Time (Melbourne)` tool (timeapi.io, unauthenticated) is the
+ * agent's first call for exactly that reason.
+ */
+function buildJiraSafetyNetWorkflow(): WorkflowSpec {
+  connectionCounter = 0;
+  const emailPreset = findMcpPreset('email-remote');
+
+  const nodes: WorkflowNode[] = [
+    node({
+      id: 'tpl-jira-trigger-aedt',
+      name: 'Trigger (Oct-Mar, AEDT)',
+      kind: 'schedule-trigger',
+      category: 'trigger',
+      icon: 'ti ti-clock-play',
+      x: 80,
+      y: 180,
+      ports: [{ key: 'tick', name: 'Tick', role: 'message-out' }],
+      data: { cron: '0 8 * 1,2,3,10,11,12 1-5' },
+      description: '19:00 AEDT (UTC+11) on weekdays, October to March.',
+    }),
+    node({
+      id: 'tpl-jira-trigger-aest',
+      name: 'Trigger (Apr-Sep, AEST)',
+      kind: 'schedule-trigger',
+      category: 'trigger',
+      icon: 'ti ti-clock-play',
+      x: 80,
+      y: 420,
+      ports: [{ key: 'tick', name: 'Tick', role: 'message-out' }],
+      data: { cron: '0 9 * 4-9 1-5' },
+      description: '19:00 AEST (UTC+10) on weekdays, April to September.',
+    }),
+
+    agent(
+      'tpl-jira-agent',
+      'Jira Time-Log Safety Net',
+      400,
+      300,
+      [
+        `You are a Jira "safety net" agent that runs once at the end of each business day (~7pm`,
+        `Melbourne time, Mon-Fri) via a schedule trigger. Your job is to make sure the user never`,
+        `forgets to log time for the day.`,
+        ``,
+        `Trigger payload / task: {{input}}`,
+        ``,
+        `# Tools available to you`,
+        ``,
+        `- **Get Current Time (Melbourne)**: call this FIRST, before anything else. It returns`,
+        `  year/month/day/hour/minute/dayOfWeek and dstActive for Australia/Melbourne. Use dstActive`,
+        `  to pick the UTC offset: true = +11:00 (AEDT), false = +10:00 (AEST). This is your only`,
+        `  source of truth for "today" - never guess the date.`,
+        `- **Jira: Search My Issues**: POST to the Jira v3 search endpoint. Its single input value is`,
+        `  the ENTIRE JSON request body, verbatim, e.g. {"jql":"assignee = currentUser() AND`,
+        `  statusCategory != Done","fields":["summary","status"],"maxResults":50}.`,
+        `- **Jira: Get Issue Worklogs**: GET worklogs for one issue. Its single input value is just`,
+        `  the issue key, e.g. PROJ-123.`,
+        `- **Jira: Add Worklog**: POST a new worklog entry. It takes two separate arguments:`,
+        `  issueKey (e.g. PROJ-123) and body (the full JSON worklog payload as a string).`,
+        `- **Email Report**: sends the final report email.`,
+        ``,
+        `The current user is identified by assignee = currentUser() - the connection behind the Jira`,
+        `tools already carries the site URL and the user's own credentials.`,
+        ``,
+        `# Steps (follow exactly, in order)`,
+        ``,
+        `1. **Get today's date.** Call Get Current Time (Melbourne). Derive today's Melbourne`,
+        `   calendar date and the correct offset (+10:00 or +11:00) from the result. You will need`,
+        `   both again in step 6.`,
+        `2. **Fetch the queue.** Call Jira: Search My Issues for issues assigned to the current user`,
+        `   that are not in a terminal or QA-like status:`,
+        `   - JQL: assignee = currentUser() AND statusCategory != Done AND status NOT IN ("QA",`,
+        `     "In QA", "Ready for QA")`,
+        `   - Adjust the exact status names only if the search returns none and you can see other`,
+        `     in-flight statuses that clearly represent "not done / not in QA" - but never include`,
+        `     tickets whose status is Done, Closed, Resolved, or any QA-review status.`,
+        `   - Request key, summary, and status fields.`,
+        `3. **Check today's worklogs.** For each ticket assigned to the user (not just the filtered`,
+        `   queue - check the user's whole assigned set), call Jira: Get Issue Worklogs and inspect`,
+        `   entries added TODAY (the Melbourne calendar date from step 1). Filter entries where`,
+        `   author is the current user and started falls within today's date.`,
+        `   - If any ticket already has a worklog entry from the current user dated today, STOP`,
+        `     logging time. Skip to step 7 and report that time was already logged today.`,
+        `4. **Decide eligibility.** If no worklog exists for today anywhere, take the queue from step`,
+        `   2 (not Done, not QA). If that queue is empty, skip to step 7 and report there were no`,
+        `   eligible tickets.`,
+        `5. **Pick one at random.** From the eligible queue, pick one ticket uniformly at random (not`,
+        `   just the first - vary your selection using whatever entropy you have, e.g. shuffle the`,
+        `   list mentally and pick an index).`,
+        `6. **Log the time.** Call Jira: Add Worklog for the chosen ticket:`,
+        `   - issueKey: the chosen ticket's key.`,
+        `   - body: JSON with timeSpent "1d" (one full working day, per the site's Jira work-day`,
+        `     hours setting - typically 8h, but let Jira interpret "1d"), started set to today's`,
+        `     Melbourne date at 09:00 formatted yyyy-MM-ddTHH:mm:ss.SSS plus the offset from step 1`,
+        `     (e.g. 2026-08-07T09:00:00.000+1000), and comment "Auto-logged by safety-net workflow -`,
+        `     please review/adjust if needed."`,
+        `7. **Report and email.** Compose a short, clear summary stating exactly one of:`,
+        `   - "No action: time already logged today on <ticket(s)>."`,
+        `   - "No action: no eligible tickets (none open outside QA/Done) to log time against."`,
+        `   - "Logged 1 day on <TICKET-KEY> - <summary> (auto-selected at random from N eligible`,
+        `     tickets)."`,
+        `   - Or a clear error description if a Jira call failed.`,
+        ``,
+        `   Call Email Report to send that summary to blakelinnell96@gmail.com, stating what ticket`,
+        `   was logged (if any) and how much time.`,
+        ``,
+        `Never log time on more than one ticket. Never log time if any ticket already has today's`,
+        `worklog. Be conservative: if you cannot determine worklog status confidently, do not log`,
+        `time, explain why in your report, and still email it.`,
+      ].join('\n'),
+      'Checks whether time was already logged today; if not, logs a full day against one random ' +
+        'eligible ticket and emails the outcome.',
+    ),
+
+    node({
+      id: 'tpl-jira-time',
+      name: 'Get Current Time (Melbourne)',
+      kind: 'http-tool',
+      category: 'tool',
+      icon: 'ti ti-clock',
+      x: 760,
+      y: 80,
+      ports: [{ key: 'tool', name: 'Tool', role: 'tools' }],
+      data: {
+        method: 'GET',
+        url: 'https://timeapi.io/api/time/current/zone?timeZone=Australia/Melbourne',
+      } satisfies HttpToolData,
+      description:
+        'Unauthenticated public API. Ground truth for "today" - the schedule trigger carries no payload.',
+    }),
+
+    node({
+      id: 'tpl-jira-search',
+      name: 'Jira: Search My Issues',
+      kind: 'http-tool',
+      category: 'tool',
+      icon: 'ti ti-brand-jira',
+      x: 760,
+      y: 220,
+      ports: [{ key: 'tool', name: 'Tool', role: 'tools' }],
+      data: {
+        method: 'POST',
+        url: '{{baseUrl}}/rest/api/3/search',
+        headers: { 'Content-Type': 'application/json' },
+        bodyTemplate: '{{input}}',
+      } satisfies HttpToolData,
+      description:
+        'Set the Connection below to your Jira Cloud site (Basic auth: account email + API token).',
+    }),
+
+    node({
+      id: 'tpl-jira-worklogs',
+      name: 'Jira: Get Issue Worklogs',
+      kind: 'http-tool',
+      category: 'tool',
+      icon: 'ti ti-brand-jira',
+      x: 760,
+      y: 360,
+      ports: [{ key: 'tool', name: 'Tool', role: 'tools' }],
+      data: {
+        method: 'GET',
+        url: '{{baseUrl}}/rest/api/3/issue/{{input}}/worklog',
+      } satisfies HttpToolData,
+      description: 'Uses the same Connection as Search My Issues.',
+    }),
+
+    node({
+      id: 'tpl-jira-add-worklog',
+      name: 'Jira: Add Worklog',
+      kind: 'http-tool',
+      category: 'tool',
+      icon: 'ti ti-brand-jira',
+      x: 760,
+      y: 500,
+      ports: [{ key: 'tool', name: 'Tool', role: 'tools' }],
+      data: {
+        method: 'POST',
+        url: '{{baseUrl}}/rest/api/3/issue/{{issueKey}}/worklog',
+        headers: { 'Content-Type': 'application/json' },
+        bodyTemplate: '{{body}}',
+        params: [
+          {
+            name: 'issueKey',
+            description: 'The Jira issue key to log time against, e.g. PROJ-123.',
+            required: true,
+          },
+          {
+            name: 'body',
+            description:
+              'The full JSON worklog body, e.g. {"timeSpent":"1d","started":"2026-08-07T09:00:00.000+1000","comment":"..."}.',
+            required: true,
+          },
+        ],
+      } satisfies HttpToolData,
+      description:
+        'Uses the same Connection as Search My Issues. This is the only tool that writes to Jira.',
+    }),
+  ];
+
+  if (emailPreset) {
+    nodes.push(
+      node({
+        id: 'tpl-jira-email',
+        name: 'Email Report',
+        kind: 'mcp-tool',
+        category: 'tool',
+        icon: emailPreset.icon,
+        x: 760,
+        y: 640,
+        ports: [{ key: 'tool', name: 'Tool', role: 'tools' }],
+        data: {
+          transport: 'sse',
+          url: emailPreset.url,
+          authKey: emailPreset.authKey,
+          envKeys: emailPreset.envSchema.map(field => field.name),
+          presetId: emailPreset.id,
+        },
+        description: emailPreset.description,
+      }),
+    );
+  }
+
+  const connections: WorkflowConnection[] = [
+    connect('tpl-jira-trigger-aedt', 'tick', 'tpl-jira-agent', 'task'),
+    connect('tpl-jira-trigger-aest', 'tick', 'tpl-jira-agent', 'task'),
+    connect('tpl-jira-agent', 'tools', 'tpl-jira-time', 'tool', 'tool-link'),
+    connect('tpl-jira-agent', 'tools', 'tpl-jira-search', 'tool', 'tool-link'),
+    connect('tpl-jira-agent', 'tools', 'tpl-jira-worklogs', 'tool', 'tool-link'),
+    connect('tpl-jira-agent', 'tools', 'tpl-jira-add-worklog', 'tool', 'tool-link'),
+  ];
+  if (nodes.some(item => item.id === 'tpl-jira-email')) {
+    connections.push(connect('tpl-jira-agent', 'tools', 'tpl-jira-email', 'tool', 'tool-link'));
+  }
+
+  const graph: WorkflowGraph = { nodes, connections };
+  return {
+    version: 1,
+    id: 'tpl-jira-safety-net',
+    name: 'Jira Time-Log Safety Net',
+    description:
+      'End-of-day check (~7pm Melbourne, Mon-Fri): if you have not logged time today, logs a full ' +
+      'day against one random eligible ticket and emails a report. Needs a Jira Connection (Basic ' +
+      'auth: account email + API token, Settings → Connections) referenced on the three Jira tool ' +
+      'nodes, and a Resend API key for the Email Report tool (Settings → Integrations).',
+    graph,
+    savedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Registry of workflow templates shown in the Workflows panel.
  * Adding a template = one entry here.
@@ -500,6 +775,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       'payroll figures, Xero journal, client e-signature, lodgement pack.',
     icon: 'ti ti-report-money',
     build: buildIasWorkflow,
+  },
+  {
+    id: 'tpl-jira-safety-net',
+    label: 'Jira Time-Log Safety Net',
+    description:
+      'End-of-day check (~7pm Melbourne, Mon-Fri): if you have not logged time today, logs a full ' +
+      'day against one random eligible ticket and emails a report.',
+    icon: 'ti ti-brand-jira',
+    build: buildJiraSafetyNetWorkflow,
   },
 ];
 

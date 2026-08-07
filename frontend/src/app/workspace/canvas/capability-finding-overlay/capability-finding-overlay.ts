@@ -54,6 +54,9 @@ import type { CapabilityFinding } from '@phorma/engine';
         <ul class="phorma-cap-popover__list">
           @for (finding of findings(); track $index) {
             <li [class.phorma-cap-popover__item--warning]="finding.severity === 'warning'">
+              @if (finding.deployOnly) {
+                <span class="phorma-cap-popover__tag">Deploy</span>
+              }
               {{ finding.message }}
             </li>
           }
@@ -184,6 +187,19 @@ import type { CapabilityFinding } from '@phorma/engine';
       .phorma-cap-popover__list li.phorma-cap-popover__item--warning {
         border-left-color: var(--phorma-accent-amber, #f59e0b);
       }
+      .phorma-cap-popover__tag {
+        display: inline-block;
+        margin-right: 0.35rem;
+        padding: 0.05rem 0.3rem;
+        border-radius: 0.2rem;
+        background: color-mix(in srgb, var(--phorma-accent-amber, #f59e0b) 22%, transparent);
+        color: var(--phorma-accent-amber, #f59e0b);
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        vertical-align: 0.05rem;
+      }
     `,
   ],
 })
@@ -206,11 +222,18 @@ export class CapabilityFindingOverlay {
   );
 
   protected readonly badgeLabel = computed(() => {
-    const count = this.findings().length;
+    const findings = this.findings();
+    const count = findings.length;
     const noun = count === 1 ? 'problem' : 'problems';
-    return this.hasError()
-      ? `${count} capability ${noun} would prevent this node from running`
-      : `${count} capability ${noun}`;
+    if (this.hasError()) {
+      return `${count} capability ${noun} would prevent this node from running`;
+    }
+    // All-deploy-only is the common case for a node that runs fine here but
+    // cannot be deployed - say which, or the amber badge reads as noise.
+    if (findings.length > 0 && findings.every(finding => finding.deployOnly)) {
+      return `${count} ${noun} would prevent this node from being deployed to the cloud`;
+    }
+    return `${count} capability ${noun}`;
   });
 
   protected readonly placement = computed<'above' | 'below'>(() => {

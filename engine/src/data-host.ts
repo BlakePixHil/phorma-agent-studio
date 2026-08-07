@@ -232,5 +232,6 @@ export interface HostCapabilities {
     fixtures: boolean;
     privateNetworkEgress: boolean;
     stdioMcp: boolean;
+    mcpOAuth: boolean;
   };
 }

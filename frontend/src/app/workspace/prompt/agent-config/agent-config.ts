@@ -415,6 +415,14 @@ export class AgentConfig {
       compressionDisabled: enabled ? undefined : true,
     });
   }
+
+  /** Per-agent tool-result cap from p-inputnumber. Empty/0 = engine default. */
+  protected onToolResultCapChange(value: number | null): void {
+    const raw = Number(value);
+    const toolResultCapChars =
+      Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), 200_000) : undefined;
+    this.workflow.updateNodeData(this.agent().id, { toolResultCapChars });
+  }
 }
 
 /** The configuration groups {@link AgentConfig} can render. */

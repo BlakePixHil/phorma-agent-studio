@@ -1,5 +1,6 @@
 import { NODE_CATEGORY_COLORS, isAgentNode, type ExecuteWorkflowNodeData } from '../../../core/workflow.model';
 import type { WorkflowGraph, WorkflowNode, WorkflowPort } from '../../../core/workflow.model';
+import { MCP_TRANSPORT_CANVAS_ICON, mcpTransportKind } from '../../../core/node-catalog';
 import type { RendererEdge, RendererNode, RendererPort } from './canvas-graph-renderer';
 
 /**
@@ -117,6 +118,19 @@ export function graphToScene(
     // Agents with attached skills get a book+count pill in the header (EPIC 6).
     const skillCount = isAgentNode(node) ? (node.data.skills?.length ?? 0) : 0;
     const skillIcon = skillCount > 0 ? resolveIcon?.('ti ti-books') : null;
+    // MCP nodes carry a local/remote glyph in the kind badge: only a remote
+    // server can run in a deployed workflow.
+    const transportIcon =
+      node.kind === 'mcp-tool'
+        ? resolveIcon?.(
+            MCP_TRANSPORT_CANVAS_ICON[
+              mcpTransportKind(
+                (node.data as { transport?: string; authMode?: string }).transport,
+                (node.data as { transport?: string; authMode?: string }).authMode,
+              )
+            ],
+          )
+        : null;
     nodes.push({
       id: node.id,
       x: node.position.x,
@@ -130,6 +144,9 @@ export function graphToScene(
       rows,
       iconGlyph: icon?.glyph,
       iconFont: icon?.font,
+      ...(transportIcon
+        ? { transportGlyph: transportIcon.glyph, transportFont: transportIcon.font }
+        : {}),
       ...(skillCount > 0
         ? { skillCount, skillGlyph: skillIcon?.glyph, skillFont: skillIcon?.font }
         : {}),

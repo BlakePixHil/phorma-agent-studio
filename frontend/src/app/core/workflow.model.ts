@@ -317,6 +317,13 @@ export interface AgentNodeData {
   /** True disables automatic context compression for long tool loops. */
   compressionDisabled?: boolean;
   /**
+   * Per-agent character cap for a single tool result fed back to the model.
+   * Absent = engine default (8000). Raise it when an agent needs whole
+   * paginated payloads (Slack/Jira list calls) whose cursor would otherwise
+   * be sliced off. Capped at 200000 to bound context cost.
+   */
+  toolResultCapChars?: number;
+  /**
    * Skills attached to this agent, embedded by value (see {@link AgentSkill}).
    * Rendered into the system prompt in array order.
    */
@@ -397,12 +404,32 @@ export interface PortalTriggerData {
   embedLabel?: string;
 }
 
+export interface HttpToolParam {
+  /** Also the `{{name}}` placeholder token in the url/body template. */
+  name: string;
+  description?: string;
+  /** Default true. */
+  required?: boolean;
+}
+
 export interface HttpToolData {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
   headers?: Record<string, string>;
   /** Markdown/JSON body template; `{{input}}` interpolates the agent's call. */
   bodyTemplate?: string;
+  /**
+   * Named arguments spliced into `{{name}}` tokens in both the url and the
+   * body template. Empty/absent falls back to a single `input` property
+   * interpolated into `{{input}}` (every node created before this existed).
+   */
+  params?: HttpToolParam[];
+  /**
+   * Stored connection supplying auth headers (and, for a relative url, the
+   * base address) - resolved host-side via `applyConnectionAuth`, never
+   * persisted with a secret value.
+   */
+  connectionId?: string;
 }
 
 export interface WebSearchToolData {

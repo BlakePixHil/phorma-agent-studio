@@ -698,13 +698,19 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   line-height: 1.3;
 }
 
-/* ── Card containers (integrations, account, secrets share one shape) ──── */
-.phorma-settings__integration,
+/* ── Card containers (account + secrets share the bordered shape; an
+     integration card sits inside a bordered group, so it only needs the
+     shared layout, not a second border) ─────────────────────────────────── */
 .phorma-settings__account,
-.phorma-settings__secrets {
+.phorma-settings__secrets,
+.phorma-settings__integration {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.phorma-settings__account,
+.phorma-settings__secrets {
   padding: 14px;
   border: 1px solid var(--p-border-color);
   border-radius: 8px;
@@ -716,14 +722,95 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
 
 /* Brief highlight flash when deep-linked from the canvas warning popover. */
 .phorma-settings__integration--highlight {
-  border-color: var(--p-primary-color, #818cf8);
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--p-primary-color, #818cf8) 30%, transparent),
-    0 4px 16px color-mix(in srgb, var(--p-primary-color, #818cf8) 15%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--p-primary-color, #818cf8) 10%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--p-primary-color, #818cf8) 40%, transparent);
+  transition: box-shadow 0.3s ease, background 0.3s ease;
 }
 
 .phorma-settings__account {
   gap: 12px;
+}
+
+/* ── Integration groups (collapsible Local / Remote expanders) ──────────── */
+.phorma-settings__integration-group {
+  border: 1px solid var(--p-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--p-text-color) 1%, transparent);
+
+  & + & {
+    margin-top: 10px;
+  }
+}
+
+.phorma-settings__integration-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--p-text-color);
+
+  // Hide the native disclosure triangle; the chevron handles affordance.
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  }
+}
+
+.phorma-settings__integration-caret {
+  font-size: 14px;
+  color: var(--p-text-muted-color);
+  transition: transform 0.18s ease;
+
+  details[open] > & {
+    transform: rotate(90deg);
+  }
+}
+
+.phorma-settings__integration-glyph,
+.phorma-settings__integration-count {
+  display: inline-flex;
+  align-items: center;
+}
+
+.phorma-settings__integration-glyph {
+  font-size: 14px;
+  line-height: 0;
+  color: var(--p-primary-color);
+}
+
+.phorma-settings__integration-count {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.phorma-settings__integration-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 12px;
+}
+
+/* Separation between stacked cards inside a group (no per-card border). */
+.phorma-settings__integration-body .phorma-settings__integration + .phorma-settings__integration {
+  padding-top: 12px;
+  margin-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--p-text-color) 14%, transparent);
 }
 
 .phorma-settings__integration-head,
@@ -743,6 +830,9 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   }
 
   h5 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     font-size: 12.5px;
     font-weight: 700;
@@ -752,6 +842,41 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
     margin: 2px 0 0;
     font-size: 13px;
     color: var(--p-text-muted-color);
+  }
+}
+
+/* A card-level note (e.g. "authorized per node"). Unlike `__hint`, it is NOT
+   indented to the field-label column - it belongs to the card, not a row. */
+.phorma-settings__integration-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
+}
+
+/* Where an MCP server runs. Amber (local, undeployable) vs primary (remote).
+   Icon-only now, so the pill needs enough padding to frame the glyph - the
+   Phorma Cloud SVG is taller than a Tabler font icon and sat flush top/bottom
+   at the old 1px vertical padding. */
+.phorma-settings__transport {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--phorma-accent-amber, #f59e0b) 16%, transparent);
+  color: var(--phorma-accent-amber, #f59e0b);
+  cursor: default;
+
+  i {
+    font-size: 12px;
+  }
+
+  &--remote {
+    background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
+    color: var(--p-primary-color);
   }
 }
 

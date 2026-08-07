@@ -639,6 +639,11 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
    */
   protected readonly mcpCredentialRefresher = effect(() => {
     const g = this.graph();
+    // Tracked alongside the graph: connecting/disconnecting OAuth from the
+    // properties panel touches no node data, so without this the canvas's
+    // own connected-state cache would only refresh on the next unrelated
+    // graph edit (see McpOAuthService.connectionChangeTick).
+    this.oauth.connectionChangeTick();
     untracked(() => {
       const mcpNodes = g.nodes.filter(n => n.kind === 'mcp-tool');
       // Refresh secret flags for each MCP node (node scope + preset scope).

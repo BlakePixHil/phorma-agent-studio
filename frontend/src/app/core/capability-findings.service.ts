@@ -2,6 +2,7 @@ import { Injectable, computed, effect, inject, signal, untracked } from '@angula
 
 import {
   BROWSER_CAPABILITIES,
+  CLOUDFLARE_CAPABILITIES,
   TAURI_DESKTOP_CAPABILITIES,
   validateAgainstCapabilities,
   type CapabilityFinding,
@@ -9,6 +10,8 @@ import {
 } from '@phorma/engine';
 
 import { ConnectionStoreService } from './connection-store.service';
+import { findMcpPreset } from './node-catalog';
+import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
 import { WorkflowService } from './workflow.service';
 
@@ -37,6 +40,7 @@ export class CapabilityFindingsService {
   private readonly tauri = inject(TauriService);
   private readonly connectionStore = inject(ConnectionStoreService);
   private readonly workflow = inject(WorkflowService);
+  private readonly settings = inject(SettingsService);
 
   /** The local host's capability record — Desktop inside Tauri, Browser otherwise. */
   readonly activeHostCapabilities = computed(() =>
@@ -58,11 +62,77 @@ export class CapabilityFindingsService {
   });
 
   /** Every capability finding for the active document's top-level graph. */
-  readonly findings = computed<CapabilityFinding[]>(() =>
+  readonly localFindings = computed<CapabilityFinding[]>(() =>
     validateAgainstCapabilities(
       { graph: this.workflow.graph() },
       this.activeHostCapabilities(),
       this.connectionSummaries(),
     ),
   );
+
+  /**
+   * Findings against the DEPLOY target (the Cloudflare Worker record), reported
+   * as warnings.
+   *
+   * A workflow can be perfectly runnable locally and still be undeployable -
+   * a local stdio MCP server is the canonical case. Validating only the local
+   * host meant the author learned that at push time, after building the whole
+   * workflow. Downgrading to `warning` is deliberate: these must NOT block a
+   * local run, which is exactly what the author is doing while they iterate.
+   * The push path re-validates against the same record at `error` severity.
+   *
+   * Suppressed once the deploy target IS the local host (nothing to warn
+   * about) and while no cloud provider has been chosen, so a purely local user
+   * never sees cloud vocabulary.
+   */
+  readonly deployFindings = computed<CapabilityFinding[]>(() => {
+    if (this.settings.cloudProvider() === null) return [];
+    const local = this.activeHostCapabilities();
+    if (local.id === CLOUDFLARE_CAPABILITIES.id) return [];
+    // Findings the local host already reports are shown at their own severity;
+    // only the deploy-specific delta belongs here.
+    const localMessages = new Set(this.localFindings().map(finding => finding.message));
+    return validateAgainstCapabilities(
+      { graph: this.workflow.graph() },
+      CLOUDFLARE_CAPABILITIES,
+      this.connectionSummaries(),
+    )
+      .filter(finding => !localMessages.has(finding.message))
+      .map(finding => ({
+        ...finding,
+        severity: 'warning' as const,
+        deployOnly: true,
+        message: this.withRemedy(finding),
+      }));
+  });
+
+  /**
+   * Appends the concrete fix to a deploy finding when the offending node is a
+   * preset with a known remote equivalent. The engine cannot do this itself -
+   * `MCP_PRESETS` is studio data and the engine is framework- and
+   * catalog-free - and "this cannot be deployed" without a named alternative
+   * leaves the author stuck.
+   */
+  private withRemedy(finding: CapabilityFinding): string {
+    if (!finding.nodeId) return finding.message;
+    const node = this.workflow.graph().nodes.find(candidate => candidate.id === finding.nodeId);
+    const presetId = (node?.data as { presetId?: string } | undefined)?.presetId;
+    const alternativeId = presetId ? findMcpPreset(presetId)?.remoteAlternativeId : undefined;
+    const alternative = alternativeId ? findMcpPreset(alternativeId) : undefined;
+    // An OAuth alternative doesn't actually fix cloud deployability - its
+    // signed-in session cannot reach a deployed worker either, so recommending
+    // it would just trade this finding for the identical one on the swapped-in
+    // node.
+    if (!alternative || alternative.authMode === 'oauth') return finding.message;
+    return `${finding.message} Swap it for the remote "${alternative.label}" server, listed under Remote MCP in the palette.`;
+  }
+
+  /**
+   * Local findings plus deploy-target findings - what the canvas badge and the
+   * properties panel render.
+   */
+  readonly findings = computed<CapabilityFinding[]>(() => [
+    ...this.localFindings(),
+    ...this.deployFindings(),
+  ]);
 }

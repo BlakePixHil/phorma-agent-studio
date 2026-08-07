@@ -112,6 +112,32 @@
   }
 }
 
+/* Where an MCP server runs, docked right of the "MCP server" label. Amber for
+   local (undeployable), primary for remote. Icon-only — the tooltip carries
+   the full text. */
+.phorma-props__transport {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--phorma-accent-amber, #f59e0b) 16%, transparent);
+  color: var(--phorma-accent-amber, #f59e0b);
+  cursor: default;
+
+  i {
+    font-size: 11px;
+  }
+
+  &--remote {
+    background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
+    color: var(--p-primary-color);
+  }
+}
+
 // pInputText / pTextarea supply the chrome; these only size them to the panel.
 .phorma-props__input,
 .phorma-props__textarea {

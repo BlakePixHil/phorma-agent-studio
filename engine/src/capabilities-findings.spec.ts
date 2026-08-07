@@ -169,6 +169,84 @@ describe('SQL driver findings', () => {
   });
 });
 
+// ── MCP transport ────────────────────────────────────────────────────────────
+
+describe('MCP transport findings', () => {
+  it('rejects a local (stdio) MCP server on a host with no stdio capability', () => {
+    const found = onlyFinding(
+      graph([node('mcp-tool', { transport: 'stdio', command: 'npx', args: [] })]),
+      CLOUDFLARE_CAPABILITIES,
+    );
+
+    expect(found.severity).toBe('error');
+    expect(found.message).toContain('local (stdio) server');
+    expect(found.message).toContain(CLOUDFLARE_CAPABILITIES.label);
+  });
+
+  it('accepts a local (stdio) MCP server on the desktop host', () => {
+    expect(
+      validateAgainstCapabilities(
+        spec(graph([node('mcp-tool', { transport: 'stdio', command: 'npx', args: [] })])),
+        TAURI_DESKTOP_CAPABILITIES,
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it('accepts a remote MCP server on a host with no stdio capability', () => {
+    expect(
+      validateAgainstCapabilities(
+        spec(graph([node('mcp-tool', { transport: 'sse', url: 'https://mcp.example.com' })])),
+        CLOUDFLARE_CAPABILITIES,
+        [],
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('MCP OAuth findings', () => {
+  it('rejects an OAuth-authenticated MCP server on a host with no mcpOAuth capability', () => {
+    const found = onlyFinding(
+      graph([
+        node('mcp-tool', { transport: 'sse', url: 'https://mcp.example.com', authMode: 'oauth' }),
+      ]),
+      CLOUDFLARE_CAPABILITIES,
+    );
+
+    expect(found.severity).toBe('error');
+    expect(found.message).toContain('OAuth sign-in');
+    expect(found.message).toContain(CLOUDFLARE_CAPABILITIES.label);
+  });
+
+  it('accepts an OAuth-authenticated MCP server on the desktop host', () => {
+    expect(
+      validateAgainstCapabilities(
+        spec(
+          graph([
+            node('mcp-tool', { transport: 'sse', url: 'https://mcp.example.com', authMode: 'oauth' }),
+          ]),
+        ),
+        TAURI_DESKTOP_CAPABILITIES,
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it('accepts a bearer-authenticated remote MCP server on a host with no mcpOAuth capability', () => {
+    expect(
+      validateAgainstCapabilities(
+        spec(
+          graph([
+            node('mcp-tool', { transport: 'sse', url: 'https://mcp.example.com', authKey: 'API_TOKEN' }),
+          ]),
+        ),
+        CLOUDFLARE_CAPABILITIES,
+        [],
+      ),
+    ).toEqual([]);
+  });
+});
+
 // ── connections ──────────────────────────────────────────────────────────────
 
 describe('connection findings', () => {
