@@ -2647,7 +2647,15 @@ class WorkflowRun {
       }
     };
 
-    const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
+    // Per-agent override takes precedence over the run-level option so a
+    // long-tool-loop agent (e.g. Jira safety-net's per-issue worklog checks
+    // + final email) can opt out of the tight 8-round default without
+    // raising the ceiling for every other agent in the same run.
+    const agentMaxRounds = (node.data as AgentNodeData).maxToolRounds;
+    const maxToolRounds =
+      typeof agentMaxRounds === 'number' && agentMaxRounds > 0
+        ? agentMaxRounds
+        : this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
     for (let round = 0; round < maxToolRounds; round++) {
       // Compress the conversation when the next request would land near the
       // model's context limit. Best-effort: failures never break the node.

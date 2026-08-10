@@ -101,6 +101,20 @@ describe('Jira Time-Log Safety Net template', () => {
     expect((worklogs.data as { params?: unknown[] }).params ?? []).toEqual([]);
   });
 
+  it('uses the non-deprecated /search/jql endpoint (Atlassian removed /search)', () => {
+    const graph = template.build().graph;
+    const search = graph.nodes.find(node => node.id === 'tpl-jira-search')!;
+    expect((search.data as { url: string }).url).toBe('{{baseUrl}}/rest/api/3/search/jql');
+  });
+
+  it('raises the tool-result cap and tool-round budget on the Jira agent so worklog tails are not truncated and the email step is reached', () => {
+    const graph = template.build().graph;
+    const agent = graph.nodes.find(node => node.id === 'tpl-jira-agent')!;
+    const data = agent.data as { toolResultCapChars?: number; maxToolRounds?: number };
+    expect(data.toolResultCapChars).toBeGreaterThan(8000);
+    expect(data.maxToolRounds).toBeGreaterThan(8);
+  });
+
   it('uses a bearer (not OAuth) email preset, so it stays deployable', () => {
     const graph = template.build().graph;
     const email = graph.nodes.find(node => node.id === 'tpl-jira-email')!;

@@ -324,6 +324,13 @@ export interface AgentNodeData {
    */
   toolResultCapChars?: number;
   /**
+   * Maximum model→tools→model rounds for this agent. Absent = run default
+   * (RunOptions.maxToolRounds, itself defaulting to 8). Raise for agents
+   * whose task needs many tool rounds (e.g. per-item worklog checks before
+   * a final report step) so they don't get cut off before completion.
+   */
+  maxToolRounds?: number;
+  /**
    * Skills attached to this agent, embedded by value (see {@link AgentSkill}).
    * Rendered into the system prompt in array order.
    */
