@@ -21,48 +21,6 @@
       "completed": false,
       "createdAt": 1785067035332,
       "order": 2000
-    },
-    {
-      "id": "scan-152kpi7",
-      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
-      "description": "[NOTE] cloud/wrangler.jsonc:76",
-      "tags": [
-        "note",
-        "cloud/wrangler.jsonc",
-        "cloud/wrangler.jsonc:76"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1786331048906,
-      "order": 3000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/wrangler.jsonc",
-        "line": 76,
-        "marker": "NOTE"
-      }
-    },
-    {
-      "id": "scan-1i9n0dj",
-      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
-      "description": "[NOTE] cloud/wrangler.jsonc:87",
-      "tags": [
-        "note",
-        "cloud/wrangler.jsonc",
-        "cloud/wrangler.jsonc:87"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1786331070903,
-      "order": 4000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/wrangler.jsonc",
-        "line": 87,
-        "marker": "NOTE"
-      }
     }
   ]
 }
