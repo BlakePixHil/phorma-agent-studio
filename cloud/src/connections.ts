@@ -424,6 +424,7 @@ const AUTH_MODES: readonly ConnectionAuth['mode'][] = [
   'none',
   'bearer',
   'basic',
+  'basic-token',
   'header',
   'query',
   'oauth2-client-credentials',

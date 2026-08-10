@@ -39,6 +39,7 @@ const AUTH_MODES: Choice<ConnectionAuth['mode']>[] = [
   { id: 'none', label: 'None' },
   { id: 'bearer', label: 'Bearer token' },
   { id: 'basic', label: 'Basic (user + password)' },
+  { id: 'basic-token', label: 'Basic (token)' },
   { id: 'header', label: 'Custom header' },
   { id: 'query', label: 'Query parameter' },
   { id: 'oauth2-client-credentials', label: 'OAuth2 client credentials' },
@@ -438,6 +439,8 @@ function draftToAuth(mode: ConnectionAuth['mode'], draft: Record<string, string>
       return { mode, secretKey: get('secretKey') };
     case 'basic':
       return { mode, userSecretKey: get('userSecretKey'), passwordSecretKey: get('passwordSecretKey') };
+    case 'basic-token':
+      return { mode, tokenSecretKey: get('tokenSecretKey') };
     case 'header':
       return {
         mode,

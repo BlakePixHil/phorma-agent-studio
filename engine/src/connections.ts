@@ -57,6 +57,7 @@ export type ConnectionAuth =
   | { mode: 'none' }
   | { mode: 'bearer'; secretKey: string }
   | { mode: 'basic'; userSecretKey: string; passwordSecretKey: string }
+  | { mode: 'basic-token'; tokenSecretKey: string }
   | { mode: 'header'; header: string; secretKey: string; prefix?: string }
   | { mode: 'query'; param: string; secretKey: string }
   | {

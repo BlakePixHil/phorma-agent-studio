@@ -235,6 +235,25 @@
               </div>
             </div>
           }
+          @case ('basic-token') {
+            <div class="phorma-conn-editor__field">
+              <label class="phorma-conn-editor__label" for="conn-auth-token">Token secret key</label>
+              <input
+                pInputText
+                id="conn-auth-token"
+                type="text"
+                pSize="small"
+                class="phorma-conn-editor__input--mono"
+                [value]="authField('tokenSecretKey')"
+                (input)="patchAuthDraft({ tokenSecretKey: $any($event.target).value })"
+                placeholder="basicToken"
+              />
+              <p class="phorma-conn-editor__hint">
+                The secret must hold the full base64 credential string (e.g. "dXNlcjpwYXNz").
+                It is sent verbatim as "Basic &lt;token&gt;" in the Authorization header.
+              </p>
+            </div>
+          }
           @case ('header') {
             <div class="phorma-conn-editor__row">
               <div class="phorma-conn-editor__field">

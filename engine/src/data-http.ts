@@ -157,6 +157,13 @@ export function applyConnectionAuth(request: DataRequest, conn?: ResolvedConnect
       setHeader(headers, AUTHORIZATION, `Basic ${base64(`${user}:${password}`)}`);
       break;
     }
+    case 'basic-token': {
+      // The secret already holds the full base64 credential string
+      // (e.g. from an external system that issued a Basic token). Send it
+      // verbatim under the Authorization header.
+      setHeader(headers, AUTHORIZATION, `Basic ${secretOf(conn, auth.tokenSecretKey)}`);
+      break;
+    }
     case 'header': {
       const name = (auth.header ?? '').trim();
       if (name.length === 0) {
