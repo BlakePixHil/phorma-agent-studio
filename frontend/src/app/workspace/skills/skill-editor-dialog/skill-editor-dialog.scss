@@ -1,3 +1,5 @@
+@use '../../../shared/field' as field;
+
 :host {
   display: contents;
 }
@@ -147,17 +149,9 @@
 }
 
 .phorma-skill-editor__input {
+  @include field.chrome();
   padding: 0.45rem 0.6rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
-  color: var(--p-text-color);
   font-size: 0.82rem;
-
-  &:focus {
-    outline: none;
-    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
-  }
 }
 
 .phorma-skill-editor__textarea {

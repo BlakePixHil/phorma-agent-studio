@@ -33,11 +33,13 @@
 
 .phorma-skills__label-actions {
   display: inline-flex;
-  gap: 0.15rem;
+  gap: 0.35rem;
   margin-left: auto;
 }
 
-.phorma-skills__icon-btn {
+/* The import button is a <label> wrapping a hidden file input. Style it to
+   match the muted pButton icon buttons used elsewhere in panel headers. */
+.phorma-skills__import-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -45,13 +47,13 @@
   height: 1.5rem;
   border-radius: 0.4rem;
   border: none;
-  background: transparent;
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
   color: var(--p-text-muted-color);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
     color: var(--p-text-color);
   }
 }

@@ -1,3 +1,5 @@
+@use '../../../shared/field' as field;
+
 :host {
   display: contents;
 }
@@ -154,26 +156,12 @@
 }
 
 .phorma-cloud__input {
+  @include field.chrome(6px);
   flex: 1 1 200px;
   min-width: 0;
   padding: 7px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color, #f8fafc);
   font-size: 12px;
   line-height: 1.4;
-  transition: border-color 0.15s ease, background 0.15s ease;
-
-  &::placeholder {
-    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.4));
-  }
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-  }
 }
 
 .phorma-cloud__hint {

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { ButtonModule } from 'primeng/button';
 
 import type { Connection } from '@phorma/engine';
 
@@ -17,7 +18,7 @@ import { ToastService } from '../../../shared/toast/toast.service';
 @Component({
   selector: 'app-connections-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe],
+  imports: [DatePipe, ButtonModule],
   templateUrl: './connections-panel.html',
   styleUrl: './connections-panel.scss',
 })

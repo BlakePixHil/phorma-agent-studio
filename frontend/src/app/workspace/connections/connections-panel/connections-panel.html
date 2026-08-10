@@ -1,19 +1,21 @@
 <div class="phorma-connections">
   <section class="phorma-connections__section">
-    <label class="phorma-connections__label">
+    <span class="phorma-connections__label">
       Connections
-      <span class="phorma-connections__label-actions">
-        <button
-          type="button"
-          class="phorma-connections__icon-btn"
-          title="New connection"
-          aria-label="New connection"
-          (click)="newConnection()"
-        >
-          <i class="ti ti-plus" aria-hidden="true"></i>
-        </button>
-      </span>
-    </label>
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-connections__add-btn"
+        title="New connection"
+        aria-label="New connection"
+        (click)="newConnection()"
+      >
+        <i class="ti ti-plus" aria-hidden="true"></i>
+      </button>
+    </span>
 
     @if (connections.connections().length > 0) {
       <ul class="phorma-connections__list">
@@ -54,7 +56,7 @@
       </ul>
     } @else {
       <p class="phorma-connections__empty">
-        No connections yet. A connection stores credentials outside the workflow — create one to give
+        No connections yet. A connection stores credentials outside the workflow - create one to give
         an HTTP request, SQL query or notification a base address and secrets.
       </p>
     }

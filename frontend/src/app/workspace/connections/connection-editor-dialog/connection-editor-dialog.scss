@@ -2,7 +2,7 @@
   display: contents;
 }
 
-/* ── Overlay + card — mirrors .phorma-skill-editor / .phorma-credits ────── */
+/* ── Overlay + card - mirrors .phorma-skill-editor / .phorma-credits ────── */
 .phorma-conn-editor {
   position: fixed;
   inset: 0;
@@ -34,20 +34,6 @@
   display: flex;
   gap: 14px;
   align-items: flex-start;
-
-  > div {
-    flex: 1 1 auto;
-  }
-}
-
-.phorma-conn-editor__icon {
-  display: grid;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  color: var(--p-text-muted-color);
-  font-size: 18px;
 }
 
 .phorma-conn-editor h2 {
@@ -92,7 +78,23 @@
 .phorma-conn-editor__field-head {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+}
+
+/* "Add +" button - muted background at rest, lighter on hover (no colour). */
+.phorma-conn-editor__add-btn.p-button {
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  border-color: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
+    border-color: transparent;
+    color: var(--p-text-color);
+  }
 }
 
 .phorma-conn-editor__label {
@@ -123,32 +125,26 @@
   color: var(--p-text-muted-color);
 }
 
+/* pInputText supplies the chrome; these only size it to the dialog. */
 .phorma-conn-editor__input {
   width: 100%;
-  padding: 0.45rem 0.6rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
-  color: var(--p-text-color);
-  font-size: 0.82rem;
+}
 
-  &:focus {
-    outline: none;
-    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
-  }
-
-  &--mono {
-    font-family: var(--phorma-font-mono, ui-monospace, monospace);
-  }
+.phorma-conn-editor__input--mono {
+  width: 100%;
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
 }
 
 .phorma-conn-editor__select {
   width: 100%;
 }
 
+/* Fill the field's width without breaking the select's own inline-flex
+   layout (a plain `display: block` stacks the label above the dropdown
+   chevron and clips it - see the auth-mode cutoff bug). */
 .phorma-conn-editor__select-full {
+  display: flex;
   width: 100%;
-  display: block;
 }
 
 .phorma-conn-editor__number {
@@ -158,9 +154,9 @@
 .phorma-conn-editor__pair {
   display: flex;
   gap: 0.4rem;
-  align-items: center;
+  align-items: stretch;
 
-  .phorma-conn-editor__input {
+  input {
     flex: 1 1 0;
     min-width: 0;
   }
@@ -202,31 +198,16 @@
   color: var(--phorma-accent-amber, #f59e0b);
 }
 
-.phorma-conn-editor__mini-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.3rem 0.45rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
+/* Muted background at rest, red-tinted on hover. No hard border - stays
+   visually inline with the input row rather than drawing a heavy outline. */
+.phorma-conn-editor__icon-btn--danger.p-button {
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  border-color: transparent;
   color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  &--danger:hover:not(:disabled) {
     background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
+    border-color: transparent;
     color: var(--phorma-accent-red, #ef4444);
   }
 }
@@ -265,4 +246,10 @@
 
 .phorma-conn-editor__spacer {
   flex: 1;
+}
+
+/* Prevent the delete button from shrinking when its text expands ("Delete" to
+   "Deleting…"). */
+.phorma-conn-editor__delete-btn {
+  flex-shrink: 0;
 }

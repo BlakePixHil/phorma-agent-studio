@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
-
+import { ButtonModule } from 'primeng/button';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { SkillEditorDialogService } from '../skill-editor-dialog.service';
 import { SkillsService } from '../../../core/skills.service';
@@ -18,7 +18,7 @@ import { serializeSkillMd, skillFileName, type SkillDef } from '../../../core/sk
 @Component({
   selector: 'app-skills-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe],
+  imports: [ButtonModule, DatePipe],
   templateUrl: './skills-panel.html',
   styleUrl: './skills-panel.scss',
 })

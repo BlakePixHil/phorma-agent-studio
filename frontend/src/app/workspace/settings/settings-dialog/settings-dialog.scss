@@ -1,3 +1,5 @@
+@use '../../../shared/field' as field;
+
 :host {
   display: contents;
 }
@@ -109,23 +111,12 @@
     pointer-events: none;
   }
 
+  /* Chrome comes from the shared field group below (one mixin expansion for
+     both fields — this sheet is close to its anyComponentStyle budget). */
   input {
     width: 100%;
     padding: 6px 8px 6px 26px;
-    border-radius: 6px;
-    border: 1px solid var(--p-border-color);
-    background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-    color: var(--p-text-color);
     font-size: 12px;
-
-    &::placeholder {
-      color: var(--p-text-muted-color);
-    }
-
-    &:focus {
-      outline: none;
-      border-color: var(--p-primary-color);
-    }
   }
 }
 
@@ -311,26 +302,21 @@
 }
 
 /* ── Inputs (shared with bespoke sections) ───────────────────────────────── */
+
+/* Both bespoke text fields in this dialog share one expansion of the field
+   chrome. Keep it a selector LIST rather than two includes: each expansion is
+   ~330 bytes of compiled CSS and this sheet sits just under its 22kB budget. */
+.phorma-settings__input,
+.phorma-settings__search input {
+  @include field.chrome(6px);
+}
+
 .phorma-settings__input {
   flex: 1 1 160px;
   min-width: 0;
   padding: 7px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--p-border-color);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
   font-size: 12px;
   line-height: 1.4;
-  transition: border-color 0.15s ease;
-
-  &::placeholder {
-    color: var(--p-text-muted-color);
-  }
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color);
-  }
 
   &--number {
     flex: 0 0 auto;
@@ -1003,8 +989,13 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
 .phorma-settings__input--invalid {
   // A 1px tint alone reads as "slightly different", not "wrong" - the ring is
   // what actually makes an invalid field noticeable at a glance.
-  border-color: var(--phorma-accent-red, #ef4444);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--phorma-accent-red, #ef4444) 22%, transparent);
+  // `&:focus` is repeated so invalid outranks the shared mixin's focus border:
+  // a field the user is actively fixing must stay red, not go primary.
+  &,
+  &:focus {
+    border-color: var(--phorma-accent-red, #ef4444);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--phorma-accent-red, #ef4444) 22%, transparent);
+  }
 }
 
 .phorma-settings__providers {

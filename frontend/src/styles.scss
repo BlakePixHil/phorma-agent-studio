@@ -84,6 +84,41 @@
   --phorma-accent-amber-soft:   rgba(245, 158, 11, 0.16);
   --phorma-accent-red:          #ef4444;
   --phorma-accent-red-soft:     rgba(239, 68, 68, 0.16);
+  /* ── Form field tokens ─────────────────────────────────────────────────
+     Soft, borderless fields. The PrimeNG preset in `app.config.ts` points
+     every `formField` colour token at these vars, so a theme defines this
+     block and never has to know a PrimeNG token name.
+     Light inverts the dark relationship: the field is the LIGHTEST surface,
+     sitting on grey chrome, held by a hairline instead of a hard border. */
+  --phorma-field-bg:             #ffffff;
+  --phorma-field-bg-hover:       #ffffff;
+  --phorma-field-bg-focus:       #ffffff;
+  --phorma-field-bg-disabled:    rgba(15, 18, 25, 0.05);
+  --phorma-field-border:         rgba(15, 18, 25, 0.06);
+  --phorma-field-border-hover:   rgba(15, 18, 25, 0.12);
+  --phorma-field-text:           #1a1a1a;
+  --phorma-field-text-disabled:  rgba(15, 18, 25, 0.38);
+  /* Placeholder alphas are tuned so the COMPOSITED colour clears 3:1 against
+     the field fill (measured, not assumed - 0.40 here landed at 2.6:1). */
+  --phorma-field-placeholder:    rgba(15, 18, 25, 0.52);
+  --phorma-field-icon:           rgba(15, 18, 25, 0.45);
+  --phorma-field-shadow:         none;
+  /* Selection controls keep a visible resting edge — a 1.25rem checkbox with
+     a transparent border reads as missing, not as soft. */
+  --phorma-control-border:       rgba(15, 18, 25, 0.18);
+  --phorma-control-border-hover: rgba(15, 18, 25, 0.30);
+  --phorma-switch-track:         rgba(15, 18, 25, 0.16);
+  --phorma-switch-track-hover:   rgba(15, 18, 25, 0.24);
+  --phorma-segment-bg:           rgba(15, 18, 25, 0.05);
+  --phorma-segment-selected:     #ffffff;
+  /* PrimeNG content, overlay and text surfaces, retinted per theme so
+     dropdowns, menus and popovers follow the theme hue instead of Aura's
+     global slate/zinc ramp. */
+  --phorma-overlay-bg:           #ffffff;
+  --phorma-overlay-border:       rgba(15, 18, 25, 0.08);
+  --phorma-hover-bg:             rgba(15, 18, 25, 0.05);
+  --phorma-text:                 #1a1a1a;
+  --phorma-text-muted:           rgba(15, 18, 25, 0.56);
   color-scheme: light;
 }
 
@@ -135,6 +170,34 @@
   --phorma-glass-bg:            rgba(19, 15, 25, 0.88);
   /* Soft elevation shadow for floating chrome — deeper in dark mode. */
   --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.35);
+  /* ── Form field tokens ─────────────────────────────────────────────────
+     Dark recipe: the field is a soft translucent lift off its container with
+     NO resting border, so it reads as a recess in the panel rather than a
+     black hole punched through it. Focus is the only hard border, and it is
+     the primary palette colour (see `app.config.ts`). */
+  --phorma-field-bg:             rgba(255, 255, 255, 0.05);
+  --phorma-field-bg-hover:       rgba(255, 255, 255, 0.08);
+  --phorma-field-bg-focus:       rgba(255, 255, 255, 0.08);
+  --phorma-field-bg-disabled:    rgba(255, 255, 255, 0.03);
+  --phorma-field-border:         transparent;
+  --phorma-field-border-hover:   transparent;
+  --phorma-field-text:           #e6e6e6;
+  --phorma-field-text-disabled:  rgba(230, 230, 230, 0.38);
+  /* Composited against a 5% fill this clears 3:1; 0.34 measured 2.7:1. */
+  --phorma-field-placeholder:    rgba(230, 230, 230, 0.45);
+  --phorma-field-icon:           rgba(230, 230, 230, 0.45);
+  --phorma-field-shadow:         none;
+  --phorma-control-border:       rgba(255, 255, 255, 0.16);
+  --phorma-control-border-hover: rgba(255, 255, 255, 0.28);
+  --phorma-switch-track:         rgba(255, 255, 255, 0.14);
+  --phorma-switch-track-hover:   rgba(255, 255, 255, 0.20);
+  --phorma-segment-bg:           rgba(255, 255, 255, 0.05);
+  --phorma-segment-selected:     rgba(255, 255, 255, 0.13);
+  --phorma-overlay-bg:           #17131d;
+  --phorma-overlay-border:       rgba(255, 255, 255, 0.07);
+  --phorma-hover-bg:             rgba(255, 255, 255, 0.06);
+  --phorma-text:                 #e6e6e6;
+  --phorma-text-muted:           rgba(230, 230, 230, 0.55);
   /* ── Semantic accent tokens ────────────────────────────────────────────
      Fixed semantic colours that should NOT follow the configurable primary
      palette. Blue = selection / active-tab highlight; green = success / save.
@@ -204,6 +267,31 @@
   --phorma-accent-amber-soft:   rgba(181, 137, 0, 0.20);
   --phorma-accent-red:          #dc322f;
   --phorma-accent-red-soft:     rgba(220, 50, 47, 0.20);
+  /* Form fields — Base01 (#586e75) wash over Base02 panels, Base1 text. */
+  --phorma-field-bg:             rgba(131, 148, 150, 0.10);
+  --phorma-field-bg-hover:       rgba(131, 148, 150, 0.15);
+  --phorma-field-bg-focus:       rgba(131, 148, 150, 0.15);
+  --phorma-field-bg-disabled:    rgba(131, 148, 150, 0.06);
+  --phorma-field-border:         transparent;
+  --phorma-field-border-hover:   transparent;
+  --phorma-field-text:           #93a1a1;
+  --phorma-field-text-disabled:  rgba(147, 161, 161, 0.45);
+  /* Solarized needs the highest alpha: Base1 over a Base02 field is a narrow
+     luminance gap to begin with (0.50 measured 2.5:1). */
+  --phorma-field-placeholder:    rgba(147, 161, 161, 0.75);
+  --phorma-field-icon:           rgba(147, 161, 161, 0.60);
+  --phorma-field-shadow:         none;
+  --phorma-control-border:       rgba(131, 148, 150, 0.28);
+  --phorma-control-border-hover: rgba(131, 148, 150, 0.42);
+  --phorma-switch-track:         rgba(131, 148, 150, 0.22);
+  --phorma-switch-track-hover:   rgba(131, 148, 150, 0.32);
+  --phorma-segment-bg:           rgba(131, 148, 150, 0.10);
+  --phorma-segment-selected:     rgba(131, 148, 150, 0.22);
+  --phorma-overlay-bg:           #0a3e4a;
+  --phorma-overlay-border:       rgba(131, 148, 150, 0.15);
+  --phorma-hover-bg:             rgba(131, 148, 150, 0.10);
+  --phorma-text:                 #93a1a1;
+  --phorma-text-muted:           rgba(147, 161, 161, 0.70);
   color-scheme: dark;
 }
 
@@ -247,6 +335,29 @@
   --phorma-wire-hover-color:    var(--p-primary-color, #a09b92);
   --phorma-glass-bg:            rgba(30, 29, 34, 0.88);
   --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.38);
+  /* Form fields — neutral white wash, warm-neutral text. */
+  --phorma-field-bg:             rgba(255, 255, 255, 0.05);
+  --phorma-field-bg-hover:       rgba(255, 255, 255, 0.08);
+  --phorma-field-bg-focus:       rgba(255, 255, 255, 0.08);
+  --phorma-field-bg-disabled:    rgba(255, 255, 255, 0.03);
+  --phorma-field-border:         transparent;
+  --phorma-field-border-hover:   transparent;
+  --phorma-field-text:           #e8e6e3;
+  --phorma-field-text-disabled:  rgba(232, 230, 227, 0.38);
+  --phorma-field-placeholder:    rgba(232, 230, 227, 0.45);
+  --phorma-field-icon:           rgba(232, 230, 227, 0.45);
+  --phorma-field-shadow:         none;
+  --phorma-control-border:       rgba(255, 255, 255, 0.16);
+  --phorma-control-border-hover: rgba(255, 255, 255, 0.28);
+  --phorma-switch-track:         rgba(255, 255, 255, 0.14);
+  --phorma-switch-track-hover:   rgba(255, 255, 255, 0.20);
+  --phorma-segment-bg:           rgba(255, 255, 255, 0.05);
+  --phorma-segment-selected:     rgba(255, 255, 255, 0.13);
+  --phorma-overlay-bg:           #242329;
+  --phorma-overlay-border:       rgba(255, 255, 255, 0.07);
+  --phorma-hover-bg:             rgba(255, 255, 255, 0.06);
+  --phorma-text:                 #e8e6e3;
+  --phorma-text-muted:           rgba(232, 230, 227, 0.55);
   --phorma-accent-blue:         #7aa2f7;
   --phorma-accent-blue-soft:    rgba(122, 162, 247, 0.18);
   --phorma-accent-blue-ring:    rgba(122, 162, 247, 0.50);
@@ -300,6 +411,29 @@
   --phorma-wire-hover-color:    var(--p-primary-color, #7aa2f7);
   --phorma-glass-bg:            rgba(18, 26, 48, 0.88);
   --phorma-panel-shadow:        0 -8px 24px rgba(0, 0, 0, 0.42);
+  /* Form fields — periwinkle wash so fields stay inside the navy family. */
+  --phorma-field-bg:             rgba(148, 178, 255, 0.07);
+  --phorma-field-bg-hover:       rgba(148, 178, 255, 0.11);
+  --phorma-field-bg-focus:       rgba(148, 178, 255, 0.11);
+  --phorma-field-bg-disabled:    rgba(148, 178, 255, 0.04);
+  --phorma-field-border:         transparent;
+  --phorma-field-border-hover:   transparent;
+  --phorma-field-text:           #dbe4ff;
+  --phorma-field-text-disabled:  rgba(219, 228, 255, 0.38);
+  --phorma-field-placeholder:    rgba(219, 228, 255, 0.45);
+  --phorma-field-icon:           rgba(219, 228, 255, 0.46);
+  --phorma-field-shadow:         none;
+  --phorma-control-border:       rgba(148, 178, 255, 0.22);
+  --phorma-control-border-hover: rgba(148, 178, 255, 0.36);
+  --phorma-switch-track:         rgba(148, 178, 255, 0.18);
+  --phorma-switch-track-hover:   rgba(148, 178, 255, 0.26);
+  --phorma-segment-bg:           rgba(148, 178, 255, 0.07);
+  --phorma-segment-selected:     rgba(148, 178, 255, 0.16);
+  --phorma-overlay-bg:           #182242;
+  --phorma-overlay-border:       rgba(148, 178, 255, 0.12);
+  --phorma-hover-bg:             rgba(148, 178, 255, 0.08);
+  --phorma-text:                 #dbe4ff;
+  --phorma-text-muted:           rgba(219, 228, 255, 0.58);
   --phorma-accent-blue:         #7aa2f7;
   --phorma-accent-blue-soft:    rgba(122, 162, 247, 0.20);
   --phorma-accent-blue-ring:    rgba(122, 162, 247, 0.50);
@@ -362,7 +496,51 @@
   --phorma-accent-amber-soft:   rgba(235, 203, 139, 0.18);
   --phorma-accent-red:          #bf616a;
   --phorma-accent-red-soft:     rgba(191, 97, 106, 0.20);
+  /* Form fields — Snow Storm wash over Polar Night. Nord panels are much
+     lighter than the other dark themes, so the wash is a step stronger to
+     keep the field readable as a distinct surface. */
+  --phorma-field-bg:             rgba(216, 222, 233, 0.08);
+  --phorma-field-bg-hover:       rgba(216, 222, 233, 0.13);
+  --phorma-field-bg-focus:       rgba(216, 222, 233, 0.13);
+  --phorma-field-bg-disabled:    rgba(216, 222, 233, 0.05);
+  --phorma-field-border:         transparent;
+  --phorma-field-border-hover:   transparent;
+  --phorma-field-text:           #eceff4;
+  --phorma-field-text-disabled:  rgba(216, 222, 233, 0.40);
+  --phorma-field-placeholder:    rgba(216, 222, 233, 0.50);
+  --phorma-field-icon:           rgba(216, 222, 233, 0.52);
+  --phorma-field-shadow:         none;
+  --phorma-control-border:       rgba(216, 222, 233, 0.24);
+  --phorma-control-border-hover: rgba(216, 222, 233, 0.38);
+  --phorma-switch-track:         rgba(216, 222, 233, 0.20);
+  --phorma-switch-track-hover:   rgba(216, 222, 233, 0.28);
+  --phorma-segment-bg:           rgba(216, 222, 233, 0.08);
+  --phorma-segment-selected:     rgba(216, 222, 233, 0.18);
+  --phorma-overlay-bg:           #434c5e;
+  --phorma-overlay-border:       rgba(216, 222, 233, 0.10);
+  --phorma-hover-bg:             rgba(216, 222, 233, 0.08);
+  --phorma-text:                 #d8dee9;
+  --phorma-text-muted:           rgba(216, 222, 233, 0.62);
   color-scheme: dark;
+}
+
+/* ----------------------------------------------------------------------------
+   Token compatibility alias
+   ---------------------------------------------------------------------------- */
+
+/*
+ * `--p-border-color` is used by roughly 40 rules across the component sheets,
+ * but Aura does NOT emit it (its hairline token is `--p-content-border-color`).
+ * An undefined var with no fallback makes the whole declaration invalid at
+ * computed-value time, so `border-color` fell back to `currentColor` — those
+ * borders were rendering in the TEXT colour, which is a large part of why the
+ * chrome read as hard-edged and jarring in the dark themes.
+ *
+ * Aliasing it to the per-theme hairline fixes every call site at once. Prefer
+ * `--phorma-overlay-border` (or a `--phorma-*` token) in new code.
+ */
+:root {
+  --p-border-color: var(--phorma-overlay-border);
 }
 
 /* ----------------------------------------------------------------------------
@@ -444,6 +622,24 @@ textarea,
   outline-offset: 1px;
 }
 
+/*
+ * Form fields opt out of the global ring — they carry their own focus
+ * indication: a 1px border in the active primary palette colour
+ * (`--p-form-field-focus-border-color`, see `core/theme-preset.ts`) plus a
+ * lift in the fill.
+ *
+ * Browsers match :focus-visible on a focused text input even when it was
+ * focused by mouse, so without this the ring above painted a SECOND primary
+ * line 1px outside the primary border on every field the user clicked into.
+ */
+.p-inputtext:focus-visible,
+.p-textarea:focus-visible,
+.p-select:focus-visible,
+.p-multiselect:focus-visible,
+.p-autocomplete-input:focus-visible {
+  outline: none;
+}
+
 /* No default drag of images/links. */
 img,
 a {
@@ -511,7 +707,9 @@ body::-webkit-scrollbar {
   width: 16rem;
   max-width: max-content;
   border-radius: 0.7rem;
-  border: 1px solid var(--p-border-color);
+  /* `--p-border-color` is not a token Aura emits — the declaration was invalid
+     and the border fell back to `currentColor`. */
+  border: 1px solid var(--p-content-border-color);
   background: color-mix(in srgb, var(--p-content-background) 88%, transparent);
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
@@ -977,6 +1175,40 @@ app-root {
 }
 
 /* ----------------------------------------------------------------------------
+   Form field hover / focus fill — the part Aura has no token for
+   ---------------------------------------------------------------------------- */
+
+/*
+ * The colours of every field come from design tokens (`core/theme-preset.ts`
+ * → `--phorma-field-*`), but Aura only exposes `filledHoverBackground` /
+ * `filledFocusBackground` for the `variant="filled"` inputs. We use the
+ * default (outlined) variant everywhere, which has NO hover or focus
+ * background token at all — the stock behaviour is a border-colour change only.
+ *
+ * Since the resting border is now transparent, the fill has to do that work:
+ * hover and focus lift it a few percent. Both values are per-theme vars, so
+ * this stays one rule rather than a per-theme override.
+ *
+ * These selectors live unlayered, so they win over PrimeNG's `@layer primeng`
+ * rules without needing !important.
+ */
+.p-inputtext:enabled:hover,
+.p-textarea:enabled:hover,
+.p-select:not(.p-disabled):hover,
+.p-multiselect:not(.p-disabled):hover,
+.p-inputnumber:not(.p-disabled):hover .p-inputnumber-input {
+  background: var(--phorma-field-bg-hover);
+}
+
+.p-inputtext:enabled:focus,
+.p-textarea:enabled:focus,
+.p-select:not(.p-disabled).p-focus,
+.p-multiselect:not(.p-disabled).p-focus,
+.p-inputwrapper-focus:not(.p-disabled) .p-inputnumber-input {
+  background: var(--phorma-field-bg-focus);
+}
+
+/* ----------------------------------------------------------------------------
    Selection-control cursor fix
    ---------------------------------------------------------------------------- */
 
@@ -1024,6 +1256,15 @@ app-root {
   padding: 0;
   flex-shrink: 0;
   border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  border-color: transparent;
+  color: var(--p-text-muted-color);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
+    border-color: transparent;
+    color: var(--p-text-color);
+  }
 }
 
 /*

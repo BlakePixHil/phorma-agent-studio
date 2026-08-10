@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { ButtonModule } from 'primeng/button';
 
 import { AssistantChat } from '../assistant-chat/assistant-chat';
 import { AssistantChatService } from '../../../core/assistant-chat.service';
@@ -15,7 +16,7 @@ import type { ChatThread } from '../../../core/assistant-chat.model';
 @Component({
   selector: 'app-assistant-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AssistantChat, DatePipe],
+  imports: [AssistantChat, ButtonModule, DatePipe],
   templateUrl: './assistant-panel.html',
   styleUrl: './assistant-panel.scss',
 })

@@ -356,7 +356,8 @@
   display: grid;
   min-height: 0;
   gap: 1px;
-  background: var(--p-border-color, rgba(255, 255, 255, 0.08));
+  /* The 1px gap IS the divider between editor and preview. */
+  background: var(--phorma-overlay-border);
   grid-template-columns: 1fr;
 
   &[data-mode='split'] {
@@ -369,10 +370,12 @@
   width: 100%;
   resize: none;
   padding: 14px 16px;
+  /* A full-height pane rather than a field, so it keeps square edges and no
+     border - but it shares the field fill so it matches every other input. */
   border: none;
   border-radius: 0;
-  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
-  color: var(--p-text-color);
+  background: var(--phorma-field-bg);
+  color: var(--phorma-field-text);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
   font-size: 13px;
   line-height: 1.6;

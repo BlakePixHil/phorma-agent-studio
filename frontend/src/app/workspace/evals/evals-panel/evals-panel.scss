@@ -37,9 +37,9 @@
   color: var(--p-text-muted-color);
 }
 
-// Sizing comes from the shared `.phorma-panel-icon-btn` class in styles.scss.
 // Heading actions push to the trailing edge of the label they sit in.
-.phorma-panel-icon-btn.p-button {
+// Only the first button gets auto-margin; subsequent ones use the label's gap.
+.phorma-evals__label > .phorma-panel-icon-btn:first-of-type {
   margin-left: auto;
 }
 

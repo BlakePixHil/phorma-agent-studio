@@ -1,3 +1,5 @@
+@use '../../../shared/field' as field;
+
 :host {
   display: block;
   height: 100%;
@@ -417,13 +419,10 @@
 }
 
 .phorma-chat__input {
+  @include field.chrome(0.55rem);
   display: block;
   width: 100%;
   padding: 0.45rem 0.6rem;
-  border-radius: 0.55rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
-  color: var(--p-text-color);
   font-size: 0.8rem;
   font-family: inherit;
   line-height: 1.45;
@@ -431,12 +430,13 @@
   field-sizing: content;
   max-height: 10rem;
 
-  &:focus {
-    outline: none;
-    border-color: color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+  // The composer keeps its own disabled treatment: the rainbow ring wrapper
+  // reads better with the field simply dimmed than swapped to a flat fill.
+  &:disabled {
+    background: var(--phorma-field-bg);
+    cursor: default;
+    opacity: 0.6;
   }
-
-  &:disabled { opacity: 0.6; }
 }
 
 .phorma-chat__controls {

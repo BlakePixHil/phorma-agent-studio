@@ -38,6 +38,9 @@ Canonical for every tool and contributor. `.github/copilot-instructions.md` poin
   superseded border/background/cursor rules, or chrome doubles up.
 - Do not override `font-size` on PrimeNG controls in panel SCSS - the size token drives height, so
   a hard-coded font size desynchronizes neighbouring controls.
+- Never hardcode input chrome (background, border, radius, placeholder colour). Field colours come
+  from `--phorma-field-*` through `core/theme-preset.ts`; hand-rolled inputs use the
+  `shared/_field.scss` `chrome()` mixin. See the `frontend-ui` steering for the full recipe.
 
 ## PrimeNG
 

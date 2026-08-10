@@ -1,0 +1,59 @@
+// ============================================================================
+// Shared form-field chrome — one definition of the soft field recipe for the
+// app's HAND-ROLLED inputs.
+//
+// PrimeNG controls get this recipe from design tokens (`core/theme-preset.ts`
+// → `--phorma-field-*`). The app also has a set of bespoke <input>/<textarea>
+// elements that deliberately sidestep PrimeNG (the confirm/prompt dialog, the
+// settings rows, the cloud dialog, the skill editor, the prompt editor, the
+// assistant composer, the palette search). Without a shared recipe those are
+// the only hard-bordered fields left in the app, which is exactly the
+// inconsistency this change exists to remove.
+//
+// Angular scopes component styles, so a component must `@use` this partial —
+// a global rule in `styles.scss` would lose to the component's own sheet on
+// source order. Include the mixin and keep ONLY sizing and typography local.
+//
+// Usage:
+//   @use '../../../shared/field' as field;
+//   .phorma-x__input { @include field.chrome(); font-size: 12px; }
+// ============================================================================
+
+/// Soft field chrome: muted fill, no hard resting border, primary border on
+/// focus. `$radius` is the only knob — everything else is a theme token so all
+/// six theme modes stay in sync automatically.
+@mixin chrome($radius: 0.5rem) {
+  border-radius: $radius;
+  // The resting border is transparent on dark themes and a hairline on light,
+  // but the WIDTH is always 1px so focusing a field never reflows the row.
+  border: 1px solid var(--phorma-field-border);
+  background: var(--phorma-field-bg);
+  color: var(--phorma-field-text);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+
+  &::placeholder {
+    color: var(--phorma-field-placeholder);
+  }
+
+  &:hover:not(:disabled):not(:focus) {
+    background: var(--phorma-field-bg-hover);
+    border-color: var(--phorma-field-border-hover);
+  }
+
+  // Focus is the ONLY hard border, in the active primary palette colour.
+  // `outline: none` also suppresses the global `:focus-visible` ring, which
+  // would otherwise paint a second primary line just outside this border.
+  &:focus {
+    outline: none;
+    border-color: var(--p-primary-color);
+    background: var(--phorma-field-bg-focus);
+  }
+
+  &:disabled {
+    background: var(--phorma-field-bg-disabled);
+    color: var(--phorma-field-text-disabled);
+    cursor: not-allowed;
+  }
+}

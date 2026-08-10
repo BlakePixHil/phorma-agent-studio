@@ -1,4 +1,5 @@
 @use '../prompt-shared' as prompt;
+@use '../../../shared/field' as field;
 
 :host {
   display: block;
@@ -60,23 +61,15 @@
 @include prompt.prompt-sections;
 
 .phorma-prompt__editor {
+  @include field.chrome(0.6rem);
   flex: 1;
   min-height: 10rem;
   resize: vertical;
   padding: 0.6rem 0.7rem;
-  border-radius: 0.6rem;
-  border: 1px solid var(--phorma-card-border);
-  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-  color: var(--p-text-color);
   font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
   font-size: 0.928rem;
   line-height: 1.55;
   width: 100%;
-
-  &:focus {
-    outline: none;
-    border-color: var(--p-primary-color, #818cf8);
-  }
 }
 
 .phorma-prompt__preview {

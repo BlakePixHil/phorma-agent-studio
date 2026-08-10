@@ -2,7 +2,7 @@
   @if (!selectedSuite()) {
     <!-- ── Suite list ── -->
     <section class="phorma-evals__section">
-      <label class="phorma-evals__label">
+      <span class="phorma-evals__label">
         Suites · {{ workflowName() }}
         <button
           type="button"
@@ -24,13 +24,13 @@
           [text]="true"
           size="small"
           class="phorma-panel-icon-btn phorma-evals__expand"
-          title="Expand to full view — model matrix, trends and flakiness"
+          title="Expand to full view - model matrix, trends and flakiness"
           aria-label="Expand to full view"
           (click)="expand()"
         >
           <i class="ti ti-arrows-maximize" aria-hidden="true"></i>
         </button>
-      </label>
+      </span>
       @if (evals.suites().length > 0) {
         <ul class="phorma-evals__list">
           @for (suite of evals.suites(); track suite.id) {
@@ -137,7 +137,7 @@
       </section>
 
       <section class="phorma-evals__section">
-        <label class="phorma-evals__label">
+        <span class="phorma-evals__label">
           Cases
           <button
             type="button"
@@ -152,7 +152,7 @@
           >
             <i class="ti ti-plus" aria-hidden="true"></i>
           </button>
-        </label>
+        </span>
         @for (case_ of suite.cases; track case_.id; let i = $index) {
           <div class="phorma-evals__case">
             <div class="phorma-evals__case-header">
@@ -252,7 +252,7 @@
       }
 
       <section class="phorma-evals__section">
-        <label class="phorma-evals__label">
+        <span class="phorma-evals__label">
           Compare models
           <button
             type="button"
@@ -267,7 +267,7 @@
           >
             <i class="ti ti-plus" aria-hidden="true"></i>
           </button>
-        </label>
+        </span>
         @for (ref of suite.models ?? []; track $index; let i = $index) {
           <div class="phorma-evals__model-row">
             <p-select

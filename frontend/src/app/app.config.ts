@@ -18,6 +18,7 @@ import {
   THEME_PALETTES,
   type ThemePaletteId,
 } from './core/theme-palettes';
+import { PHORMA_COMPONENTS, PHORMA_SEMANTIC } from './core/theme-preset';
 import { CLERK_PUBLISHABLE_KEY } from '../environments/clerk';
 
 /**
@@ -49,15 +50,23 @@ function readInitialPaletteRamp() {
 }
 
 /**
- * Aura preset with the primary palette overridden to Phorma's saved palette.
+ * Aura preset with the primary palette overridden to Phorma's saved palette,
+ * plus the Phorma design-language overrides (soft borderless form fields and
+ * per-theme content/overlay/text surfaces — see `core/theme-preset.ts`).
+ *
  * The palette can still be swapped at runtime via `ThemeService.setPalette()`
  * (which calls `updatePrimaryPalette`), but seeding the correct ramp here
- * ensures the first paint matches the user's choice without a flash.
+ * ensures the first paint matches the user's choice without a flash. The
+ * design-language overrides are palette-independent: they resolve through
+ * `--phorma-*` and `--p-primary-color` at paint time, so `updatePrimaryPalette`
+ * cannot clobber them.
  */
 const PhormaPreset = definePreset(Aura, {
   semantic: {
     primary: readInitialPaletteRamp(),
+    ...PHORMA_SEMANTIC,
   },
+  components: PHORMA_COMPONENTS,
 });
 
 export const appConfig: ApplicationConfig = {

@@ -4,7 +4,7 @@ import type { Connection } from '@phorma/engine';
 
 /**
  * Opens/closes the connection editor dialog (Requirement 19.5). `editing`
- * carries the Connection being edited, or null for a brand-new one — mirrors
+ * carries the Connection being edited, or null for a brand-new one - mirrors
  * `SkillEditorDialogService`.
  */
 @Injectable({ providedIn: 'root' })

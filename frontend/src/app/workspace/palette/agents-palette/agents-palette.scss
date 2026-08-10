@@ -1,3 +1,5 @@
+@use '../../../shared/field' as field;
+
 :host {
   display: block;
   height: 100%;
@@ -26,22 +28,10 @@
   }
 
   input {
+    @include field.chrome(0.55rem);
     width: 100%;
     padding: 0.4rem 0.6rem 0.4rem 1.9rem;
-    border-radius: 0.55rem;
-    border: 1px solid var(--phorma-card-border);
-    background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
-    color: var(--p-text-color);
     font-size: 0.928rem;
-
-    &:focus {
-      outline: none;
-      border-color: var(--p-primary-color, #818cf8);
-    }
-
-    &::placeholder {
-      color: var(--p-text-muted-color);
-    }
   }
 }
 

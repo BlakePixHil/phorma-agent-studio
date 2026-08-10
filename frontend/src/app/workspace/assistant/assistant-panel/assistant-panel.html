@@ -4,7 +4,11 @@
     @if (chat.activeThread(); as thread) {
       <button
         type="button"
-        class="phorma-assist__icon-btn"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
         title="All chats"
         aria-label="All chats"
         [disabled]="chat.busy()"
@@ -17,7 +21,11 @@
       <span class="phorma-assist__title">Assistant</span>
       <button
         type="button"
-        class="phorma-assist__icon-btn"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
         title="New chat"
         aria-label="New chat"
         (click)="chat.newThread()"
@@ -27,7 +35,11 @@
     }
     <button
       type="button"
-      class="phorma-assist__icon-btn phorma-assist__expand"
+      pButton
+      severity="secondary"
+      [text]="true"
+      size="small"
+      class="phorma-panel-icon-btn"
       title="Expand to full view"
       aria-label="Expand to full view"
       (click)="expand()"

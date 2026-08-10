@@ -14,7 +14,13 @@
  *
  * Adding a new theme is:
  *   1. Add a key to `ThemeMode` + an entry in `THEME_MODES` below.
- *   2. Add the matching `:root.<class>` block in `styles.scss`.
+ *   2. Add the matching `:root.<class>` block in `styles.scss`. It must define
+ *      the form-field group (`--phorma-field-*`, `--phorma-control-*`,
+ *      `--phorma-switch-*`, `--phorma-segment-*`) and the surface group
+ *      (`--phorma-overlay-*`, `--phorma-hover-bg`, `--phorma-text*`) as well as
+ *      the canvas/node tokens — `core/theme-preset.ts` maps those onto every
+ *      PrimeNG control, so omitting them leaves the theme's inputs, dropdowns
+ *      and menus on the previous theme's colours.
  * No service/UI changes are needed — the settings picker renders from
  * `THEME_MODE_LIST` and the service applies classes generically.
  */

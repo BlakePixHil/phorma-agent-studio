@@ -59,11 +59,11 @@ interface ConfigRow {
  * values straight to the host secret store.
  *
  * Two things never happen here, by construction:
- * - A secret VALUE is never read back once saved — {@link secretDrafts} only
+ * - A secret VALUE is never read back once saved - {@link secretDrafts} only
  *   ever holds text the user is CURRENTLY typing; a successful save clears it
  *   immediately, and there is no code path that populates a draft from a
  *   stored value.
- * - A secret value never reaches `ConnectionsService.update` — it goes
+ * - A secret value never reaches `ConnectionsService.update` - it goes
  *   straight to {@link ConnectionsService.writeSecret}, which forwards it to
  *   the host store and records only the field NAME in metadata.
  */
@@ -337,7 +337,7 @@ export class ConnectionEditorDialog {
   /**
    * Requirement 19.7: writes the drafted value directly to the host secret
    * store, then shows the field as holding a stored secret without ever
-   * showing the value — the draft is discarded immediately on success.
+   * showing the value - the draft is discarded immediately on success.
    */
   protected async saveSecret(secretKey: string): Promise<void> {
     const connectionId = this.savedConnection()?.id;
@@ -357,7 +357,7 @@ export class ConnectionEditorDialog {
       this.toast.success(draft.trim() ? 'Secret saved' : 'Secret removed', secretKey);
     } catch (error) {
       // Requirement 19.9: every previously stored value and the metadata stay
-      // unchanged on failure — nothing here mutates either until the write
+      // unchanged on failure - nothing here mutates either until the write
       // above has already succeeded.
       this.toast.error('Could not save secret', error instanceof Error ? error.message : String(error));
     }

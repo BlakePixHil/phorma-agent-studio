@@ -1,15 +1,19 @@
 <div class="phorma-skills">
   <section class="phorma-skills__section">
-    <label class="phorma-skills__label">
+    <span class="phorma-skills__label">
       Skill library
       <span class="phorma-skills__label-actions">
-        <label class="phorma-skills__icon-btn" title="Import SKILL.md" aria-label="Import SKILL.md">
+        <label class="phorma-skills__import-btn" title="Import SKILL.md" aria-label="Import SKILL.md">
           <i class="ti ti-file-import" aria-hidden="true"></i>
           <input type="file" accept=".md,.markdown,text/markdown" (change)="importFile($event)" hidden />
         </label>
         <button
           type="button"
-          class="phorma-skills__icon-btn"
+          pButton
+          severity="secondary"
+          [text]="true"
+          size="small"
+          class="phorma-panel-icon-btn"
           title="New skill"
           aria-label="New skill"
           (click)="newSkill()"
@@ -17,7 +21,7 @@
           <i class="ti ti-plus" aria-hidden="true"></i>
         </button>
       </span>
-    </label>
+    </span>
 
     @if (skills.skills().length > 0) {
       <ul class="phorma-skills__list">

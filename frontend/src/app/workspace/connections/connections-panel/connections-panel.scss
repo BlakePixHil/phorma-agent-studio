@@ -23,7 +23,6 @@
 .phorma-connections__label {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
   font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -31,27 +30,21 @@
   color: var(--p-text-muted-color);
 }
 
-.phorma-connections__label-actions {
-  display: inline-flex;
-  gap: 0.15rem;
+/* Muted background at rest, lighter on hover. Self-contained click target. */
+.phorma-connections__add-btn.p-button {
   margin-left: auto;
-}
-
-.phorma-connections__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 1.5rem;
   height: 1.5rem;
+  padding: 0;
+  flex-shrink: 0;
   border-radius: 0.4rem;
-  border: none;
-  background: transparent;
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  border-color: transparent;
   color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
+    border-color: transparent;
     color: var(--p-text-color);
   }
 }

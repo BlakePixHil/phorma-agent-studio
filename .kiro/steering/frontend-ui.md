@@ -19,6 +19,34 @@ produced regressions.
 - The saved palette must be seeded synchronously in `app.config.ts` via
   `definePreset(Aura, { semantic: { primary: ramp } })`. `updatePrimaryPalette()` in the
   `ThemeService` constructor does not affect first paint and causes a flash.
+
+## Form field design language
+
+Fields are soft and borderless: a translucent fill, no resting border on dark themes and a 6%
+hairline on light, no drop shadow, 8px radius, and a 1px border in `--p-primary-color` as the only
+focus indicator. Never hardcode input chrome.
+
+- Colours live in `--phorma-field-*`, `--phorma-control-*`, `--phorma-segment-*`,
+  `--phorma-switch-*` and `--phorma-overlay-*`, defined once per theme block in `styles.scss`.
+  `core/theme-preset.ts` (`PHORMA_SEMANTIC`, `PHORMA_COMPONENTS`) is the only place that maps them
+  onto PrimeNG token names, so adding a theme mode never touches a PrimeNG token.
+- Those colours must be declared inside `colorScheme.light` / `colorScheme.dark`. PrimeNG emits the
+  `semantic` block first in the same CSS layer, so a semantic-level value loses to Aura's own on
+  source order.
+- Keep the resting `border-width` at 1px with a transparent colour, or fields reflow on focus.
+- Aura has no `hoverBackground` for the default outlined input, so the hover and focus fill lift is
+  a small unlayered rule block in `styles.scss`. Set the `filled*` tokens too: an input with a
+  value carries `.p-filled`.
+- Selection controls (checkbox, radio) and the slider need `--phorma-control-border` explicitly. If
+  they inherit the transparent field border they disappear.
+- Bespoke non-PrimeNG inputs use the `shared/_field.scss` `chrome($radius)` mixin via `@use`, and
+  keep only sizing and typography local. A global rule cannot do this: component sheets are
+  injected after the global sheet and win at equal specificity. Group selectors into one include
+  per sheet where `anyComponentStyle` is tight.
+- `--p-border-color` is not a token Aura emits; it is aliased to `--phorma-overlay-border` in
+  `styles.scss` for the ~40 legacy call sites. Use a `--phorma-*` token in new code.
+- Form fields opt out of the global `:focus-visible` ring, which would otherwise double up with the
+  primary focus border.
 - All chrome panels (toolbar, both sidebars, terminal, status bar) are plain frosted glass. The
   specular shimmer `::after` gradients were deliberately removed. The single hairline divider is
   drawn by the resize handle, not by a panel border - do not add one.

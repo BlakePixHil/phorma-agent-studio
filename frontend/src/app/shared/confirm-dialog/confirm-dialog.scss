@@ -1,3 +1,5 @@
+@use '../field' as field;
+
 :host {
   display: contents;
 }
@@ -72,26 +74,12 @@
 }
 
 .phorma-confirm__input {
+  @include field.chrome(6px);
   width: 100%;
   padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
-  background: var(--p-hover-background, rgba(255, 255, 255, 0.04));
-  color: var(--p-text-color, #f8fafc);
   font: inherit;
   font-size: 13px;
   line-height: 1.4;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-
-  &::placeholder {
-    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.4));
-  }
-
-  &:focus {
-    border-color: var(--p-primary-color, #818cf8);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--p-primary-color, #818cf8) 25%, transparent);
-  }
 }
 
 .phorma-confirm__actions {

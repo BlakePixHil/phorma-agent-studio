@@ -29,6 +29,10 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
+
+  .phorma-panel-icon-btn:first-of-type {
+    margin-left: auto;
+  }
 }
 
 .phorma-usage__controls {
