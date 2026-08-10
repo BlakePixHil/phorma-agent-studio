@@ -3,6 +3,7 @@ import {
   CONNECTION_ID_PATTERN,
   CONNECTION_SECRET_PREFIX,
   assertConnectionId,
+  authSecretKeyNames,
   connectionSecretName,
   isConnectionId,
   workerSecretName,
@@ -128,5 +129,72 @@ describe('assertConnectionId', () => {
     expect(() => assertConnectionId('')).toThrowError(
       new RegExp(CONNECTION_ID_PATTERN.source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     );
+  });
+});
+
+/**
+ * `authSecretKeyNames` (Requirement 2.2 support).
+ *
+ * `ConnectionAuth` holds POINTERS, never values, which is why a mode can need
+ * one, two or three names. Authoring surfaces declare those names on the
+ * connection automatically; before that, an operator had to type the same name
+ * into both the auth field and the secret list, and a mismatch resolved to
+ * nothing at run time with no visible cause.
+ */
+describe('authSecretKeyNames', () => {
+  it('returns nothing for unauthenticated and undefined descriptors', () => {
+    expect(authSecretKeyNames({ mode: 'none' })).toEqual([]);
+    expect(authSecretKeyNames(undefined)).toEqual([]);
+  });
+
+  it('returns the single pointer of the one-secret modes', () => {
+    expect(authSecretKeyNames({ mode: 'bearer', secretKey: 'apiKey' })).toEqual(['apiKey']);
+    expect(
+      authSecretKeyNames({ mode: 'header', header: 'X-Api-Key', secretKey: 'apiKey' }),
+    ).toEqual(['apiKey']);
+    expect(authSecretKeyNames({ mode: 'query', param: 'api_key', secretKey: 'apiKey' })).toEqual([
+      'apiKey',
+    ]);
+  });
+
+  it('returns every pointer of the multi-secret modes, in declaration order', () => {
+    expect(
+      authSecretKeyNames({ mode: 'basic', userSecretKey: 'user', passwordSecretKey: 'pass' }),
+    ).toEqual(['user', 'pass']);
+    expect(
+      authSecretKeyNames({
+        mode: 'oauth2-refresh',
+        tokenUrl: 'https://auth.example.com/token',
+        clientIdSecretKey: 'clientId',
+        clientSecretKey: 'clientSecret',
+        refreshTokenSecretKey: 'refreshToken',
+      }),
+    ).toEqual(['clientId', 'clientSecret', 'refreshToken']);
+    expect(
+      authSecretKeyNames({
+        mode: 'aws-sigv4',
+        service: 'execute-api',
+        region: 'us-east-1',
+        accessKeySecretKey: 'accessKeyId',
+        secretKeySecretKey: 'secretAccessKey',
+      }),
+    ).toEqual(['accessKeyId', 'secretAccessKey']);
+  });
+
+  it('trims, drops blanks and de-duplicates, so a half-filled form declares nothing empty', () => {
+    expect(
+      authSecretKeyNames({ mode: 'basic', userSecretKey: '  creds ', passwordSecretKey: 'creds' }),
+    ).toEqual(['creds']);
+    expect(authSecretKeyNames({ mode: 'bearer', secretKey: '   ' })).toEqual([]);
+  });
+
+  it('produces names a host can turn into a store entry', () => {
+    for (const name of authSecretKeyNames({
+      mode: 'basic',
+      userSecretKey: 'user',
+      passwordSecretKey: 'pass',
+    })) {
+      expect(workerSecretName('conn-a', name)).toMatch(WORKER_SECRET_NAME_PATTERN);
+    }
   });
 });

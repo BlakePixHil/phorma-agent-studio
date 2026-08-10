@@ -216,6 +216,17 @@ export interface FixtureStore {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * How a host names the store entry holding one connection secret. Declared
+ * rather than inferred so a validation message can tell the operator exactly
+ * what to set, without the validator hard-coding a host id.
+ *
+ * - `os-keychain`: `conn:{id}:{key}` in the OS keychain (desktop).
+ * - `cloudflare-worker-env`: a `CONN_*` worker secret / vault entry.
+ * - `none`: this host cannot hold a connection secret at all.
+ */
+export type ConnectionSecretScheme = 'os-keychain' | 'cloudflare-worker-env' | 'none';
+
+/**
  * What a host can actually run. Used for run-time guardrails and push-time
  * validation (design §12), so an operator learns a workflow cannot run here
  * before a node fails mid-run.
@@ -226,6 +237,8 @@ export interface HostCapabilities {
   nodeKinds: readonly string[];
   sqlDrivers: readonly SqlDriver[];
   connectionTypes: readonly ConnectionType[];
+  /** Where a connection secret lives on this host. Absent reads as `none`. */
+  connectionSecretScheme?: ConnectionSecretScheme;
   features: {
     cron: boolean;
     durableState: boolean;

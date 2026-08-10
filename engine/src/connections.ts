@@ -114,6 +114,13 @@ export type ConnectionSummary = Omit<Connection, 'secretKeys'> & {
   secretKeys: string[];
   /** Number of `secretKeys` actually present in the host's store. */
   secretsPresent: number;
+  /**
+   * The declared names the host's store does NOT hold, so validation can say
+   * WHICH secret to set rather than only how many are missing. Still a name
+   * list, so it is as secret-free as `secretKeys`. Optional for backwards
+   * compatibility: a host that omits it falls back to the count.
+   */
+  missingSecretKeys?: string[];
   usedByWorkflowIds?: string[];
 };
 
@@ -146,6 +153,44 @@ export function assertConnectionId(value: unknown): string {
 /** Host-agnostic secret entry name for one connection field. */
 export function connectionSecretName(connectionId: string, secretKey: string): string {
   return `${CONNECTION_SECRET_PREFIX}${connectionId}:${secretKey}`;
+}
+
+/**
+ * Every secret field name a `ConnectionAuth` descriptor POINTS AT, in
+ * declaration order and without duplicates.
+ *
+ * `auth` never holds a value - it names which entry of the connection's secret
+ * store to apply, which is why `basic` needs two names and the OAuth modes need
+ * three. Authoring surfaces use this to keep `Connection.secretKeys` in step
+ * with the selected auth mode automatically: a pointer to a name the connection
+ * does not declare resolves to nothing at run time, and the operator has no way
+ * to see why.
+ */
+export function authSecretKeyNames(auth: ConnectionAuth | undefined): string[] {
+  if (!auth) return [];
+  const names: string[] = [];
+  switch (auth.mode) {
+    case 'none':
+      break;
+    case 'bearer':
+    case 'header':
+    case 'query':
+      names.push(auth.secretKey);
+      break;
+    case 'basic':
+      names.push(auth.userSecretKey, auth.passwordSecretKey);
+      break;
+    case 'oauth2-client-credentials':
+      names.push(auth.clientIdSecretKey, auth.clientSecretKey);
+      break;
+    case 'oauth2-refresh':
+      names.push(auth.clientIdSecretKey, auth.clientSecretKey, auth.refreshTokenSecretKey);
+      break;
+    case 'aws-sigv4':
+      names.push(auth.accessKeySecretKey, auth.secretKeySecretKey);
+      break;
+  }
+  return [...new Set(names.map((name) => name.trim()).filter((name) => name.length > 0))];
 }
 
 /**

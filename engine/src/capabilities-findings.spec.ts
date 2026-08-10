@@ -286,12 +286,59 @@ describe('connection findings', () => {
     expect(found.message).toContain(TAURI_DESKTOP_CAPABILITIES.label);
   });
 
+  /**
+   * A count alone left the operator with nowhere to go: the studio reported
+   * "missing 1 of 1 secret values on Cloudflare Worker" for a secret that WAS
+   * stored locally, without saying that the deployed host keeps its own copy or
+   * what that copy is called. `missingSecretKeys` plus the host's declared
+   * `connectionSecretScheme` is what makes the message end in an action.
+   */
+  it('names only the absent key when the host reports which ones are missing', () => {
+    const found = onlyFinding(
+      graph([node('http-request', { url: 'https://api.example.com/v1', connectionId: 'conn-api' })]),
+      TAURI_DESKTOP_CAPABILITIES,
+      [
+        connection({
+          secretKeys: ['clientId', 'clientSecret'],
+          secretsPresent: 1,
+          missingSecretKeys: ['clientSecret'],
+        }),
+      ],
+    );
+
+    expect(found.message).toContain('missing 1 of 2');
+    expect(found.message).toContain('clientSecret');
+    expect(found.message).not.toContain('clientId,');
+  });
+
+  it('names the exact worker entry to create on the Cloudflare host', () => {
+    const found = onlyFinding(
+      graph([node('http-request', { url: 'https://api.example.com/v1', connectionId: 'conn-api' })]),
+      CLOUDFLARE_CAPABILITIES,
+      [connection({ secretKeys: ['apiKey'], secretsPresent: 0, missingSecretKeys: ['apiKey'] })],
+    );
+
+    expect(found.message).toContain('CONN_CONN_API_APIKEY');
+    expect(found.message).toContain('wrangler secret put');
+  });
+
+  it('offers the keychain remedy on the desktop host, never the worker one', () => {
+    const found = onlyFinding(
+      graph([node('http-request', { url: 'https://api.example.com/v1', connectionId: 'conn-api' })]),
+      TAURI_DESKTOP_CAPABILITIES,
+      [connection({ secretKeys: ['apiKey'], secretsPresent: 0, missingSecretKeys: ['apiKey'] })],
+    );
+
+    expect(found.message).toContain('keychain');
+    expect(found.message).not.toContain('CONN_');
+  });
+
   it('raises nothing when every declared secret is present', () => {
     expect(
       validateAgainstCapabilities(
         spec(graph([node('http-request', { url: 'https://a.example.com', connectionId: 'conn-api' })])),
         TAURI_DESKTOP_CAPABILITIES,
-        [connection({ secretKeys: ['token'], secretsPresent: 1 })],
+        [connection({ secretKeys: ['token'], secretsPresent: 1, missingSecretKeys: [] })],
       ),
     ).toEqual([]);
   });

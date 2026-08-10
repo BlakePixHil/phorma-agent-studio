@@ -672,6 +672,34 @@ export class SettingsDialog {
     });
   }
 
+  // ── Any other worker secret ──────────────────────────────────────────────
+  // The fixed list above covers the provider keys, and used to be the ONLY
+  // input: a `CONN_*`, `MCP_*` or `KEY_ENC_SECRET` value could not be set from
+  // the studio at all, which turned a validation error into a dead end.
+
+  protected readonly customSecretName = signal('');
+  protected readonly customSecretValue = signal('');
+
+  /** The shape `wrangler secret put` (and `putWorkerSecret`) accepts. */
+  protected readonly customSecretReady = computed(
+    () => /^[A-Z][A-Z0-9_]*$/.test(this.customSecretName().trim()) && this.customSecretValue().trim().length > 0,
+  );
+
+  protected onCustomSecretNameInput(event: Event): void {
+    this.customSecretName.set((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onCustomSecretValueInput(event: Event): void {
+    this.customSecretValue.set((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected async saveCustomWorkerSecret(): Promise<void> {
+    if (!this.customSecretReady()) return;
+    await this.cloud.putWorkerSecret(this.customSecretName().trim(), this.customSecretValue());
+    this.customSecretValue.set('');
+    this.customSecretName.set('');
+  }
+
   constructor() {
     // Usage page (EPIC 2): refresh the ledgers when the page is opened.
     effect(() => {

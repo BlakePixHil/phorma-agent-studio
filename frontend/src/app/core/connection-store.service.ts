@@ -238,14 +238,15 @@ export class ConnectionStoreService implements ConnectionStore {
     const connections = await this.db.listConnections();
     const summaries: ConnectionSummary[] = [];
     for (const connection of connections) {
-      let present = 0;
+      const missing: string[] = [];
       for (const key of connection.secretKeys) {
-        if (await this.hasSecret(connection.id, key)) present += 1;
+        if (!(await this.hasSecret(connection.id, key))) missing.push(key);
       }
       summaries.push({
         ...connection,
         secretKeys: [...connection.secretKeys],
-        secretsPresent: present,
+        secretsPresent: connection.secretKeys.length - missing.length,
+        missingSecretKeys: missing,
       });
     }
     return summaries.sort((left, right) => left.id.localeCompare(right.id));

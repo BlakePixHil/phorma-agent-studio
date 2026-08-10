@@ -1154,6 +1154,50 @@
                                 />
                               </div>
                             }
+                            <!-- Any other secret name, so the fixed list above is
+                                 never a dead end (CONN_*, MCP_*, KEY_ENC_SECRET). -->
+                            <div class="phorma-settings__row">
+                              <input
+                                type="text"
+                                class="phorma-settings__input phorma-settings__input--mono"
+                                placeholder="OTHER_SECRET_NAME"
+                                [value]="customSecretName()"
+                                (input)="onCustomSecretNameInput($event)"
+                                autocomplete="off"
+                                aria-label="Worker secret name"
+                              />
+                              <input
+                                type="password"
+                                class="phorma-settings__input"
+                                placeholder="Paste value"
+                                [value]="customSecretValue()"
+                                (input)="onCustomSecretValueInput($event)"
+                                (keydown.enter)="saveCustomWorkerSecret()"
+                                autocomplete="off"
+                                aria-label="Worker secret value"
+                              />
+                              <p-button
+                                styleClass="phorma-settings__btn"
+                                size="small"
+                                label="Set"
+                                [loading]="cloud.savingSecret() === customSecretName().trim()"
+                                [disabled]="!customSecretReady() || cloud.savingSecret() !== null || !cloud.cloudFolder()"
+                                (onClick)="saveCustomWorkerSecret()"
+                              />
+                            </div>
+                            @if (customSecretName().trim() && !customSecretReady()) {
+                              <p class="phorma-settings__hint">
+                                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                                A worker secret name must be upper-case letters, digits and
+                                underscores, starting with a letter.
+                              </p>
+                            }
+                            <p class="phorma-settings__hint">
+                              Connection secrets (<code>CONN_*</code>) are easier to set from the
+                              cloud button in Connections - it works for both deploy targets and
+                              needs no terminal. Set <code>KEY_ENC_SECRET</code> here once to
+                              enable it.
+                            </p>
                             @if (!cloud.cloudFolder()) {
                               <p class="phorma-settings__hint">
                                 <i class="ti ti-alert-triangle" aria-hidden="true"></i>

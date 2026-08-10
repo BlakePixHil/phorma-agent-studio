@@ -198,23 +198,15 @@
   color: var(--phorma-accent-amber, #f59e0b);
 }
 
-/* Muted background at rest, red-tinted on hover. No hard border - stays
-   visually inline with the input row rather than drawing a heavy outline. */
-.phorma-conn-editor__icon-btn--danger.p-button {
-  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-  border-color: transparent;
-  color: var(--p-text-muted-color);
+/* The muted icon-button recipe and its success/danger hover tints are shared:
+   `.phorma-input-icon-btn` (+ `--success` / `--danger`) in `styles.scss`. */
 
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    border-color: transparent;
-    color: var(--phorma-accent-red, #ef4444);
-  }
-}
-
+/* `align-items: stretch` is what gives the save/remove buttons the same height
+   as the input beside them - `.phorma-input-icon-btn` pins only the width, so
+   with `center` they collapsed to the icon's line height. */
 .phorma-conn-editor__secret-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.4rem;
 }
 

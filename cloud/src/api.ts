@@ -10,7 +10,10 @@
  * webhook worker can call the same endpoints later without schema changes.
  */
 
-import { verifyRequest, type AuthEnv } from './auth';
+import { isConnectionId, workerSecretName } from '@phorma/engine';
+
+import { verifyRequest, isHosted, type AuthEnv } from './auth';
+import { secretVault, SECRET_VAULT_MAX_VALUE_CHARS, type SecretVaultEnv } from './secret-vault';
 import {
   TenantStore,
   creditsForTier,
@@ -24,7 +27,116 @@ import {
   type TenantEnv,
 } from './tenants';
 
-export type ApiEnv = AuthEnv & TenantEnv;
+export type ApiEnv = AuthEnv & TenantEnv & SecretVaultEnv;
+
+/** JSON responder bound to the current request's CORS headers. */
+type Respond = (body: unknown, status?: number) => Response;
+
+/**
+ * A `Connection.secretKeys` entry is an operator-typed field name. Bound it
+ * before it becomes part of a storage key.
+ */
+const SECRET_KEY_PATTERN = /^[A-Za-z0-9_.\-]{1,64}$/;
+
+/**
+ * `GET | POST | DELETE /api/connection-secrets` — the vault surface.
+ *
+ *   GET    → `{ secrets: [{ name, updatedAt }] }`, names only. Lets the studio
+ *            show which secrets the deployed runtime already holds without any
+ *            code path that reads a value back.
+ *   POST   → `{ connectionId, secretKey, value }`, encrypted here and stored.
+ *   DELETE → `?connectionId=&secretKey=`, idempotent.
+ *
+ * The owner scope is the VERIFIED identity, never a request field, so one
+ * tenant cannot address another's vault (hosted mode). BYO deployments have a
+ * single owner and share the default vault.
+ */
+async function handleConnectionSecretRequest(
+  request: Request,
+  env: ApiEnv,
+  respond: Respond,
+): Promise<Response> {
+  // An unprotected BYO worker treats every caller as the owner, which is
+  // tolerable for triggering a workflow and NOT tolerable for a credential
+  // store: a stranger could stash a key and then spend it through a deployed
+  // workflow. Vault access therefore requires the deployment to have an
+  // authentication credential at all, unlike the rest of the surface.
+  if (!isHosted(env) && !env.CLERK_SECRET_KEY && !env.PHORMA_TOKEN) {
+    return respond(
+      {
+        error:
+          'Storing credentials requires this worker to be protected. Run ' +
+          '`npx wrangler secret put PHORMA_TOKEN`, set the same value in ' +
+          'Settings > Cloud, and try again.',
+      },
+      403,
+    );
+  }
+
+  const auth = await verifyRequest(env, request);
+  if (!auth) return respond({ error: 'Unauthorized.' }, 401);
+  // Hosted mode is per-tenant, so an anonymous identity has no vault to address.
+  if (isHosted(env) && !auth.userId) return respond({ error: 'Unauthorized.' }, 401);
+  if (!env.SecretVault) {
+    return respond({ error: 'This deployment has no secret vault binding.' }, 501);
+  }
+  if (!env.KEY_ENC_SECRET) {
+    return respond(
+      {
+        error:
+          'This worker cannot store credentials: KEY_ENC_SECRET is not set. Run ' +
+          '`npx wrangler secret put KEY_ENC_SECRET` with a base64 32-byte random value, ' +
+          'redeploy, and try again.',
+      },
+      501,
+    );
+  }
+
+  const vault = secretVault(env, auth.userId);
+
+  if (request.method === 'GET') {
+    return respond({ secrets: await vault.entries() });
+  }
+
+  const body =
+    request.method === 'POST'
+      ? ((await request.json().catch(() => null)) as {
+          connectionId?: unknown;
+          secretKey?: unknown;
+          value?: unknown;
+        } | null)
+      : null;
+  const url = new URL(request.url);
+  const connectionId = body ? body.connectionId : url.searchParams.get('connectionId');
+  const secretKey = body ? body.secretKey : url.searchParams.get('secretKey');
+
+  if (!isConnectionId(connectionId)) {
+    return respond({ error: 'connectionId must be a valid connection id.' }, 400);
+  }
+  if (typeof secretKey !== 'string' || !SECRET_KEY_PATTERN.test(secretKey)) {
+    return respond({ error: 'secretKey must be 1-64 characters of [A-Za-z0-9_.-].' }, 400);
+  }
+  const name = workerSecretName(connectionId, secretKey);
+
+  if (request.method === 'DELETE') {
+    const { removed } = await vault.remove(name);
+    return respond({ ok: true, name, removed });
+  }
+
+  if (request.method !== 'POST') return respond({ error: 'Method not allowed.' }, 405);
+
+  const value = typeof body?.value === 'string' ? body.value : '';
+  if (value.length === 0) return respond({ error: 'value is required.' }, 400);
+  if (value.length > SECRET_VAULT_MAX_VALUE_CHARS) {
+    return respond({ error: 'value is too large.' }, 413);
+  }
+
+  // Encrypted HERE, so the vault only ever holds ciphertext.
+  const enc = await encryptString(value, env.KEY_ENC_SECRET);
+  const result = await vault.put(name, enc);
+  if (!result.ok) return respond({ error: result.error }, 400);
+  return respond({ ok: true, name });
+}
 
 /**
  * Handles /api/* requests. Returns null when the path is not an API route.
@@ -67,6 +179,14 @@ async function routeApiRequest(
       status,
       headers: { 'Content-Type': 'application/json', ...cors },
     });
+
+  // ── /api/connection-secrets — credential ingestion for DEPLOYED runs ──────
+  // Deliberately ABOVE the hosted-bindings gate: this is the one control-plane
+  // surface a BYO deployment needs too, because `wrangler secret put` is a
+  // terminal trip and a hosted tenant cannot run it at all.
+  if (url.pathname === '/api/connection-secrets') {
+    return handleConnectionSecretRequest(request, env, respond);
+  }
 
   const store = new TenantStore(env);
   if (!store.enabled) {

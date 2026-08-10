@@ -11,7 +11,7 @@
  * host it is running on — the host passes its own record on `RunOptions`.
  */
 
-import type { ConnectionSummary, ConnectionType } from './connections.js';
+import { workerSecretName, type ConnectionSummary, type ConnectionType } from './connections.js';
 import type { HostCapabilities } from './data-host.js';
 import { validateExpression } from './expr.js';
 import type {
@@ -90,6 +90,7 @@ export const TAURI_DESKTOP_CAPABILITIES: HostCapabilities = {
   nodeKinds: [...ALL_NODE_KINDS],
   sqlDrivers: [...DESKTOP_SQL_DRIVERS],
   connectionTypes: [...ALL_CONNECTION_TYPES],
+  connectionSecretScheme: 'os-keychain',
   features: {
     cron: false,
     durableState: true,
@@ -111,6 +112,7 @@ export const BROWSER_CAPABILITIES: HostCapabilities = {
   nodeKinds: ALL_NODE_KINDS.filter((kind) => kind !== 'sql-query'),
   sqlDrivers: [],
   connectionTypes: [],
+  connectionSecretScheme: 'none',
   features: {
     cron: false,
     durableState: true,
@@ -138,6 +140,7 @@ export const CLOUDFLARE_CAPABILITIES: HostCapabilities = {
    */
   sqlDrivers: ['postgres', 'mysql'],
   connectionTypes: [...ALL_CONNECTION_TYPES],
+  connectionSecretScheme: 'cloudflare-worker-env',
   features: {
     cron: true,
     durableState: true,
@@ -453,14 +456,54 @@ function resolveConnection(
   const declared = Array.isArray(summary.secretKeys) ? summary.secretKeys : [];
   const present = typeof summary.secretsPresent === 'number' ? summary.secretsPresent : 0;
   if (present < declared.length) {
+    // A host that reports WHICH names are absent lets the message name the
+    // exact store entry to create; one that only counts falls back to listing
+    // every declared name.
+    const missing = Array.isArray(summary.missingSecretKeys)
+      ? summary.missingSecretKeys.filter((key) => declared.includes(key))
+      : declared;
     report(
       `Connection "${summary.name}" is missing ${declared.length - present} of ` +
         `${declared.length} secret values on ${capabilities.label} ` +
-        `(secret keys: ${declared.join(', ')}).`,
+        `(secret keys: ${missing.join(', ')}).` +
+        secretRemedy(summary.id, missing, capabilities),
     );
   }
 
   return summary;
+}
+
+/**
+ * The actionable half of the missing-secret finding: where this host expects
+ * the value to live, named exactly. Empty when the host declares no scheme, so
+ * a future host cannot accidentally inherit Cloudflare's instructions.
+ */
+function secretRemedy(
+  connectionId: unknown,
+  missing: readonly string[],
+  capabilities: HostCapabilities,
+): string {
+  const id = typeof connectionId === 'string' ? connectionId : '';
+  const first = missing[0];
+  if (id.length === 0 || first === undefined) return '';
+
+  switch (capabilities.connectionSecretScheme) {
+    case 'cloudflare-worker-env': {
+      const names = missing.map((key) => workerSecretName(id, key));
+      const shown = names.length > 2 ? `${names.slice(0, 2).join(', ')}, ...` : names.join(', ');
+      return (
+        ` Store ${names.length === 1 ? 'it' : 'them'} on the deployed worker as ${shown}` +
+        ` - use the cloud button beside the secret in Connections, or ` +
+        `\`npx wrangler secret put ${names[0]}\` - then push again.`
+      );
+    }
+    case 'os-keychain':
+      return ` Enter ${missing.length === 1 ? 'it' : 'them'} in Connections to store ${
+        missing.length === 1 ? 'it' : 'them'
+      } in this machine's keychain.`;
+    default:
+      return '';
+  }
 }
 
 /** Rule 2: `sql-query` needs a driver this host actually ships. */

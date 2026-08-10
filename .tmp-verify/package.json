@@ -1,0 +1,10 @@
+{
+  "name": "phorma-tmp-verify",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "description": "Throwaway harness for browser verification. Delete after use.",
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

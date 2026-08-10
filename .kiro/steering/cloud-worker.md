@@ -51,6 +51,15 @@ user's own Cloudflare account and keys).
 - Secrets: `npx wrangler secret put <PROVIDER>_API_KEY` per provider, plus `PHORMA_TOKEN` to protect
   BYO endpoints. Connection secrets follow `connectionSecretName` / `workerSecretName` from
   `engine/src/connections.ts` (worker names must match `^[A-Z][A-Z0-9_]*$`).
+- A deployed run resolves a connection secret from worker env FIRST, then from the `SecretVault`
+  Durable Object (`POST /api/connection-secrets`, AES-GCM under `KEY_ENC_SECRET`, one instance per
+  owner: `secrets:{userId}` hosted, `secrets:default` BYO). The vault is the only ingestion path a
+  hosted tenant has, since `wrangler secret put` needs their own account. `MCP_*` bearers are still
+  env-only. Spec: `.kiro/specs/deployed-credential-vault/`.
+- Adding a Durable Object class means a binding + migration tag in `wrangler.jsonc` top level AND
+  `env.hosted` AND `DeployConfigService`'s generated override, which REPLACES the committed config
+  on every BYO deploy. `cloud/test/deploy-config.test.mjs` derives the expected class list from
+  `src/index.ts`'s export statement and will catch a miss.
 
 ## Release-adjacent code in cloud/
 

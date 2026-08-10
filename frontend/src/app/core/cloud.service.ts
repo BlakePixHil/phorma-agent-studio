@@ -37,9 +37,12 @@ export type CloudConnectionState = 'disconnected' | 'connecting' | 'connected';
  * from a `ConnectionSummary`, leaving exactly the `Connection` metadata shape
  * the worker's push route accepts. Never carries a secret value either way.
  */
-function toConnectionMetadata(summary: ConnectionSummary): Omit<ConnectionSummary, 'secretsPresent' | 'usedByWorkflowIds'> {
-  const { secretsPresent, usedByWorkflowIds, ...metadata } = summary;
+function toConnectionMetadata(
+  summary: ConnectionSummary,
+): Omit<ConnectionSummary, 'secretsPresent' | 'missingSecretKeys' | 'usedByWorkflowIds'> {
+  const { secretsPresent, missingSecretKeys, usedByWorkflowIds, ...metadata } = summary;
   void secretsPresent;
+  void missingSecretKeys;
   void usedByWorkflowIds;
   return metadata;
 }
@@ -256,6 +259,96 @@ export class CloudService {
 
   /** Secret name currently being saved (drives per-row button spinners). */
   readonly savingSecret = signal<string | null>(null);
+
+  // ── Connection secrets on the deployed runtime (any provider) ─────────────
+
+  /**
+   * Connection-secret entry names the deployed runtime currently holds, as
+   * `workerSecretName` produces them. Names only - there is no route that
+   * returns a value, by construction.
+   *
+   * Empty on any failure (unreachable worker, no vault binding, no encryption
+   * key): this drives an informational badge, so it must never throw into a
+   * caller that is only trying to render.
+   */
+  async connectionSecretNames(): Promise<string[]> {
+    const base = this.effectiveWorkerUrl();
+    if (!base) return [];
+    try {
+      const response = await fetch(`${base}/api/connection-secrets`, {
+        headers: await this.headers(),
+      });
+      if (!response.ok) return [];
+      const body = (await response.json()) as { secrets?: { name?: unknown }[] };
+      return (body.secrets ?? [])
+        .map(entry => entry.name)
+        .filter((name): name is string => typeof name === 'string');
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Stores one connection secret on the deployed runtime, so a deployed run can
+   * resolve it (Requirement 3.5 second path).
+   *
+   * The value goes ONLY here: the studio's own copy lives in the OS keychain,
+   * which a worker cannot read, and there is no path that reads either store
+   * back. That is why this takes the value the operator is currently typing
+   * rather than "syncing" a stored one - a sync would require a read-back that
+   * deliberately does not exist.
+   *
+   * Works for both deploy targets: Phorma Cloud (the tenant's own vault) and
+   * own-Cloudflare (the deployment's vault). Resolves false having toasted, so
+   * a caller can keep the draft on screen for a retry.
+   */
+  async putConnectionSecret(connectionId: string, secretKey: string, value: string): Promise<boolean> {
+    const base = this.effectiveWorkerUrl();
+    if (!base) {
+      this.toast.warning('No cloud target', 'Pick a deploy target in Settings > Cloud first.');
+      return false;
+    }
+    if (!value.trim()) {
+      this.toast.warning('Empty value', 'Enter the secret value first.');
+      return false;
+    }
+    this.savingSecret.set(`${connectionId}:${secretKey}`);
+    try {
+      const response = await fetch(`${base}/api/connection-secrets`, {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ connectionId, secretKey, value }),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
+      this.toast.success('Secret sent to the cloud', `${secretKey} is available to deployed runs.`);
+      return true;
+    } catch (error) {
+      this.toast.error('Could not send the secret', error instanceof Error ? error.message : String(error));
+      return false;
+    } finally {
+      this.savingSecret.set(null);
+    }
+  }
+
+  /** Removes one connection secret from the deployed runtime. Idempotent. */
+  async deleteConnectionSecret(connectionId: string, secretKey: string): Promise<boolean> {
+    const base = this.effectiveWorkerUrl();
+    if (!base) return false;
+    try {
+      const query = `connectionId=${encodeURIComponent(connectionId)}&secretKey=${encodeURIComponent(secretKey)}`;
+      const response = await fetch(`${base}/api/connection-secrets?${query}`, {
+        method: 'DELETE',
+        headers: await this.headers(),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
+      return true;
+    } catch (error) {
+      this.toast.error('Could not remove the secret', error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
 
   /**
    * Sets a secret on the user's deployed worker via

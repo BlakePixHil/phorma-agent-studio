@@ -15,9 +15,18 @@ import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 
-import type { Connection, ConnectionAuth, ConnectionType, SqlLimits } from '@phorma/engine';
+import {
+  authSecretKeyNames,
+  workerSecretName,
+  type Connection,
+  type ConnectionAuth,
+  type ConnectionType,
+  type SqlLimits,
+} from '@phorma/engine';
 
+import { CloudService } from '../../../core/cloud.service';
 import { ConnectionsService } from '../../../core/connections.service';
+import { SettingsService } from '../../../core/settings.service';
 import { ConnectionEditorDialogService } from '../connection-editor-dialog.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
@@ -80,6 +89,8 @@ export class ConnectionEditorDialog {
   protected readonly connections = inject(ConnectionsService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly toast = inject(ToastService);
+  private readonly cloud = inject(CloudService);
+  private readonly settings = inject(SettingsService);
 
   protected readonly connectionTypes = CONNECTION_TYPES;
   protected readonly authModes = AUTH_MODES;
@@ -126,6 +137,22 @@ export class ConnectionEditorDialog {
   protected readonly secretPresence = signal<Record<string, boolean>>({});
   protected readonly newSecretName = signal('');
 
+  // ── Cloud copies of the secrets ─────────────────────────────────────────
+  // A deployed run cannot read this machine's keychain, so a connection secret
+  // needs a SECOND copy on the deploy target. There is deliberately no way to
+  // read either store back, which is why sending happens from the draft the
+  // operator is currently typing rather than from the stored value.
+
+  /** True once the user picked a deploy target in Settings > Cloud. */
+  protected readonly cloudConfigured = computed(
+    () => this.settings.cloudProvider() !== null && this.cloud.configured(),
+  );
+
+  /** Entry names the deploy target already holds (`CONN_*`), never values. */
+  private readonly cloudSecretNames = signal<readonly string[]>([]);
+  /** The `connectionId:secretKey` currently being sent, for the row spinner. */
+  protected readonly sendingToCloud = signal<string | null>(null);
+
   constructor() {
     // Re-seed the form whenever the dialog opens on a (possibly different)
     // connection. Mirrors `SkillEditorDialog`'s reset effect.
@@ -143,6 +170,18 @@ export class ConnectionEditorDialog {
       const keys = connection.secretKeys;
       untracked(() => void this.refreshPresence(keys));
     });
+
+    // Ask the deploy target which secrets it holds, once per dialog opening.
+    // `untracked` is required: the refresh writes `cloudSecretNames`, which the
+    // template reads, and tracking it here would loop the effect.
+    effect(() => {
+      if (!this.dialog.visible() || !this.cloudConfigured()) return;
+      untracked(() => void this.refreshCloudSecrets());
+    });
+  }
+
+  private async refreshCloudSecrets(): Promise<void> {
+    this.cloudSecretNames.set(await this.cloud.connectionSecretNames());
   }
 
   private seedForm(editing: Connection | null): void {
@@ -261,6 +300,7 @@ export class ConnectionEditorDialog {
           type: this.type(),
           config,
           auth,
+          secretKeys: withAuthSecretKeys(current.secretKeys, auth),
           allowWrites: this.allowWrites() || undefined,
           limits,
         });
@@ -272,6 +312,7 @@ export class ConnectionEditorDialog {
           type: this.type(),
           config,
           auth,
+          secretKeys: authSecretKeyNames(auth),
           allowWrites: this.allowWrites(),
           limits,
         });
@@ -364,6 +405,77 @@ export class ConnectionEditorDialog {
     }
   }
 
+  /** True when the deploy target already holds this secret. */
+  protected storedInCloud(secretKey: string): boolean {
+    const connectionId = this.savedConnection()?.id;
+    if (!connectionId) return false;
+    return this.cloudSecretNames().includes(workerSecretName(connectionId, secretKey));
+  }
+
+  /** True while this row's value is in flight to the deploy target. */
+  protected sendingSecret(secretKey: string): boolean {
+    return this.sendingToCloud() === `${this.savedConnection()?.id}:${secretKey}`;
+  }
+
+  /**
+   * Sends the drafted value to the deploy target so a DEPLOYED run can resolve
+   * it, then discards the draft exactly as {@link saveSecret} does.
+   *
+   * Phorma Cloud is somebody else's infrastructure, so that target is confirmed
+   * explicitly rather than treated as an extension of the local store. The
+   * own-Cloudflare target is the operator's own worker and needs no ceremony.
+   */
+  protected async sendSecretToCloud(secretKey: string): Promise<void> {
+    const connectionId = this.savedConnection()?.id;
+    const draft = this.secretDrafts()[secretKey];
+    if (!connectionId || !draft?.trim() || this.sendingToCloud()) return;
+
+    if (this.settings.cloudProvider() === 'phorma') {
+      const confirmed = await this.confirmDialog.confirm({
+        title: 'Send this secret to Phorma Cloud?',
+        message:
+          `"${secretKey}" will be stored encrypted on Phorma Cloud so your deployed runs can ` +
+          `use it. Remove it any time from this dialog. Deploying to your own Cloudflare ` +
+          `account instead keeps it entirely within your infrastructure.`,
+        confirmLabel: 'Send',
+      });
+      if (!confirmed) return;
+    }
+
+    this.sendingToCloud.set(`${connectionId}:${secretKey}`);
+    try {
+      const sent = await this.cloud.putConnectionSecret(connectionId, secretKey, draft);
+      if (!sent) return;
+      this.secretDrafts.update(drafts => {
+        const next = { ...drafts };
+        delete next[secretKey];
+        return next;
+      });
+      await this.refreshCloudSecrets();
+    } finally {
+      this.sendingToCloud.set(null);
+    }
+  }
+
+  /** Removes the deploy target's copy, leaving the local one untouched. */
+  protected async removeCloudSecret(secretKey: string): Promise<void> {
+    const connectionId = this.savedConnection()?.id;
+    if (!connectionId) return;
+    const confirmed = await this.confirmDialog.confirm({
+      title: 'Remove the cloud copy?',
+      message:
+        `Deployed runs will stop being able to resolve "${secretKey}" and will fail until it ` +
+        `is stored again. The copy on this machine is not affected.`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    if (await this.cloud.deleteConnectionSecret(connectionId, secretKey)) {
+      this.toast.success('Cloud copy removed', secretKey);
+      await this.refreshCloudSecrets();
+    }
+  }
+
   /** Requirement 19.9-adjacent: drops a declared secret field entirely. */
   protected async removeSecretField(secretKey: string): Promise<void> {
     const connectionId = this.savedConnection()?.id;
@@ -417,6 +529,25 @@ export class ConnectionEditorDialog {
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth descriptor <-> draft conversion
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `existing` plus every secret name the selected auth mode points at, in place
+ * and without duplicates.
+ *
+ * This is what keeps the two halves of the Secrets story in step. `auth` only
+ * ever holds a POINTER (which is why `basic` needs two names and the OAuth modes
+ * need three); `secretKeys` is the list of fields the store actually holds.
+ * Requiring the operator to type `apiKey` in both places, with nothing linking
+ * them, made a silent misconfiguration the default outcome. Declaring the
+ * pointer's target automatically makes it unreachable through the editor.
+ *
+ * Names are only ADDED. A key dropped from auth stays declared, because the
+ * store may still hold a value for it and silently orphaning that value is
+ * worse than one stale row the operator can delete deliberately.
+ */
+function withAuthSecretKeys(existing: readonly string[], auth: ConnectionAuth): string[] {
+  return [...new Set([...existing, ...authSecretKeyNames(auth)])];
+}
 
 /** Flattens an existing auth descriptor's own fields into a text-draft map. */
 function authToDraft(auth: ConnectionAuth | undefined): Record<string, string> {

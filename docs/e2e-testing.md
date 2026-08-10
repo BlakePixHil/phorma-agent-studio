@@ -148,6 +148,28 @@ node (`app-ask-user-overlay`, real DOM, autofocused) and in the Runs panel card
 valid. A suspended question also reveals the Runs pane and raises a persistent
 "needs an answer" toast.
 
+## Driving the browser without Playwright
+
+Playwright is NOT a dependency of this repo, and the recipes above are written against its API. When
+no Playwright install is available, use `scripts/cdp.mjs` - a zero-dependency Chrome DevTools
+Protocol driver (Node 24 ships a global `WebSocket`, and karma already proves a system Chrome
+exists):
+
+```powershell
+node scripts/cdp.mjs http://localhost:7322 scripts/my-check.mjs
+```
+
+The snippet file default-exports an array of `async (evaluate) => any` steps; `evaluate(expression)`
+runs the expression in page context and resolves its value, awaiting a promise. Everything in the
+recipes above transfers - `page.evaluate(() => ...)` becomes `evaluate('...')` with the body as a
+string. Reach for the component instance the same way (`window.ng.getComponent(el)`); a dialog with
+no menubar path is easiest opened through its own service, e.g.
+`window.ng.getComponent(document.querySelector('app-connection-editor-dialog')).dialog.openNew()`.
+
+Baseline for the duplicate-id check: PrimeNG 20's menubar renders nine `p-menubar-submenu` elements
+with a literal `id="null"`. That is third-party markup, not a regression - filter it out, or compare
+only ids you own.
+
 ## Environment Notes
 
 - Dev server: `cd frontend && npx ng serve --port 7322` (7321 belongs to Phorma Code).

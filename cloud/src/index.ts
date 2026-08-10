@@ -21,10 +21,11 @@ import { handleApiRequest, type ApiEnv } from './api';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
+import { SecretVault } from './secret-vault';
 import { WorkflowAgent, type Env } from './workflow-agent';
 
-// Both Durable Object classes must be exported for their bindings to resolve.
-export { WorkflowAgent, PortalIndex };
+// Every Durable Object class must be exported for its binding to resolve.
+export { WorkflowAgent, PortalIndex, SecretVault };
 
 /** CORS headers for the current mode (scoped in hosted, `*` in BYO). */
 function corsHeaders(env: Env, request: Request): Record<string, string> {

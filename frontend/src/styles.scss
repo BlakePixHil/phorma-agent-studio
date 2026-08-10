@@ -1269,14 +1269,47 @@ app-root {
 
 /*
  * A square icon-only action sized to sit flush beside a `size="small"` input
- * (copy / open / add buttons in a `__url-row` or `__copy-row`). Apply to a
- * `pButton severity="secondary" [outlined] size="small"` button. Height comes
- * from the row's `align-items: stretch`, so only the width is pinned.
+ * (copy / open / save / add buttons in a `__url-row`, `__copy-row` or
+ * `__secret-row`). Apply to a `pButton severity="secondary" [text] size="small"`
+ * button. Height comes from the row's `align-items: stretch`, so only the width
+ * is pinned - a row using `align-items: center` squashes these to the icon's
+ * own line height.
+ *
+ * Muted, not outlined: a soft fill with NO border at rest, matching the field
+ * recipe beside it. An outlined icon button next to a borderless input drew the
+ * heaviest line in the row. Hover raises the fill; the semantic modifiers below
+ * tint that hover instead of adding chrome.
  */
 .phorma-input-icon-btn.p-button {
   width: 1.85rem;
   padding: 0;
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  border-color: transparent;
+  color: var(--p-text-muted-color);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
+    border-color: transparent;
+    color: var(--p-text-color);
+  }
+}
+
+/*
+ * Semantic hover tints for the confirming and destructive actions in a row.
+ * Colour appears ONLY on hover: a row of permanently green and red buttons
+ * reads as status, not as affordances.
+ */
+.phorma-input-icon-btn--success.p-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--phorma-accent-green, #22c55e) 16%, transparent);
+  border-color: transparent;
+  color: var(--phorma-accent-green, #22c55e);
+}
+
+.phorma-input-icon-btn--danger.p-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 16%, transparent);
+  border-color: transparent;
+  color: var(--phorma-accent-red, #ef4444);
 }
 
 /*

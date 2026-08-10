@@ -43,6 +43,7 @@ import { verifyBearer, verifyRequest, isHosted, type AuthContext } from './auth'
 import {
   OPENROUTER_SLUG_PREFIX,
   TenantStore,
+  decryptString,
   tierLimits,
   type TenantEnv,
   type TenantRecord,
@@ -68,7 +69,12 @@ import {
   assertPublicHttpUrl,
   createWorkerDataFetcher,
 } from './data-host';
-import { WorkerConnectionStore, connectionMetadataFromPush } from './connections';
+import {
+  WorkerConnectionStore,
+  connectionMetadataFromPush,
+  type WorkerConnectionSecretSource,
+} from './connections';
+import { secretVault, type SecretVaultEnv } from './secret-vault';
 // Decisions about a pushed spec (retention bounds, notification targeting) live
 // in one dependency-free module; this file owns the effects they describe.
 import {
@@ -145,7 +151,7 @@ import {
   type WorkflowSpec,
 } from '@phorma/engine';
 
-export interface Env extends TenantEnv, PortalRegistryEnv {
+export interface Env extends TenantEnv, PortalRegistryEnv, SecretVaultEnv {
   WorkflowAgent: DurableObjectNamespace;
   /** R2 bucket holding installer artifacts and update manifests. */
   RELEASES?: R2Bucket;
@@ -453,14 +459,47 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    * `workflow_state` table under `oauth:{connectionId}` (Requirements 3.5-3.7,
    * 3.10, 3.11). Built per run, because a push can replace both the metadata and
    * the workflow id that scopes the token cache.
+   *
+   * `secretSource` is the second ingestion path (`secret-vault.ts`): env wins,
+   * the vault fills the gap for a credential the operator could not set with
+   * `wrangler secret put`. `ownerFallback` matters on the FIRST push of a
+   * workflow, where the inventory is read before `POST /workflow` has stamped
+   * `ownerId` - without it, a hosted tenant's very first deploy would look at
+   * the wrong vault and report every secret missing.
    */
-  private connectionHost(workflowId: string): WorkerConnectionStore {
+  private connectionHost(workflowId: string, ownerFallback?: string | null): WorkerConnectionStore {
     return new WorkerConnectionStore(
       this.env as unknown as Readonly<Record<string, unknown>>,
       this.connectionMetadata(),
       this.workflowStateHost(),
-      { workflowId },
+      { workflowId, secretSource: this.vaultSecretSource(ownerFallback) },
     );
+  }
+
+  /**
+   * Vault-backed fallback for a `CONN_*` name, or undefined when this
+   * deployment has no vault (no binding, or no encryption key - both mean
+   * there is nothing to read). A decryption failure reads as absent: the
+   * caller already turns absence into a named, actionable error, and a
+   * half-decrypted credential must never reach an outbound request.
+   */
+  private vaultSecretSource(ownerFallback?: string | null): WorkerConnectionSecretSource | undefined {
+    const encryptionKey = this.env.KEY_ENC_SECRET;
+    if (!this.env.SecretVault || !encryptionKey) return undefined;
+    const ownerId = this.hosted ? (this.state.ownerId ?? ownerFallback ?? null) : null;
+    const vault = secretVault(this.env, ownerId);
+    return {
+      read: async (name: string) => {
+        const enc = await vault.read(name);
+        if (!enc) return undefined;
+        try {
+          return await decryptString(enc, encryptionKey);
+        } catch {
+          console.error(`[phorma] Could not decrypt the stored secret ${name}.`);
+          return undefined;
+        }
+      },
+    };
   }
 
   /**
@@ -559,7 +598,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // cannot run. An error finding aborts before `setState`/`rescheduleCron`
       // run, so a previously deployed workflow is left completely unchanged.
       // Warning-only findings never block the deployment.
-      const connections = await this.connectionHost(spec.id).list();
+      const connections = await this.connectionHost(spec.id, auth.userId).list();
       const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, connections);
       if (findings.some(finding => finding.severity === 'error')) {
         return json({ error: 'Workflow is not deployable to this worker.', findings }, 400);
@@ -605,7 +644,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // inventory `WorkerConnectionStore` will resolve against at run time.
     if (request.method === 'GET' && path.endsWith('/connections')) {
       const workflowId = this.state.spec?.id ?? '';
-      const connections = await this.connectionHost(workflowId).list();
+      const connections = await this.connectionHost(workflowId, auth.userId).list();
       return json({ connections });
     }
 

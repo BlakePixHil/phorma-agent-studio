@@ -14,6 +14,18 @@ import type { WorkflowNode } from './types.js';
  * `{{input}}` token cannot do.
  */
 
+/**
+ * `ToolDefinition.parameters` is deliberately the cross-package `object`
+ * boundary type (see the conventions steering), so a test that asserts on the
+ * JSON schema inside it has to narrow first.
+ */
+function schema(definition: { parameters: object }): {
+  properties?: Record<string, unknown>;
+  required?: string[];
+} {
+  return definition.parameters as { properties?: Record<string, unknown>; required?: string[] };
+}
+
 function node(data: object, overrides: Partial<WorkflowNode> = {}): WorkflowNode {
   return {
     id: 'n-http',
@@ -31,13 +43,13 @@ function node(data: object, overrides: Partial<WorkflowNode> = {}): WorkflowNode
 describe('httpToolDefinition', () => {
   it('falls back to a single free-form input property with no params', () => {
     const definition = httpToolDefinition(node({ method: 'GET', url: 'https://api.example.com' }));
-    expect(definition.parameters.properties).toEqual({
+    expect(schema(definition).properties).toEqual({
       input: {
         type: 'string',
         description: 'Interpolated into the {{input}} placeholder of the URL and body template.',
       },
     });
-    expect(definition.parameters.required).toEqual(['input']);
+    expect(schema(definition).required).toEqual(['input']);
   });
 
   it('builds one named string property per declared param', () => {
@@ -51,25 +63,25 @@ describe('httpToolDefinition', () => {
         ],
       }),
     );
-    expect(definition.parameters.properties).toEqual({
+    expect(schema(definition).properties).toEqual({
       issueKey: { type: 'string', description: 'Jira issue key' },
       body: { type: 'string', description: 'JSON request body' },
     });
-    expect(definition.parameters.required).toEqual(['issueKey', 'body']);
+    expect(schema(definition).required).toEqual(['issueKey', 'body']);
   });
 
   it('excludes a param from required when explicitly marked optional', () => {
     const definition = httpToolDefinition(
       node({ url: 'https://x.test', params: [{ name: 'q', required: false }] }),
     );
-    expect(definition.parameters.required).toEqual([]);
+    expect(schema(definition).required).toEqual([]);
   });
 
   it('ignores params with a blank name', () => {
     const definition = httpToolDefinition(
       node({ url: 'https://x.test', params: [{ name: '  ' }] }),
     );
-    expect(definition.parameters.properties).toEqual({
+    expect(schema(definition).properties).toEqual({
       input: {
         type: 'string',
         description: 'Interpolated into the {{input}} placeholder of the URL and body template.',

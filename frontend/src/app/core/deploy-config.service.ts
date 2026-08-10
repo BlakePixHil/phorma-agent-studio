@@ -33,12 +33,14 @@ export const BYO_CONFIG_FILENAME = 'wrangler.byo.jsonc';
 const DO_MIGRATIONS = [
   { tag: 'v1', new_sqlite_classes: ['WorkflowAgent'] },
   { tag: 'v2', new_sqlite_classes: ['PortalIndex'] },
+  { tag: 'v3', new_sqlite_classes: ['SecretVault'] },
 ] as const;
 
 /** Durable Object bindings, mirrored from `cloud/wrangler.jsonc`. */
 const DO_BINDINGS = [
   { name: 'WorkflowAgent', class_name: 'WorkflowAgent' },
   { name: 'PortalIndex', class_name: 'PortalIndex' },
+  { name: 'SecretVault', class_name: 'SecretVault' },
 ] as const;
 
 /** Compatibility settings, mirrored from `cloud/wrangler.jsonc`. */

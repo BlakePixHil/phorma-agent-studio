@@ -38,6 +38,25 @@ function parseJsonc(text) {
 const committedText = readFileSync(join(repoRoot, 'cloud', 'wrangler.jsonc'), 'utf8');
 const committed = parseJsonc(committedText);
 
+/**
+ * Every Durable Object class the worker exports, in migration order. Sourced
+ * from `src/index.ts` rather than hardcoded, so exporting a new class without
+ * binding it (or without a migration) fails here instead of at deploy.
+ */
+const EXPECTED_DO_CLASSES = (() => {
+  const indexText = readFileSync(join(repoRoot, 'cloud', 'src', 'index.ts'), 'utf8');
+  const match = /export \{([^}]+)\}/.exec(indexText);
+  return (match?.[1] ?? '')
+    .split(',')
+    .map(name => name.trim())
+    .filter(Boolean);
+})();
+
+/** A migration list reduced to `[tag, classes]` pairs for order-sensitive comparison. */
+function migrationShape(migrations) {
+  return (migrations ?? []).map(entry => [entry.tag, entry.new_sqlite_classes ?? []]);
+}
+
 // ── 1: the committed top-level config is BYO-safe ────────────────────────────
 console.log('Committed wrangler.jsonc: BYO-safe');
 {
@@ -53,12 +72,18 @@ console.log('Committed wrangler.jsonc: BYO-safe');
   );
   check('a worker name is still provided as a default', typeof committed.name === 'string');
   check('the entry point is set', committed.main === 'src/index.ts');
-  check('both Durable Objects are bound', committed.durable_objects?.bindings?.length === 2);
+  // Asserted as SETS rather than counts: adding a Durable Object should fail
+  // this suite only where a source actually drifted, not on a magic number.
+  const boundClasses = (committed.durable_objects?.bindings ?? []).map(b => b.class_name);
   check(
-    'migrations cover WorkflowAgent and PortalIndex',
-    committed.migrations?.length === 2 &&
-      committed.migrations[0].tag === 'v1' &&
-      committed.migrations[1].tag === 'v2',
+    'every Durable Object class this worker exports is bound',
+    JSON.stringify(boundClasses) === JSON.stringify(EXPECTED_DO_CLASSES),
+    JSON.stringify(boundClasses),
+  );
+  check(
+    'migrations cover every bound class, one tag each, in order',
+    JSON.stringify(migrationShape(committed.migrations)) ===
+      JSON.stringify(EXPECTED_DO_CLASSES.map((cls, i) => [`v${i + 1}`, [cls]])),
     JSON.stringify(committed.migrations),
   );
 
@@ -69,7 +94,18 @@ console.log('Committed wrangler.jsonc: BYO-safe');
   check('hosted keeps the RELEASES bucket', hosted?.r2_buckets?.length === 1);
   check('hosted keeps D1', hosted?.d1_databases?.length === 1);
   check('hosted keeps KV', hosted?.kv_namespaces?.length === 1);
-  check('hosted keeps both migrations', hosted?.migrations?.length === 2);
+  check(
+    'hosted mirrors the top-level Durable Object bindings',
+    JSON.stringify((hosted?.durable_objects?.bindings ?? []).map(b => b.class_name)) ===
+      JSON.stringify(EXPECTED_DO_CLASSES),
+    JSON.stringify(hosted?.durable_objects?.bindings),
+  );
+  check(
+    'hosted mirrors the top-level migrations',
+    JSON.stringify(migrationShape(hosted?.migrations)) ===
+      JSON.stringify(migrationShape(committed.migrations)),
+    JSON.stringify(hosted?.migrations),
+  );
   check('hosted sets PHORMA_MODE', hosted?.vars?.PHORMA_MODE === 'hosted');
 }
 
@@ -84,14 +120,15 @@ console.log('\nGenerated override: mirrors the committed config');
     'utf8',
   );
 
-  check(
-    'generator declares the v1 migration',
-    serviceText.includes("tag: 'v1'") && serviceText.includes("'WorkflowAgent'"),
-  );
-  check(
-    'generator declares the v2 migration',
-    serviceText.includes("tag: 'v2'") && serviceText.includes("'PortalIndex'"),
-  );
+  // The generated override REPLACES the committed config, so a class or a
+  // migration tag missing here silently drops a binding from every BYO deploy.
+  EXPECTED_DO_CLASSES.forEach((cls, index) => {
+    const tag = `v${index + 1}`;
+    check(
+      `generator declares the ${tag} migration for ${cls}`,
+      serviceText.includes(`tag: '${tag}'`) && serviceText.includes(`'${cls}'`),
+    );
+  });
   check(
     'generator uses the committed compatibility date',
     serviceText.includes(`'${committed.compatibility_date}'`),

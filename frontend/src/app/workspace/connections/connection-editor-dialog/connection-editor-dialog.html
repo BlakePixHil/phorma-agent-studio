@@ -108,7 +108,7 @@
                 severity="secondary"
                 [text]="true"
                 size="small"
-                class="phorma-input-icon-btn phorma-conn-editor__icon-btn--danger"
+                class="phorma-input-icon-btn phorma-input-icon-btn--danger"
                 title="Remove"
                 [attr.aria-label]="'Remove config entry ' + ($index + 1)"
                 (click)="removeConfigRow($index)"
@@ -508,19 +508,41 @@
           <div class="phorma-conn-editor__field">
             <span class="phorma-conn-editor__label">Secrets</span>
 
-            @if (!secretsSupported) {
+            @if (!secretsSupported && !cloudConfigured()) {
               <p class="phorma-conn-editor__warn">
                 <i class="ti ti-lock" aria-hidden="true"></i>
-                Secret storage requires the desktop app or a deployed worker - this host has no
-                connection secret store, so secret entry is disabled here.
+                Secret storage needs the desktop app (OS keychain) or a deploy target set in
+                Settings > Cloud. This host has neither, so secret entry is disabled here.
               </p>
             } @else {
+              @if (!secretsSupported) {
+                <p class="phorma-conn-editor__hint">
+                  This host has no local secret store, so values go straight to your deploy target
+                  with <i class="ti ti-cloud-upload" aria-hidden="true"></i>. Local runs here
+                  cannot use them.
+                </p>
+              } @else if (cloudConfigured()) {
+                <p class="phorma-conn-editor__hint">
+                  Deployed runs cannot read this machine's keychain, so each secret needs a copy on
+                  your deploy target. Save it here, then use
+                  <i class="ti ti-cloud-upload" aria-hidden="true"></i> to send the same value to
+                  the cloud.
+                </p>
+              }
+
               @for (key of connection.secretKeys; track key) {
                 <div class="phorma-conn-editor__secret-row">
                   <label class="phorma-conn-editor__secret-label">
                     {{ key }}
                     @if (secretConfigured(key)) {
-                      <i class="ti ti-circle-check phorma-conn-editor__ok" title="Stored" aria-hidden="true"></i>
+                      <i class="ti ti-circle-check phorma-conn-editor__ok" title="Stored on this machine" aria-hidden="true"></i>
+                    }
+                    @if (storedInCloud(key)) {
+                      <i
+                        class="ti ti-cloud-check phorma-conn-editor__ok"
+                        title="Stored on your deploy target"
+                        aria-hidden="true"
+                      ></i>
                     }
                   </label>
                   <input
@@ -538,23 +560,57 @@
                     type="button"
                     pButton
                     severity="secondary"
-                    [outlined]="true"
+                    [text]="true"
                     size="small"
-                    class="phorma-input-icon-btn"
-                    [disabled]="secretDrafts()[key] === undefined"
+                    class="phorma-input-icon-btn phorma-input-icon-btn--success"
+                    [disabled]="!secretsSupported || secretDrafts()[key] === undefined"
                     (click)="saveSecret(key)"
-                    title="Save"
+                    [title]="secretsSupported ? 'Save on this machine' : 'This host has no local secret store'"
                     aria-label="Save secret"
                   >
                     <i class="ti ti-check" aria-hidden="true"></i>
                   </button>
+                  @if (cloudConfigured()) {
+                    <button
+                      type="button"
+                      pButton
+                      severity="secondary"
+                      [text]="true"
+                      size="small"
+                      class="phorma-input-icon-btn"
+                      [disabled]="!secretDrafts()[key] || sendingSecret(key)"
+                      (click)="sendSecretToCloud(key)"
+                      title="Send this value to your deploy target"
+                      aria-label="Send this value to your deploy target"
+                    >
+                      <i
+                        [class]="sendingSecret(key) ? 'ti ti-loader-2 phorma-icon-spin' : 'ti ti-cloud-upload'"
+                        aria-hidden="true"
+                      ></i>
+                    </button>
+                    @if (storedInCloud(key)) {
+                      <button
+                        type="button"
+                        pButton
+                        severity="secondary"
+                        [text]="true"
+                        size="small"
+                        class="phorma-input-icon-btn phorma-input-icon-btn--danger"
+                        (click)="removeCloudSecret(key)"
+                        title="Remove the cloud copy"
+                        aria-label="Remove the cloud copy"
+                      >
+                        <i class="ti ti-cloud-off" aria-hidden="true"></i>
+                      </button>
+                    }
+                  }
                   <button
                     type="button"
                     pButton
                     severity="secondary"
                     [text]="true"
                     size="small"
-                    class="phorma-input-icon-btn phorma-conn-editor__icon-btn--danger"
+                    class="phorma-input-icon-btn phorma-input-icon-btn--danger"
                     (click)="removeSecretField(key)"
                     title="Remove this secret field"
                     aria-label="Remove this secret field"
@@ -581,7 +637,7 @@
                   type="button"
                   pButton
                   severity="secondary"
-                  [outlined]="true"
+                  [text]="true"
                   size="small"
                   class="phorma-input-icon-btn"
                   [disabled]="!newSecretName().trim()"

@@ -19,13 +19,24 @@
 //      remains as a fallback for non-Clerk clients)
 //   4. npx wrangler deploy   (or use Deploy in the studio's Cloud dialog)
 //
-// Credentials a DEPLOYED workflow needs are separate worker secrets, because
-// the studio's own keychain never travels to the cloud:
-//   - Remote MCP node bearer tokens:  npx wrangler secret put MCP_<AUTHKEY>
-//     e.g. the "Email (remote)" preset's authKey RESEND_API_KEY becomes
-//     MCP_RESEND_API_KEY. Local (stdio) MCP servers cannot run here at all.
-//   - Connection secrets:  npx wrangler secret put CONN_<ID>_<KEY>
-//     (the exact name is in the error the run reports when one is missing)
+// Credentials a DEPLOYED workflow needs never travel with a push - the studio's
+// keychain stays on the machine. Two ways to give the worker its own copy:
+//
+//   a) From the studio (recommended, no terminal). One-time setup:
+//        npx wrangler secret put KEY_ENC_SECRET   # base64 32 random bytes, e.g.
+//        #   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+//        npx wrangler secret put PHORMA_TOKEN     # required: the vault refuses
+//        #   to store credentials on an unprotected worker
+//      Then use the cloud button beside a secret in the studio's Connections
+//      editor. Values are AES-GCM encrypted and held in the SecretVault
+//      Durable Object; the worker reads them when a run resolves a connection.
+//
+//   b) As real worker secrets (always available, takes priority over the vault):
+//      - Remote MCP node bearer tokens:  npx wrangler secret put MCP_<AUTHKEY>
+//        e.g. the "Email (remote)" preset's authKey RESEND_API_KEY becomes
+//        MCP_RESEND_API_KEY. Local (stdio) MCP servers cannot run here at all.
+//      - Connection secrets:  npx wrangler secret put CONN_<ID>_<KEY>
+//        (the exact name is in the error the run reports when one is missing)
 //
 // If you have MORE THAN ONE Cloudflare account, or you want a custom worker
 // name or a custom portal domain, set those in the studio under
@@ -48,6 +59,11 @@
       {
         "name": "PortalIndex",
         "class_name": "PortalIndex"
+      },
+      // Encrypted credential vault for deployed runs (one instance per owner).
+      {
+        "name": "SecretVault",
+        "class_name": "SecretVault"
       }
     ]
   },
@@ -59,6 +75,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["PortalIndex"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["SecretVault"]
     }
   ],
   "observability": {
@@ -100,6 +120,11 @@
           {
             "name": "PortalIndex",
             "class_name": "PortalIndex"
+          },
+          // Encrypted credential vault for deployed runs (one instance per tenant).
+          {
+            "name": "SecretVault",
+            "class_name": "SecretVault"
           }
         ]
       },
@@ -111,6 +136,10 @@
         {
           "tag": "v2",
           "new_sqlite_classes": ["PortalIndex"]
+        },
+        {
+          "tag": "v3",
+          "new_sqlite_classes": ["SecretVault"]
         }
       ],
       "d1_databases": [

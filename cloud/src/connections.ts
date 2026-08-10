@@ -67,6 +67,22 @@ export interface CachedOAuthToken {
  */
 export type WorkerConnectionEnv = Readonly<Record<string, unknown>>;
 
+/**
+ * A second place a `CONN_*`-named secret value can come from, consulted only
+ * when the worker env has none.
+ *
+ * `wrangler secret put` is a deploy-time operation that needs the operator's
+ * own Cloudflare account, so it cannot be the only ingestion path: a
+ * Phorma-hosted tenant has no way to run it at all. The vault
+ * (`POST /api/connection-secrets`, see `secret-vault.ts`) fills that gap, and
+ * env keeps priority so an operator who already set a real worker secret is
+ * never silently overridden by a vault entry.
+ */
+export interface WorkerConnectionSecretSource {
+  /** Value for a `workerSecretName` entry, or undefined when absent. */
+  read(name: string): Promise<string | undefined>;
+}
+
 export interface WorkerConnectionStoreOptions {
   /** Scope for the `oauth:` cache key. Same value the engine uses for state. */
   readonly workflowId?: string;
@@ -74,6 +90,8 @@ export interface WorkerConnectionStoreOptions {
   readonly now?: () => number;
   /** Token endpoint transport. Default the global `fetch`. */
   readonly fetchImpl?: typeof fetch;
+  /** Fallback secret store consulted when env holds no value for a name. */
+  readonly secretSource?: WorkerConnectionSecretSource;
 }
 
 /** The two `auth.mode` values that need a token before a request goes out. */
@@ -92,6 +110,14 @@ export class WorkerConnectionStore implements ConnectionStore {
   private readonly clock: () => number;
   private readonly fetchImpl: typeof fetch;
   private readonly workflowId: string;
+  private readonly secretSource: WorkerConnectionSecretSource | undefined;
+  /**
+   * Memoised vault lookups, so resolving N secrets of one connection (or
+   * listing the inventory) costs one round trip per NAME rather than per read.
+   * Scoped to this store instance, which is built per run/request, so a
+   * rotation is picked up by the next one without any invalidation logic.
+   */
+  private readonly sourceCache = new Map<string, Promise<string | undefined>>();
   /**
    * In-flight refreshes, keyed by connection id. Requirement 2.7: every
    * resolution arriving while a refresh is in flight is served from that single
@@ -109,6 +135,7 @@ export class WorkerConnectionStore implements ConnectionStore {
     this.clock = options.now ?? (() => Date.now());
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.workflowId = options.workflowId ?? '';
+    this.secretSource = options.secretSource;
   }
 
   /**
@@ -132,7 +159,7 @@ export class WorkerConnectionStore implements ConnectionStore {
       );
     }
 
-    const secrets = this.readDeclaredSecrets(connection);
+    const secrets = await this.readDeclaredSecrets(connection);
 
     if (connection.auth.mode === 'oauth2-client-credentials' || connection.auth.mode === 'oauth2-refresh') {
       // A failure here throws, so `secrets` (already read) is discarded with the
@@ -150,14 +177,22 @@ export class WorkerConnectionStore implements ConnectionStore {
    * readable.
    */
   async list(): Promise<ConnectionSummary[]> {
-    return [...this.metadata.values()]
-      .map((connection) => ({
+    const summaries: ConnectionSummary[] = [];
+    for (const connection of this.metadata.values()) {
+      const missing: string[] = [];
+      for (const key of connection.secretKeys) {
+        if ((await this.secretValue(connection.id, key)) === undefined) missing.push(key);
+      }
+      summaries.push({
         ...connection,
         secretKeys: [...connection.secretKeys],
-        secretsPresent: connection.secretKeys.filter((key) => this.secretValue(connection.id, key) !== undefined)
-          .length,
-      }))
-      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+        secretsPresent: connection.secretKeys.length - missing.length,
+        // Names the studio can act on: the push-time validator turns these
+        // into the exact `CONN_*` entry the operator has to create.
+        missingSecretKeys: missing,
+      });
+    }
+    return summaries.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
   }
 
   // ── Secrets ───────────────────────────────────────────────────────────────
@@ -167,14 +202,16 @@ export class WorkerConnectionStore implements ConnectionStore {
    * missing key names itself and the connection, and the values read before it
    * go out of scope unused — there is no partial bundle to leak or misuse.
    */
-  private readDeclaredSecrets(connection: Connection): Record<string, string> {
+  private async readDeclaredSecrets(connection: Connection): Promise<Record<string, string>> {
     const secrets: Record<string, string> = {};
     for (const key of connection.secretKeys) {
-      const value = this.secretValue(connection.id, key);
+      const value = await this.secretValue(connection.id, key);
       if (value === undefined) {
         throw new Error(
           `Connection "${connection.name}" (${connection.id}) is missing the secret "${key}". ` +
-            `Set the worker secret ${workerSecretName(connection.id, key)} and deploy again.`,
+            `Store it as ${workerSecretName(connection.id, key)} - use the cloud button beside ` +
+            `the secret in Connections, or \`npx wrangler secret put ` +
+            `${workerSecretName(connection.id, key)}\` - and push again.`,
         );
       }
       secrets[key] = value;
@@ -182,9 +219,25 @@ export class WorkerConnectionStore implements ConnectionStore {
     return secrets;
   }
 
-  /** One `CONN_*` lookup. Absent, non-string and empty all read as absent. */
-  private secretValue(connectionId: string, secretKey: string): string | undefined {
-    const value = this.env[workerSecretName(connectionId, secretKey)];
+  /**
+   * One `CONN_*` lookup: worker env first, then the vault. Absent, non-string
+   * and empty all read as absent, in either source.
+   */
+  private async secretValue(connectionId: string, secretKey: string): Promise<string | undefined> {
+    const name = workerSecretName(connectionId, secretKey);
+    const fromEnv = this.env[name];
+    if (typeof fromEnv === 'string' && fromEnv.length > 0) return fromEnv;
+
+    const source = this.secretSource;
+    if (!source) return undefined;
+    let pending = this.sourceCache.get(name);
+    if (!pending) {
+      // A vault failure must read as "absent", not crash the run: the caller
+      // already turns absence into a named, actionable error.
+      pending = source.read(name).catch(() => undefined);
+      this.sourceCache.set(name, pending);
+    }
+    const value = await pending;
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 

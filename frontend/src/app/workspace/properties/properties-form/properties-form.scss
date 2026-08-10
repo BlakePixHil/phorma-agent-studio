@@ -209,13 +209,17 @@
   }
 }
 
-// Sizing comes from the shared `.phorma-input-icon-btn` class in styles.scss.
-// Destructive actions stay neutral until hovered, so the panel does not read
-// as a wall of warnings.
+// Sizing and the muted resting fill come from the shared `.phorma-input-icon-btn`
+// class in styles.scss. Destructive actions stay neutral until hovered, so the
+// panel does not read as a wall of warnings.
+//
+// The border stays transparent on hover to match the shared
+// `.phorma-input-icon-btn--danger` modifier - prefer that class in new markup;
+// this local name is kept only because it is already on ~8 buttons here.
 .phorma-props__icon-btn--danger.p-button:hover:not(:disabled) {
-  border-color: var(--phorma-accent-red, #f87171);
+  border-color: transparent;
   color: var(--phorma-accent-red, #f87171);
-  background: color-mix(in srgb, var(--phorma-accent-red, #f87171) 12%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-red, #f87171) 16%, transparent);
 }
 
 .phorma-props__select-full {
