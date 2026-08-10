@@ -1,63 +1,65 @@
 <div class="phorma-workflows">
-  <!-- Saved workflows -->
-  <div class="phorma-workflows__section-label">Saved</div>
-  @if (workflow.library().length > 0) {
-    <ul class="phorma-workflows__list">
-      @for (spec of workflow.library(); track spec.id) {
-        <li>
-          <app-panel-card (click)="open(spec)">
-            <i card-icon class="ti ti-topology-star-3" aria-hidden="true"></i>
-            <ng-container card-meta>
-              <span class="phorma-card__title">{{ spec.name }}</span>
-              <span class="phorma-card__sub">{{ spec.savedAt | date: 'MMM d, h:mm a' }}</span>
-            </ng-container>
-            <ng-container card-actions>
-              <span
-                role="button"
-                tabindex="0"
-                class="phorma-card__action-btn"
-                aria-label="View version history"
-                title="Version history"
-                (click)="openHistory($event, spec)"
-                (keydown.enter)="openHistory($event, spec)"
-              >
-                <i class="ti ti-history" aria-hidden="true"></i>
-              </span>
-              <span
-                role="button"
-                tabindex="0"
-                class="phorma-card__action-btn"
-                aria-label="Rename workflow"
-                title="Rename"
-                (click)="rename($event, spec)"
-                (keydown.enter)="rename($event, spec)"
-              >
-                <i class="ti ti-edit" aria-hidden="true"></i>
-              </span>
-              <span
-                role="button"
-                tabindex="0"
-                class="phorma-card__action-btn phorma-card__action-btn--danger"
-                aria-label="Delete workflow"
-                title="Delete"
-                (click)="remove($event, spec)"
-                (keydown.enter)="remove($event, spec)"
-              >
-                <i class="ti ti-trash" aria-hidden="true"></i>
-              </span>
-            </ng-container>
-          </app-panel-card>
-        </li>
-      }
-    </ul>
-  } @else {
-    <div class="phorma-workflows__placeholder">
-      <i class="ti ti-topology-star-3" aria-hidden="true"></i>
-      <p>No saved workflows yet.<br />Save one with Ctrl+S.</p>
-    </div>
-  }
+  <!-- Saved workflows (grows to fill, pushing templates to the bottom) -->
+  <section class="phorma-workflows__saved-section">
+    <div class="phorma-workflows__section-label">Saved</div>
+    @if (workflow.library().length > 0) {
+      <ul class="phorma-workflows__list">
+        @for (spec of workflow.library(); track spec.id) {
+          <li>
+            <app-panel-card (click)="open(spec)">
+              <i card-icon class="ti ti-topology-star-3" aria-hidden="true"></i>
+              <ng-container card-meta>
+                <span class="phorma-card__title">{{ spec.name }}</span>
+                <span class="phorma-card__sub">{{ spec.savedAt | date: 'MMM d, h:mm a' }}</span>
+              </ng-container>
+              <ng-container card-actions>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-card__action-btn"
+                  aria-label="View version history"
+                  title="Version history"
+                  (click)="openHistory($event, spec)"
+                  (keydown.enter)="openHistory($event, spec)"
+                >
+                  <i class="ti ti-history" aria-hidden="true"></i>
+                </span>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-card__action-btn"
+                  aria-label="Rename workflow"
+                  title="Rename"
+                  (click)="rename($event, spec)"
+                  (keydown.enter)="rename($event, spec)"
+                >
+                  <i class="ti ti-edit" aria-hidden="true"></i>
+                </span>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-card__action-btn phorma-card__action-btn--danger"
+                  aria-label="Delete workflow"
+                  title="Delete"
+                  (click)="remove($event, spec)"
+                  (keydown.enter)="remove($event, spec)"
+                >
+                  <i class="ti ti-trash" aria-hidden="true"></i>
+                </span>
+              </ng-container>
+            </app-panel-card>
+          </li>
+        }
+      </ul>
+    } @else {
+      <div class="phorma-workflows__placeholder">
+        <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+        <p>No saved workflows yet.<br />Save one with Ctrl+S.</p>
+      </div>
+    }
+  </section>
 
-  <!-- Built-in templates (collapsible) -->
+  <!-- Built-in templates (collapsible, pinned to bottom) -->
   <section class="phorma-workflows__templates-section"
     [class.phorma-workflows__templates-section--collapsed]="templatesCollapsed()">
     <button type="button" class="phorma-workflows__templates-header" (click)="toggleTemplates()"
@@ -68,7 +70,7 @@
       <span class="phorma-workflows__templates-header-label">Templates</span>
     </button>
     @if (!templatesCollapsed()) {
-      <ul id="phorma-workflows-templates-list" class="phorma-workflows__list">
+      <ul id="phorma-workflows-templates-list" class="phorma-workflows__list phorma-workflows__templates-list">
         @for (template of templates; track template.id) {
           <li>
             <app-panel-card (click)="openTemplate(template)" [title]="template.description">
