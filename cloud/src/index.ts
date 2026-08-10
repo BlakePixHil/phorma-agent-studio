@@ -12,6 +12,10 @@
  *    their own prefix.
  *  - `/api/*` control-plane routes (profile/quota, admin provisioning).
  *  - CORS is scoped via ALLOWED_ORIGINS instead of `*`.
+ *
+ * Three route groups are deliberately public and matched before any auth layer:
+ * `/status.*` (service health for the website), `/update|/download|/releases.json`
+ * (installers and the updater manifest), and `/p/{slug}` (published portals).
  */
 
 import { routeAgentRequest } from 'agents';
@@ -21,6 +25,7 @@ import { handleApiRequest, type ApiEnv } from './api';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
+import { handleStatusRequest, type StatusEnv } from './status';
 import { SecretVault } from './secret-vault';
 import { WorkflowAgent, type Env } from './workflow-agent';
 
@@ -49,6 +54,14 @@ const AGENT_PATH_PREFIX = '/agents/workflow-agent/';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const cors = corsHeaders(env, request);
+
+    // Public service status (`/status.json`, `/status.svg`). Unauthenticated and
+    // edge-cached so the marketing site can render a live indicator. Matched
+    // FIRST because it answers its own preflight with open CORS - the scoped
+    // `cors` below would reject phorma-labs.com, and widening ALLOWED_ORIGINS
+    // to fix that would also widen the authenticated `/api/*` surface.
+    const statusResponse = await handleStatusRequest(request, env as StatusEnv, ctx);
+    if (statusResponse) return statusResponse;
 
     // CORS preflight for the studio (Tauri webview / localhost dev).
     if (request.method === 'OPTIONS') {

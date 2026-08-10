@@ -119,6 +119,7 @@ pull the builder, registry and cloud services into the layout shell at startup.
 Circular DI (NG0200) exists around the run path:
 `RunControllerService -> ModelTransportService -> PhormaCloudService -> CloudService -> RunControllerService`.
 `CloudService` legitimately injects `RunControllerService`, so **services on the transport path
-must not inject `CloudService`**. Read the Phorma Cloud base URL with
-`loadLayout('phormaCloudUrl', PHORMA_CLOUD_DEFAULT_URL)` instead.
-`WorkflowVersionsService` deliberately injects only storage for the same reason.
+must not inject `CloudService`**. Read the Phorma Cloud base URL with `loadPhormaCloudUrl()` from
+`core/phorma-cloud-url.ts` - a leaf module that also owns `PHORMA_CLOUD_DEFAULT_URL` and migrates
+installs off retired hosts. `WorkflowVersionsService` deliberately injects only storage for the
+same reason.

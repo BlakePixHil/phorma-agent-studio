@@ -61,6 +61,28 @@ user's own Cloudflare account and keys).
   on every BYO deploy. `cloud/test/deploy-config.test.mjs` derives the expected class list from
   `src/index.ts`'s export statement and will catch a miss.
 
+## Public service status (`cloud/src/status.ts`)
+
+`GET /status.json` and `GET /status.svg` are unauthenticated, edge-cached (30s) health routes that
+phorma-labs.com renders as its footer indicator and `/status` page.
+
+- Matched FIRST in `index.ts`, before the generic `OPTIONS` branch, because they answer with open
+  CORS (`*`). Do not "fix" a cross-origin failure by adding the website to `ALLOWED_ORIGINS` - that
+  widens the authenticated `/api/*` surface too.
+- Eight components, each with a functional probe: WorkflowAgent DO, D1, KV, SecretVault DO,
+  PortalIndex DO, R2, Clerk, OpenRouter. `critical: true` on runtime, D1, KV, Clerk and OpenRouter.
+- Rollup: critical outage -> red, any degraded or non-critical outage -> amber, else green. An
+  absent binding is `unknown` and is EXCLUDED, so a BYO worker never reads as broken.
+- Always answers HTTP 200, even during an outage. A non-200 makes browsers and generic monitors
+  report "unreachable" and throw away the detail we just gathered.
+- Cloudflare's own status page is intentionally not consulted: its global indicator is almost never
+  green, so it would pin the badge amber. Clerk's Statuspage (`/api/v2/status.json`) IS trusted for
+  colour. OpenRouter has no public status JSON, so it gets a functional probe only.
+- Probe `detail` strings are hand-written. Never forward a vendor body or an exception message -
+  `status.test.mjs` asserts secrets and internal errors stay out of the payload.
+- Operator banner without a deploy: put JSON at the `status:notice` KV key
+  (`{status,message,until?}`). It can only make the rollup worse, never better.
+
 ## Release-adjacent code in cloud/
 
 `cloud/src/releases.ts` serves the updater manifest. Prerelease comparison is SemVer dot-segment

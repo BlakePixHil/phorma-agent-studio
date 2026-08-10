@@ -22,6 +22,7 @@ import { TauriService } from './tauri.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { WorkflowService } from './workflow.service';
 import { loadLayout, saveLayout } from './layout-storage';
+import { loadPhormaCloudUrl, savePhormaCloudUrl } from './phorma-cloud-url';
 import { ToastService } from '../shared/toast/toast.service';
 import { isAgentNode, type WorkflowSpec } from './workflow.model';
 import type {
@@ -47,8 +48,9 @@ function toConnectionMetadata(
   return metadata;
 }
 
-/** Default Phorma Cloud runtime URL (override via the hidden setting). */
-export const PHORMA_CLOUD_DEFAULT_URL = 'https://dev.phoma-labs.com';
+// `PHORMA_CLOUD_DEFAULT_URL` and the retired-host migration live in
+// `phorma-cloud-url.ts`, a leaf module the run path can import without closing
+// the RunController -> ModelTransport -> PhormaCloud -> Cloud DI cycle.
 
 /**
  * The studio's bridge to the deployed cloud runtime.
@@ -82,7 +84,7 @@ export class CloudService {
   /** Absolute path of the repo's cloud/ folder (deploy runs wrangler there). */
   readonly cloudFolder = signal(loadLayout('cloudFolder', ''));
   /** Phorma Cloud base URL (configurable for staging; defaults to prod). */
-  readonly phormaCloudUrl = signal(loadLayout('phormaCloudUrl', PHORMA_CLOUD_DEFAULT_URL));
+  readonly phormaCloudUrl = signal(loadPhormaCloudUrl());
 
   /** The user's chosen deploy target (null until picked in Settings → Cloud). */
   readonly provider = computed(() => this.settings.cloudProvider());
@@ -141,8 +143,7 @@ export class CloudService {
   }
 
   setPhormaCloudUrl(url: string): void {
-    this.phormaCloudUrl.set(url.trim().replace(/\/$/, '') || PHORMA_CLOUD_DEFAULT_URL);
-    saveLayout('phormaCloudUrl', this.phormaCloudUrl());
+    this.phormaCloudUrl.set(savePhormaCloudUrl(url));
   }
 
   /** Picks the cloud/ folder with the native dialog (desktop only). */

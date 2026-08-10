@@ -19,7 +19,8 @@ import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { SettingsDialogService } from '../settings-dialog.service';
-import { CloudService, PHORMA_CLOUD_DEFAULT_URL } from '../../../core/cloud.service';
+import { CloudService } from '../../../core/cloud.service';
+import { PHORMA_CLOUD_DEFAULT_URL } from '../../../core/phorma-cloud-url';
 import { DeployConfigService } from '../../../core/deploy-config.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import { ModelTransportService } from '../../../core/model-transport.service';

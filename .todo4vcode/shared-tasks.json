@@ -21,6 +21,48 @@
       "completed": false,
       "createdAt": 1785067035332,
       "order": 2000
+    },
+    {
+      "id": "scan-1je6zxx",
+      "text": "the dividing line is rendered ONCE, by the resize handle's hairline",
+      "description": "[NOTE] frontend/src/app/layout/sidebar/sidebar.scss:19",
+      "tags": [
+        "note",
+        "frontend/src/app/layout/sidebar/sidebar.scss",
+        "frontend/src/app/layout/sidebar/sidebar.scss:19"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1786340488437,
+      "order": 3000,
+      "source": {
+        "type": "comment-scan",
+        "file": "frontend/src/app/layout/sidebar/sidebar.scss",
+        "line": 19,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1i9n0dj",
+      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
+      "description": "[NOTE] cloud/wrangler.jsonc:87",
+      "tags": [
+        "note",
+        "cloud/wrangler.jsonc",
+        "cloud/wrangler.jsonc:87"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1786340491185,
+      "order": 4000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/wrangler.jsonc",
+        "line": 87,
+        "marker": "NOTE"
+      }
     }
   ]
 }

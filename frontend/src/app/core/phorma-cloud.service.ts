@@ -3,8 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import { PHORMA_CLOUD_DEFAULT_URL } from './cloud.service';
-import { loadLayout } from './layout-storage';
+import { loadPhormaCloudUrl } from './phorma-cloud-url';
 
 /** Profile + quota returned by the hosted control plane's `GET /api/me`. */
 export interface PhormaCloudProfile {
@@ -216,10 +215,10 @@ export class PhormaCloudService {
       this.error.set(null);
       return;
     }
-    // Read phormaCloudUrl directly from localStorage (not CloudService) to
-    // avoid a circular DI: RunControllerService → ModelTransportService →
-    // PhormaCloudService → CloudService → RunControllerService.
-    const base = loadLayout('phormaCloudUrl', PHORMA_CLOUD_DEFAULT_URL);
+    // Read the URL from the leaf module (not CloudService) to avoid a circular
+    // DI: RunControllerService → ModelTransportService → PhormaCloudService →
+    // CloudService → RunControllerService.
+    const base = loadPhormaCloudUrl();
     if (!base) return;
 
     this.loading.set(true);

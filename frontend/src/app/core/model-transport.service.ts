@@ -11,8 +11,8 @@ import {
   type ModelRequest,
 } from '@phorma/engine';
 
-import { PHORMA_CLOUD_DEFAULT_URL } from './cloud.service';
 import { loadLayout } from './layout-storage';
+import { loadPhormaCloudUrl } from './phorma-cloud-url';
 import { PhormaCloudService } from './phorma-cloud.service';
 import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
@@ -43,11 +43,11 @@ export class ModelTransportService {
       : new FetchModelClient(async provider =>
           providerRequiresKey(provider) ? this.settings.browserKey(provider) : null,
         );
-    // Read phormaCloudUrl directly from localStorage (not CloudService) to
-    // avoid a circular DI: RunControllerService → ModelTransportService →
-    // CloudService → RunControllerService. The value rarely changes and is
-    // re-read on every create() call, so it stays current enough.
-    const cloudBaseUrl = loadLayout('phormaCloudUrl', PHORMA_CLOUD_DEFAULT_URL);
+    // Read the URL from the leaf module (not CloudService) to avoid a circular
+    // DI: RunControllerService → ModelTransportService → CloudService →
+    // RunControllerService. The value rarely changes and is re-read on every
+    // create() call, so it stays current enough.
+    const cloudBaseUrl = loadPhormaCloudUrl();
     return new CompositeModelClient(byoClient, this.phormaCloud, cloudBaseUrl);
   }
 
