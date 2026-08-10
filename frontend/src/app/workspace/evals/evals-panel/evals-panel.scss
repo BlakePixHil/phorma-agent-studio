@@ -105,65 +105,13 @@
   padding: 0;
 }
 
-.phorma-evals__list-item.p-button {
-  justify-content: flex-start;
-  gap: 0.5rem;
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-  padding: 0.45rem 0.55rem;
-  color: var(--p-text-color);
-  text-align: left;
-}
-
 .phorma-evals__list-icon {
   color: var(--p-text-muted-color);
 }
 
-.phorma-evals__list-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
-  flex: 1;
-}
-
-.phorma-evals__list-title {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.phorma-evals__list-sub {
-  font-size: 0.928rem;
-  color: var(--p-text-muted-color);
-}
-
-// The delete action sits beside the row button (never nested inside it).
+// The row wrapper is just a container now (card handles layout).
 .phorma-evals__row {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.phorma-evals__delete.p-button {
-  flex-shrink: 0;
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-
-  .phorma-evals__row:hover &,
-  &:focus-visible {
-    opacity: 1;
-  }
 }
 
 .phorma-evals__detail-header {

@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 
 import { WorkflowService } from '../../../core/workflow.service';
 import { SettingsService } from '../../../core/settings.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
+import { PanelCard } from '../../../shared/panel-card/panel-card';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from '../../../core/workflow-templates';
 import type { WorkflowSpec } from '../../../core/workflow.model';
 import { VersionHistoryDialogService } from '../version-history-dialog.service';
@@ -18,7 +19,7 @@ import { VersionHistoryDialogService } from '../version-history-dialog.service';
 @Component({
   selector: 'app-workflows-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe],
+  imports: [DatePipe, PanelCard],
   templateUrl: './workflows-panel.html',
   styleUrl: './workflows-panel.scss',
 })
@@ -32,8 +33,15 @@ export class WorkflowsPanel {
   /** Built-in template gallery (registry-driven). */
   protected readonly templates = WORKFLOW_TEMPLATES;
 
+  /** Whether the templates section is collapsed. */
+  protected readonly templatesCollapsed = signal(false);
+
   protected open(spec: WorkflowSpec): void {
     this.workflow.openWorkflow(spec.id);
+  }
+
+  protected toggleTemplates(): void {
+    this.templatesCollapsed.update(v => !v);
   }
 
   protected openHistory(event: Event, spec: WorkflowSpec): void {

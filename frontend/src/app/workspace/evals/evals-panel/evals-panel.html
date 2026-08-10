@@ -35,37 +35,29 @@
         <ul class="phorma-evals__list">
           @for (suite of evals.suites(); track suite.id) {
             <li class="phorma-evals__row">
-              <button
-                type="button"
-                pButton
-                severity="secondary"
-                [outlined]="true"
-                size="small"
-                class="phorma-evals__list-item"
-                (click)="openSuite(suite)"
-              >
-                <i class="ti ti-flask phorma-evals__list-icon" aria-hidden="true"></i>
-                <span class="phorma-evals__list-meta">
-                  <span class="phorma-evals__list-title">{{ suite.name }}</span>
-                  <span class="phorma-evals__list-sub">
+              <app-panel-card (click)="openSuite(suite)">
+                <i card-icon class="ti ti-flask phorma-evals__list-icon" aria-hidden="true"></i>
+                <ng-container card-meta>
+                  <span class="phorma-card__title">{{ suite.name }}</span>
+                  <span class="phorma-card__sub">
                     {{ suite.cases.length }} {{ suite.cases.length === 1 ? 'case' : 'cases' }}
                     · updated {{ suite.updatedAt | date: 'MMM d, HH:mm' }}
                   </span>
-                </span>
-              </button>
-              <button
-                type="button"
-                pButton
-                severity="danger"
-                [text]="true"
-                size="small"
-                class="phorma-evals__delete"
-                title="Delete suite"
-                aria-label="Delete suite"
-                (click)="deleteSuite(suite, $event)"
-              >
-                <i class="ti ti-trash" aria-hidden="true"></i>
-              </button>
+                </ng-container>
+                <ng-container card-actions>
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="phorma-card__action-btn phorma-card__action-btn--danger"
+                    title="Delete suite"
+                    aria-label="Delete suite"
+                    (click)="deleteSuite(suite, $event)"
+                    (keydown.enter)="deleteSuite(suite, $event)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </span>
+                </ng-container>
+              </app-panel-card>
             </li>
           }
         </ul>
@@ -344,49 +336,41 @@
           <ul class="phorma-evals__list">
             @for (run of evals.runs(); track run.id) {
               <li class="phorma-evals__row">
-                <button
-                  type="button"
-                  pButton
-                  severity="secondary"
-                  [outlined]="true"
-                  size="small"
-                  class="phorma-evals__list-item"
-                  (click)="openRun(run)"
-                >
-                  <span
+                <app-panel-card (click)="openRun(run)">
+                  <span card-icon
                     class="phorma-evals__pass-badge"
                     [class.phorma-evals__pass-badge--ok]="passCounts(run).passed === passCounts(run).total && run.status === 'completed'"
                   >
                     {{ passCounts(run).passed }}/{{ passCounts(run).total }}
                   </span>
-                  <span class="phorma-evals__list-meta">
-                    <span class="phorma-evals__list-title">
+                  <ng-container card-meta>
+                    <span class="phorma-card__title">
                       {{ run.startedAt | date: 'MMM d, HH:mm:ss' }}
                       @if (run.environment === 'cloud') {
                         <i class="ti ti-cloud" aria-hidden="true" title="Cloud run"></i>
                       }
                     </span>
-                    <span class="phorma-evals__list-sub">
+                    <span class="phorma-card__sub">
                       {{ run.status }}
                       @if (run.models.length > 0) {
                         · {{ run.models.length }} {{ run.models.length === 1 ? 'model' : 'models' }}
                       }
                     </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  pButton
-                  severity="danger"
-                  [text]="true"
-                  size="small"
-                  class="phorma-evals__delete"
-                  title="Delete eval run"
-                  aria-label="Delete eval run"
-                  (click)="deleteEvalRun(run, $event)"
-                >
-                  <i class="ti ti-trash" aria-hidden="true"></i>
-                </button>
+                  </ng-container>
+                  <ng-container card-actions>
+                    <span
+                      role="button"
+                      tabindex="0"
+                      class="phorma-card__action-btn phorma-card__action-btn--danger"
+                      title="Delete eval run"
+                      aria-label="Delete eval run"
+                      (click)="deleteEvalRun(run, $event)"
+                      (keydown.enter)="deleteEvalRun(run, $event)"
+                    >
+                      <i class="ti ti-trash" aria-hidden="true"></i>
+                    </span>
+                  </ng-container>
+                </app-panel-card>
               </li>
             }
           </ul>

@@ -1,41 +1,21 @@
 <div class="phorma-workflows">
-  <!-- Built-in templates -->
-  <div class="phorma-workflows__section-label">Templates</div>
-  <ul class="phorma-workflows__list">
-    @for (template of templates; track template.id) {
-      <li>
-        <button
-          type="button"
-          class="phorma-workflows__item"
-          (click)="openTemplate(template)"
-          [title]="template.description"
-        >
-          <i [class]="template.icon" aria-hidden="true"></i>
-          <span class="phorma-workflows__meta">
-            <span class="phorma-workflows__name">{{ template.label }}</span>
-            <span class="phorma-workflows__date">Template</span>
-          </span>
-        </button>
-      </li>
-    }
-  </ul>
-
+  <!-- Saved workflows -->
   <div class="phorma-workflows__section-label">Saved</div>
   @if (workflow.library().length > 0) {
     <ul class="phorma-workflows__list">
       @for (spec of workflow.library(); track spec.id) {
         <li>
-          <button type="button" class="phorma-workflows__item" (click)="open(spec)">
-            <i class="ti ti-topology-star-3" aria-hidden="true"></i>
-            <span class="phorma-workflows__meta">
-              <span class="phorma-workflows__name">{{ spec.name }}</span>
-              <span class="phorma-workflows__date">{{ spec.savedAt | date: 'MMM d, h:mm a' }}</span>
-            </span>
-            <span class="phorma-workflows__row-actions">
+          <app-panel-card (click)="open(spec)">
+            <i card-icon class="ti ti-topology-star-3" aria-hidden="true"></i>
+            <ng-container card-meta>
+              <span class="phorma-card__title">{{ spec.name }}</span>
+              <span class="phorma-card__sub">{{ spec.savedAt | date: 'MMM d, h:mm a' }}</span>
+            </ng-container>
+            <ng-container card-actions>
               <span
                 role="button"
                 tabindex="0"
-                class="phorma-workflows__row-btn phorma-workflows__history"
+                class="phorma-card__action-btn"
                 aria-label="View version history"
                 title="Version history"
                 (click)="openHistory($event, spec)"
@@ -46,7 +26,7 @@
               <span
                 role="button"
                 tabindex="0"
-                class="phorma-workflows__row-btn phorma-workflows__rename"
+                class="phorma-card__action-btn"
                 aria-label="Rename workflow"
                 title="Rename"
                 (click)="rename($event, spec)"
@@ -57,7 +37,7 @@
               <span
                 role="button"
                 tabindex="0"
-                class="phorma-workflows__row-btn phorma-workflows__row-btn--danger phorma-workflows__delete"
+                class="phorma-card__action-btn phorma-card__action-btn--danger"
                 aria-label="Delete workflow"
                 title="Delete"
                 (click)="remove($event, spec)"
@@ -65,8 +45,8 @@
               >
                 <i class="ti ti-trash" aria-hidden="true"></i>
               </span>
-            </span>
-          </button>
+            </ng-container>
+          </app-panel-card>
         </li>
       }
     </ul>
@@ -76,4 +56,31 @@
       <p>No saved workflows yet.<br />Save one with Ctrl+S.</p>
     </div>
   }
+
+  <!-- Built-in templates (collapsible) -->
+  <section class="phorma-workflows__templates-section"
+    [class.phorma-workflows__templates-section--collapsed]="templatesCollapsed()">
+    <button type="button" class="phorma-workflows__templates-header" (click)="toggleTemplates()"
+      [attr.aria-expanded]="!templatesCollapsed()" aria-controls="phorma-workflows-templates-list">
+      <i class="ti phorma-workflows__templates-chevron"
+        [class.ti-chevron-down]="!templatesCollapsed()"
+        [class.ti-chevron-right]="templatesCollapsed()" aria-hidden="true"></i>
+      <span class="phorma-workflows__templates-header-label">Templates</span>
+    </button>
+    @if (!templatesCollapsed()) {
+      <ul id="phorma-workflows-templates-list" class="phorma-workflows__list">
+        @for (template of templates; track template.id) {
+          <li>
+            <app-panel-card (click)="openTemplate(template)" [title]="template.description">
+              <i card-icon [class]="template.icon" aria-hidden="true"></i>
+              <ng-container card-meta>
+                <span class="phorma-card__title">{{ template.label }}</span>
+                <span class="phorma-card__sub">Template</span>
+              </ng-container>
+            </app-panel-card>
+          </li>
+        }
+      </ul>
+    }
+  </section>
 </div>

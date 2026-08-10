@@ -57,31 +57,29 @@
         <ul class="phorma-assist__list">
           @for (thread of chat.threads(); track thread.id) {
             <li>
-              <button
-                type="button"
-                class="phorma-assist__list-item"
-                (click)="openThread(thread)"
-              >
-                <i class="ti ti-message-2 phorma-assist__list-icon" aria-hidden="true"></i>
-                <span class="phorma-assist__list-meta">
-                  <span class="phorma-assist__list-title">{{ thread.title }}</span>
-                  <span class="phorma-assist__list-sub">
+              <app-panel-card class="phorma-assist__thread-card" (click)="openThread(thread)">
+                <i card-icon class="ti ti-message-2 phorma-assist__list-icon" aria-hidden="true"></i>
+                <ng-container card-meta>
+                  <span class="phorma-card__title">{{ thread.title }}</span>
+                  <span class="phorma-card__sub">
                     {{ thread.turns.length }} {{ thread.turns.length === 1 ? 'message' : 'messages' }}
                     · {{ thread.updatedAt | date: 'MMM d, HH:mm' }}
                   </span>
-                </span>
-                <span
-                  role="button"
-                  tabindex="0"
-                  class="phorma-assist__delete"
-                  title="Delete chat"
-                  aria-label="Delete chat"
-                  (click)="deleteThread(thread, $event)"
-                  (keydown.enter)="deleteThread(thread, $event)"
-                >
-                  <i class="ti ti-trash" aria-hidden="true"></i>
-                </span>
-              </button>
+                </ng-container>
+                <ng-container card-actions>
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="phorma-card__action-btn phorma-card__action-btn--danger"
+                    title="Delete chat"
+                    aria-label="Delete chat"
+                    (click)="deleteThread(thread, $event)"
+                    (keydown.enter)="deleteThread(thread, $event)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </span>
+                </ng-container>
+              </app-panel-card>
             </li>
           }
         </ul>

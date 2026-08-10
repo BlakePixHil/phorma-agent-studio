@@ -95,9 +95,10 @@
   justify-content: center;
   height: 100%;
   gap: 0.5rem;
+  padding: 1.5rem 1rem;
   color: var(--p-text-muted-color);
 
-  i {
+  > i {
     font-size: 1.6rem;
     opacity: 0.6;
   }
@@ -106,4 +107,11 @@
     margin: 0;
     font-size: 0.857rem;
   }
+}
+
+.phorma-prompt__browse-btn.p-button {
+  margin-top: 0.35rem;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
 }

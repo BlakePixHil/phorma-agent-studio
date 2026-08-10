@@ -26,6 +26,7 @@ import {
 import { CloudService } from '../../../core/cloud.service';
 import { EvalRunnerService } from '../../../core/eval-runner.service';
 import { EvalService } from '../../../core/eval.service';
+import { PanelCard } from '../../../shared/panel-card/panel-card';
 import { PanelExpandService } from '../../../core/panel-expand.service';
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import { RunControllerService } from '../../../core/run-controller.service';
@@ -63,6 +64,7 @@ const MATCHER_OPTIONS: { id: EvalMatcher; label: string }[] = [
     FormsModule,
     ButtonModule,
     InputTextModule,
+    PanelCard,
     SelectModule,
     TextareaModule,
   ],

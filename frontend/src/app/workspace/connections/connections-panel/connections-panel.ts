@@ -7,6 +7,7 @@ import type { Connection } from '@phorma/engine';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ConnectionEditorDialogService } from '../connection-editor-dialog.service';
 import { ConnectionsService } from '../../../core/connections.service';
+import { PanelCard } from '../../../shared/panel-card/panel-card';
 import { ToastService } from '../../../shared/toast/toast.service';
 
 /**
@@ -18,7 +19,7 @@ import { ToastService } from '../../../shared/toast/toast.service';
 @Component({
   selector: 'app-connections-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, ButtonModule],
+  imports: [DatePipe, ButtonModule, PanelCard],
   templateUrl: './connections-panel.html',
   styleUrl: './connections-panel.scss',
 })

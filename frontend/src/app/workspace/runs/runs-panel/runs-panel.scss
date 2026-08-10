@@ -18,10 +18,13 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  flex-shrink: 0;
 
   &--grow {
-    flex: 1;
-    min-height: 0;
+    flex: 1 1 0;
+    min-height: 6rem;
+    flex-shrink: 1;
+    overflow: hidden;
   }
 }
 
@@ -487,6 +490,7 @@
   gap: 0.2rem;
   overflow-y: auto;
   min-height: 0;
+  flex: 1;
 }
 
 .phorma-runs__entry {
@@ -523,6 +527,26 @@
     &:hover {
       background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
     }
+
+    /* Visual affordance: a subtle chevron hint for expandable entries */
+    &::after {
+      content: '\eb3a'; /* ti-chevron-right */
+      font-family: 'tabler-icons';
+      font-size: 0.7rem;
+      color: var(--p-text-muted-color);
+      opacity: 0.5;
+      flex-shrink: 0;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    &:hover::after {
+      opacity: 0.8;
+    }
+  }
+
+  &--expandable.phorma-runs__entry-row--expanded::after {
+    transform: rotate(90deg);
+    opacity: 0.8;
   }
 }
 
@@ -546,9 +570,9 @@
 /* ── Grouped tool activity ──────────────────────────────────────────────── */
 .phorma-runs__group {
   border-radius: 0.55rem;
-  border: 1px solid var(--phorma-card-border);
   background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .phorma-runs__group-header {
@@ -603,7 +627,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  border-top: 1px solid var(--phorma-card-border);
+  border-top: 1px solid color-mix(in srgb, var(--p-text-color) 6%, transparent);
 }
 
 /* ── Expandable payload + copy button ───────────────────────────────────── */

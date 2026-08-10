@@ -298,7 +298,9 @@
 <!-- A single trace entry: toggle row + expandable payload with copy button. -->
 <ng-template #entryTpl let-entry>
   <li class="phorma-runs__entry phorma-runs__entry--{{ entry.tone }}">
-    <button type="button" class="phorma-runs__entry-row" [class.phorma-runs__entry-row--expandable]="!!entry.detail"
+    <button type="button" class="phorma-runs__entry-row"
+      [class.phorma-runs__entry-row--expandable]="!!entry.detail"
+      [class.phorma-runs__entry-row--expanded]="!!entry.detail && expanded().has(entry.id)"
       (click)="entry.detail && toggleExpanded(entry.id)">
       <i class="{{ entry.icon }}" aria-hidden="true"></i>
       <span class="phorma-runs__entry-label">{{ entry.label }}</span>

@@ -5,6 +5,7 @@ import { ButtonModule } from 'primeng/button';
 import { AssistantChat } from '../assistant-chat/assistant-chat';
 import { AssistantChatService } from '../../../core/assistant-chat.service';
 import { AssistantDialogService } from '../assistant-dialog.service';
+import { PanelCard } from '../../../shared/panel-card/panel-card';
 import type { ChatThread } from '../../../core/assistant-chat.model';
 
 /**
@@ -16,7 +17,7 @@ import type { ChatThread } from '../../../core/assistant-chat.model';
 @Component({
   selector: 'app-assistant-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AssistantChat, ButtonModule, DatePipe],
+  imports: [AssistantChat, ButtonModule, DatePipe, PanelCard],
   templateUrl: './assistant-panel.html',
   styleUrl: './assistant-panel.scss',
 })

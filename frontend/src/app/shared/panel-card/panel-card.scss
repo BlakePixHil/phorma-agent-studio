@@ -1,0 +1,68 @@
+:host {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.55rem;
+  border: none;
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  }
+
+  &:hover .phorma-card__actions {
+    opacity: 1;
+    width: auto;
+  }
+}
+
+:host(.phorma-card--active) {
+  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
+  }
+}
+
+:host(.phorma-card--compact) {
+  padding: 0.35rem 0.45rem;
+  gap: 0.4rem;
+}
+
+/* Icon slot */
+::ng-deep [card-icon] {
+  margin-top: 0.1rem;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  color: var(--phorma-card-icon-color, var(--p-text-muted-color));
+  transition: color 0.15s ease;
+}
+
+:host(:hover) ::ng-deep [card-icon] {
+  color: var(--phorma-card-icon-hover-color, var(--p-text-color));
+}
+
+/* Meta slot */
+.phorma-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Actions slot - collapsible on hover */
+.phorma-card__actions {
+  display: inline-flex;
+  gap: 0.1rem;
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, width 0.15s ease;
+}

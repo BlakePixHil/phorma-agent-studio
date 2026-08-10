@@ -63,69 +63,15 @@
   gap: 0.3rem;
 }
 
-.phorma-assist__list-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.45rem 0.55rem;
-  border-radius: 0.55rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-color);
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
-
-    .phorma-assist__delete { opacity: 1; }
-  }
-}
-
 .phorma-assist__list-icon {
-  flex-shrink: 0;
   color: var(--p-primary-color);
 }
 
-.phorma-assist__list-meta {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.08rem;
-}
-
-.phorma-assist__list-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.phorma-assist__list-sub {
-  font-size: 0.928rem;
-  color: var(--p-text-muted-color);
-}
-
-.phorma-assist__delete {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.4rem;
-  height: 1.4rem;
-  border-radius: 0.4rem;
-  color: var(--p-text-muted-color);
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
-  }
+// Keep the assistant thread icon primary-coloured by setting the custom property
+// on the card host. This overrides the panel-card's default muted icon colour.
+::ng-deep .phorma-assist__thread-card {
+  --phorma-card-icon-color: var(--p-primary-color);
+  --phorma-card-icon-hover-color: var(--p-primary-color);
 }
 
 /* ── Empty state ───────────────────────────────────────────────────────── */

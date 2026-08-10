@@ -28,24 +28,9 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--p-text-muted-color);
-}
 
-/* Muted background at rest, lighter on hover. Self-contained click target. */
-.phorma-connections__add-btn.p-button {
-  margin-left: auto;
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  flex-shrink: 0;
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-  border-color: transparent;
-  color: var(--p-text-muted-color);
-
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
-    border-color: transparent;
-    color: var(--p-text-color);
+  .phorma-panel-icon-btn {
+    margin-left: auto;
   }
 }
 
@@ -61,96 +46,4 @@
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.phorma-connections__list-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.45rem 0.55rem;
-  border-radius: 0.55rem;
-  border: 1px solid var(--phorma-card-border);
-  background: transparent;
-  color: var(--p-text-color);
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
-  }
-
-  &:hover .phorma-connections__row-actions {
-    opacity: 1;
-    width: auto;
-  }
-}
-
-.phorma-connections__list-icon {
-  margin-top: 0.1rem;
-  color: var(--p-text-muted-color);
-}
-
-.phorma-connections__list-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
-  flex: 1;
-}
-
-.phorma-connections__list-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.phorma-connections__list-sub {
-  font-size: 0.928rem;
-  color: var(--p-text-muted-color);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.phorma-connections__used-by {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.928rem;
-  color: var(--p-primary-color);
-}
-
-.phorma-connections__row-actions {
-  display: inline-flex;
-  gap: 0.1rem;
-  width: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: opacity 0.15s ease, width 0.15s ease;
-}
-
-.phorma-connections__row-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.4rem;
-  height: 1.4rem;
-  border-radius: 0.35rem;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
-    color: var(--p-text-color);
-  }
-
-  &--danger:hover {
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 14%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
-  }
 }
