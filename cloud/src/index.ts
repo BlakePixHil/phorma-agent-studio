@@ -124,12 +124,23 @@ export default {
       }
     }
 
-    return (
+    const response =
       (await routeAgentRequest(routed, env)) ??
       new Response('Phorma Agent Studio cloud runtime. POST /agents/workflow-agent/{id}/trigger', {
         status: 404,
         headers: cors,
-      })
-    );
+      });
+    // `routeAgentRequest` (the agents SDK) returns its own Response for
+    // unknown methods/paths (404/405) WITHOUT CORS headers, so the browser
+    // blocks the body and the studio only sees a misleading CORS error
+    // instead of the real status. Attach the studio CORS headers to every
+    // response that leaves this handler so a missing route surfaces as a
+    // clean 404 the frontend can read, not an opaque network failure.
+    if (response && !response.headers.has('Access-Control-Allow-Origin')) {
+      const headers = new Headers(response.headers);
+      for (const [key, value] of Object.entries(cors)) headers.set(key, value);
+      return new Response(response.body, { status: response.status, headers });
+    }
+    return response;
   },
 };

@@ -11,6 +11,7 @@ import {
 
 import { ConnectionStoreService } from './connection-store.service';
 import { findMcpPreset } from './node-catalog';
+import { PhormaCloudService, tierLabel } from './phorma-cloud.service';
 import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
 import { WorkflowService } from './workflow.service';
@@ -41,6 +42,7 @@ export class CapabilityFindingsService {
   private readonly connectionStore = inject(ConnectionStoreService);
   private readonly workflow = inject(WorkflowService);
   private readonly settings = inject(SettingsService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   /** The local host's capability record — Desktop inside Tauri, Browser otherwise. */
   readonly activeHostCapabilities = computed(() =>
@@ -128,11 +130,46 @@ export class CapabilityFindingsService {
   }
 
   /**
-   * Local findings plus deploy-target findings - what the canvas badge and the
-   * properties panel render.
+   * Tier-driven schedule-budget findings for Phorma Cloud users. The worker's
+   * `rescheduleCron` arms schedules in graph order and silently drops the rest
+   * once the plan's `schedulesPerWorkflow` budget is spent; this surfaces the
+   * drop on the canvas BEFORE the user pushes, on every excess schedule-trigger
+   * node (index >= budget, matching the worker's iteration order).
+   *
+   * Phorma Cloud only: BYO Cloudflare deployments have no schedule cap (the
+   * worker sets `scheduleBudget = Infinity` when `!this.hosted`). Suppressed
+   * while no cloud provider is chosen, so a purely local user never sees cloud
+   * vocabulary. `warning` severity: the excess schedule doesn't block local
+   * runs or push - the worker just ignores it, which is degraded but not fatal.
+   */
+  readonly tierScheduleFindings = computed<CapabilityFinding[]>(() => {
+    if (this.settings.cloudProvider() !== 'phorma') return [];
+    const budget = this.phormaCloud.schedulesPerWorkflow();
+    const scheduleNodes = this.workflow
+      .graph()
+      .nodes.filter(node => node.kind === 'schedule-trigger');
+    if (scheduleNodes.length <= budget) return [];
+    const tier = this.phormaCloud.profile()?.tier ?? 'starter';
+    const planName = tierLabel(tier).toLowerCase();
+    return scheduleNodes.slice(budget).map(node => ({
+      severity: 'warning' as const,
+      nodeId: node.id,
+      nodeName: node.name,
+      deployOnly: true,
+      message:
+        `Your Phorma Cloud plan (${planName}) allows ${budget} schedule ${budget === 1 ? 'trigger' : 'triggers'} ` +
+        `per workflow. This schedule will not run in the cloud - the worker arms schedules in order and ` +
+        `skips the rest. Upgrade your plan in Settings → Cloud to arm all schedules.`,
+    }));
+  });
+
+  /**
+   * Local findings plus deploy-target findings plus tier-schedule findings -
+   * what the canvas badge and the properties panel render.
    */
   readonly findings = computed<CapabilityFinding[]>(() => [
     ...this.localFindings(),
     ...this.deployFindings(),
+    ...this.tierScheduleFindings(),
   ]);
 }

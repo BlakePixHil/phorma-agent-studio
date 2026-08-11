@@ -116,6 +116,13 @@ export class CloudService {
    * deployed".
    */
   readonly deployedStatus = signal<{ hasWorkflow: boolean; savedAt: string | null } | null>(null);
+  /**
+   * The workflow id the live {@link deployedStatus} was last checked for.
+   * Consumers must compare this to the workflow they're interested in before
+   * trusting {@link deployedStatus} - otherwise a stale status from a
+   * previously-active workflow leaks when the user switches tabs.
+   */
+  readonly deployedStatusWorkflowId = signal<string | null>(null);
   /** True while {@link refreshStatus} has a request in flight. */
   readonly statusLoading = signal(false);
 
@@ -538,6 +545,7 @@ export class CloudService {
       }
       await this.versions.recordDeploy(rawSpec).catch(() => undefined);
       this.deployedStatus.set({ hasWorkflow: true, savedAt: new Date().toISOString() });
+      this.deployedStatusWorkflowId.set(spec.id);
       this.toast.success('Workflow pushed', `"${spec.name}" is live in the cloud.`);
       return true;
     } catch (error) {
@@ -604,6 +612,7 @@ export class CloudService {
     const base = this.instanceUrl(workflowId);
     if (!base || !this.configured()) {
       this.deployedStatus.set(null);
+      this.deployedStatusWorkflowId.set(null);
       return;
     }
     this.statusLoading.set(true);
@@ -611,28 +620,35 @@ export class CloudService {
       const response = await fetch(`${base}/status`, { headers: await this.headers() });
       if (!response.ok) {
         this.deployedStatus.set(null);
+        this.deployedStatusWorkflowId.set(null);
         return;
       }
       const body = (await response.json()) as { hasWorkflow?: boolean; savedAt?: string | null };
       this.deployedStatus.set({ hasWorkflow: body.hasWorkflow === true, savedAt: body.savedAt ?? null });
+      this.deployedStatusWorkflowId.set(workflowId);
     } catch {
       this.deployedStatus.set(null);
+      this.deployedStatusWorkflowId.set(null);
     } finally {
       this.statusLoading.set(false);
     }
   }
 
   /**
-   * Removes the deployed spec from `workflowId`'s instance (Cloud dialog's
-   * "Remove from cloud" action). The instance itself, its run history, usage
-   * ledger and connection metadata are untouched - pushing again needs no
-   * other setup.
+   * Fully tears down `workflowId`'s deployed instance in Phorma Cloud (the
+   * Cloud dialog's "Remove from cloud" action, and the library-delete path).
+   * Cancels cron, unpublishes the portal, deletes tracked portal session
+   * Durable Objects, wipes every SQLite table (runs, events, usage ledger,
+   * workflow state + fixtures) and calls `storage.deleteAll()` so the instance
+   * itself can be reclaimed. Connection secrets in the per-tenant vault are
+   * untouched (they may be shared across workflows) and D1 usage rows are
+   * retained for billing. Returns true on success; surfaces a toast on error.
    */
   async removeWorkflow(workflowId: string): Promise<boolean> {
     const base = this.instanceUrl(workflowId);
     if (!base) return false;
     try {
-      const response = await fetch(`${base}/workflow`, {
+      const response = await fetch(`${base}/workflow/purge`, {
         method: 'DELETE',
         headers: await this.headers(),
       });
@@ -641,12 +657,45 @@ export class CloudService {
         throw new Error(detail?.error ?? `Could not remove the workflow (HTTP ${response.status}).`);
       }
       this.deployedStatus.set({ hasWorkflow: false, savedAt: null });
+      this.deployedStatusWorkflowId.set(workflowId);
+      this.versions.unmarkDeployed(workflowId);
       this.toast.success('Removed from cloud', `"${this.workflow.activeName()}" is no longer deployed.`);
       return true;
     } catch (error) {
       this.toast.error('Remove failed', error instanceof Error ? error.message : String(error));
       return false;
     }
+  }
+
+  /**
+   * Best-effort cloud teardown for the library-delete path. Refreshes the
+   * deployment status for `workflowId` and, if the workflow is currently
+   * deployed, calls {@link removeWorkflow} to fully purge it. Never throws:
+   * a cloud that is unreachable, unconfigured, or returns an error (for example
+   * a 409 while a run is in progress) only logs a warning toast so the local
+   * delete still completes. Returns true when nothing needed cleanup or
+   * cleanup succeeded; false when cleanup was needed but failed (the caller
+   * may warn the user to remove the workflow from Phorma Cloud manually).
+   */
+  async purgeIfDeployed(workflowId: string): Promise<boolean> {
+    if (!this.configured()) return true;
+    try {
+      await this.refreshStatus(workflowId);
+    } catch {
+      // refreshStatus already swallows errors and sets status to null; reaching
+      // here is exceptional and means we cannot determine deployment state.
+      return true;
+    }
+    const status = this.deployedStatus();
+    if (!status?.hasWorkflow) return true;
+    const removed = await this.removeWorkflow(workflowId);
+    if (!removed) {
+      this.toast.warning(
+        'Cloud cleanup failed',
+        `"${this.workflow.activeName()}" could not be removed from Phorma Cloud. Remove it manually from the Cloud dialog.`,
+      );
+    }
+    return removed;
   }
 
   // ── Run history (EPIC 1) ──────────────────────────────────────────────────

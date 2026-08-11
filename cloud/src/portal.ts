@@ -470,6 +470,13 @@ async function openSession(
     ownerId: record.ownerId,
     responderNodeId: record.responderNodeId,
   });
+  // Track the session instance so a workflow delete / "Remove from cloud" can
+  // tear it down. Best-effort: a registry write failure must not break a
+  // visitor's turn - the session would only leak on purge, which is strictly
+  // better than failing the request.
+  await portalIndex(env)
+    .addSession(record.workflowId, sessionId, portalSessionInstance(record, sessionId))
+    .catch(() => undefined);
   return { stub };
 }
 

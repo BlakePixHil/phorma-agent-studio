@@ -56,6 +56,7 @@ export class CloudDialog {
       untracked(() => {
         if (this.provider() === 'phorma') void this.phormaCloud.refresh();
         this.cloud.deployedStatus.set(null);
+        this.cloud.deployedStatusWorkflowId.set(null);
         if (workflowId) void this.cloud.refreshStatus(workflowId);
       });
     });

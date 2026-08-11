@@ -46,6 +46,19 @@ const TIER_SUB_WORKFLOW_DEPTH: Record<string, number> = {
 };
 
 /**
+ * Max active cron schedules per workflow per plan — MUST mirror
+ * `schedulesPerWorkflow` in `cloud/src/tenants.ts` TIERS. The worker's
+ * `rescheduleCron` arms schedules in graph order and silently drops the rest
+ * once the budget is spent; this map lets the studio surface that drop on the
+ * canvas BEFORE the user pushes. BYO Cloudflare has no cap (Infinity).
+ */
+const TIER_SCHEDULES_PER_WORKFLOW: Record<string, number> = {
+  starter: 1,
+  pro: 5,
+  team: 20,
+};
+
+/**
  * Marketing names for tier ids — the raw id is a D1 string (`team`, not
  * "Teams"). Unknown ids (e.g. a custom enterprise tier) title-case through.
  */
@@ -126,6 +139,20 @@ export class PhormaCloudService {
     const profile = this.profile();
     if (profile?.status !== 'active' || !profile.tier) return 2;
     return Math.min(25, Math.max(2, TIER_SUB_WORKFLOW_DEPTH[profile.tier] ?? 5));
+  });
+
+  /**
+   * Max active cron schedules per workflow for the signed-in tenant's plan.
+   * Unknown active custom tiers fall back to the starter limit (1). Inactive,
+   * missing, or malformed profiles use 1 (the most restrictive) so a user who
+   * hasn't signed in sees the conservative cap rather than an unbounded one.
+   * BYO Cloudflare deployments have no schedule cap — the worker only enforces
+   * the budget in hosted mode.
+   */
+  readonly schedulesPerWorkflow = computed(() => {
+    const profile = this.profile();
+    if (profile?.status !== 'active' || !profile.tier) return 1;
+    return TIER_SCHEDULES_PER_WORKFLOW[profile.tier] ?? 1;
   });
 
   /** 0–1 fraction of the monthly run allowance used (null without quota). */

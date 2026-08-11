@@ -122,7 +122,8 @@ export class WorkflowActionsService {
       {
         id: 'workflow_delete',
         label: 'Delete a workflow',
-        description: 'Removes a workflow from the library along with its version history.',
+        description:
+          'Removes a workflow from the library along with its version history. If it is deployed to Phorma Cloud, also tears down its cloud deployment (Durable Object, portal and session instances).',
         surface: 'workflows',
         access: 'write',
         risk: 'confirm',
@@ -321,6 +322,11 @@ export class WorkflowActionsService {
     if (!this.workflow.library().some(spec => spec.id === workflowId)) {
       return actionFail(`Workflow '${workflowId}' is not in the library.`);
     }
+    // Purge the cloud deployment first (best-effort): a deployed workflow's
+    // Durable Object, portal and session DOs must be torn down or they
+    // outlive the local workflow with no way for the user to remove them. A
+    // failure only warns - the local delete still completes.
+    await this.cloud.purgeIfDeployed(workflowId).catch(() => undefined);
     await this.workflow.removeFromLibrary(workflowId);
     return actionOk({ workflowId, name }, { revertable: false });
   }

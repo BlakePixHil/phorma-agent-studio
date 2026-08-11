@@ -109,9 +109,9 @@
       [text]="true"
       severity="secondary"
       size="small"
-      [icon]="cloud.connected() ? 'ti ti-cloud-check' : 'ti ti-cloud'"
-      [class.phorma-cloud-live]="cloud.connected()"
-      [pTooltip]="cloud.connected() ? 'Cloud monitor connected' : 'Cloud deploy & monitor'"
+      [icon]="cloud.connected() ? 'ti ti-cloud-check' : cloudDeployed() ? 'ti ti-cloud-check' : 'ti ti-cloud'"
+      [class.phorma-cloud-live]="cloud.connected() || cloudDeployed()"
+      [pTooltip]="cloudTooltip()"
       tooltipPosition="bottom"
       (onClick)="openCloud()"
     />

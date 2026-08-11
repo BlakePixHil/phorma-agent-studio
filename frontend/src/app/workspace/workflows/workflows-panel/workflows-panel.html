@@ -10,7 +10,14 @@
               <i card-icon class="ti ti-topology-star-3" aria-hidden="true"></i>
               <ng-container card-meta>
                 <span class="phorma-card__title">{{ spec.name }}</span>
-                <span class="phorma-card__sub">{{ spec.savedAt | date: 'MMM d, h:mm a' }}</span>
+                <span class="phorma-card__sub">
+                  {{ spec.savedAt | date: 'MMM d, h:mm a' }}
+                  @if (isDeployed(spec)) {
+                    <span class="phorma-card__deployed" title="Deployed to cloud">
+                      <i class="ti ti-cloud-check" aria-hidden="true"></i> Deployed
+                    </span>
+                  }
+                </span>
               </ng-container>
               <ng-container card-actions>
                 <span

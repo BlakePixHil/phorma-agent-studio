@@ -141,6 +141,41 @@ export class PortalIndex extends DurableObject {
     return { removed };
   }
 
+  // ── Portal session registry ───────────────────────────────────────────────
+  //
+  // A published portal spawns one `WorkflowAgent` instance per visitor
+  // conversation, named `{ownerId}:{workflowId}#s{sessionId}` (see
+  // `portalSessionInstance`). Those instances are never enumerable from the
+  // DO namespace, so without a registry a workflow delete / unpublish would
+  // orphan every visitor's session DO - its transcript and journaled state
+  // would live in storage until Cloudflare evicted the instance.
+  //
+  // The registry stores the session INSTANCE NAME (already tenant-prefixed)
+  // under `session:{workflowId}:{sessionId}`. `addSession` is called when a
+  // session DO is initialised; `deleteSessions` returns the instance names
+  // and drops the tracking keys so a caller (the workflow DO's purge path)
+  // can delete each session DO and the registry does not retain stale
+  // references. `unpublish` does NOT clear sessions - the purge path calls
+  // `deleteSessions` explicitly after unpublishing, so a transient unpublish
+  // (re-publish to a new slug) does not destroy in-flight conversations.
+
+  /** Records a portal session instance so it can be torn down later. Idempotent. */
+  async addSession(workflowId: string, sessionId: string, instanceName: string): Promise<void> {
+    await this.ctx.storage.put(`session:${workflowId}:${sessionId}`, instanceName);
+  }
+
+  /**
+   * Returns every tracked session instance name for a workflow and drops the
+   * tracking keys. Callers delete each session DO; the registry keeps no
+   * stale references. Idempotent.
+   */
+  async deleteSessions(workflowId: string): Promise<string[]> {
+    const map = await this.ctx.storage.list<string>({ prefix: `session:${workflowId}:` });
+    const names = [...map.values()];
+    for (const key of map.keys()) await this.ctx.storage.delete(key);
+    return names;
+  }
+
   /** The record for a workflow, whatever slug it currently holds. */
   async statusFor(workflowId: string): Promise<PortalStatus> {
     for (const record of await this.allRecords()) {

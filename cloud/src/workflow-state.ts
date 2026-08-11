@@ -81,6 +81,22 @@ export function ensureWorkflowStateTable(sql: DurableSqlExecutor): void {
   `;
 }
 
+/**
+ * Deletes every `workflow_state` row belonging to a workflow.
+ *
+ * Keys are workflow-scoped by the engine (`{workflowId}::{namespace}:{key}` via
+ * `scopedStateKey`), so a prefix match is exact - it can never touch another
+ * workflow's state. Used by the workflow DO's purge path (full teardown on
+ * delete / "Remove from cloud"); the blanket `DELETE FROM workflow_state` in
+ * that path covers this too, but the helper is reusable and self-documenting
+ * for any caller that needs to clear one workflow's state without wiping the
+ * whole table (for example, a future "reset state" action).
+ */
+export function clearAllForWorkflow(sql: DurableSqlExecutor, workflowId: string): void {
+  const prefix = `${workflowId}${STATE_SCOPE_SEPARATOR}`;
+  sql`DELETE FROM workflow_state WHERE substr(key, 1, ${prefix.length}) = ${prefix}`;
+}
+
 export interface DurableStateStoreOptions {
   /** The Durable Object's tagged SQL executor. */
   readonly sql: DurableSqlExecutor;

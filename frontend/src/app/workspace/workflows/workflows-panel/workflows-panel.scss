@@ -113,3 +113,27 @@
   flex: 1;
   min-width: 0;
 }
+
+// ── "Deployed" badge on a saved-workflow card ──────────────────────────────
+// A compact green pill inline with the saved-date subtext, so a user can see
+// at a glance which library workflows are live in the cloud. Matches the
+// accent-green used by the Cloud dialog's status pill and the toolbar's
+// cloud-live icon.
+
+.phorma-card__deployed {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 0.4rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--phorma-accent-green, #34d399);
+  background: color-mix(in srgb, var(--phorma-accent-green, #34d399) 14%, transparent);
+
+  i {
+    font-size: 0.7rem;
+  }
+}

@@ -12,6 +12,10 @@
  *   DELETE /workflow - remove the deployed spec (studio "Remove from cloud");
  *                      refused while a run is in progress; run history,
  *                      the usage ledger and connection metadata are kept
+ *   DELETE /workflow/purge - full teardown: cancel cron, unpublish the portal,
+ *                      delete tracked portal session DOs (via RPC), wipe every
+ *                      SQLite table and `storage.deleteAll()`. Studio "Remove
+ *                      from cloud" and the library-delete path hit this.
  *   POST /connections — replace the connection metadata inventory (names,
  *                      types, auth modes — never a secret value)
  *   GET  /connections — this worker's connection inventory as
@@ -627,6 +631,24 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       return json({ ok: true });
     }
 
+    // Full teardown (studio "Remove from cloud" with `?purge=1`, and the
+    // library-delete path). Wipes EVERYTHING this DO owns for the workflow:
+    // the spec, cron schedules, portal slug + access keys, tracked portal
+    // session DOs, and every SQLite table (run_journal, runs, run_events,
+    // usage_ledger, workflow_state incl. fixtures and cached OAuth tokens),
+    // then `ctx.storage.deleteAll()` so the instance itself can be reclaimed.
+    // Connection secrets in the per-tenant SecretVault are NOT touched (they
+    // may be shared across workflows) and D1 usage rows are retained for
+    // billing. The owner instance also unpublishes the portal and deletes
+    // tracked portal session DOs via {@link WorkflowAgent.purgeSelf} (RPC).
+    if (request.method === 'DELETE' && path.endsWith('/workflow/purge')) {
+      if (this.handle) {
+        return json({ error: 'Stop the running run before removing this workflow.' }, 409);
+      }
+      await this.purgeSelf(false);
+      return json({ ok: true, purged: true });
+    }
+
     // The dedicated connection-metadata push route (Requirement 3.6). Carries
     // NAMES only: `connectionMetadataFromPush` drops anything value-shaped, and
     // the secrets themselves arrive separately as `CONN_*` worker secrets.
@@ -937,6 +959,89 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
   }
 
+  /**
+   * Fully tears down THIS Durable Object instance. Called from the
+   * `DELETE /workflow/purge` HTTP handler for the owner instance (with
+   * `cascade=false`), and via RPC from the owner for each tracked portal
+   * session instance (with `cascade=false` - a session owns no portal slug
+   * and no cron of its own to cancel).
+   *
+   * Wipes every SQLite table this DO owns (`run_journal`, `runs`,
+   * `run_events`, `usage_ledger`, `workflow_state` incl. fixtures and cached
+   * OAuth tokens), drops the agents-SDK housekeeping tables, calls
+   * `ctx.storage.deleteAll()` so the instance itself can be reclaimed, and
+   * resets in-memory state. When `cascade` is true (the owner instance), it
+   * also cancels cron, unpublishes the portal slug + access keys, and
+   * best-effort deletes every tracked portal session DO via RPC.
+   *
+   * Connection secrets in the per-tenant SecretVault are NOT touched (they
+   * may be shared across workflows) and D1 usage rows are retained for
+   * billing. Best-effort for session DOs: an evicted or mid-run session
+   * logs a warning and does not abort the overall purge.
+   */
+  async purgeSelf(cascade: boolean): Promise<{ ok: true }> {
+    if (cascade) {
+      // Owner instance only: cancel cron, drop the portal slug + access
+      // keys, then delete every tracked portal session DO via RPC.
+      await this.cancelScheduledRuns();
+      const index = portalIndex(this.env);
+      const workflowId = this.workflowKey();
+      await index.unpublish(workflowId);
+      const sessionNames = await index.deleteSessions(workflowId);
+      await Promise.all(
+        sessionNames.map(name => this.purgeSessionInstance(name)),
+      );
+    }
+    // Wipe every SQLite table this DO owns. `workflow_state` keys are
+    // workflow-scoped, but this instance IS the workflow (or the session),
+    // so a blanket DELETE is correct and cheaper than a scoped one.
+    this.ensureTables();
+    this.sql`DELETE FROM run_journal`;
+    this.sql`DELETE FROM runs`;
+    this.sql`DELETE FROM run_events`;
+    this.sql`DELETE FROM usage_ledger`;
+    this.sql`DELETE FROM workflow_state`;
+    // Drop the agents-SDK housekeeping tables too, or their rows would
+    // outlive the workflow (the SDK's own `destroy()` does the same).
+    this.sql`DROP TABLE IF EXISTS cf_agents_state`;
+    this.sql`DROP TABLE IF EXISTS cf_agents_schedules`;
+    this.sql`DROP TABLE IF EXISTS cf_agents_queues`;
+    this.sql`DROP TABLE IF EXISTS cf_agents_mcp_servers`;
+    // Drop any remaining DO key-value storage and let the instance be
+    // reclaimed. The SDK's state lives in SQLite (already dropped above),
+    // so this clears anything else stored via `ctx.storage.put`.
+    await this.ctx.storage.deleteAll();
+    // Reset in-memory state. `setState` persists to `cf_agents_state`, which
+    // we just dropped - the table is recreated on the next access by the
+    // SDK's lazy `state` getter, so this only shapes the in-memory copy for
+    // any code that runs before the DO is evicted. Preserve `ownerId` so a
+    // stray post-purge request can still be attributed for abuse analysis.
+    this.setState({
+      ...this.initialState,
+      ownerId: this.state.ownerId,
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Best-effort RPC call to purge a portal session DO instance by name.
+   * Called from {@link purgeSelf} for every session the `PortalIndex`
+   * registry tracked for this workflow. A session that has already been
+   * evicted or is mid-run logs a warning and does not abort the overall
+   * purge - the owner is still torn down.
+   */
+  private async purgeSessionInstance(sessionName: string): Promise<void> {
+    try {
+      const id = this.env.WorkflowAgent.idFromName(sessionName);
+      const stub = this.env.WorkflowAgent.get(id) as unknown as {
+        purgeSelf(cascade: boolean): Promise<{ ok: true }>;
+      };
+      await stub.purgeSelf(false);
+    } catch (error) {
+      console.warn(`purgeSessionInstance: failed to purge session ${sessionName}`, error);
+    }
+  }
+
   private async rescheduleCron(spec: WorkflowSpec): Promise<void> {
     // Portal session instances serve ONE visitor conversation. Arming cron
     // there would give every visitor their own recurring job.
@@ -950,13 +1055,27 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // Hosted mode: cap active schedules by tier so background cron runs
     // can't burn quota 24/7.
     let scheduleBudget = Number.POSITIVE_INFINITY;
+    let tierSchedulesLimit = Number.POSITIVE_INFINITY;
     if (this.hosted && this.state.ownerId) {
       const tenant = await new TenantStore(this.env).getTenant(this.state.ownerId);
-      scheduleBudget = tierLimits(tenant?.tier ?? 'starter').schedulesPerWorkflow;
+      tierSchedulesLimit = tierLimits(tenant?.tier ?? 'starter').schedulesPerWorkflow;
+      scheduleBudget = tierSchedulesLimit;
     }
     for (const node of spec.graph.nodes) {
       if (node.kind !== 'schedule-trigger') continue;
-      if (scheduleBudget <= 0) break;
+      if (scheduleBudget <= 0) {
+        // Plain-English: this surfaces in the cloud monitor's status panel
+        // (GET /status) and wrangler tail. The node name is user-authored
+        // (non-secret) and helps the operator identify which schedule was
+        // skipped without exposing cloudflare internals to the end user.
+        this.reportSettingsIssue(
+          `Schedule "${node.name}" was not armed because this plan allows ` +
+            `${tierSchedulesLimit} ${tierSchedulesLimit === 1 ? 'schedule' : 'schedules'} ` +
+            `per workflow. The cloud runs the first ${tierSchedulesLimit} ` +
+            `in order and skips the rest. Upgrade the plan to arm all schedules.`,
+        );
+        break;
+      }
       const cron = (node.data as { cron?: string }).cron;
       if (cron?.trim()) {
         await this.schedule(cron.trim(), 'scheduledRun', undefined);

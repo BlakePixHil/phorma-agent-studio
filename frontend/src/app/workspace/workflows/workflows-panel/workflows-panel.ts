@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { DatePipe } from '@angular/common';
 
 import { WorkflowService } from '../../../core/workflow.service';
+import { WorkflowVersionsService } from '../../../core/workflow-versions.service';
+import { CloudService } from '../../../core/cloud.service';
 import { SettingsService } from '../../../core/settings.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
@@ -25,6 +27,8 @@ import { VersionHistoryDialogService } from '../version-history-dialog.service';
 })
 export class WorkflowsPanel {
   protected readonly workflow = inject(WorkflowService);
+  protected readonly versions = inject(WorkflowVersionsService);
+  private readonly cloud = inject(CloudService);
   private readonly settings = inject(SettingsService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly toast = inject(ToastService);
@@ -47,6 +51,11 @@ export class WorkflowsPanel {
   protected openHistory(event: Event, spec: WorkflowSpec): void {
     event.stopPropagation();
     this.versionHistory.open(spec.id);
+  }
+
+  /** Whether a library workflow has been deployed to a cloud runtime. */
+  protected isDeployed(spec: WorkflowSpec): boolean {
+    return this.versions.deployedWorkflowIds().has(spec.id);
   }
 
   /** Opens a template as a fresh unsaved workflow tab. */
@@ -86,6 +95,14 @@ export class WorkflowsPanel {
           tone: 'danger',
         })
       : true;
-    if (confirmed) void this.workflow.removeFromLibrary(spec.id);
+    if (!confirmed) return;
+    // Tear down the cloud deployment first (best-effort): if this workflow is
+    // deployed to Phorma Cloud, its Durable Object, portal and session DOs must
+    // be purged or they hang around with no way for the user to remove them
+    // after the local workflow is gone. A failure (cloud unreachable, a run in
+    // progress) only warns - the local delete still completes so the user is
+    // never stuck, and the toast tells them to retry from the Cloud dialog.
+    await this.cloud.purgeIfDeployed(spec.id).catch(() => undefined);
+    void this.workflow.removeFromLibrary(spec.id);
   }
 }

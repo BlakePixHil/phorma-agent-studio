@@ -421,6 +421,25 @@ export class IndexedDbStorageService {
     return versions.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
   }
 
+  /**
+   * Every workflow id that has at least one version snapshot marked
+   * `deployed: true`. Used by the library panel and the toolbar cloud icon to
+   * show a "deployed" badge without a per-workflow network round-trip. A single
+   * full-table scan on startup; updated incrementally by `saveWorkflowVersion`.
+   */
+  async listDeployedWorkflowIds(): Promise<Set<string>> {
+    const db = await this.open();
+    const store = db
+      .transaction(WORKFLOW_VERSIONS_STORE, 'readonly')
+      .objectStore(WORKFLOW_VERSIONS_STORE);
+    const all = await this.request<WorkflowVersion[]>(store.getAll());
+    const ids = new Set<string>();
+    for (const version of all) {
+      if (version.deployed) ids.add(version.workflowId);
+    }
+    return ids;
+  }
+
   async saveWorkflowVersion(version: WorkflowVersion): Promise<void> {
     const db = await this.open();
     await this.request(

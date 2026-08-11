@@ -19,6 +19,7 @@ import { ClipboardService } from '../../core/clipboard.service';
 import { SelectionService } from '../../core/selection.service';
 import { RunControllerService } from '../../core/run-controller.service';
 import { CloudService } from '../../core/cloud.service';
+import { WorkflowVersionsService } from '../../core/workflow-versions.service';
 import { SettingsService } from '../../core/settings.service';
 import { CloudDialogService } from '../../workspace/cloud/cloud-dialog.service';
 import { SettingsDialogService } from '../../workspace/settings/settings-dialog.service';
@@ -51,6 +52,7 @@ export class Toolbar {
   protected readonly terminal = inject(TerminalOutputService);
   protected readonly runController = inject(RunControllerService);
   protected readonly cloud = inject(CloudService);
+  protected readonly versions = inject(WorkflowVersionsService);
   protected readonly portal = inject(PortalService);
   protected readonly clerk = inject(ClerkService);
   private readonly cloudDialog = inject(CloudDialogService);
@@ -181,6 +183,31 @@ export class Toolbar {
   protected readonly gridSnapTooltip = computed(() =>
     this.canvasState.gridSnap() ? 'Disable grid snapping' : 'Enable grid snapping',
   );
+
+  /**
+   * Whether the ACTIVE workflow is deployed to a cloud runtime. Combines the
+   * live status from the Cloud dialog (`deployedStatus`, authoritative when
+   * the dialog has been opened for THIS workflow) with the local version-
+   * snapshot flag (`deployedWorkflowIds`, always available offline). The live
+   * signal is only trusted when its workflow id matches the active workflow -
+   * otherwise it's a stale status from a previously-opened workflow and the
+   * local set is used instead.
+   */
+  protected readonly cloudDeployed = computed(() => {
+    const activeId = this.workflow.activeDoc()?.workflowId;
+    if (!activeId) return false;
+    const live = this.cloud.deployedStatus();
+    const liveId = this.cloud.deployedStatusWorkflowId();
+    if (live && liveId === activeId) return live.hasWorkflow;
+    return this.versions.deployedWorkflowIds().has(activeId);
+  });
+
+  /** Tooltip for the cloud button, reflecting deploy + monitor state. */
+  protected readonly cloudTooltip = computed(() => {
+    if (this.cloud.connected()) return 'Cloud monitor connected';
+    if (this.cloudDeployed()) return 'Workflow is deployed to the cloud';
+    return 'Cloud deploy & monitor';
+  });
 
   /** Whether the user is on macOS (for Cmd vs Ctrl shortcut display). */
   protected readonly isMac =

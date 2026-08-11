@@ -168,6 +168,13 @@
   }
 }
 
+// Cloud / Portal buttons — green tint when a workflow is deployed or a portal
+// is live, so the status is visible without a tooltip hover. Matches the
+// accent-green used by the Cloud dialog's status pill.
+:host ::ng-deep .phorma-cloud-live.p-button .p-button-icon {
+  color: var(--phorma-accent-green, #34d399);
+}
+
 // Clerk UserButton popover action buttons (Manage account / Sign out).
 // In dark mode Clerk ships black text on a dark card; force readable colors.
 :host ::ng-deep clerk-user-button {
