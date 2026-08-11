@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Phorma Agent Studio - Pre-seed Deck</title>
+<style>
+:root {
+  --bg:            #0b0e14;
+  --bg-2:          #10141d;
+  --panel:         #151a24;
+  --border:        rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text:          #e6e6e6;
+  --muted:         rgba(230, 230, 230, 0.55);
+  --dim:           rgba(230, 230, 230, 0.38);
+  --blue:          #60a5fa;
+  --blue-soft:     rgba(96, 165, 250, 0.16);
+  --green:         #4ade80;
+  --green-soft:    rgba(74, 222, 128, 0.14);
+  --amber:         #fbbf24;
+  --amber-soft:    rgba(251, 191, 36, 0.16);
+  --red:           #f87171;
+  --red-soft:      rgba(248, 113, 113, 0.14);
+  --font: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Stage: fixed 1280x720 slide scaled to fit the viewport ───────────────── */
+#stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+#deck {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  transform-origin: center center;
+  flex: none;
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  padding: 62px 76px 58px;
+  background:
+    radial-gradient(1100px 620px at 82% -12%, rgba(96, 165, 250, 0.10), transparent 62%),
+    radial-gradient(760px 520px at -8% 108%, rgba(74, 222, 128, 0.055), transparent 60%),
+    linear-gradient(168deg, var(--bg-2) 0%, var(--bg) 100%);
+  overflow: hidden;
+}
+.slide.is-active { display: flex; }
+
+/* ── Type scale ───────────────────────────────────────────────────────────── */
+.eyebrow {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.eyebrow::before {
+  content: '';
+  width: 22px;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 2px;
+}
+h1 { font-size: 62px; line-height: 1.04; letter-spacing: -0.028em; font-weight: 680; }
+h2 {
+  font-size: 40px;
+  line-height: 1.16;
+  letter-spacing: -0.022em;
+  font-weight: 650;
+  max-width: 20ch;
+}
+h2.wide { max-width: 26ch; }
+.sub {
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 62ch;
+  margin-top: 20px;
+}
+.body { margin-top: 34px; flex: 1; min-height: 0; }
+
+/* ── Bullets ──────────────────────────────────────────────────────────────── */
+ul.points { list-style: none; display: grid; gap: 17px; max-width: 74ch; }
+ul.points li {
+  position: relative;
+  padding-left: 30px;
+  font-size: 20px;
+  line-height: 1.45;
+  color: rgba(230, 230, 230, 0.88);
+}
+ul.points li::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 11px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 0 4px var(--blue-soft);
+}
+ul.points li b { color: var(--text); font-weight: 640; }
+ul.points.tight li { font-size: 18px; }
+ul.points.neg li::before { background: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+ul.points.pos li::before { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.cards { display: grid; gap: 18px; }
+.cards.c2 { grid-template-columns: repeat(2, 1fr); }
+.cards.c3 { grid-template-columns: repeat(3, 1fr); }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 26px;
+}
+.card h3 {
+  font-size: 19px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+.card .num {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--blue);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+/* ── Table ────────────────────────────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 16px; }
+th, td { text-align: left; padding: 13px 14px; border-bottom: 1px solid var(--border); }
+th {
+  font-size: 11.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+td:first-child, th:first-child { padding-left: 4px; }
+tbody tr:last-child td { border-bottom: none; }
+tr.mine td { background: rgba(96, 165, 250, 0.07); }
+tr.mine td:first-child { color: var(--blue); font-weight: 660; }
+td.n { text-align: right; font-family: var(--mono); font-size: 15px; }
+th.n { text-align: right; }
+.yes { color: var(--green); font-weight: 650; }
+.no  { color: rgba(248, 113, 113, 0.75); }
+.part { color: var(--amber); }
+.matrix td:not(:first-child), .matrix th:not(:first-child) { text-align: center; }
+
+/* ── Product screenshot frame ─────────────────────────────────────────────────
+   Rounded, hairline-bordered, drop-shadowed window. The image fills the frame
+   with `cover` so the shot always sits flush to the corners regardless of the
+   capture's aspect ratio. If the file is missing, the img hides itself and the
+   fallback panel behind it shows through instead of a broken-image icon. */
+.shot {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(96, 165, 250, 0.12);
+  min-height: 0;
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+}
+/* Hairline inner highlight so the shot reads as a window, not a pasted rectangle. */
+.shot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+.shot__fallback {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--dim);
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 26px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 26px),
+    var(--panel);
+}
+.shot.is-missing .shot__fallback { display: grid; }
+
+/* ── Pull quote / wedge ───────────────────────────────────────────────────── */
+.wedge {
+  margin-top: auto;
+  border-left: 3px solid var(--blue);
+  background: linear-gradient(90deg, var(--blue-soft), transparent 72%);
+  padding: 19px 24px;
+  border-radius: 0 12px 12px 0;
+  font-size: 21px;
+  line-height: 1.42;
+  font-weight: 560;
+}
+.wedge span { color: var(--blue); }
+
+/* ── Placeholder pill: impossible to present by accident ──────────────────── */
+.fill {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border: 1px dashed rgba(251, 191, 36, 0.5);
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* ── Chrome ───────────────────────────────────────────────────────────────── */
+.foot {
+  position: absolute;
+  left: 76px;
+  right: 76px;
+  bottom: 26px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+.foot .mark { display: flex; align-items: center; gap: 8px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+#bar {
+  position: fixed;
+  left: 0; top: 0;
+  height: 2px;
+  background: var(--blue);
+  transition: width 0.22s ease;
+  z-index: 40;
+}
+#help {
+  position: fixed;
+  right: 14px;
+  bottom: 12px;
+  font-size: 11px;
+  color: rgba(230, 230, 230, 0.22);
+  font-family: var(--mono);
+  z-index: 45;
+  pointer-events: none;
+}
+
+/* ── Grid overview (G) ────────────────────────────────────────────────────── */
+#grid {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 12, 0.96);
+  z-index: 60;
+  display: none;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  padding: 34px;
+  align-content: start;
+  overflow: auto;
+}
+#grid.on { display: grid; }
+#grid button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  min-height: 76px;
+}
+#grid button:hover, #grid button:focus-visible {
+  border-color: var(--blue);
+  outline: none;
+  background: #1a2130;
+}
+#grid button i { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--blue); display: block; margin-bottom: 5px; }
+
+/* ── Print: one slide per landscape page ──────────────────────────────────── */
+@page { size: 1280px 720px; margin: 0; }
+@media print {
+  html, body { overflow: visible; height: auto; background: #fff; }
+  #stage { position: static; display: block; }
+  #deck { width: 1280px; height: auto; transform: none !important; }
+  .slide {
+    display: flex !important;
+    position: relative;
+    inset: auto;
+    width: 1280px;
+    height: 720px;
+    page-break-after: always;
+    break-after: page;
+  }
+  #bar, #help, #grid { display: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div id="bar"></div>
+<div id="stage"><div id="deck">
+
+<!-- ══ 1. TITLE ═══════════════════════════════════════════════════════════ -->
+<section class="slide" data-title="Title">
+  <div style="margin:auto 0; max-width:900px;">
+    <div class="eyebrow">Phorma Labs Pty Ltd</div>
+    <h1>Build agents<br />you can watch<br />think.</h1>
+    <p class="sub" style="max-width:600px;">The visual studio and debugger for multi-agent AI workflows.
+      Design on a canvas, step through every run, deploy the identical engine to your own cloud.</p>
+    <div style="margin-top:42px; display:flex; gap:30px; font-size:15px; color:var(--muted); flex-wrap:wrap;">
+      <span>Blake Linnell, Founder</span>
+      <span>blakelinnell96@gmail.com</span>
+      <span>Melbourne, Australia</span>
+    </div>
+    <div style="margin-top:16px; font-size:15px; color:var(--blue);">
+      Raising $1.2M pre-seed
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> phorma-labs.com</span><span>01</span></div>
+</section>
+
+<!-- ══ 2. PROBLEM ════════════════════════════════════════════════════════ -->
+<section class="slide" data-title="Problem">
+  <div class="eyebrow">The problem</div>
+  <h2 class="wide">Agents are being deployed into real operations, and nobody can see what they
+    did.</h2>
+  <div class="body" style="display:flex; gap:36px; align-items:flex-start;">
+    <ul class="points neg" style="flex:1.25;">
+      <li>Engineers debug multi-agent systems with <b>print statements and log greps</b></li>
+      <li>Orchestration logic is scattered across repos, notebooks and prompt files</li>
+      <li>The ops owner who owns the process <b>cannot inspect, verify or trust</b> the system</li>
+      <li>When an agent misbehaves in production, <b>the trace is already gone</b></li>
+    </ul>
+    <div style="flex:1; border-left:3px solid var(--green);
+                background:linear-gradient(90deg, var(--green-soft), transparent 82%);
+                padding:22px 26px; border-radius:0 14px 14px 0;">
+      <p style="font-size:19px; line-height:1.5; font-style:italic; color:var(--text);">
+        &ldquo;An agentic workflow solution that is capable and easy enough to run our day-to-day
+        operations was a missing piece we didn't know we needed.&rdquo;</p>
+      <p style="margin-top:14px; font-size:14.5px; color:var(--muted);">
+        <b style="color:var(--text); font-weight:640;">David Markovski</b><br />Optimised Accounting</p>
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Problem</span><span>02</span></div>
+</section>
+
+<!-- ══ 3. WHY NOW ════════════════════════════════════════════════════════ -->
+<section class="slide" data-title="Why now">
+  <div class="eyebrow">Why now</div>
+  <h2 class="wide">Agents reached production before the tooling to run them did.</h2>
+  <div class="body">
+    <div class="cards c2">
+      <div class="card">
+        <h3><span class="num">01</span> The category is proven at scale</h3>
+        <p>n8n raised a $180M Series C led by Accel. Visual orchestration is a venture-scale
+          category, not a feature someone bolts on.</p>
+      </div>
+      <div class="card">
+        <h3><span class="num">02</span> The labs tried it and handed it back</h3>
+        <p>OpenAI retires Agent Builder on 30 November 2026 and points those workflows at a code
+          SDK. The demand did not disappear with it, and those users did not become engineers.</p>
+      </div>
+      <div class="card">
+        <h3><span class="num">03</span> Integration breadth stopped being the moat</h3>
+        <p>MCP standardised tool access, so connector count is now table stakes for everyone. The
+          contest moves to the run itself: can you see it, trust it, and fix it?</p>
+      </div>
+      <div class="card">
+        <h3><span class="num">04</span> The buyers are already non-technical</h3>
+        <p>Our first design partner is an accounting firm, not a tech startup. That is what
+          production agent adoption looks like in 2026, and it is not who a code SDK serves.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="mark"><span class="dot"></span> Sources: PitchBook (n8n Series C), openai.com/blog/introducing-agentkit</span>
+    <span>03</span>
+  </div>
+</section>
+
+<!-- ══ 4. PRODUCT: CANVAS ════════════════════════════════════════════════ -->
+<section class="slide" data-title="Product - canvas">
+  <div class="eyebrow">Product</div>
+  <h2>Agents are nodes. Handoffs are edges. The canvas is the monitor.</h2>
+  <div class="body" style="display:flex; gap:32px; align-items:stretch;">
+    <figure class="shot" style="flex:1.6;">
+      <img src="assets/canvas-run.png" alt="Phorma Agent Studio canvas mid-run: two schedule
+        triggers handing off to a Jira Time-Log Safety Net agent that is thinking, with dashed tool
+        links out to four tool nodes." />
+      <div class="shot__fallback">
+        <span class="fill">SAVE THE SCREENSHOT TO docs/assets/canvas-run.png</span>
+        <span>node glowing, edge pulsing, tokens streaming</span>
+      </div>
+    </figure>
+    <div style="flex:1; display:grid; gap:16px; align-content:center;">
+      <div class="card" style="padding:18px 20px;">
+        <h3 style="font-size:17px;">Watch it happen live</h3>
+        <p style="font-size:15px;">See which step is active, what is being handed off, and what comes
+          back, as it happens.</p>
+      </div>
+      <div class="card" style="padding:18px 20px;">
+        <h3 style="font-size:17px;">60fps at scale</h3>
+        <p style="font-size:15px;">Custom Canvas2D renderer across hundreds of nodes. Built like a
+          design tool, not a dashboard.</p>
+      </div>
+      <div class="card" style="padding:18px 20px;">
+        <h3 style="font-size:17px;">Legible to the whole team</h3>
+        <p style="font-size:15px;">The canvas is the documentation. A non-engineer can see what the
+          agents are doing.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> The canvas</span><span>04</span></div>
+</section>
+
+<!-- ══ 5. PRODUCT: DEBUGGER (WEDGE) ══════════════════════════════════════ -->
+<section class="slide" data-title="Product - debugger">
+  <div class="eyebrow">The wedge</div>
+  <h2>Pause. Step. Breakpoint. Replay.</h2>
+  <div class="body" style="display:flex; gap:32px;">
+    <div style="flex:1;">
+      <ul class="points pos tight">
+        <li><b>IDE-grade control of a live run.</b> Pause, resume, step, breakpoints mid-run</li>
+        <li><b>Every run persisted</b> with its full trace and per-node output, ready to reopen</li>
+        <li><b>Built-in evals.</b> Input suites scored by exact match, contains, or LLM-as-judge,
+          comparable across models</li>
+        <li><b>Robustness as config.</b> Retries with backoff, model fallback, error branches,
+          timeouts, context compression</li>
+        <li><b>Version history.</b> Every save is a version with a semantic diff and one-click
+          restore</li>
+      </ul>
+    </div>
+    <div style="flex:0.82; background:#0d1117; border:1px solid var(--border-strong);
+                border-radius:12px; padding:20px 22px; font-family:var(--mono); font-size:14px;
+                line-height:2.05; align-self:start;">
+      <div style="color:var(--dim); font-size:11px; letter-spacing:0.12em; margin-bottom:8px;">RUN TRACE</div>
+      <div><span style="color:var(--green)">&check;</span> plan.generate <span style="color:var(--dim)">88ms</span></div>
+      <div><span style="color:var(--green)">&check;</span> tools.search <span style="color:var(--dim)">212ms</span></div>
+      <div><span style="color:var(--amber)">!</span> guard.pii <span style="color:var(--dim)">retried x1</span></div>
+      <div><span style="color:var(--green)">&check;</span> respond.stream <span style="color:var(--blue)">live</span></div>
+      <div><span style="color:var(--green)">&check;</span> memory.write <span style="color:var(--dim)">41ms</span></div>
+      <div><span style="color:var(--green)">&check;</span> eval.score <span style="color:var(--dim)">0.94</span></div>
+      <div style="color:var(--red); margin-top:6px;">&#9679; breakpoint at node 3</div>
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Debugger discipline</span><span>05</span></div>
+</section>
+
+<!-- ══ 6. PRODUCT: PARITY ════════════════════════════════════════════════ -->
+<section class="slide" data-title="Product - local to cloud">
+  <div class="eyebrow">Local to cloud</div>
+  <h2>What you test is byte-identical to what ships.</h2>
+  <div class="body" style="display:flex; align-items:center; gap:26px;">
+    <div class="card" style="flex:1;">
+      <h3>Desktop Studio</h3>
+      <p>Design on the canvas and run locally. Every step, handoff and tool call plays out in front
+        of you. Offline, against real data, zero cloud round-trip.</p>
+      <div style="margin-top:16px; font-family:var(--mono); font-size:12.5px; color:var(--dim);">
+        macOS &middot; Windows &middot; Linux
+      </div>
+    </div>
+    <div style="text-align:center; flex:none; width:170px;">
+      <div style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--blue); margin-bottom:8px;">one click</div>
+      <div style="height:2px; background:linear-gradient(90deg, var(--blue), var(--green)); border-radius:2px;"></div>
+      <div style="font-size:13px; color:var(--muted); margin-top:9px;">same engine</div>
+    </div>
+    <div class="card" style="flex:1;">
+      <h3>Your Cloudflare account</h3>
+      <p>Ship the identical runtime into a Durable Object. Your keys, your cloud, no rewrite and no
+        lock-in. Or take the managed path on Phorma Cloud.</p>
+      <div style="margin-top:16px; font-family:var(--mono); font-size:12.5px; color:var(--dim);">
+        AWS on the roadmap
+      </div>
+    </div>
+  </div>
+  <div class="wedge" style="margin-top:30px; font-size:19px;">
+    One pure-TypeScript engine. One event stream. <span>No prototype-to-production rewrite tax.</span>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Parity</span><span>06</span></div>
+</section>
+
+<!-- ══ 7. COMPETITION ════════════════════════════════════════════════════ -->
+<section class="slide" data-title="Competition">
+  <div class="eyebrow">Competition</div>
+  <h2 class="wide" style="font-size:36px; max-width:34ch;">Everyone can show you what happened.
+    We let you drive it while it happens.</h2>
+  <div class="body" style="margin-top:26px;">
+    <table class="matrix" style="font-size:14.5px;">
+      <thead>
+        <tr>
+          <th style="width:23%">&nbsp;</th>
+          <th>Visual canvas</th>
+          <th>Inspect a past run</th>
+          <th>Pause, step,<br />breakpoint a live run</th>
+          <th>Agents as the<br />primitive</th>
+          <th>One engine,<br />local to prod</th>
+          <th>Runs in your<br />own cloud</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="mine">
+          <td>Phorma</td>
+          <td class="yes">&check;</td><td class="yes">&check;</td><td class="yes">&check;</td>
+          <td class="yes">&check;</td><td class="yes">&check;</td><td class="yes">&check;</td>
+        </tr>
+        <tr>
+          <td>n8n, Zapier, Make</td>
+          <td class="yes">&check;</td><td class="yes">&check;</td><td class="no">&times;</td>
+          <td class="part">bolted on</td><td class="no">&times;</td><td class="part">self-host</td>
+        </tr>
+        <tr>
+          <td>LangGraph, CrewAI</td>
+          <td class="no">&times;</td><td class="part">external</td><td class="part">in code</td>
+          <td class="yes">&check;</td><td class="yes">&check;</td><td class="yes">&check;</td>
+        </tr>
+        <tr>
+          <td>Vendor-native builders</td>
+          <td class="yes">&check;</td><td class="yes">&check;</td><td class="no">&times;</td>
+          <td class="yes">&check;</td><td class="no">&times;</td><td class="no">&times;</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="margin-top:18px; font-size:14.5px; line-height:1.55; color:var(--muted);">
+      <b style="color:var(--text);">Credit where it is due.</b> n8n ships execution history, data
+      pinning, AI evaluations and a <i>Debug in editor</i> action that replays a past execution's data
+      in the canvas. Real tooling - and a post-mortem. You still cannot hold a live agent at node
+      three, read what it decided and step it forward.
+    </p>
+  </div>
+  <div class="wedge" style="font-size:18px; padding:16px 22px;">
+    Their unit of work is an execution log. <span>Ours is a run you can drive.</span>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Source: docs.n8n.io/build/understand-workflows/understand-executions</span><span>07</span></div>
+</section>
+
+<!-- ══ 8. ICP + MOTION ═══════════════════════════════════════════════════ -->
+<section class="slide" data-title="Who buys">
+  <div class="eyebrow">Go to market</div>
+  <h2 class="wide">Land with automation engineers. Expand to the ops team that owns the process.</h2>
+  <div class="body">
+    <div class="cards c3">
+      <div class="card">
+        <h3><span class="num">LAND</span></h3>
+        <p style="color:var(--text); font-size:17px; margin-bottom:8px;">Automation and platform
+          engineers running agents in production.</p>
+        <p>They are debugging blind today, they install desktop tools without friction, and they
+          evangelise internally.</p>
+      </div>
+      <div class="card">
+        <h3><span class="num">EXPAND</span></h3>
+        <p style="color:var(--text); font-size:17px; margin-bottom:8px;">The ops owner who needs to
+          see and trust the system.</p>
+        <p>The canvas is what makes the engineer's work legible to them. That is what turns one seat
+          into a team plan.</p>
+      </div>
+      <div class="card">
+        <h3><span class="num">MOTION</span></h3>
+        <p style="color:var(--text); font-size:17px; margin-bottom:8px;">Free studio, zero-key first
+          run.</p>
+        <p>No license gate, local Ollama out of the box. Content-led on debugging and eval practice,
+          plus outbound to teams migrating off deprecated vendor builders.</p>
+      </div>
+    </div>
+    <div style="margin-top:26px; border-left:3px solid var(--green);
+                background:linear-gradient(90deg, var(--green-soft), transparent 76%);
+                padding:16px 22px; border-radius:0 12px 12px 0; font-size:18px; line-height:1.45;">
+      <b>Two teams have committed to pay</b> before a payment page exists, including Optimised
+      Accounting. <span style="color:var(--muted)">Both came from operations, not engineering.</span>
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Beachhead</span><span>08</span></div>
+</section>
+
+<!-- ══ 9. BUSINESS MODEL ═════════════════════════════════════════════════ -->
+<section class="slide" data-title="Business model">
+  <div class="eyebrow">Business model</div>
+  <h2>The studio is free. The control plane is the product.</h2>
+  <div class="body" style="display:flex; gap:34px;">
+    <div style="flex:1.15;">
+      <table>
+        <thead>
+          <tr><th>Plan</th><th class="n">Price / mo</th><th class="n">Credits</th><th class="n">Runs</th><th class="n">Concurrent</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Starter</td><td class="n">$20</td><td class="n">1,000</td><td class="n">300</td><td class="n">1</td></tr>
+          <tr class="mine"><td>Pro</td><td class="n">$60</td><td class="n">3,000</td><td class="n">2,000</td><td class="n">3</td></tr>
+          <tr><td>Team</td><td class="n">$200</td><td class="n">10,000</td><td class="n">10,000</td><td class="n">10</td></tr>
+          <tr><td>Enterprise</td><td class="n">custom</td><td class="n">custom</td><td class="n">custom</td><td class="n">custom</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:18px; font-size:15px; color:var(--muted); line-height:1.6;">
+        Top-up packs at $10 / $20 / $40, priced so upgrading always beats topping up.
+        Target gross margin <b style="color:var(--green)">75-80%</b>; Cloudflare runtime cost is
+        negligible per run.
+      </p>
+    </div>
+    <div class="card" style="flex:0.85; align-self:start; border-color:rgba(96,165,250,0.3);">
+      <h3>Where value accrues</h3>
+      <p>Bring-your-own runtime and keys stay free forever. What teams pay for, and cannot easily
+        walk away from, is <b style="color:var(--text)">the accumulated record of what their agents
+        did</b>: every run trace, every eval score across every model, shared across the team.</p>
+      <p style="margin-top:12px;">The moat is the journal, not the token markup.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Free studio, paid control plane</span><span>09</span></div>
+</section>
+
+<!-- ══ 10. WHY ME ════════════════════════════════════════════════════════ -->
+<section class="slide" data-title="Why me">
+  <div class="eyebrow">Why me</div>
+  <h2>Blake Linnell</h2>
+  <div class="body">
+    <ul class="points tight">
+      <li><b>Shipped the entire stack in six weeks.</b> The studio, a pure-TypeScript run engine, a
+        Rust desktop shell and a Cloudflare control plane: four packages, roughly 100k lines, live as
+        signed cross-platform installers with an auto-updater</li>
+      <li><b>Seven years of software engineering delivered under hard deadlines</b>, including
+        several years carrying multiple full-time roles at once. Sustained output under load is not a
+        promise here, it is a track record</li>
+      <li><b>I already build for the operations buyer.</b> Phorma's other products run day-to-day
+        operations for an accounting firm and a technology company. That is how I found this problem,
+        and it is why design partner one came from operations rather than engineering</li>
+    </ul>
+    <div class="cards c3" style="margin-top:30px;">
+      <div class="card" style="padding:17px 20px;">
+        <h3 style="font-size:16px;">Engine</h3>
+        <p style="font-size:14.5px;">31k lines, zero framework deps, vitest plus property tests</p>
+      </div>
+      <div class="card" style="padding:17px 20px;">
+        <h3 style="font-size:16px;">Studio</h3>
+        <p style="font-size:14.5px;">61k lines, custom Canvas2D renderer, Angular 20</p>
+      </div>
+      <div class="card" style="padding:17px 20px;">
+        <h3 style="font-size:16px;">Cloud &amp; shell</h3>
+        <p style="font-size:14.5px;">Durable Object runtime, Rust keychain-backed key handling</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="mark"><span class="dot"></span> Founder</span><span>10</span></div>
+</section>
+
+<!-- ══ 11. THE ASK ═══════════════════════════════════════════════════════ -->
+<section class="slide" data-title="The ask">
+  <div class="eyebrow">The ask</div>
+  <h2 class="wide">$1.2M pre-seed to turn a shipped product into a used one.</h2>
+  <div class="body">
+    <p class="sub" style="margin-top:0; font-size:17px;">18 months of runway. Two hires, one
+      measurement layer, and one number that matters: paying teams.</p>
+    <div class="cards c3" style="margin-top:22px;">
+      <div class="card" style="padding:20px 22px;">
+        <h3 style="font-size:17px;"><span class="num">45%</span> Go to market</h3>
+        <p style="font-size:15px;">First hire is a product-minded salesperson. The product is
+          further ahead than the pipeline, so sales comes before more engineering. Plus
+          design-partner onboarding and the content engine.</p>
+      </div>
+      <div class="card" style="padding:20px 22px;">
+        <h3 style="font-size:17px;"><span class="num">35%</span> Product &amp; engineering</h3>
+        <p style="font-size:15px;">Senior engineer from month six. Self-serve billing, onboarding,
+          product instrumentation, team workspaces and the AWS deploy target.</p>
+      </div>
+      <div class="card" style="padding:20px 22px;">
+        <h3 style="font-size:17px;"><span class="num">20%</span> Infra &amp; buffer</h3>
+        <p style="font-size:15px;">Cloudflare, subsidised inference for the zero-key first run, code
+          signing, then legal, accounting, insurance and contingency.</p>
+      </div>
+    </div>
+    <div class="cards c3" style="margin-top:18px;">
+      <div class="card" style="padding:15px 20px; border-color:rgba(96,165,250,0.28);">
+        <h3 style="font-size:15px; color:var(--blue);">Month 6</h3>
+        <p style="font-size:14.5px;">Billing and analytics live &middot; 25 paying teams &middot;
+          $2.5k MRR</p>
+      </div>
+      <div class="card" style="padding:15px 20px; border-color:rgba(96,165,250,0.28);">
+        <h3 style="font-size:15px; color:var(--blue);">Month 12</h3>
+        <p style="font-size:14.5px;">120 paying teams &middot; $12k MRR &middot; 800 weekly active</p>
+      </div>
+      <div class="card" style="padding:15px 20px; border-color:rgba(74,222,128,0.34);">
+        <h3 style="font-size:15px; color:var(--green);">Month 18 - seed ready</h3>
+        <p style="font-size:14.5px;">250+ paying teams &middot; $25k MRR ($300k ARR run-rate)
+          &middot; 40% week-4 retention</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="mark"><span class="dot"></span> hello@phorma-labs.com &middot; phorma-labs.com</span>
+    <span>Sized against the $1.3M median for Australian angel and pre-seed rounds in 2026 (Cut Through Ventures) &nbsp;&middot;&nbsp; 11</span>
+  </div>
+</section>
+
+</div></div>
+
+<div id="grid" role="dialog" aria-label="Slide overview"></div>
+<div id="help">&larr; &rarr; navigate &middot; G grid &middot; F fullscreen</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var deck   = document.getElementById('deck');
+  var slides = Array.prototype.slice.call(deck.querySelectorAll('.slide'));
+  var bar    = document.getElementById('bar');
+  var grid   = document.getElementById('grid');
+  var index  = 0;
+
+  /* A missing screenshot degrades to the labelled placeholder panel rather than
+     a broken-image icon, so the deck is always presentable. */
+  Array.prototype.forEach.call(document.querySelectorAll('.shot img'), function (img) {
+    function miss() {
+      img.style.display = 'none';
+      img.parentNode.classList.add('is-missing');
+    }
+    img.addEventListener('error', miss);
+    if (img.complete && img.naturalWidth === 0) miss();
+  });
+
+  /* Scale the fixed 1280x720 stage to fit whatever viewport it is shown in,
+     so the same file works on a laptop, a projector and in print. */
+  function fit() {
+    var pad = 1;
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720) * pad;
+    deck.style.transform = 'scale(' + s + ')';
+  }
+
+  function render() {
+    slides.forEach(function (el, i) { el.classList.toggle('is-active', i === index); });
+    bar.style.width = ((index + 1) / slides.length * 100) + '%';
+    if (location.hash !== '#' + (index + 1)) {
+      history.replaceState(null, '', '#' + (index + 1));
+    }
+  }
+
+  function go(i) {
+    index = Math.max(0, Math.min(slides.length - 1, i));
+    render();
+  }
+
+  /* Grid overview, built once from the slide titles. */
+  slides.forEach(function (el, i) {
+    var b = document.createElement('button');
+    b.innerHTML = '<i>' + String(i + 1).padStart(2, '0') + '</i>';
+    b.appendChild(document.createTextNode(el.dataset.title || 'Slide'));
+    b.addEventListener('click', function () {
+      grid.classList.remove('on');
+      go(i);
+    });
+    grid.appendChild(b);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Enter') { go(index + 1); e.preventDefault(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'Backspace')       { go(index - 1); e.preventDefault(); }
+    else if (k === 'Home') { go(0); }
+    else if (k === 'End')  { go(slides.length - 1); }
+    else if (k === 'g' || k === 'G') { grid.classList.toggle('on'); }
+    else if (k === 'f' || k === 'F') {
+      if (document.fullscreenElement) { document.exitFullscreen(); }
+      else if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen(); }
+    }
+    else if (k === 'Escape') { grid.classList.remove('on'); }
+    else if (/^[1-9]$/.test(k)) { go(parseInt(k, 10) - 1); }
+  });
+
+  /* Click the right two thirds to advance, the left third to go back. */
+  document.getElementById('stage').addEventListener('click', function (e) {
+    if (grid.classList.contains('on')) return;
+    go(e.clientX < window.innerWidth / 3 ? index - 1 : index + 1);
+  });
+
+  window.addEventListener('resize', fit);
+  window.addEventListener('hashchange', function () {
+    var n = parseInt(location.hash.slice(1), 10);
+    if (!isNaN(n) && n - 1 !== index) go(n - 1);
+  });
+
+  var start = parseInt(location.hash.slice(1), 10);
+  if (!isNaN(start)) index = Math.max(0, Math.min(slides.length - 1, start - 1));
+  fit();
+  render();
+})();
+</script>
+</body>
+</html>
