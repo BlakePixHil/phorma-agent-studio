@@ -46,6 +46,17 @@ export class CloudDialog {
   /** The chosen deploy target ('cloudflare' fallback keeps legacy behavior). */
   protected readonly provider = computed(() => this.settings.cloudProvider() ?? 'cloudflare');
 
+  /**
+   * Deployment status for the workflow this dialog is showing. Goes through
+   * `deployedStatusFor` rather than reading `cloud.deployedStatus()` directly:
+   * the signal is a single shared slot, and other surfaces (the library panel's
+   * delete, which purges the cloud) check the status of OTHER workflows, which
+   * would otherwise be rendered here as if it were this workflow's.
+   */
+  protected readonly deployedStatus = computed(() =>
+    this.cloud.deployedStatusFor(this.workflow.activeDoc()?.workflowId),
+  );
+
   constructor() {
     // Refresh the account chip and the deployment status whenever the dialog
     // opens - both providers deploy one instance per workflow, so the status
@@ -76,7 +87,9 @@ export class CloudDialog {
       title: 'Remove from cloud?',
       message:
         `"${this.workflow.activeName()}" will stop running in the cloud immediately - scheduled ` +
-        `triggers, manual runs and the live monitor all need a fresh push afterward. Run history is kept.`,
+        `triggers, manual runs and the live monitor all need a fresh push afterward. Its published ` +
+        `portal is taken offline, and the cloud copy of its run history and usage is deleted. Your ` +
+        `local workflow, connections and account usage totals are untouched.`,
       confirmLabel: 'Remove',
       tone: 'danger',
     });

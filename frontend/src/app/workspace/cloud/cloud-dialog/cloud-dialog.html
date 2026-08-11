@@ -184,7 +184,7 @@
             </span>
           </div>
           <div class="phorma-cloud__row">
-            @if (cloud.deployedStatus(); as deployStatus) {
+            @if (deployedStatus(); as deployStatus) {
               @if (deployStatus.hasWorkflow) {
                 <p-button
                   styleClass="phorma-cloud__btn"

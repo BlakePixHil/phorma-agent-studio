@@ -196,9 +196,8 @@ export class Toolbar {
   protected readonly cloudDeployed = computed(() => {
     const activeId = this.workflow.activeDoc()?.workflowId;
     if (!activeId) return false;
-    const live = this.cloud.deployedStatus();
-    const liveId = this.cloud.deployedStatusWorkflowId();
-    if (live && liveId === activeId) return live.hasWorkflow;
+    const live = this.cloud.deployedStatusFor(activeId);
+    if (live) return live.hasWorkflow;
     return this.versions.deployedWorkflowIds().has(activeId);
   });
 

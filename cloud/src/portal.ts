@@ -459,24 +459,29 @@ async function openSession(
   if (!spec) return { error: 'This assistant is not available right now.', status: 503 };
 
   const stub = sessionStub(env, record, sessionId);
-  await stub.initPortalSession({
-    spec,
-    slug: record.slug,
-    sessionId,
-    workflowId: record.workflowId,
-    // The session instance cannot derive this itself: reading `this.name` on an
-    // RPC-reached Durable Object throws in partyserver.
-    ownerInstance: ownerName,
-    ownerId: record.ownerId,
-    responderNodeId: record.responderNodeId,
-  });
-  // Track the session instance so a workflow delete / "Remove from cloud" can
-  // tear it down. Best-effort: a registry write failure must not break a
-  // visitor's turn - the session would only leak on purge, which is strictly
-  // better than failing the request.
-  await portalIndex(env)
-    .addSession(record.workflowId, sessionId, portalSessionInstance(record, sessionId))
-    .catch(() => undefined);
+  // This runs on EVERY visitor turn, so the registry write goes out alongside
+  // the session init rather than after it - two Durable Object hops in
+  // parallel instead of in series. Tracking the instance is what lets a
+  // workflow delete / "Remove from cloud" tear the session down later.
+  // Best-effort: a registry write failure must not break a visitor's turn - the
+  // session would only leak on purge, which is strictly better than failing the
+  // request.
+  await Promise.all([
+    stub.initPortalSession({
+      spec,
+      slug: record.slug,
+      sessionId,
+      workflowId: record.workflowId,
+      // The session instance cannot derive this itself: reading `this.name` on
+      // an RPC-reached Durable Object throws in partyserver.
+      ownerInstance: ownerName,
+      ownerId: record.ownerId,
+      responderNodeId: record.responderNodeId,
+    }),
+    portalIndex(env)
+      .addSession(record.workflowId, sessionId, portalSessionInstance(record, sessionId))
+      .catch(() => undefined),
+  ]);
   return { stub };
 }
 

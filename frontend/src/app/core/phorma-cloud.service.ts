@@ -46,7 +46,7 @@ const TIER_SUB_WORKFLOW_DEPTH: Record<string, number> = {
 };
 
 /**
- * Max active cron schedules per workflow per plan — MUST mirror
+ * Max active cron schedules per workflow per plan - MUST mirror
  * `schedulesPerWorkflow` in `cloud/src/tenants.ts` TIERS. The worker's
  * `rescheduleCron` arms schedules in graph order and silently drops the rest
  * once the budget is spent; this map lets the studio surface that drop on the

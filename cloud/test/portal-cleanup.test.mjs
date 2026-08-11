@@ -3,11 +3,13 @@
  *
  * Two concerns are pinned here, both reachable without a real worker:
  *
- *  1. `PortalIndex.addSession` / `deleteSessions` - the session registry that
- *     lets a workflow purge delete the per-visitor session Durable Objects a
- *     published portal has spawned. A Map-backed storage stub exercises the
- *     exact key shape (`session:{workflowId}:{sessionId}`) and the
- *     idempotent, prefix-bounded delete.
+ *  1. `PortalIndex.addSession` / `listSessions` / `forgetSessions` - the session
+ *     registry that lets a workflow purge delete the per-visitor session
+ *     Durable Objects a published portal has spawned. A Map-backed storage stub
+ *     exercises the exact key shape (`session:{workflowId}:{sessionId}`), the
+ *     idempotent prefix-bounded read, and the rule that a session is forgotten
+ *     only after its DO is purged (the registry is the only reference to that
+ *     instance, so an early delete orphans it forever).
  *  2. `clearAllForWorkflow` - the workflow-state helper that wipes every
  *     `workflow_state` row for one workflow. Keys are workflow-scoped by the
  *     engine (`{workflowId}::{namespace}:{key}`), so a prefix match is exact
@@ -111,23 +113,36 @@ console.log('\nPortalIndex session registry');
   await index.addSession('wf-a', 'sess-1', 'owner:wf-a#ssess-1');
   check('addSession is idempotent (re-registering overwrites the same key)', storage._map.size === 3, String(storage._map.size));
 
-  const deleted = await index.deleteSessions('wf-a');
-  check('deleteSessions returns the two wf-a session instance names', deleted.length === 2, JSON.stringify(deleted));
+  const listed = await index.listSessions('wf-a');
+  check('listSessions returns the two wf-a sessions', listed.length === 2, JSON.stringify(listed));
   check(
-    'the returned names are the tenant-prefixed instance names',
-    deleted.includes('owner:wf-a#ssess-1') && deleted.includes('owner:wf-a#ssess-2'),
-    JSON.stringify(deleted),
+    'each entry carries the sessionId and the tenant-prefixed instance name',
+    listed.some(e => e.sessionId === 'sess-1' && e.instanceName === 'owner:wf-a#ssess-1') &&
+      listed.some(e => e.sessionId === 'sess-2' && e.instanceName === 'owner:wf-a#ssess-2'),
+    JSON.stringify(listed),
   );
-  check('wf-a tracking keys are gone', storage._map.size === 1, String(storage._map.size));
+  check('listSessions does not mutate the registry', storage._map.size === 3, String(storage._map.size));
+  check('listSessions is scoped per workflow', (await index.listSessions('wf-b')).length === 1);
+
+  // The purge path forgets only what it actually purged. Simulate sess-2's DO
+  // purge failing: its tracking key MUST survive, because the registry is the
+  // only reference to that instance that exists anywhere.
+  await index.forgetSessions('wf-a', ['sess-1']);
+  const afterPartial = await index.listSessions('wf-a');
+  check(
+    'a session whose purge failed keeps its tracking key (retryable, never orphaned)',
+    afterPartial.length === 1 && afterPartial[0].sessionId === 'sess-2',
+    JSON.stringify(afterPartial),
+  );
   check('wf-b session survives (per-workflow isolation)', (await storage.list({ prefix: 'session:wf-b:' })).size === 1);
 
-  // Idempotent: a second call returns nothing and is harmless.
-  const again = await index.deleteSessions('wf-a');
-  check('deleteSessions is idempotent (empty on second call)', again.length === 0, JSON.stringify(again));
+  await index.forgetSessions('wf-a', ['sess-2']);
+  check('forgetting the rest clears the workflow', (await index.listSessions('wf-a')).length === 0);
 
-  // Deleting a workflow with no sessions is a no-op.
-  const empty = await index.deleteSessions('wf-never');
-  check('deleteSessions on an unknown workflow returns []', empty.length === 0, JSON.stringify(empty));
+  // Idempotent: forgetting an already-forgotten or unknown session is harmless.
+  await index.forgetSessions('wf-a', ['sess-1', 'sess-2', 'sess-never']);
+  check('forgetSessions is idempotent', (await index.listSessions('wf-a')).length === 0);
+  check('listSessions on an unknown workflow returns []', (await index.listSessions('wf-never')).length === 0);
 }
 
 // ── Session keys do not collide with slug keys ─────────────────────────────
@@ -156,15 +171,16 @@ console.log('\nSession keys are namespaced away from slug keys');
   });
   await index.addSession('wf-a', 'sess-1', 'owner:wf-a#ssess-1');
 
-  const sessions = await index.deleteSessions('wf-a');
-  check('deleteSessions returns only the session, not the slug', sessions.length === 1 && sessions[0] === 'owner:wf-a#ssess-1', JSON.stringify(sessions));
-  check('the slug entry survives deleteSessions (purge calls unpublish separately)', (await storage.get('portal:my-portal')) !== undefined);
+  const sessions = await index.listSessions('wf-a');
+  check('listSessions returns only the session, not the slug', sessions.length === 1 && sessions[0].instanceName === 'owner:wf-a#ssess-1', JSON.stringify(sessions));
+  await index.forgetSessions('wf-a', sessions.map(entry => entry.sessionId));
+  check('the slug entry survives session teardown (purge calls unpublish separately)', (await storage.get('portal:my-portal')) !== undefined);
 
   const { removed } = await index.unpublish('wf-a');
   check('unpublish removes the slug', removed.length === 1 && removed[0] === 'my-portal', JSON.stringify(removed));
-  // deleteSessions already ran above and cleared the session key, so the
-  // registry has no session keys left either way; the point is that unpublish
-  // itself does not touch the session namespace.
+  // The session key was already forgotten above, so the registry has no session
+  // keys left either way; the point is that unpublish itself does not touch the
+  // session namespace.
   const sessionKeysAfterUnpublish = await storage.list({ prefix: 'session:wf-a:' });
   check('unpublish does not touch the session namespace', sessionKeysAfterUnpublish.size === 0, String(sessionKeysAfterUnpublish.size));
 }

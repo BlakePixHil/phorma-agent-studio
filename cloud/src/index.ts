@@ -133,13 +133,25 @@ export default {
     // `routeAgentRequest` (the agents SDK) returns its own Response for
     // unknown methods/paths (404/405) WITHOUT CORS headers, so the browser
     // blocks the body and the studio only sees a misleading CORS error
-    // instead of the real status. Attach the studio CORS headers to every
-    // response that leaves this handler so a missing route surfaces as a
-    // clean 404 the frontend can read, not an opaque network failure.
-    if (response && !response.headers.has('Access-Control-Allow-Origin')) {
-      const headers = new Headers(response.headers);
-      for (const [key, value] of Object.entries(cors)) headers.set(key, value);
-      return new Response(response.body, { status: response.status, headers });
+    // instead of the real status. Attach the studio CORS headers to those so a
+    // missing route surfaces as a clean 404 the frontend can read, not an
+    // opaque network failure. (`WorkflowAgent`'s own `json()` responses already
+    // carry CORS, so they fall straight through.)
+    //
+    // NEVER re-wrap a WebSocket upgrade: the 101 response carries the
+    // `webSocket` handle, which `new Response(body, init)` drops, and workerd
+    // rejects status 101 without it - the cloud monitor's `wss://` connect to
+    // this same `/agents/workflow-agent/{id}` path would fail outright. CORS
+    // does not apply to WebSockets anyway (browsers do not preflight them), so
+    // there is nothing to attach. The SDK's own CORS helper skips upgrades for
+    // exactly this reason.
+    const isUpgrade = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
+    if (response && !isUpgrade && response.status !== 101 && !response.webSocket) {
+      if (!response.headers.has('Access-Control-Allow-Origin')) {
+        const headers = new Headers(response.headers);
+        for (const [key, value] of Object.entries(cors)) headers.set(key, value);
+        return new Response(response.body, { status: response.status, headers });
+      }
     }
     return response;
   },

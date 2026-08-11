@@ -85,16 +85,25 @@ export class WorkflowsPanel {
 
   protected async remove(event: Event, spec: WorkflowSpec): Promise<void> {
     event.stopPropagation();
-    // Confirmation is skippable via Settings → General.
-    const confirmed = this.settings.confirmWorkflowDelete()
-      ? await this.confirmDialog.confirm({
-          title: 'Delete workflow?',
-          message: `"${spec.name}" will be removed from your library. Open tabs keep their copy.`,
-          confirmLabel: 'Delete',
-          cancelLabel: 'Keep',
-          tone: 'danger',
-        })
-      : true;
+    // A deployed workflow ALWAYS confirms, even with the confirmation turned off
+    // in Settings → General: that setting is about a local library delete, and
+    // this delete also takes a published portal offline and destroys the cloud
+    // deployment. Saying so is the difference between a delete and a surprise.
+    const deployed = this.isDeployed(spec);
+    const confirmed =
+      this.settings.confirmWorkflowDelete() || deployed
+        ? await this.confirmDialog.confirm({
+            title: 'Delete workflow?',
+            message: deployed
+              ? `"${spec.name}" will be removed from your library, and its cloud deployment will be ` +
+                `torn down: scheduled triggers stop, any published portal goes offline immediately, ` +
+                `and the cloud copy of its run history and usage is deleted. Open tabs keep their copy.`
+              : `"${spec.name}" will be removed from your library. Open tabs keep their copy.`,
+            confirmLabel: 'Delete',
+            cancelLabel: 'Keep',
+            tone: 'danger',
+          })
+        : true;
     if (!confirmed) return;
     // Tear down the cloud deployment first (best-effort): if this workflow is
     // deployed to Phorma Cloud, its Durable Object, portal and session DOs must

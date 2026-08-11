@@ -120,6 +120,8 @@
 // accent-green used by the Cloud dialog's status pill and the toolbar's
 // cloud-live icon.
 
+// Root font-size is 14px, so 0.857rem is the 12px type floor the rest of this
+// panel uses. Anything smaller renders under 10px and is unreadable.
 .phorma-card__deployed {
   display: inline-flex;
   align-items: center;
@@ -127,13 +129,13 @@
   margin-left: 0.4rem;
   padding: 1px 6px;
   border-radius: 999px;
-  font-size: 0.7rem;
+  font-size: 0.857rem;
   font-weight: 600;
   line-height: 1.4;
-  color: var(--phorma-accent-green, #34d399);
-  background: color-mix(in srgb, var(--phorma-accent-green, #34d399) 14%, transparent);
+  color: var(--phorma-accent-green, #22c55e);
+  background: color-mix(in srgb, var(--phorma-accent-green, #22c55e) 14%, transparent);
 
   i {
-    font-size: 0.7rem;
+    font-size: 0.857rem;
   }
 }

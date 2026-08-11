@@ -11,11 +11,18 @@
  * `miniflare` runs that bundle against a real (in-memory) SQLite-backed
  * Durable Object — no network, no Cloudflare account, no deployed worker.
  *
+ * Because it is the one harness with a real DO, it also hosts the worker-route
+ * regressions that only a real bundle can catch (the OPTIONS preflight, the
+ * purge cascade across two Durable Objects, and the WebSocket upgrade).
+ *
  * Covers:
  *  - an error finding -> HTTP 400 with EVERY finding in the body, and the
  *    previously deployed spec left completely unchanged (17.12)
  *  - a warning-only (or clean) push -> HTTP 200 and the spec is replaced
  *    (17.12, 17.15)
+ *  - `DELETE /workflow` clears the spec; `DELETE /workflow/purge` additionally
+ *    cascades (portal unpublished, sessions purged) and is idempotent
+ *  - the gateway leaves a 101 WebSocket upgrade untouched
  *
  * Run: node cloud/test/deploy-validation.test.mjs
  */
@@ -96,6 +103,39 @@ function specWithTwoErrorFindings(id, name) {
   };
 }
 
+/**
+ * A publishable portal: a `portal-trigger` handed off to one agent. The handoff
+ * matters - `validatePortal` rejects a trigger that answers nobody.
+ */
+function portalSpec(id, name) {
+  return {
+    version: 1,
+    id,
+    name,
+    savedAt: new Date().toISOString(),
+    graph: {
+      nodes: [
+        {
+          id: 'portal',
+          name: 'Portal',
+          kind: 'portal-trigger',
+          category: 'trigger',
+          icon: '',
+          position: { x: 0, y: 0 },
+          ports: [{ id: 'portal-msg', name: 'Message', role: 'message-out' }],
+          data: { mode: 'chat', access: 'public', slug: 'purge-me' },
+        },
+        node('answer', 'agent', [IN('answer'), OUT('answer', 'Reply')], {
+          prompt: 'Reply in one short sentence.',
+        }),
+      ],
+      connections: [
+        { id: 'e1', outputId: 'portal-msg-out', inputId: 'answer-in', kind: 'handoff' },
+      ],
+    },
+  };
+}
+
 /** A trigger plus an `http-request` node whose url is a template — warning only. */
 function specWithWarningOnly(id, name) {
   return {
@@ -139,6 +179,29 @@ async function removeWorkflow(mf, workflowId) {
     { method: 'DELETE' },
   );
   return { status: response.status, body: await response.json() };
+}
+
+async function purgeWorkflow(mf, workflowId) {
+  const response = await mf.dispatchFetch(
+    `http://localhost/agents/workflow-agent/${encodeURIComponent(workflowId)}/workflow/purge`,
+    { method: 'DELETE' },
+  );
+  return { status: response.status, body: await response.json().catch(() => ({})) };
+}
+
+async function publish(mf, workflowId) {
+  const response = await mf.dispatchFetch(
+    `http://localhost/agents/workflow-agent/${encodeURIComponent(workflowId)}/publish`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+  );
+  return { status: response.status, body: await response.json().catch(() => ({})) };
+}
+
+async function portalStatus(mf, workflowId) {
+  const response = await mf.dispatchFetch(
+    `http://localhost/agents/workflow-agent/${encodeURIComponent(workflowId)}/portal`,
+  );
+  return { status: response.status, body: await response.json().catch(() => ({})) };
 }
 
 // ── Build the exact deploy bundle, then run it under Miniflare ─────────────
@@ -258,6 +321,82 @@ try {
 
     const after = await status(mf, workflowId);
     check('hasWorkflow is false after removal', after.body.hasWorkflow === false, JSON.stringify(after.body));
+  }
+
+  // ── DELETE /workflow/purge cascades (studio delete / "Remove from cloud") ──
+  // The purge is the ONLY teardown a user can reach for cloud resources they
+  // can no longer see, so the cascade is the property that matters: cron
+  // cancelled, portal slug unpublished, session DOs purged, spec gone. Proven
+  // through the portal slug, because it lives in a DIFFERENT Durable Object
+  // (`PortalIndex`) and therefore can only disappear if the owner instance
+  // actually cascaded. Regression: the route shipped calling
+  // `purgeSelf(false)`, so it wiped its own tables and left the published
+  // portal serving a workflow that no longer existed.
+  console.log('\nDELETE /workflow/purge');
+  {
+    const workflowId = 'wf-purge-cascade';
+    const pushed = await push(mf, workflowId, portalSpec(workflowId, 'Purgeable portal'));
+    check('the portal spec deploys (200)', pushed.status === 200, JSON.stringify(pushed.body));
+
+    const published = await publish(mf, workflowId);
+    check(
+      'the portal publishes',
+      published.status === 200 && published.body?.ok === true,
+      JSON.stringify(published.body),
+    );
+    const before = await portalStatus(mf, workflowId);
+    check('the portal registry holds a slug', before.body?.record?.slug === 'purge-me', JSON.stringify(before.body));
+
+    const purged = await purgeWorkflow(mf, workflowId);
+    check(
+      'the purge responds ok',
+      purged.status === 200 && purged.body?.purged === true,
+      JSON.stringify(purged.body),
+    );
+    check(
+      'no session DO was left orphaned',
+      purged.body?.orphanedSessions === 0,
+      JSON.stringify(purged.body),
+    );
+
+    const afterPortal = await portalStatus(mf, workflowId);
+    check(
+      'the purge UNPUBLISHED the portal (the cascade ran)',
+      afterPortal.body?.record === null,
+      JSON.stringify(afterPortal.body),
+    );
+    const afterStatus = await status(mf, workflowId);
+    check(
+      'hasWorkflow is false after the purge',
+      afterStatus.body.hasWorkflow === false,
+      JSON.stringify(afterStatus.body),
+    );
+
+    // Purging twice must not fault - the library-delete path can race the
+    // Cloud dialog's own "Remove from cloud".
+    const again = await purgeWorkflow(mf, workflowId);
+    check('a second purge is a clean no-op', again.status === 200, JSON.stringify(again.body));
+  }
+
+  // ── The gateway must not re-wrap a WebSocket upgrade ──────────────────────
+  // The monitor connects `wss://.../agents/workflow-agent/{id}`, which returns
+  // a 101 carrying the `webSocket` handle. Regression: the CORS-attachment
+  // block in index.ts rebuilt every response that lacked
+  // `Access-Control-Allow-Origin`, and rebuilding a 101 drops the socket (and
+  // workerd rejects the status), so the cloud monitor could not connect at all.
+  console.log('\nWebSocket upgrade passthrough');
+  {
+    const workflowId = 'wf-ws-upgrade';
+    await push(mf, workflowId, validSpec(workflowId, 'Monitored'));
+    const response = await mf.dispatchFetch(
+      `http://localhost/agents/workflow-agent/${encodeURIComponent(workflowId)}`,
+      { headers: { Upgrade: 'websocket' } },
+    );
+    check('the upgrade is answered 101', response.status === 101, String(response.status));
+    check('the response still carries the webSocket handle', response.webSocket !== null && response.webSocket !== undefined);
+    // Accept before closing: workerd refuses close() on an unaccepted socket.
+    response.webSocket?.accept();
+    response.webSocket?.close();
   }
 } finally {
   await mf.dispose();

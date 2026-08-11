@@ -13,9 +13,9 @@
  *                      refused while a run is in progress; run history,
  *                      the usage ledger and connection metadata are kept
  *   DELETE /workflow/purge - full teardown: cancel cron, unpublish the portal,
- *                      delete tracked portal session DOs (via RPC), wipe every
- *                      SQLite table and `storage.deleteAll()`. Studio "Remove
- *                      from cloud" and the library-delete path hit this.
+ *                      delete tracked portal session DOs (via RPC) and empty
+ *                      every SQLite table. Studio "Remove from cloud" and the
+ *                      library-delete path hit this.
  *   POST /connections — replace the connection metadata inventory (names,
  *                      types, auth modes — never a secret value)
  *   GET  /connections — this worker's connection inventory as
@@ -635,18 +635,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // library-delete path). Wipes EVERYTHING this DO owns for the workflow:
     // the spec, cron schedules, portal slug + access keys, tracked portal
     // session DOs, and every SQLite table (run_journal, runs, run_events,
-    // usage_ledger, workflow_state incl. fixtures and cached OAuth tokens),
-    // then `ctx.storage.deleteAll()` so the instance itself can be reclaimed.
+    // usage_ledger, workflow_state incl. fixtures and cached OAuth tokens).
     // Connection secrets in the per-tenant SecretVault are NOT touched (they
     // may be shared across workflows) and D1 usage rows are retained for
-    // billing. The owner instance also unpublishes the portal and deletes
-    // tracked portal session DOs via {@link WorkflowAgent.purgeSelf} (RPC).
+    // billing. This is the OWNER instance, so it cascades: `cascade=true` also
+    // cancels cron, unpublishes the portal and purges every tracked portal
+    // session DO via {@link WorkflowAgent.purgeSelf} (RPC).
     if (request.method === 'DELETE' && path.endsWith('/workflow/purge')) {
       if (this.handle) {
         return json({ error: 'Stop the running run before removing this workflow.' }, 409);
       }
-      await this.purgeSelf(false);
-      return json({ ok: true, purged: true });
+      const { orphanedSessions } = await this.purgeSelf(true);
+      return json({ ok: true, purged: true, orphanedSessions });
     }
 
     // The dedicated connection-metadata push route (Requirement 3.6). Carries
@@ -960,85 +960,128 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   }
 
   /**
-   * Fully tears down THIS Durable Object instance. Called from the
-   * `DELETE /workflow/purge` HTTP handler for the owner instance (with
-   * `cascade=false`), and via RPC from the owner for each tracked portal
-   * session instance (with `cascade=false` - a session owns no portal slug
-   * and no cron of its own to cancel).
+   * Fully tears down THIS Durable Object instance. Called with `cascade=true`
+   * from the `DELETE /workflow/purge` HTTP handler (which always lands on the
+   * OWNER instance), and with `cascade=false` via RPC from that owner for each
+   * tracked portal session instance - a session owns no portal slug and no
+   * cron of its own to cancel.
    *
    * Wipes every SQLite table this DO owns (`run_journal`, `runs`,
    * `run_events`, `usage_ledger`, `workflow_state` incl. fixtures and cached
-   * OAuth tokens), drops the agents-SDK housekeeping tables, calls
-   * `ctx.storage.deleteAll()` so the instance itself can be reclaimed, and
-   * resets in-memory state. When `cascade` is true (the owner instance), it
-   * also cancels cron, unpublishes the portal slug + access keys, and
-   * best-effort deletes every tracked portal session DO via RPC.
+   * OAuth tokens) plus the agents-SDK housekeeping tables, clears the alarm so
+   * nothing is left to wake the instance, and resets state to blank. When
+   * `cascade` is true it also cancels cron, unpublishes the portal slug +
+   * access keys, and purges every tracked portal session DO via RPC.
    *
    * Connection secrets in the per-tenant SecretVault are NOT touched (they
    * may be shared across workflows) and D1 usage rows are retained for
-   * billing. Best-effort for session DOs: an evicted or mid-run session
-   * logs a warning and does not abort the overall purge.
+   * billing. Session purges are best-effort: an evicted or mid-run session
+   * logs a warning and does not abort the overall purge. Its registry entry is
+   * KEPT so a later purge can retry it, and the count comes back as
+   * `orphanedSessions` for the caller to surface.
    */
-  async purgeSelf(cascade: boolean): Promise<{ ok: true }> {
+  async purgeSelf(cascade: boolean): Promise<{ ok: true; orphanedSessions: number }> {
+    let orphanedSessions = 0;
     if (cascade) {
       // Owner instance only: cancel cron, drop the portal slug + access
-      // keys, then delete every tracked portal session DO via RPC.
+      // keys, then purge every tracked portal session DO via RPC.
       await this.cancelScheduledRuns();
       const index = portalIndex(this.env);
       const workflowId = this.workflowKey();
       await index.unpublish(workflowId);
-      const sessionNames = await index.deleteSessions(workflowId);
-      await Promise.all(
-        sessionNames.map(name => this.purgeSessionInstance(name)),
+      // Forget a session only AFTER its DO is actually purged. The registry is
+      // the only reference to a session instance that exists anywhere, so
+      // dropping the key on a failed purge would orphan that DO permanently -
+      // the exact leak this registry was added to prevent.
+      const sessions = await index.listSessions(workflowId);
+      const purged = await Promise.all(
+        sessions.map(async session => ({
+          session,
+          ok: await this.purgeSessionInstance(session.instanceName),
+        })),
       );
+      const done = purged.filter(entry => entry.ok).map(entry => entry.session.sessionId);
+      orphanedSessions = purged.length - done.length;
+      await index.forgetSessions(workflowId, done);
     }
-    // Wipe every SQLite table this DO owns. `workflow_state` keys are
-    // workflow-scoped, but this instance IS the workflow (or the session),
-    // so a blanket DELETE is correct and cheaper than a scoped one.
-    this.ensureTables();
-    this.sql`DELETE FROM run_journal`;
-    this.sql`DELETE FROM runs`;
-    this.sql`DELETE FROM run_events`;
-    this.sql`DELETE FROM usage_ledger`;
-    this.sql`DELETE FROM workflow_state`;
-    // Drop the agents-SDK housekeeping tables too, or their rows would
-    // outlive the workflow (the SDK's own `destroy()` does the same).
-    this.sql`DROP TABLE IF EXISTS cf_agents_state`;
-    this.sql`DROP TABLE IF EXISTS cf_agents_schedules`;
-    this.sql`DROP TABLE IF EXISTS cf_agents_queues`;
-    this.sql`DROP TABLE IF EXISTS cf_agents_mcp_servers`;
-    // Drop any remaining DO key-value storage and let the instance be
-    // reclaimed. The SDK's state lives in SQLite (already dropped above),
-    // so this clears anything else stored via `ctx.storage.put`.
-    await this.ctx.storage.deleteAll();
-    // Reset in-memory state. `setState` persists to `cf_agents_state`, which
-    // we just dropped - the table is recreated on the next access by the
-    // SDK's lazy `state` getter, so this only shapes the in-memory copy for
-    // any code that runs before the DO is evicted. Preserve `ownerId` so a
-    // stray post-purge request can still be attributed for abuse analysis.
+    // Empty every SQLite table this DO owns, its own and the agents-SDK
+    // housekeeping ones (whose rows would otherwise outlive the workflow).
+    // `workflow_state` keys are workflow-scoped, but this instance IS the
+    // workflow (or the session), so a blanket DELETE is correct and cheaper
+    // than a scoped one.
+    //
+    // DELETE, not DROP: this instance stays alive and serving until it is
+    // evicted, and both the SDK and this class keep using those tables -
+    // `setState` writes `cf_agents_state` right below, and a second purge reads
+    // `cf_agents_schedules` through `getSchedules()`. Dropping them made both
+    // throw "no such table", so the purge 500'd after doing most of the work and
+    // a retry 500'd immediately. Only the rows are the payload; empty tables
+    // cost nothing and disappear with the instance.
+    //
+    // Filtered through `sqlite_master` because these tables are created lazily:
+    // `cf_agents_queues` and `cf_agents_mcp_servers` may never have existed, and
+    // `DELETE FROM` a missing table throws (the old `DROP TABLE IF EXISTS` was
+    // tolerant of that; a bare DELETE is not). A tagged-template value cannot
+    // be a table identifier, so the names stay literal.
+    const present = new Set(
+      this.sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`.map(
+        row => row.name,
+      ),
+    );
+    const clear = (table: string, run: () => void): void => {
+      if (present.has(table)) run();
+    };
+    clear('run_journal', () => this.sql`DELETE FROM run_journal`);
+    clear('runs', () => this.sql`DELETE FROM runs`);
+    clear('run_events', () => this.sql`DELETE FROM run_events`);
+    clear('usage_ledger', () => this.sql`DELETE FROM usage_ledger`);
+    clear('workflow_state', () => this.sql`DELETE FROM workflow_state`);
+    clear('cf_agents_schedules', () => this.sql`DELETE FROM cf_agents_schedules`);
+    clear('cf_agents_queues', () => this.sql`DELETE FROM cf_agents_queues`);
+    clear('cf_agents_mcp_servers', () => this.sql`DELETE FROM cf_agents_mcp_servers`);
+    // Drop the alarm: the SDK arms one for the next schedule, and an alarm that
+    // fires after the schedules are gone would wake a purged instance for
+    // nothing.
+    //
+    // Deliberately NOT `ctx.storage.deleteAll()`. On a SQLite-backed Durable
+    // Object that deletes the TABLES, not just key-value pairs, and this
+    // instance keeps serving until it is evicted - so `setState` below and the
+    // SDK's `getSchedules()` on any later request both threw "no such table",
+    // which made the purge report failure after succeeding and made a retry
+    // fail outright. This class stores nothing outside SQLite, so emptying the
+    // tables above already removes every byte of workflow data; a Durable Object
+    // is not deleted by `deleteAll()` either way.
+    await this.ctx.storage.deleteAlarm();
+    // Reset state. This rewrites the single `cf_agents_state` row, so the
+    // instance is left holding the same blank state a brand-new one would have
+    // and a re-push needs no other setup. Preserve `ownerId` so a stray
+    // post-purge request can still be attributed for abuse analysis.
     this.setState({
       ...this.initialState,
       ownerId: this.state.ownerId,
     });
-    return { ok: true };
+    return { ok: true, orphanedSessions };
   }
 
   /**
    * Best-effort RPC call to purge a portal session DO instance by name.
    * Called from {@link purgeSelf} for every session the `PortalIndex`
-   * registry tracked for this workflow. A session that has already been
-   * evicted or is mid-run logs a warning and does not abort the overall
-   * purge - the owner is still torn down.
+   * registry tracked for this workflow. Returns false when the session could
+   * not be purged (already evicted, mid-run, transient RPC failure) so the
+   * caller keeps its registry entry for a later retry instead of orphaning the
+   * instance. Never throws: the owner is torn down regardless.
    */
-  private async purgeSessionInstance(sessionName: string): Promise<void> {
+  private async purgeSessionInstance(sessionName: string): Promise<boolean> {
     try {
       const id = this.env.WorkflowAgent.idFromName(sessionName);
       const stub = this.env.WorkflowAgent.get(id) as unknown as {
-        purgeSelf(cascade: boolean): Promise<{ ok: true }>;
+        purgeSelf(cascade: boolean): Promise<{ ok: true; orphanedSessions: number }>;
       };
       await stub.purgeSelf(false);
+      return true;
     } catch (error) {
       console.warn(`purgeSessionInstance: failed to purge session ${sessionName}`, error);
+      return false;
     }
   }
 
