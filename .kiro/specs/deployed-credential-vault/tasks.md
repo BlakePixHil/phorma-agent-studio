@@ -43,6 +43,10 @@
   - [x] 3.4 Connection editor: cloud badge, upload and remove per secret row, hosted-target
         confirmation, gate widened to keychain OR deploy target
     - _Requirements: 12, 13, 14_
+  - [x] 3.6 Fan-out save (2026-08-11 follow-up): one save writes every store, the draft survives
+        until they all hold the value, Phorma consent asked once per editor session, amber
+        `ti-cloud-exclamation` badge for a value the deploy target lacks
+    - _Requirements: 12a, 13, 14_
   - [x] 3.5 Free-form worker secret name/value row in Settings > Cloud
     - _Requirements: 15_
 

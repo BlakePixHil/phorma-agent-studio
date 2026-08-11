@@ -517,16 +517,13 @@
             } @else {
               @if (!secretsSupported) {
                 <p class="phorma-conn-editor__hint">
-                  This host has no local secret store, so values go straight to your deploy target
-                  with <i class="ti ti-cloud-upload" aria-hidden="true"></i>. Local runs here
-                  cannot use them.
+                  This host has no local secret store, so saving a value sends it straight to your
+                  deploy target. Local runs here cannot use it.
                 </p>
               } @else if (cloudConfigured()) {
                 <p class="phorma-conn-editor__hint">
-                  Deployed runs cannot read this machine's keychain, so each secret needs a copy on
-                  your deploy target. Save it here, then use
-                  <i class="ti ti-cloud-upload" aria-hidden="true"></i> to send the same value to
-                  the cloud.
+                  Deployed runs cannot read this machine's keychain, so saving a value stores it
+                  both here and on your deploy target. Badges show where each one landed.
                 </p>
               }
 
@@ -541,6 +538,12 @@
                       <i
                         class="ti ti-cloud-check phorma-conn-editor__ok"
                         title="Stored on your deploy target"
+                        aria-hidden="true"
+                      ></i>
+                    } @else if (cloudCopyMissing(key)) {
+                      <i
+                        class="ti ti-cloud-exclamation phorma-conn-editor__pending"
+                        title="Not on your deploy target yet - deployed runs cannot resolve it"
                         aria-hidden="true"
                       ></i>
                     }
@@ -563,14 +566,17 @@
                     [text]="true"
                     size="small"
                     class="phorma-input-icon-btn phorma-input-icon-btn--success"
-                    [disabled]="!secretsSupported || secretDrafts()[key] === undefined"
+                    [disabled]="secretDrafts()[key] === undefined || busySecret() !== null"
                     (click)="saveSecret(key)"
-                    [title]="secretsSupported ? 'Save on this machine' : 'This host has no local secret store'"
+                    [title]="saveSecretTitle()"
                     aria-label="Save secret"
                   >
-                    <i class="ti ti-check" aria-hidden="true"></i>
+                    <i
+                      [class]="sendingSecret(key) ? 'ti ti-loader-2 phorma-icon-spin' : 'ti ti-check'"
+                      aria-hidden="true"
+                    ></i>
                   </button>
-                  @if (cloudConfigured()) {
+                  @if (cloudCopyMissing(key)) {
                     <button
                       type="button"
                       pButton
@@ -578,31 +584,28 @@
                       [text]="true"
                       size="small"
                       class="phorma-input-icon-btn"
-                      [disabled]="!secretDrafts()[key] || sendingSecret(key)"
+                      [disabled]="!secretDrafts()[key] || busySecret() !== null"
                       (click)="sendSecretToCloud(key)"
-                      title="Send this value to your deploy target"
-                      aria-label="Send this value to your deploy target"
+                      title="Send this value to your deploy target only"
+                      aria-label="Send this value to your deploy target only"
                     >
-                      <i
-                        [class]="sendingSecret(key) ? 'ti ti-loader-2 phorma-icon-spin' : 'ti ti-cloud-upload'"
-                        aria-hidden="true"
-                      ></i>
+                      <i class="ti ti-cloud-upload" aria-hidden="true"></i>
                     </button>
-                    @if (storedInCloud(key)) {
-                      <button
-                        type="button"
-                        pButton
-                        severity="secondary"
-                        [text]="true"
-                        size="small"
-                        class="phorma-input-icon-btn phorma-input-icon-btn--danger"
-                        (click)="removeCloudSecret(key)"
-                        title="Remove the cloud copy"
-                        aria-label="Remove the cloud copy"
-                      >
-                        <i class="ti ti-cloud-off" aria-hidden="true"></i>
-                      </button>
-                    }
+                  }
+                  @if (storedInCloud(key)) {
+                    <button
+                      type="button"
+                      pButton
+                      severity="secondary"
+                      [text]="true"
+                      size="small"
+                      class="phorma-input-icon-btn phorma-input-icon-btn--danger"
+                      (click)="removeCloudSecret(key)"
+                      title="Remove the cloud copy"
+                      aria-label="Remove the cloud copy"
+                    >
+                      <i class="ti ti-cloud-off" aria-hidden="true"></i>
+                    </button>
                   }
                   <button
                     type="button"

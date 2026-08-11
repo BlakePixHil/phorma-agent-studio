@@ -228,6 +228,12 @@
   color: var(--phorma-accent-green, #22c55e);
 }
 
+/* A store that is configured but does not hold this value yet - the state that
+   makes a deployed run fail to resolve the secret. */
+.phorma-conn-editor__pending {
+  color: var(--phorma-accent-amber, #f59e0b);
+}
+
 /* ── Footer ──────────────────────────────────────────────────────────────── */
 .phorma-conn-editor__actions {
   display: flex;

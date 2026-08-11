@@ -309,8 +309,18 @@ export class CloudService {
    * Works for both deploy targets: Phorma Cloud (the tenant's own vault) and
    * own-Cloudflare (the deployment's vault). Resolves false having toasted, so
    * a caller can keep the draft on screen for a retry.
+   *
+   * `silent` suppresses only the SUCCESS toast, for a caller that writes both
+   * secret stores in one action and reports them together. Failures always
+   * toast: a credential that did not reach the deploy target is the thing the
+   * operator has to know about.
    */
-  async putConnectionSecret(connectionId: string, secretKey: string, value: string): Promise<boolean> {
+  async putConnectionSecret(
+    connectionId: string,
+    secretKey: string,
+    value: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> {
     const base = this.effectiveWorkerUrl();
     if (!base) {
       this.toast.warning('No cloud target', 'Pick a deploy target in Settings > Cloud first.');
@@ -329,7 +339,9 @@ export class CloudService {
       });
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
-      this.toast.success('Secret sent to the cloud', `${secretKey} is available to deployed runs.`);
+      if (!options?.silent) {
+        this.toast.success('Secret sent to the cloud', `${secretKey} is available to deployed runs.`);
+      }
       return true;
     } catch (error) {
       this.toast.error('Could not send the secret', error instanceof Error ? error.message : String(error));

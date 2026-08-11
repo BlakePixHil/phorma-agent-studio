@@ -58,8 +58,14 @@ Two smaller defects surfaced in the same report:
 12. THE Studio SHALL send a secret value to the deploy target from the draft the operator is
     currently typing, because neither secret store can be read back and a "sync stored value"
     action would require a read path that must not exist.
-13. THE Studio SHALL confirm explicitly before sending a value to Phorma Cloud, and SHALL NOT
-    require confirmation for the operator's own Cloudflare worker.
+12a. THE Studio SHALL write one drafted value to EVERY secret store the install has in a single
+    save, and SHALL keep the draft until every one of them holds it. Writing one store and
+    discarding the draft made the other store unreachable for that value - the dead end reported
+    on 2026-08-11, where a secret saved locally could never be deployed.
+13. THE Studio SHALL confirm explicitly before sending a value to Phorma Cloud, once per editor
+    session rather than once per secret field, and SHALL NOT require confirmation for the
+    operator's own Cloudflare worker. A declined confirmation SHALL still store the value locally
+    and SHALL leave the draft on screen, so the decision is reversible without retyping.
 14. THE Studio SHALL show, per declared secret, whether the local store and the deploy target each
     hold it, using names only.
 15. THE Studio SHALL accept any `^[A-Z][A-Z0-9_]*$` worker secret name in the Settings > Cloud

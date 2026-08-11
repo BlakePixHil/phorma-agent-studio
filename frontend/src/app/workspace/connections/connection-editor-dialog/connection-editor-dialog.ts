@@ -69,13 +69,19 @@ interface ConfigRow {
  * values straight to the host secret store.
  *
  * Two things never happen here, by construction:
- * - A secret VALUE is never read back once saved - {@link secretDrafts} only
- *   ever holds text the user is CURRENTLY typing; a successful save clears it
- *   immediately, and there is no code path that populates a draft from a
+ * - A secret VALUE is never read back once saved. {@link secretDrafts} only
+ *   ever holds text the user typed in this dialog session, it is dropped when
+ *   the dialog closes, and there is no code path that populates a draft from a
  *   stored value.
  * - A secret value never reaches `ConnectionsService.update` - it goes
  *   straight to {@link ConnectionsService.writeSecret}, which forwards it to
  *   the host store and records only the field NAME in metadata.
+ *
+ * A credential needs a copy in EVERY store this install runs on: the OS
+ * keychain for local runs, the deploy target's vault for deployed ones. Since
+ * neither store can be read back, a value that reached only one of them can
+ * never be copied into the other - so {@link saveSecret} writes to all of them
+ * from the one draft, and the draft survives until they all hold it.
  */
 @Component({
   selector: 'app-connection-editor-dialog',
@@ -150,8 +156,26 @@ export class ConnectionEditorDialog {
 
   /** Entry names the deploy target already holds (`CONN_*`), never values. */
   private readonly cloudSecretNames = signal<readonly string[]>([]);
-  /** The `connectionId:secretKey` currently being sent, for the row spinner. */
-  protected readonly sendingToCloud = signal<string | null>(null);
+  /** The secret field currently being written to either store, for its spinner. */
+  protected readonly busySecret = signal<string | null>(null);
+
+  /**
+   * Session answer to "may a value go to Phorma Cloud?", null until asked.
+   * That target is somebody else's infrastructure, so a value only leaves the
+   * machine on an explicit confirmation; asking once per dialog rather than
+   * once per field keeps a two-secret mode like `basic` from stacking two
+   * identical prompts. Own-Cloudflare is the operator's own worker and is
+   * never asked about.
+   */
+  private readonly cloudConsent = signal<boolean | null>(null);
+
+  /** What the row's save button will do, given the stores this install has. */
+  protected readonly saveSecretTitle = computed(() => {
+    if (!this.secretsSupported) return 'Send to your deploy target';
+    return this.cloudConfigured()
+      ? 'Save on this machine and send to your deploy target'
+      : 'Save on this machine';
+  });
 
   constructor() {
     // Re-seed the form whenever the dialog opens on a (possibly different)
@@ -199,6 +223,8 @@ export class ConnectionEditorDialog {
     this.secretDrafts.set({});
     this.newSecretName.set('');
     this.secretPresence.set({});
+    this.busySecret.set(null);
+    this.cloudConsent.set(null);
   }
 
   private async refreshPresence(secretKeys: readonly string[]): Promise<void> {
@@ -377,32 +403,119 @@ export class ConnectionEditorDialog {
   }
 
   /**
-   * Requirement 19.7: writes the drafted value directly to the host secret
-   * store, then shows the field as holding a stored secret without ever
-   * showing the value - the draft is discarded immediately on success.
+   * Requirement 19.7: writes the drafted value to every secret store this
+   * install has - the OS keychain, and the deploy target's vault when one is
+   * configured - then shows the field as holding a stored secret without ever
+   * showing the value.
+   *
+   * Both stores are written from the SAME draft on purpose. Writing one and
+   * clearing the draft used to be a dead end: with no read-back path, the value
+   * could not then be copied to the other store, so a secret saved locally
+   * could never be deployed and the push kept reporting it missing.
    */
   protected async saveSecret(secretKey: string): Promise<void> {
     const connectionId = this.savedConnection()?.id;
     const draft = this.secretDrafts()[secretKey];
-    if (!connectionId || draft === undefined) return;
+    if (!connectionId || draft === undefined || this.busySecret()) return;
+
+    // Claimed before the first `await`: the consent prompt is modal, and a
+    // second Enter on the row must not open a second one.
+    this.busySecret.set(secretKey);
+    try {
+      // An empty draft means "remove the local value". Replicating a removal to
+      // the deploy target belongs to `removeCloudSecret`, which confirms first.
+      const value = draft.trim();
+      const toCloud = value.length > 0 && this.cloudConfigured() && (await this.cloudAllowed(false));
+
+      if (this.secretsSupported && !(await this.writeLocalSecret(connectionId, secretKey, draft))) return;
+      const sentToCloud = toCloud && (await this.sendToCloud(connectionId, secretKey, draft));
+
+      if (this.secretsSupported && sentToCloud) {
+        this.toast.success('Secret saved', `${secretKey} is stored on this machine and in the cloud.`);
+      } else if (this.secretsSupported) {
+        this.toast.success(value ? 'Secret saved' : 'Secret removed', secretKey);
+      } else if (sentToCloud) {
+        this.toast.success('Secret saved to the cloud', `${secretKey} is available to deployed runs.`);
+      }
+
+      if (!value || !this.secretMissingSomewhere(secretKey)) this.discardDraft(secretKey);
+    } finally {
+      this.busySecret.set(null);
+    }
+  }
+
+  /**
+   * Writes one value to the host secret store, reporting success. Requirement
+   * 19.9: a failed write leaves every stored value and the metadata unchanged,
+   * so nothing here mutates either until the write has already succeeded.
+   */
+  private async writeLocalSecret(
+    connectionId: string,
+    secretKey: string,
+    draft: string,
+  ): Promise<boolean> {
     try {
       await this.connections.writeSecret(connectionId, secretKey, draft);
-      this.secretDrafts.update(drafts => {
-        const next = { ...drafts };
-        delete next[secretKey];
-        return next;
-      });
       this.secretPresence.update(presence => ({ ...presence, [secretKey]: draft.trim().length > 0 }));
       // A saved connection's `secretKeys` may have gained this name.
       const refreshed = await this.freshSavedConnection(connectionId);
       if (refreshed) this.savedConnection.set(refreshed);
-      this.toast.success(draft.trim() ? 'Secret saved' : 'Secret removed', secretKey);
+      return true;
     } catch (error) {
-      // Requirement 19.9: every previously stored value and the metadata stay
-      // unchanged on failure - nothing here mutates either until the write
-      // above has already succeeded.
       this.toast.error('Could not save secret', error instanceof Error ? error.message : String(error));
+      return false;
     }
+  }
+
+  /** Sends one value to the deploy target and refreshes the cloud badges. */
+  private async sendToCloud(connectionId: string, secretKey: string, draft: string): Promise<boolean> {
+    const sent = await this.cloud.putConnectionSecret(connectionId, secretKey, draft, { silent: true });
+    if (sent) await this.refreshCloudSecrets();
+    return sent;
+  }
+
+  /** Forgets a draft value once every store this install uses holds it. */
+  private discardDraft(secretKey: string): void {
+    this.secretDrafts.update(drafts => {
+      const next = { ...drafts };
+      delete next[secretKey];
+      return next;
+    });
+  }
+
+  /**
+   * True when a store this install runs on still lacks this secret's value.
+   * While that holds, the draft is the ONLY way to reach that store, so it is
+   * kept on screen rather than discarded.
+   */
+  private secretMissingSomewhere(secretKey: string): boolean {
+    if (this.secretsSupported && !this.secretConfigured(secretKey)) return true;
+    return this.cloudConfigured() && !this.storedInCloud(secretKey);
+  }
+
+  /**
+   * Whether a value may be sent to the current deploy target, asking the
+   * operator once per dialog session when that target is Phorma Cloud.
+   * `explicit` marks a direct "send to the cloud" click, which re-asks after an
+   * earlier decline instead of silently doing nothing.
+   */
+  private async cloudAllowed(explicit: boolean): Promise<boolean> {
+    if (this.settings.cloudProvider() !== 'phorma') return true;
+    const consent = this.cloudConsent();
+    if (consent === true) return true;
+    if (consent === false && !explicit) return false;
+
+    const confirmed = await this.confirmDialog.confirm({
+      title: 'Store these secrets on Phorma Cloud?',
+      message:
+        `Secret values you save for "${this.name().trim() || 'this connection'}" will be stored ` +
+        `encrypted on Phorma Cloud so your deployed runs can use them - a deployed run cannot ` +
+        `read this machine's keychain. Remove them any time from this dialog. Deploying to your ` +
+        `own Cloudflare account instead keeps them entirely within your infrastructure.`,
+      confirmLabel: 'Store in the cloud',
+    });
+    this.cloudConsent.set(confirmed);
+    return confirmed;
   }
 
   /** True when the deploy target already holds this secret. */
@@ -412,48 +525,39 @@ export class ConnectionEditorDialog {
     return this.cloudSecretNames().includes(workerSecretName(connectionId, secretKey));
   }
 
-  /** True while this row's value is in flight to the deploy target. */
+  /** True while this row's value is being written to either store. */
   protected sendingSecret(secretKey: string): boolean {
-    return this.sendingToCloud() === `${this.savedConnection()?.id}:${secretKey}`;
+    return this.busySecret() === secretKey;
   }
 
   /**
-   * Sends the drafted value to the deploy target so a DEPLOYED run can resolve
-   * it, then discards the draft exactly as {@link saveSecret} does.
-   *
-   * Phorma Cloud is somebody else's infrastructure, so that target is confirmed
-   * explicitly rather than treated as an extension of the local store. The
-   * own-Cloudflare target is the operator's own worker and needs no ceremony.
+   * True when the deploy target is configured but does not hold this secret,
+   * which is exactly the state that makes a deployed run fail to resolve it.
+   * Rendered as a badge so the gap is visible before the push reports it.
+   */
+  protected cloudCopyMissing(secretKey: string): boolean {
+    return this.cloudConfigured() && !this.storedInCloud(secretKey);
+  }
+
+  /**
+   * Sends the drafted value to the deploy target only, so a DEPLOYED run can
+   * resolve it. {@link saveSecret} already does this as part of a normal save;
+   * this is the retry after a failed send, and the way back in for an operator
+   * who declined the Phorma Cloud prompt earlier in the session.
    */
   protected async sendSecretToCloud(secretKey: string): Promise<void> {
     const connectionId = this.savedConnection()?.id;
     const draft = this.secretDrafts()[secretKey];
-    if (!connectionId || !draft?.trim() || this.sendingToCloud()) return;
+    if (!connectionId || !draft?.trim() || this.busySecret()) return;
 
-    if (this.settings.cloudProvider() === 'phorma') {
-      const confirmed = await this.confirmDialog.confirm({
-        title: 'Send this secret to Phorma Cloud?',
-        message:
-          `"${secretKey}" will be stored encrypted on Phorma Cloud so your deployed runs can ` +
-          `use it. Remove it any time from this dialog. Deploying to your own Cloudflare ` +
-          `account instead keeps it entirely within your infrastructure.`,
-        confirmLabel: 'Send',
-      });
-      if (!confirmed) return;
-    }
-
-    this.sendingToCloud.set(`${connectionId}:${secretKey}`);
+    this.busySecret.set(secretKey);
     try {
-      const sent = await this.cloud.putConnectionSecret(connectionId, secretKey, draft);
-      if (!sent) return;
-      this.secretDrafts.update(drafts => {
-        const next = { ...drafts };
-        delete next[secretKey];
-        return next;
-      });
-      await this.refreshCloudSecrets();
+      if (!(await this.cloudAllowed(true))) return;
+      if (!(await this.sendToCloud(connectionId, secretKey, draft))) return;
+      this.toast.success('Secret saved to the cloud', `${secretKey} is available to deployed runs.`);
+      if (!this.secretMissingSomewhere(secretKey)) this.discardDraft(secretKey);
     } finally {
-      this.sendingToCloud.set(null);
+      this.busySecret.set(null);
     }
   }
 
