@@ -36,6 +36,8 @@ import { UsageDialog } from './workspace/usage/usage-dialog/usage-dialog';
 import { SkillsPanel } from './workspace/skills/skills-panel/skills-panel';
 import { ConnectionsPanel } from './workspace/connections/connections-panel/connections-panel';
 import { ConnectionEditorDialog } from './workspace/connections/connection-editor-dialog/connection-editor-dialog';
+import { ConnectorInstallDialog } from './workspace/connections/connector-install-dialog/connector-install-dialog';
+import { ConnectorPackageDialog } from './workspace/connections/connector-package-dialog/connector-package-dialog';
 import { SkillEditorDialog } from './workspace/skills/skill-editor-dialog/skill-editor-dialog';
 import { PortalPanel } from './workspace/portal/portal-panel/portal-panel';
 import { VersionHistoryDialog } from './workspace/workflows/version-history-dialog/version-history-dialog';
@@ -81,6 +83,8 @@ import { Toast } from './shared/toast/toast';
     SkillEditorDialog,
     ConnectionsPanel,
     ConnectionEditorDialog,
+    ConnectorInstallDialog,
+    ConnectorPackageDialog,
     PortalPanel,
     VersionHistoryDialog,
     ConfirmDialog,

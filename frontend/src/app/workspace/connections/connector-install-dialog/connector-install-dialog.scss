@@ -1,0 +1,205 @@
+:host {
+  display: contents;
+}
+
+/* Overlay + card - mirrors .phorma-conn-editor (dialogs sit at z-index 80, below
+   the confirm dialog at 85 which can be summoned from inside this one). */
+.phorma-cx-install {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 7, 18, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.phorma-cx-install__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
+  /* The BODY scrolls, not the card: the card scrolling let the body shrink (it
+     is a flex item, so `min-height: 0` plus the default `flex-shrink: 1` makes
+     it) while its content spilled out visibly and painted over the footer. It
+     also keeps Install reachable without scrolling to the end of a long form. */
+  overflow: hidden;
+  border: 1px solid var(--phorma-overlay-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--p-content-background, rgba(20, 22, 30, 0.92));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  color: var(--p-text-color, #f8fafc);
+}
+
+.phorma-cx-install__header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  flex-shrink: 0;
+
+  h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    margin: 6px 0 0;
+    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}
+
+.phorma-cx-install__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.phorma-cx-install__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the scrollbar so it never sits on top of an input's focus ring. */
+  padding-right: 2px;
+}
+
+.phorma-cx-install__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.phorma-cx-install__label {
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+}
+
+.phorma-cx-install__sublabel {
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+}
+
+.phorma-cx-install__required {
+  color: var(--phorma-accent-amber, #f59e0b);
+}
+
+.phorma-cx-install__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+
+  input {
+    width: 100%;
+  }
+}
+
+/* p-select needs flex, not block, or its label and chevron stack vertically. */
+.phorma-cx-install__select {
+  display: flex;
+  width: 100%;
+}
+
+.phorma-cx-install__facts,
+.phorma-cx-install__secrets,
+.phorma-cx-install__hosts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.928rem;
+
+  li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+
+  i {
+    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+  }
+}
+
+.phorma-cx-install__facts {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+
+.phorma-cx-install__hosts li {
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
+  font-size: 0.857rem;
+}
+
+.phorma-cx-install__secret-name {
+  font-weight: 600;
+}
+
+.phorma-cx-install__secret-hint {
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+}
+
+.phorma-cx-install__hint {
+  margin: 0;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+  font-size: 0.857rem;
+  line-height: 1.5;
+}
+
+.phorma-cx-install__notice {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  flex-shrink: 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  background: var(--phorma-hover-bg, rgba(255, 255, 255, 0.05));
+  font-size: 0.857rem;
+  line-height: 1.5;
+
+  ul {
+    margin: 0.25rem 0 0;
+    padding-left: 1.1rem;
+  }
+
+  &--warn {
+    background: var(--phorma-accent-amber-soft, rgba(245, 158, 11, 0.16));
+
+    > i {
+      color: var(--phorma-accent-amber, #f59e0b);
+    }
+  }
+
+  &--error {
+    background: var(--phorma-accent-red-soft, rgba(239, 68, 68, 0.16));
+
+    > i {
+      color: var(--phorma-accent-red, #ef4444);
+    }
+  }
+}
+
+.phorma-cx-install__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-top: 18px;
+}

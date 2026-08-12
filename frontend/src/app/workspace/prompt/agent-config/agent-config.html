@@ -126,7 +126,7 @@
           Subscribe to Phorma Cloud
         </p>
         <p class="phorma-prompt__hint">
-          Run agents on Phorma Cloud credits — no API keys, no setup. Subscribe to pick from
+          Run agents on Phorma Cloud credits. No API keys, no setup. Subscribe to pick from
           curated top models and have runs billed to your plan.
         </p>
         <button
@@ -145,14 +145,22 @@
     }
     @if (isPhormaCloud() && phormaCloudSubscribed()) {
       <p class="phorma-prompt__hint">
-        Runs on your Phorma Cloud credits — no API key needed. Usage counts against your
-        monthly credits.
+        Runs on your Phorma Cloud credits. No API key needed.
       </p>
     }
     @if (inheritsDefault()) {
       <p class="phorma-prompt__hint">
-        Uses the application default: <strong>{{ resolvedDefaultLabel() }}</strong> —
-        change it in App&nbsp;›&nbsp;Settings&nbsp;›&nbsp;Models.
+        Uses the application default: <strong>{{ resolvedDefaultLabel() }}</strong>.
+        <button
+          type="button"
+          pButton
+          [text]="true"
+          size="small"
+          class="phorma-prompt__link"
+          (click)="openModelSettings()"
+        >
+          Change it in Settings
+        </button>
       </p>
     }
     @if (isBedrock()) {
@@ -314,9 +322,7 @@
       />
     </div>
     <p class="phorma-prompt__hint">
-      Maximum characters of a single tool result fed back to the model. Raise this for
-      paginated list calls (Slack/Jira) whose cursor lives at the tail and would be lost
-      under the default cap. Max 200000.
+      Maximum characters of a single tool result fed back to the model.
     </p>
   </section>
 }

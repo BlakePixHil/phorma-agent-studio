@@ -42,19 +42,6 @@
   align-items: flex-start;
 }
 
-.phorma-confirm__icon {
-  display: grid;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  color: var(--p-text-muted-color);
-}
-
-.phorma-confirm__icon--danger {
-  color: var(--p-red-400, #fca5a5);
-}
-
 .phorma-confirm h2 {
   margin: 0;
   font-size: 15px;

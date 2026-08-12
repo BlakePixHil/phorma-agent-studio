@@ -8,9 +8,6 @@
       (click)="$event.stopPropagation()"
     >
       <header class="phorma-credits__header">
-        <span class="phorma-credits__icon">
-          <i class="ti ti-coin" aria-hidden="true"></i>
-        </span>
         <div>
           <h2>Buy more credits</h2>
           @if (phormaCloud.profile()?.quota; as quota) {

@@ -1,0 +1,254 @@
+@if (dialog.visible() && dialog.bundle(); as bundle) {
+  <div class="phorma-cx-install" role="presentation" (click)="onEscape()">
+    <section
+      class="phorma-cx-install__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Install connector"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-cx-install__header">
+        <div>
+          <h2>{{ bundle.name }}</h2>
+          <p class="phorma-cx-install__meta">
+            v{{ bundle.version }}
+            @if (bundle.author) {
+              <span>· {{ bundle.author }}</span>
+            }
+            @if (dialog.fileName(); as file) {
+              <span>· {{ file }}</span>
+            }
+          </p>
+          @if (bundle.description) {
+            <p>{{ bundle.description }}</p>
+          }
+        </div>
+      </header>
+
+      <div class="phorma-cx-install__body">
+        <!-- ── What installs ── -->
+        @if (summary(); as info) {
+          <ul class="phorma-cx-install__facts">
+            <li>
+              <i class="ti ti-stack-2" aria-hidden="true"></i>
+              {{ info.stepCount }} {{ info.stepCount === 1 ? 'step' : 'steps' }} in the palette
+            </li>
+            @if (info.tableCount > 0) {
+              <li>
+                <i class="ti ti-table" aria-hidden="true"></i>
+                {{ info.tableCount }} mapping {{ info.tableCount === 1 ? 'table' : 'tables' }}
+              </li>
+            }
+            @if (info.workflowCount > 0) {
+              <li>
+                <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+                {{ info.workflowCount }} starter
+                {{ info.workflowCount === 1 ? 'workflow' : 'workflows' }}
+              </li>
+            }
+            <li>
+              <i class="ti ti-plug-connected" aria-hidden="true"></i>
+              1 {{ bundle.connection.type }} connection
+            </li>
+          </ul>
+
+          @if (info.needsWrites) {
+            <p class="phorma-cx-install__notice phorma-cx-install__notice--warn">
+              <i class="ti ti-pencil-exclamation" aria-hidden="true"></i>
+              This connector's steps write to the target system. Installing does
+              <strong>not</strong> grant write access - turn on "Allow writes" on the connection
+              yourself once you are satisfied.
+            </p>
+          }
+        }
+
+        <!-- ── Credentials it will ask for ── -->
+        @if (bundle.connection.secretFields.length > 0) {
+          <div class="phorma-cx-install__group">
+            <span class="phorma-cx-install__label">Credentials you will provide</span>
+            <ul class="phorma-cx-install__secrets">
+              @for (field of bundle.connection.secretFields; track field.name) {
+                <li>
+                  <i class="ti ti-key" aria-hidden="true"></i>
+                  <span class="phorma-cx-install__secret-name">{{ field.label }}</span>
+                  @if (field.description) {
+                    <span class="phorma-cx-install__secret-hint">{{ field.description }}</span>
+                  }
+                  @if (field.docsUrl) {
+                    <a [href]="field.docsUrl" target="_blank" rel="noopener noreferrer">Where to get it</a>
+                  }
+                </li>
+              }
+            </ul>
+            <p class="phorma-cx-install__hint">
+              No credential travels in a connector file. You enter these in Connections after
+              installing, and they are stored outside the workflow.
+            </p>
+          </div>
+        }
+
+        <!-- ── Where it will connect ── -->
+        <div class="phorma-cx-install__group">
+          <span class="phorma-cx-install__label">Outbound traffic</span>
+          @if (egressHosts().length > 0) {
+            <ul class="phorma-cx-install__hosts">
+              @for (host of egressHosts(); track host) {
+                <li><i class="ti ti-world" aria-hidden="true"></i> {{ host }}</li>
+              }
+            </ul>
+          } @else {
+            <p class="phorma-cx-install__hint">
+              No outbound host can be determined before the connection is configured.
+            </p>
+          }
+        </div>
+
+        <!-- ── Connection ── -->
+        <div class="phorma-cx-install__group">
+          <span class="phorma-cx-install__label">Connection</span>
+          <p-select
+            inputId="cx-connection-mode"
+            class="phorma-cx-install__select"
+            [options]="modeOptions()"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="mode()"
+            (ngModelChange)="mode.set($event)"
+            appendTo="body"
+            size="small"
+          />
+
+          @if (mode() === 'create') {
+            <div class="phorma-cx-install__field">
+              <label class="phorma-cx-install__sublabel" for="cx-connection-name">Name</label>
+              <input
+                pInputText
+                id="cx-connection-name"
+                type="text"
+                pSize="small"
+                [value]="connectionName()"
+                (input)="onNameInput($event)"
+                maxlength="100"
+              />
+            </div>
+
+            @for (field of configFields(); track field.name) {
+              <div class="phorma-cx-install__field">
+                <label class="phorma-cx-install__sublabel" [for]="fieldId(field.name)">
+                  {{ field.label }}
+                  @if (field.required) {
+                    <span class="phorma-cx-install__required" aria-hidden="true">*</span>
+                  }
+                </label>
+                <input
+                  pInputText
+                  [id]="fieldId(field.name)"
+                  type="text"
+                  pSize="small"
+                  [value]="configDraft()[field.name] || ''"
+                  (input)="onConfigInput(field.name, $event)"
+                  [placeholder]="field.placeholder || ''"
+                />
+                @if (field.description) {
+                  <p class="phorma-cx-install__hint">{{ field.description }}</p>
+                }
+              </div>
+            }
+          } @else if (mode() === 'existing') {
+            <p-select
+              inputId="cx-connection-existing"
+              class="phorma-cx-install__select"
+              [options]="reusableConnections()"
+              optionLabel="label"
+              optionValue="id"
+              [ngModel]="selectedConnectionId()"
+              (ngModelChange)="selectedConnectionId.set($event)"
+              placeholder="Pick a connection"
+              appendTo="body"
+              size="small"
+            />
+            <p class="phorma-cx-install__hint">
+              Any credential this connector needs but the connection does not declare yet is added to
+              it, so Connections prompts you for the value. Existing secrets are untouched.
+            </p>
+          } @else {
+            <p class="phorma-cx-install__hint">
+              The steps install unbound. Pick a connection on each node in the Properties panel
+              before running them.
+            </p>
+          }
+        </div>
+
+        <!-- ── Problems ── -->
+        @if (blockingFindings().length > 0) {
+          <div class="phorma-cx-install__notice phorma-cx-install__notice--warn">
+            <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+            <div>
+              <strong>{{ hostLabel() }} cannot run every step:</strong>
+              <ul>
+                @for (finding of blockingFindings(); track finding.message) {
+                  <li>{{ finding.message }}</li>
+                }
+              </ul>
+              You can still install it - the steps will run on a host that supports them.
+            </div>
+          </div>
+        }
+
+        @if (dialog.warnings().length > 0) {
+          <div class="phorma-cx-install__notice">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            <ul>
+              @for (finding of dialog.warnings(); track finding.message) {
+                <li>{{ finding.message }}</li>
+              }
+            </ul>
+          </div>
+        }
+
+        @if (errors().length > 0) {
+          <div class="phorma-cx-install__notice phorma-cx-install__notice--error">
+            <i class="ti ti-circle-x" aria-hidden="true"></i>
+            <ul>
+              @for (message of errors(); track message) {
+                <li>{{ message }}</li>
+              }
+            </ul>
+          </div>
+        }
+
+        @if (missingConfig().length > 0) {
+          <p class="phorma-cx-install__hint">
+            Fill in {{ missingConfig().join(', ') }} to continue.
+          </p>
+        }
+      </div>
+
+      <footer class="phorma-cx-install__footer">
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [text]="true"
+          size="small"
+          [disabled]="installing()"
+          (click)="dialog.close()"
+        >
+          <span>Cancel</span>
+        </button>
+        <button
+          type="button"
+          pButton
+          size="small"
+          class="phorma-btn-content"
+          [disabled]="!canInstall()"
+          (click)="install()"
+        >
+          <i class="ti" [class.ti-download]="!installing()" [class.ti-loader-2]="installing()"
+            [class.phorma-icon-spin]="installing()" aria-hidden="true"></i>
+          <span>{{ installing() ? 'Installing…' : 'Install connector' }}</span>
+        </button>
+      </footer>
+    </section>
+  </div>
+}

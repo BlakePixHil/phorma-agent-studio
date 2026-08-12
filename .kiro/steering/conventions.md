@@ -61,6 +61,10 @@ Canonical for every tool and contributor. `.github/copilot-instructions.md` poin
   siblings in a flex wrapper and reveal the action on wrapper `:hover`.
 - The app has zero `p-dialog` usage - dialogs are bespoke overlays following the confirm-dialog
   pattern. Every dialog carries `role="dialog"` (global key handlers depend on that probe).
+- Dialog layout: the CARD must not scroll. `card { overflow: hidden }`, `header`/`footer`
+  `flex-shrink: 0`, and `body { flex: 1 1 auto; min-height: 0; overflow-y: auto }`. A scrolling card
+  lets the body shrink and spill its content over the footer buttons on a short viewport.
+- Dialog headers carry NO icon beside the heading. Title, optional subtitle, and the actions.
 - Overlay layering: expanded panels sit at `z-index: 75`, real dialogs at `80`, the confirm/prompt
   dialog at `85`, the command palette at `90`. A confirm is routinely summoned from inside another
   dialog (e.g. a delete action), so it must always outrank every real dialog, not just tie with it.

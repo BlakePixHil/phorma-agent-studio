@@ -4,6 +4,9 @@ import type { Connection, ConnectionType } from '@phorma/engine';
 
 import { AiEditSessionService } from '../ai-edit-session.service';
 import { ConnectionsService } from '../connections.service';
+import { ConnectorsService } from '../connectors.service';
+import { connectorStepEntryId, isBuiltInConnector } from '../connectors.model';
+import { GraphActionsService } from './graph-actions.service';
 import { LocalAgentRouterService } from '../local-agent-router.service';
 import { WorkflowService } from '../workflow.service';
 import {
@@ -37,6 +40,8 @@ const CONNECTION_TYPES: readonly ConnectionType[] = [
 @Injectable({ providedIn: 'root' })
 export class ConnectionActionsService {
   private readonly connections = inject(ConnectionsService);
+  private readonly connectors = inject(ConnectorsService);
+  private readonly graphActions = inject(GraphActionsService);
   private readonly workflow = inject(WorkflowService);
   private readonly router = inject(LocalAgentRouterService);
   private readonly session = inject(AiEditSessionService);
@@ -151,6 +156,57 @@ export class ConnectionActionsService {
           `Assigning connection "${this.connectionName(argStr(args, 'connectionId'))}"`,
         run: args => this.assign(args),
       },
+      // ── Connectors (P1-14) ────────────────────────────────────────────────
+      {
+        id: 'connector_list',
+        label: 'List connectors',
+        description:
+          'Lists installed and built-in connectors: id, name, version, the steps they add to the palette, the connection they are bound to, and which declared credentials still need a value. Never returns a secret value.',
+        surface: 'connections',
+        access: 'read',
+        risk: 'silent',
+        activity: () => 'Listing connectors',
+        run: () => this.listConnectors(),
+      },
+      {
+        id: 'connector_add_step',
+        label: 'Add a connector step to the canvas',
+        description:
+          'Drops one pre-configured step from an installed connector onto the canvas as an ordinary data node, with its connection already bound and any mapping tables inlined.',
+        surface: 'connections',
+        access: 'write',
+        risk: 'silent',
+        graphEdit: true,
+        params: {
+          connectorId: { type: 'string', description: 'Connector id from connector_list.', required: true },
+          stepId: { type: 'string', description: 'Step id from connector_list.', required: true },
+        },
+        activity: args => `Adding connector step "${argStr(args, 'stepId') ?? ''}"`,
+        run: args => this.addConnectorStep(args),
+      },
+      {
+        id: 'connector_remove',
+        label: 'Remove a connector',
+        description:
+          'Removes an installed connector and its palette steps. Nodes already on a canvas keep working, and the connection and its secrets are left in place. Built-in connectors cannot be removed.',
+        surface: 'connections',
+        access: 'write',
+        risk: 'confirm',
+        params: {
+          connectorId: { type: 'string', description: 'Connector id.', required: true },
+        },
+        confirmSummary: args => {
+          const id = argStr(args, 'connectorId');
+          const connector = id ? this.connectors.byId().get(id) : undefined;
+          const steps = connector?.bundle.steps?.length ?? 0;
+          return (
+            `Remove connector "${connector?.bundle.name ?? id}" and its ${steps} palette ` +
+            `${steps === 1 ? 'step' : 'steps'}? Nodes already on a canvas are unaffected.`
+          );
+        },
+        activity: args => `Removing connector "${argStr(args, 'connectorId') ?? ''}"`,
+        run: args => this.removeConnector(args),
+      },
     ];
   }
 
@@ -247,6 +303,75 @@ export class ConnectionActionsService {
       return actionFail(messageOf(error));
     }
     return actionOk({ connectionId, name: connection.name }, { revertable: false });
+  }
+
+  // ── Connector executors (P1-14) ──────────────────────────────────────────
+
+  private async listConnectors(): Promise<ActionResult> {
+    await this.connectors.refresh();
+    const rows = this.connectors.connectors().map(connector => ({
+      id: connector.id,
+      name: connector.bundle.name,
+      version: connector.bundle.version,
+      builtIn: isBuiltInConnector(connector.id),
+      connectionType: connector.bundle.connection.type,
+      connectionId: connector.connectionId ?? null,
+      // Names only. A connector file never carries a value, and neither does this.
+      missingSecretKeys: this.connectors.missingSecretKeys(connector),
+      steps: (connector.bundle.steps ?? []).map(step => ({
+        id: step.id,
+        label: step.label,
+        kind: step.kind,
+        ...(step.description ? { description: step.description } : {}),
+      })),
+    }));
+    return actionOk({ connectors: rows });
+  }
+
+  private addConnectorStep(args: ActionArgs): ActionResult {
+    const connectorId = argStr(args, 'connectorId');
+    const stepId = argStr(args, 'stepId');
+    if (!connectorId) return actionFail('Missing the connector id.');
+    if (!stepId) return actionFail('Missing the step id.');
+
+    const connector = this.connectors.byId().get(connectorId);
+    if (!connector) return actionFail(`Connector '${connectorId}' is not installed.`);
+    const entryId = connectorStepEntryId(connectorId, stepId);
+    if (!this.connectors.catalogEntryFor(entryId)) {
+      const available = (connector.bundle.steps ?? []).map(step => step.id).join(', ');
+      return actionFail(
+        `Connector '${connector.bundle.name}' has no step '${stepId}'` +
+          (available ? ` (available: ${available}).` : '.'),
+      );
+    }
+
+    // Goes through the same catalog path as a palette drop, so the node is an
+    // ordinary data node with the standard ports.
+    // Shares the graph surface's cascade counter, so an AI turn that adds a
+    // connector step and a node does not stack them on the same pixel.
+    const added = this.router.addNode(entryId, this.graphActions.nextPosition());
+    if (!added.ok || !added.value) return actionFail(added.error ?? 'Failed to add the step.');
+    return actionOk(
+      { nodeId: added.value.id, name: added.value.name, kind: added.value.kind },
+      {
+        message: connector.connectionId
+          ? undefined
+          : `Added "${added.value.name}". It has no connection bound yet - assign one before running it.`,
+      },
+    );
+  }
+
+  private async removeConnector(args: ActionArgs): Promise<ActionResult> {
+    const connectorId = argStr(args, 'connectorId');
+    if (!connectorId) return actionFail('Missing the connector id.');
+    const connector = this.connectors.byId().get(connectorId);
+    if (!connector) return actionFail(`Connector '${connectorId}' is not installed.`);
+    try {
+      await this.connectors.remove(connectorId);
+    } catch (error) {
+      return actionFail(messageOf(error));
+    }
+    return actionOk({ connectorId, name: connector.bundle.name }, { revertable: false });
   }
 
   private async assign(args: ActionArgs): Promise<ActionResult> {

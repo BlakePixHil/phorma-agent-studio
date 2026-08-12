@@ -157,6 +157,29 @@
   line-height: 0;
 }
 
+/* Missing-credential count beside a connector sub-group heading (P1-14). Amber
+   rather than red: the steps are installed and editable, they just cannot run
+   until a secret is entered, which is a next step and not a failure. */
+.phorma-palette__needs-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border-radius: 0.35rem;
+  background: var(--phorma-accent-amber-soft, rgba(245, 158, 11, 0.16));
+  color: var(--phorma-accent-amber, #f59e0b);
+  font-size: 0.786rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+
+  i {
+    font-size: 0.85rem;
+    line-height: 0;
+  }
+}
+
 .phorma-palette__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

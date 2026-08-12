@@ -61,6 +61,45 @@
           }
         </div>
 
+        @if (section.showConnectorSteps) {
+          @for (group of connectorGroups(); track group.connectorId) {
+            <div
+              class="phorma-palette__subheading phorma-palette__subheading--connector"
+              [title]="'Steps from the ' + group.label + ' connector'"
+            >
+              <span class="phorma-palette__transport" aria-hidden="true">
+                <i class="{{ group.icon }}"></i>
+              </span>
+              {{ group.label }}
+              @if (group.missingSecrets.length > 0) {
+                <span
+                  class="phorma-palette__needs-secret"
+                  [title]="'Needs ' + group.missingSecrets.join(', ') + ' in Connections'"
+                >
+                  <i class="ti ti-key-off" aria-hidden="true"></i>
+                  {{ group.missingSecrets.length }}
+                </span>
+              }
+            </div>
+            <div class="phorma-palette__grid">
+              @for (entry of group.steps; track entry.entryId) {
+                <button
+                  type="button"
+                  class="phorma-palette__item"
+                  draggable="true"
+                  (dragstart)="onConnectorStepDragStart($event, entry)"
+                  (dragend)="onDragEnd()"
+                  (click)="onConnectorStepClick(entry)"
+                  [title]="connectorStepTitle(group, entry)"
+                >
+                  <i class="phorma-palette__icon {{ entry.step.icon || group.icon }}" aria-hidden="true"></i>
+                  <span class="phorma-palette__label">{{ entry.step.label }}</span>
+                </button>
+              }
+            </div>
+          }
+        }
+
         @if (section.showMcpPresets) {
           @for (group of mcpGroups(); track group.kind) {
             <div class="phorma-palette__subheading" [title]="group.title">

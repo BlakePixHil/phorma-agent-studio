@@ -77,7 +77,9 @@ export class SkillsPanel {
     anchor.href = url;
     anchor.download = skillFileName(skill);
     anchor.click();
-    URL.revokeObjectURL(url);
+    // Deferred: revoking in the same tick can invalidate the blob before the
+    // browser has read it, producing an empty download.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   /** Imports a SKILL.md file straight into the library. */

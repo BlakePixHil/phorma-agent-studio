@@ -1,5 +1,6 @@
 <div class="phorma-connections">
-  <section class="phorma-connections__section">
+  <!-- Connections (grows to fill, pushing connectors to the bottom) -->
+  <section class="phorma-connections__list-section">
     <span class="phorma-connections__label">
       Connections
       <button
@@ -55,10 +56,157 @@
         }
       </ul>
     } @else {
-      <p class="phorma-connections__empty">
-        No connections yet. A connection stores credentials outside the workflow - create one to give
-        an HTTP request, SQL query or notification a base address and secrets.
-      </p>
+      <div class="phorma-connections__placeholder">
+        <i class="ti ti-plug-connected" aria-hidden="true"></i>
+        <p>
+          No connections yet.<br />
+          A connection stores credentials outside the workflow, giving an HTTP request, SQL query or
+          notification its address and secrets.
+        </p>
+        <button
+          type="button"
+          pButton
+          severity="secondary"
+          [outlined]="true"
+          size="small"
+          (click)="newConnection()"
+        >
+          <i class="ti ti-plus" aria-hidden="true"></i>
+          <span>New connection</span>
+        </button>
+        @if (connectors.connectors().length > 0) {
+          <p class="phorma-connections__placeholder-hint">
+            Or set up a connector below - it fills in the address and credential fields for you.
+          </p>
+        }
+      </div>
+    }
+  </section>
+
+  <!-- Connectors (P1-14): collapsible, pinned to the bottom like runs history -->
+  <section
+    class="phorma-connections__connectors-section"
+    [class.phorma-connections__connectors-section--collapsed]="connectorsCollapsed()"
+  >
+    <div class="phorma-connections__section-header">
+      <button
+        type="button"
+        class="phorma-connections__collapse"
+        (click)="toggleConnectors()"
+        [attr.aria-expanded]="!connectorsCollapsed()"
+        aria-controls="phorma-connectors-list"
+      >
+        <i
+          class="ti phorma-connections__chevron"
+          [class.ti-chevron-down]="!connectorsCollapsed()"
+          [class.ti-chevron-right]="connectorsCollapsed()"
+          aria-hidden="true"
+        ></i>
+        <span class="phorma-connections__collapse-label">Connectors</span>
+        <span class="phorma-connections__count">{{ connectors.connectors().length }}</span>
+      </button>
+
+      <label
+        class="phorma-connections__import-btn"
+        title="Install a connector file"
+        aria-label="Install a connector file"
+      >
+        <i class="ti ti-package-import" aria-hidden="true"></i>
+        <input
+          type="file"
+          accept=".json,application/json"
+          (change)="openConnectorFile($event)"
+          hidden
+        />
+      </label>
+      <button
+        type="button"
+        pButton
+        severity="secondary"
+        [text]="true"
+        size="small"
+        class="phorma-panel-icon-btn"
+        title="Package this workflow's steps as a connector"
+        aria-label="Package as connector"
+        (click)="packageConnector()"
+      >
+        <i class="ti ti-package-export" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    @if (!connectorsCollapsed()) {
+      <ul id="phorma-connectors-list" class="phorma-connections__list phorma-connections__connectors-list">
+        @for (connector of connectors.connectors(); track connector.id) {
+          <li>
+            <app-panel-card
+              [title]="connector.bundle.description || connector.bundle.name"
+              (click)="setUpConnector(connector, $event)"
+            >
+              <i card-icon class="{{ connector.bundle.icon || 'ti ti-plug' }}" aria-hidden="true"></i>
+              <ng-container card-meta>
+                <span class="phorma-card__title">{{ connector.bundle.name }}</span>
+                <span class="phorma-card__sub">
+                  v{{ connector.bundle.version }} ·
+                  {{ stepCount(connector) }} {{ stepCount(connector) === 1 ? 'step' : 'steps' }}
+                  @if (isBuiltIn(connector)) {
+                    · built in
+                  } @else {
+                    · installed {{ connector.installedAt | date: 'MMM d' }}
+                  }
+                </span>
+                @if (bindings().get(connector.id); as binding) {
+                  <span
+                    class="phorma-card__badge"
+                    [class.phorma-card__badge--warn]="binding.missing"
+                  >
+                    <i
+                      class="ti"
+                      [class.ti-plug-connected]="!binding.missing"
+                      [class.ti-plug-off]="binding.missing"
+                      aria-hidden="true"
+                    ></i>
+                    {{ binding.label }}
+                  </span>
+                }
+                @if (missingSecrets().get(connector.id); as missing) {
+                  @if (missing.length > 0) {
+                    <span class="phorma-card__badge phorma-card__badge--warn">
+                      <i class="ti ti-key-off" aria-hidden="true"></i>
+                      Needs {{ missing.join(', ') }}
+                    </span>
+                  }
+                }
+              </ng-container>
+              <ng-container card-actions>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="phorma-card__action-btn"
+                  title="Export as a connector file"
+                  aria-label="Export as a connector file"
+                  (click)="exportConnector(connector, $event)"
+                  (keydown.enter)="exportConnector(connector, $event)"
+                >
+                  <i class="ti ti-download" aria-hidden="true"></i>
+                </span>
+                @if (!isBuiltIn(connector)) {
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="phorma-card__action-btn phorma-card__action-btn--danger"
+                    title="Remove connector"
+                    aria-label="Remove connector"
+                    (click)="removeConnector(connector, $event)"
+                    (keydown.enter)="removeConnector(connector, $event)"
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </span>
+                }
+              </ng-container>
+            </app-panel-card>
+          </li>
+        }
+      </ul>
     }
   </section>
 </div>

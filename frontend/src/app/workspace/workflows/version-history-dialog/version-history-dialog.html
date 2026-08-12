@@ -2,7 +2,6 @@
   <div class="phorma-versions" role="presentation" (click)="dialog.close()">
     <section class="phorma-versions__card" role="dialog" aria-modal="true" aria-label="Workflow version history" (click)="$event.stopPropagation()">
       <header class="phorma-versions__header">
-        <span class="phorma-versions__icon"><i class="ti ti-history" aria-hidden="true"></i></span>
         <div>
           <h2>Version history</h2>
           <p>{{ current()?.name ?? 'Workflow' }} - saved edits that survive restarts.</p>

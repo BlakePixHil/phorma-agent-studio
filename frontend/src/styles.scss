@@ -680,6 +680,18 @@ textarea,
   outline: none;
 }
 
+/* Placeholder text must truncate with an ellipsis, not clip mid-character. Long
+   placeholders (e.g. "default (8000)") overflow the input's box otherwise,
+   and a clipped word reads as a rendering bug. */
+input::placeholder,
+textarea::placeholder,
+.p-inputtext::placeholder,
+.p-inputnumber-input::placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* No default drag of images/links. */
 img,
 a {

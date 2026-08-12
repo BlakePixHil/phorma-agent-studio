@@ -1,0 +1,151 @@
+{
+  "format": 1,
+  "id": "cx-dummyjson-products",
+  "name": "DummyJSON Products (demo)",
+  "description": "A runnable example connector for manual testing. Talks to dummyjson.com, a free public REST API that needs no signup and no credentials: paginated product listing, single-product fetch, search, a field mapping with a lookup table, and a category roll-up.",
+  "version": "1.0.0",
+  "author": "Phorma",
+  "icon": "ti ti-shopping-bag",
+  "connection": {
+    "type": "http",
+    "configFields": [
+      {
+        "name": "baseUrl",
+        "label": "API base URL",
+        "description": "The public DummyJSON API. Change it only if you are pointing at a mirror.",
+        "placeholder": "https://dummyjson.com",
+        "required": true,
+        "default": "https://dummyjson.com"
+      }
+    ],
+    "secretFields": [],
+    "auth": { "mode": "none" }
+  },
+  "steps": [
+    {
+      "id": "list-products",
+      "label": "List products (paginated)",
+      "description": "Walks /products with skip/limit offset pagination, collecting every item into `products`. Capped at 3 pages of 20 so a test run stays small.",
+      "icon": "ti ti-list-details",
+      "keywords": ["list", "products", "page", "offset", "demo"],
+      "kind": "http-request",
+      "data": {
+        "method": "GET",
+        "url": "/products",
+        "responseMode": "json",
+        "bodyMode": "none",
+        "resultKey": "products",
+        "pagination": {
+          "mode": "offset",
+          "offsetParam": "skip",
+          "limitParam": "limit",
+          "limit": 20,
+          "itemsPath": "products",
+          "maxPages": 3
+        },
+        "retry": { "maxAttempts": 3, "backoffMs": 1000, "idempotent": true, "honorRetryAfter": true },
+        "fixtures": "off"
+      }
+    },
+    {
+      "id": "get-product",
+      "label": "Get one product",
+      "description": "Fetches a single product by the `id` field of the incoming payload, for example {\"id\": 1}.",
+      "icon": "ti ti-file-search",
+      "keywords": ["get", "product", "by id", "demo"],
+      "kind": "http-request",
+      "data": {
+        "method": "GET",
+        "url": "/products/{{id}}",
+        "responseMode": "json",
+        "bodyMode": "none",
+        "resultKey": "product",
+        "pagination": { "mode": "none" },
+        "retry": { "maxAttempts": 3, "backoffMs": 1000, "idempotent": true, "honorRetryAfter": true },
+        "fixtures": "off"
+      }
+    },
+    {
+      "id": "search-products",
+      "label": "Search products",
+      "description": "Searches with the `query` field of the incoming payload, for example {\"query\": \"phone\"}. Returns the matches under `products`.",
+      "icon": "ti ti-search",
+      "keywords": ["search", "query", "products", "demo"],
+      "kind": "http-request",
+      "data": {
+        "method": "GET",
+        "url": "/products/search",
+        "query": [{ "key": "q", "value": "{{query}}" }],
+        "headers": [{ "key": "Accept", "value": "application/json" }],
+        "responseMode": "json",
+        "bodyMode": "none",
+        "resultPath": "products",
+        "resultKey": "products",
+        "pagination": { "mode": "none" },
+        "retry": { "maxAttempts": 3, "backoffMs": 1000, "idempotent": true, "honorRetryAfter": true },
+        "fixtures": "off"
+      }
+    },
+    {
+      "id": "map-products",
+      "label": "Map products to line items",
+      "description": "Projects each product in `products` into your own vocabulary, translating the vendor's availability wording through the bundled stockLabels table. Emits `lineItems`.",
+      "icon": "ti ti-transform",
+      "keywords": ["map", "rename", "cast", "lookup", "demo"],
+      "kind": "transform",
+      "tables": ["stockLabels"],
+      "data": {
+        "itemsPath": "products",
+        "mode": "array",
+        "resultKey": "lineItems",
+        "passthrough": false,
+        "fields": [
+          { "target": "sku", "expression": "item.id", "cast": "string", "required": true },
+          { "target": "name", "expression": "item.title", "cast": "string", "required": true },
+          { "target": "category", "expression": "item.category", "cast": "string" },
+          { "target": "unitPrice", "expression": "item.price", "cast": "number", "default": 0 },
+          { "target": "onHand", "expression": "item.stock", "cast": "integer", "default": 0 },
+          {
+            "target": "availability",
+            "expression": "lookup('stockLabels', item.availabilityStatus)",
+            "cast": "string",
+            "default": "Unknown"
+          },
+          { "target": "rating", "expression": "round(item.rating, 1)", "cast": "number" }
+        ]
+      }
+    },
+    {
+      "id": "category-totals",
+      "label": "Roll up by category",
+      "description": "Groups `lineItems` by category: how many lines, total value, and the dearest unit price. Emits `summary`.",
+      "icon": "ti ti-chart-bar",
+      "keywords": ["group", "sum", "roll up", "category", "demo"],
+      "kind": "aggregate",
+      "data": {
+        "op": "group",
+        "itemsPath": "lineItems",
+        "resultKey": "summary",
+        "group": {
+          "by": ["category"],
+          "metrics": [
+            { "name": "lines", "fn": "count" },
+            { "name": "totalValue", "fn": "sum", "path": "unitPrice" },
+            { "name": "dearest", "fn": "max", "path": "unitPrice" }
+          ]
+        }
+      }
+    }
+  ],
+  "tables": [
+    {
+      "name": "stockLabels",
+      "description": "DummyJSON availability wording mapped to yours. Edit freely after installing.",
+      "entries": {
+        "In Stock": "Available",
+        "Low Stock": "Low",
+        "Out of Stock": "Unavailable"
+      }
+    }
+  ]
+}

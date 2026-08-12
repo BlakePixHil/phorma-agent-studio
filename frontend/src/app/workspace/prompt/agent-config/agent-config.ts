@@ -202,6 +202,10 @@ export class AgentConfig {
     this.settingsDialog.open('cloud');
   }
 
+  protected openModelSettings(): void {
+    this.settingsDialog.open('models');
+  }
+
   /**
    * Fetches the live model list for a BYO provider into {@link liveModels}.
    * Fails silently (recording the error) so the picker falls back to static

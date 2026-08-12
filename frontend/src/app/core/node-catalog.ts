@@ -24,6 +24,7 @@ import type {
   WorkflowNodeKind,
   WorkflowPort,
 } from './workflow.model';
+import { CONNECTOR_STEP_PREFIX } from './connectors.model';
 
 /** MIME type used for palette → canvas drag-and-drop payloads. */
 export const PHORMA_NODE_MIME = 'application/x-phorma-node';
@@ -1099,13 +1100,36 @@ export const MCP_TRANSPORT_LABEL: Record<McpTransportKind, string> = {
 /** Prefix used for synthesized catalog entries derived from MCP presets. */
 const MCP_PRESET_PREFIX = 'mcp-preset:';
 
-/** Finds a catalog entry by preset id (also resolves MCP preset ids). */
+/**
+ * Resolver for `connector-step:` ids, installed by `ConnectorsService` (P1-14).
+ *
+ * Installed connectors are RUNTIME state, so they cannot live in the
+ * compile-time `NODE_CATALOG` this module owns. A one-function seam is what lets
+ * every existing consumer of {@link findCatalogEntry} - the canvas drop, the
+ * click-to-add path, the AI router, the test harness - instantiate a connector
+ * step with no changes and, crucially, no dependency-injection edge from
+ * `WorkflowService` into `ConnectorsService` (which would close a cycle through
+ * `ConnectionsService`, and NG0200 is already a hazard on the run path).
+ *
+ * `NODE_CATALOG` itself is untouched: this is a second lookup, exactly like the
+ * MCP preset branch, not a mutable catalog.
+ */
+type ConnectorStepResolver = (entryId: string) => NodeCatalogEntry | undefined;
+let connectorStepResolver: ConnectorStepResolver | undefined;
+
+/** Installs (or clears, with `undefined`) the connector-step resolver. */
+export function registerConnectorStepResolver(resolver: ConnectorStepResolver | undefined): void {
+  connectorStepResolver = resolver;
+}
+
+/** Finds a catalog entry by preset id (also resolves MCP presets and connector steps). */
 export function findCatalogEntry(id: string): NodeCatalogEntry | undefined {
   const direct = NODE_CATALOG.find(entry => entry.id === id);
   if (direct) return direct;
   if (id.startsWith(MCP_PRESET_PREFIX)) {
     return mcpPresetToCatalogEntry(id.slice(MCP_PRESET_PREFIX.length));
   }
+  if (id.startsWith(CONNECTOR_STEP_PREFIX)) return connectorStepResolver?.(id);
   return undefined;
 }
 

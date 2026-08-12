@@ -1,0 +1,166 @@
+@if (dialog.visible()) {
+  <div class="phorma-cx-package" role="presentation" (click)="dialog.close()">
+    <section
+      class="phorma-cx-package__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Package as connector"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-cx-package__header">
+        <div>
+          <h2>Package as connector</h2>
+          <p>
+            Turns the data steps of this workflow into one shareable file. Credentials never travel:
+            the file names the secrets a recipient must provide, and your own base address and
+            secret values stay here.
+          </p>
+        </div>
+      </header>
+
+      <div class="phorma-cx-package__body">
+        <div class="phorma-cx-package__row">
+          <div class="phorma-cx-package__field">
+            <label class="phorma-cx-package__label" for="cx-pkg-name">Name</label>
+            <input
+              pInputText
+              id="cx-pkg-name"
+              type="text"
+              pSize="small"
+              [value]="name()"
+              (input)="onNameInput($event)"
+              maxlength="100"
+            />
+          </div>
+          <div class="phorma-cx-package__field phorma-cx-package__field--narrow">
+            <label class="phorma-cx-package__label" for="cx-pkg-version">Version</label>
+            <input
+              pInputText
+              id="cx-pkg-version"
+              type="text"
+              pSize="small"
+              [value]="version()"
+              (input)="onVersionInput($event)"
+              maxlength="32"
+            />
+          </div>
+        </div>
+
+        <div class="phorma-cx-package__row">
+          <div class="phorma-cx-package__field">
+            <label class="phorma-cx-package__label" for="cx-pkg-description">Description</label>
+            <input
+              pInputText
+              id="cx-pkg-description"
+              type="text"
+              pSize="small"
+              [value]="description()"
+              (input)="onDescriptionInput($event)"
+              placeholder="What this connector talks to, and what the steps do"
+              maxlength="500"
+            />
+          </div>
+          <div class="phorma-cx-package__field phorma-cx-package__field--narrow">
+            <label class="phorma-cx-package__label" for="cx-pkg-author">Author</label>
+            <input
+              pInputText
+              id="cx-pkg-author"
+              type="text"
+              pSize="small"
+              [value]="author()"
+              (input)="onAuthorInput($event)"
+              maxlength="100"
+            />
+          </div>
+        </div>
+
+        <div class="phorma-cx-package__field">
+          <label class="phorma-cx-package__label" for="cx-pkg-connection">Connection to describe</label>
+          @if (connectionOptions().length > 0) {
+            <p-select
+              inputId="cx-pkg-connection"
+              class="phorma-cx-package__select"
+              [options]="connectionOptions()"
+              optionLabel="label"
+              optionValue="id"
+              [ngModel]="connectionId()"
+              (ngModelChange)="connectionId.set($event)"
+              appendTo="body"
+              size="small"
+            />
+            <p class="phorma-cx-package__hint">
+              Its type, auth mode and field names are carried. Its values are not.
+            </p>
+          } @else {
+            <p class="phorma-cx-package__hint">
+              This workflow has no connection to describe. Create one first.
+            </p>
+          }
+        </div>
+
+        <div class="phorma-cx-package__field">
+          <span class="phorma-cx-package__label">
+            Steps
+            <span class="phorma-cx-package__count">{{ selectedCount() }} selected</span>
+          </span>
+          @if (candidates().length > 0) {
+            <ul class="phorma-cx-package__steps">
+              @for (candidate of candidates(); track candidate.node.id) {
+                <li>
+                  <p-checkbox
+                    [inputId]="'cx-pkg-node-' + candidate.node.id"
+                    [binary]="true"
+                    size="small"
+                    [ngModel]="candidate.selected"
+                    (ngModelChange)="toggleNode(candidate.node.id)"
+                  />
+                  <label [for]="'cx-pkg-node-' + candidate.node.id">
+                    <i class="{{ candidate.node.icon }}" aria-hidden="true"></i>
+                    <span class="phorma-cx-package__step-name">{{ candidate.node.name }}</span>
+                    <span class="phorma-cx-package__step-kind">{{ candidate.node.kind }}</span>
+                  </label>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="phorma-cx-package__hint">
+              This workflow has no packageable steps yet. HTTP Request, SQL Query, Transform and
+              Aggregate nodes can be packaged.
+            </p>
+          }
+        </div>
+
+        @if (errors().length > 0) {
+          <div class="phorma-cx-package__notice phorma-cx-package__notice--error">
+            <i class="ti ti-circle-x" aria-hidden="true"></i>
+            <div>
+              <strong>This cannot be shared yet:</strong>
+              <ul>
+                @for (finding of errors(); track finding.path + finding.message) {
+                  <li>{{ finding.path ? finding.path + ' - ' : '' }}{{ finding.message }}</li>
+                }
+              </ul>
+            </div>
+          </div>
+        }
+      </div>
+
+      <footer class="phorma-cx-package__footer">
+        <button type="button" pButton severity="secondary" [text]="true" size="small" (click)="dialog.close()">
+          <span>Cancel</span>
+        </button>
+        <button
+          type="button"
+          pButton
+          size="small"
+          class="phorma-btn-content"
+          [disabled]="!canPackage()"
+          (click)="download()"
+        >
+          <i class="ti ti-download" aria-hidden="true"></i>
+          <span>Download connector</span>
+        </button>
+      </footer>
+    </section>
+  </div>
+}

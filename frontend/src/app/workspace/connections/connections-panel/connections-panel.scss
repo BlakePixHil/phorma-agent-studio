@@ -7,22 +7,26 @@
 .phorma-connections {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
   height: 100%;
   min-height: 0;
   padding: 0.65rem 0.75rem 0.8rem;
   overflow-y: auto;
 }
 
-.phorma-connections__section {
+// ── Connections (grows to fill, pushing connectors to the bottom) ────────────
+
+.phorma-connections__list-section {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-height: 0;
 }
 
 .phorma-connections__label {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   font-size: 0.928rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -34,11 +38,6 @@
   }
 }
 
-.phorma-connections__empty {
-  font-size: 0.928rem;
-  color: var(--p-text-muted-color);
-}
-
 .phorma-connections__list {
   display: flex;
   flex-direction: column;
@@ -46,4 +45,150 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* Empty state: centred in the grow area, so an install with no connections reads
+   as an invitation rather than as a panel that failed to load. */
+.phorma-connections__placeholder {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.25rem;
+  text-align: center;
+  color: var(--p-text-muted-color);
+
+  > i {
+    font-size: 1.6rem;
+    opacity: 0.6;
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.928rem;
+    line-height: 1.5;
+  }
+}
+
+.phorma-connections__placeholder-hint {
+  font-size: 0.857rem;
+  opacity: 0.85;
+}
+
+// ── Connectors: collapsible, pinned to the bottom (runs-history pattern) ─────
+
+.phorma-connections__connectors-section {
+  /* Expanded, cap at half the panel so the connections list above stays
+     visible however many connectors are installed. Collapsed, shrink to the
+     header. */
+  flex-shrink: 0;
+  margin-top: auto;
+  max-height: 50%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+
+  &--collapsed {
+    max-height: none;
+  }
+}
+
+.phorma-connections__connectors-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* The header is a flex ROW holding the collapse button and the section actions
+   as SIBLINGS - a button inside a button is invalid HTML and breaks keyboard
+   navigation, so the whole strip cannot be one button the way the Templates
+   header is. */
+.phorma-connections__section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.phorma-connections__collapse {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.4rem;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.928rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+
+  &:hover {
+    color: var(--p-text-color);
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  }
+}
+
+.phorma-connections__chevron {
+  flex: none;
+  font-size: 0.85rem;
+}
+
+.phorma-connections__collapse-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Count pill, so a collapsed section still says how much is behind it. */
+.phorma-connections__count {
+  flex: none;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+  font-size: 0.786rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* A <label> wrapping a hidden file input, styled to match the muted pButton
+   icon buttons in panel headers (mirrors the skills panel's import control -
+   `.phorma-panel-icon-btn` cannot be reused because it requires `.p-button`). */
+.phorma-connections__import-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.4rem;
+  border: none;
+  background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 14%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+/* Missing-credential badge on a connector row. Amber, not red: the connector is
+   installed and usable, it just cannot run until a secret is entered. */
+.phorma-card__badge--warn {
+  color: var(--phorma-accent-amber, #f59e0b);
 }

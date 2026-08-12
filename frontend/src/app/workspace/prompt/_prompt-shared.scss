@@ -194,11 +194,12 @@
   }
 
   .phorma-prompt__number {
-    flex: 0 0 5.5rem;
+    flex: 0 0 8.5rem;
 
     ::ng-deep .p-inputnumber-input {
       width: 100%;
       font-size: 0.928rem;
+      text-overflow: ellipsis;
     }
   }
 }

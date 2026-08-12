@@ -8,13 +8,6 @@
       (click)="$event.stopPropagation()"
     >
       <header class="phorma-cloud__header">
-        <span class="phorma-cloud__icon">
-          @if (provider() === 'phorma') {
-            <app-phorma-cloud-icon />
-          } @else {
-            <i class="ti ti-cloud" aria-hidden="true"></i>
-          }
-        </span>
         <div>
           <h2>{{ provider() === 'phorma' ? 'Phorma Cloud' : 'Cloud' }}</h2>
           @if (provider() === 'phorma') {

@@ -19,13 +19,14 @@ import {
 } from '@phorma/engine';
 
 import type { ChatThread } from './assistant-chat.model';
+import type { InstalledConnector } from './connectors.model';
 import type { PromptEntry } from './prompt-library.model';
 import type { SkillDef } from './skills.model';
 import type { WorkflowSpec } from './workflow.model';
 import { WORKFLOW_VERSIONS_KEEP, type WorkflowVersion } from './workflow-versions.model';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -92,6 +93,19 @@ const WORKFLOW_VERSIONS_BY_SAVED = 'by-saved';
  * is readable from every workflow.
  */
 const CONNECTIONS_STORE = 'connections';
+
+/**
+ * Object store holding INSTALLED connector bundles (keyPath `id`) - P1-14.
+ *
+ * Global like `skills`, `prompts` and `connections`, so there is no workflow
+ * index. Only user-installed bundles live here: the connectors compiled into the
+ * app are derived at read time (`BUILTIN_CONNECTOR_PREFIX`) and never stored, so
+ * shipping a fix to a built-in reaches existing installs.
+ *
+ * A stored bundle is secret-free by construction - `validateConnectorBundle`
+ * rejects a bundle carrying a credential before it can reach this store.
+ */
+const CONNECTORS_STORE = 'connectors';
 
 /**
  * Object store backing the engine's `WorkflowStateStore` and `FixtureStore`
@@ -507,6 +521,31 @@ export class IndexedDbStorageService {
     );
   }
 
+  // ── Installed connector bundles (P1-14) ───────────────────────────────
+
+  /** Every installed connector, most recently installed first. */
+  async listConnectors(): Promise<InstalledConnector[]> {
+    const db = await this.open();
+    const connectors = await this.request<InstalledConnector[]>(
+      db.transaction(CONNECTORS_STORE, 'readonly').objectStore(CONNECTORS_STORE).getAll(),
+    );
+    return connectors.sort((a, b) => (b.installedAt ?? '').localeCompare(a.installedAt ?? ''));
+  }
+
+  async saveConnector(connector: InstalledConnector): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(CONNECTORS_STORE, 'readwrite').objectStore(CONNECTORS_STORE).put(connector),
+    );
+  }
+
+  async removeConnector(id: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db.transaction(CONNECTORS_STORE, 'readwrite').objectStore(CONNECTORS_STORE).delete(id),
+    );
+  }
+
   // ── Durable workflow state + fixtures (P1-8, Requirements 12.1-12.22) ──
 
   /**
@@ -854,6 +893,9 @@ export class IndexedDbStorageService {
         // workflow-state store that also holds `fx:` fixtures.
         if (!db.objectStoreNames.contains(CONNECTIONS_STORE)) {
           db.createObjectStore(CONNECTIONS_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(CONNECTORS_STORE)) {
+          db.createObjectStore(CONNECTORS_STORE, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(WORKFLOW_STATE_STORE)) {
           const state = db.createObjectStore(WORKFLOW_STATE_STORE, { keyPath: 'key' });

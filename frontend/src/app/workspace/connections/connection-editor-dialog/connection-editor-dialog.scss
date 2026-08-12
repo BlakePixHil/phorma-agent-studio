@@ -21,7 +21,7 @@
   flex-direction: column;
   width: min(720px, 100%);
   max-height: calc(100vh - 48px);
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
   border-radius: 8px;
   padding: 20px;
@@ -34,6 +34,7 @@
   display: flex;
   gap: 14px;
   align-items: flex-start;
+  flex-shrink: 0;
 }
 
 .phorma-conn-editor h2 {
@@ -51,12 +52,20 @@
 }
 
 /* ── Body ────────────────────────────────────────────────────────────────── */
+/* The BODY scrolls, not the card. With the card scrolling, this body (a flex
+   item with `min-height: 0` and the default `flex-shrink: 1`) was squeezed while
+   its content spilled out visibly and painted OVER the footer buttons - which is
+   what a connection with several config rows and secret fields produces. Keeping
+   the footer pinned also means Save never scrolls out of reach. */
 .phorma-conn-editor__body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 14px;
   margin-top: 16px;
   min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .phorma-conn-editor__row {
@@ -238,6 +247,7 @@
 .phorma-conn-editor__actions {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 0.5rem;
   margin-top: 16px;
 }

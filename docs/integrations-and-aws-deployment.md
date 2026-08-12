@@ -258,12 +258,18 @@ Building a sync against a production API is unpleasant. Let `http-request` and `
 responses on a run and replay them on later runs (a "fixtures" toggle), so a workflow can be iterated
 and evaluated (EPIC 4) without touching the source system. Also makes the data nodes testable in CI.
 
-### P1-14 · Reusable connector definitions — **L** (defer)
+### P1-14 · Reusable connector definitions — **L** — SHIPPED
 
 Once the primitives exist, an integration is a JSON bundle: a connection type, some pre-configured
 `http-request` steps, and a mapping table. Packaging that as a shareable "connector" (with the existing
-skills library as the distribution precedent) is where the ecosystem value is — but it is premature
-until P1-1 through P1-8 are real. Deliberately deferred so it does not distort the primitives.
+skills library as the distribution precedent) is where the ecosystem value is — but it was premature
+until P1-1 through P1-8 were real, so it was deliberately deferred so as not to distort the primitives.
+
+Those primitives now exist, and this shipped: one `*.connector.json` carrying a connection template,
+pre-configured steps, mapping tables and starter workflows, installed through a preview that shows
+the declared egress and credentials before anything is written. Plan and decisions:
+`docs/connector-packaging-plan.md`. Format and packaging: `engine/src/connectors.ts`. A remote
+registry, signing and connector auto-update are the follow-ups and are deliberately still absent.
 
 ### Phase 1 dependency order
 
@@ -282,7 +288,7 @@ until P1-1 through P1-8 are real. Deliberately deferred so it does not distort t
 | P1-11 | Sync audit record | S | P1-2, P1-6 |
 | P1-12 | Redaction + retention | S–M | — |
 | P1-13 | Mock / replay | M | P1-2, P1-6 |
-| P1-14 | Connector packaging | L | all of the above (defer) |
+| P1-14 | Connector packaging | L | all of the above (shipped) |
 
 **Minimum viable slice for an API-fronted source:** P1-1, P1-2, P1-4, P1-5, P1-8, P1-9 — one **L**,
 four **M**, one **S**. `schedule-trigger`, `for-each`, retries, journalling, run history and live

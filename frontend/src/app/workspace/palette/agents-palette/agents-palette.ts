@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 
 import {
+  DATA_SECTION_LABEL,
   MCP_LOCAL_ICON,
   MCP_OAUTH_ICON,
   MCP_PRESETS,
@@ -14,6 +15,8 @@ import {
   type NodeCatalogEntry,
   type McpPreset,
 } from '../../../core/node-catalog';
+import { ConnectorsService } from '../../../core/connectors.service';
+import type { ConnectorStepEntry } from '../../../core/connectors.model';
 import { NodeDragService } from '../../../core/node-drag.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { NODE_CATEGORY_COLORS, type NodeCategory } from '../../../core/workflow.model';
@@ -38,7 +41,19 @@ interface PaletteSection {
   color: string;
   /** True for the group that owns the MCP Servers sub-list. */
   showMcpPresets: boolean;
+  /** True for the group that owns the connector-step sub-lists (Data). */
+  showConnectorSteps: boolean;
   entries: NodeCatalogEntry[];
+}
+
+/** Installed-connector steps, grouped under their connector (P1-14). */
+interface ConnectorStepGroup {
+  connectorId: string;
+  label: string;
+  icon: string;
+  /** Secret names still missing, so the palette can say why a step will fail. */
+  missingSecrets: string[];
+  steps: ConnectorStepEntry[];
 }
 
 /** MCP presets sharing a transport, rendered as a labelled sub-group. */
@@ -64,6 +79,7 @@ interface McpPresetGroup {
 })
 export class AgentsPalette {
   private readonly nodeDrag = inject(NodeDragService);
+  private readonly connectors = inject(ConnectorsService);
 
   protected readonly query = signal('');
 
@@ -137,10 +153,48 @@ export class AgentsPalette {
   protected readonly localIcon = MCP_LOCAL_ICON;
   protected readonly oauthIcon = MCP_OAUTH_ICON;
 
-  /** Whether any palette entries (catalog sections or presets) match the query. */
+  /**
+   * Installed-connector steps matching the search, grouped by connector. Data
+   * nodes, so they hide when a filter excludes `flow` - the category connector
+   * steps actually instantiate as.
+   */
+  protected readonly connectorGroups = computed<ConnectorStepGroup[]>(() => {
+    const q = this.query().trim().toLowerCase();
+    const active = this.activeCategories();
+    if (active.size > 0 && !active.has('flow')) return [];
+
+    const matches = (entry: ConnectorStepEntry): boolean =>
+      q.length === 0 ||
+      entry.step.label.toLowerCase().includes(q) ||
+      entry.connectorName.toLowerCase().includes(q) ||
+      (entry.step.description?.toLowerCase().includes(q) ?? false) ||
+      (entry.step.keywords?.some(keyword => keyword.toLowerCase().includes(q)) ?? false);
+
+    const groups: ConnectorStepGroup[] = [];
+    for (const connector of this.connectors.connectors()) {
+      const steps = this.connectors.steps().filter(
+        entry => entry.connectorId === connector.id && matches(entry),
+      );
+      if (steps.length === 0) continue;
+      groups.push({
+        connectorId: connector.id,
+        label: connector.bundle.name,
+        icon: connector.bundle.icon || 'ti ti-plug',
+        missingSecrets: this.connectors.missingSecretKeys(connector),
+        steps,
+      });
+    }
+    return groups;
+  });
+
+  /** Whether any palette entries (catalog sections, presets, connectors) match. */
   protected readonly hasResults = computed(() => {
     const sections = this.sections();
-    return sections.some(section => section.entries.length > 0) || this.mcpPresets().length > 0;
+    return (
+      sections.some(section => section.entries.length > 0) ||
+      this.mcpPresets().length > 0 ||
+      this.connectorGroups().length > 0
+    );
   });
 
   /**
@@ -152,6 +206,7 @@ export class AgentsPalette {
     const q = this.query().trim().toLowerCase();
     const active = this.activeCategories();
     const hasPresetMatches = this.mcpPresets().length > 0;
+    const hasConnectorMatches = this.connectorGroups().length > 0;
     const matches = (entry: NodeCatalogEntry): boolean =>
       q.length === 0 ||
       entry.label.toLowerCase().includes(q) ||
@@ -173,19 +228,36 @@ export class AgentsPalette {
         if (group) group.push(entry);
         else groups.set(groupLabel, [entry]);
       }
+      // The Data group only exists because some catalog entry declares it, so a
+      // search that matches connector steps but no primitive (a vendor name, say)
+      // would have nowhere to render them. Make the host group exist.
+      if (category === 'flow' && hasConnectorMatches && !groups.has(DATA_SECTION_LABEL)) {
+        groups.set(DATA_SECTION_LABEL, []);
+      }
       for (const [groupLabel, entries] of groups) {
         const ownsPresets = category === 'tool' && groupLabel === label;
+        // Connector steps hang off the Data group for the same reason MCP
+        // presets hang off Tools: they instantiate as `flow` nodes and belong
+        // beside the data primitives they are pre-configured versions of.
+        const ownsConnectors = category === 'flow' && groupLabel === DATA_SECTION_LABEL;
         // The MCP preset list lives inside the Tools group, so that group must
         // survive a search that matches only presets - dropping it for having
         // no catalog entries hid every preset and made searching "jira" (or any
-        // server name) return nothing at all.
-        if (entries.length === 0 && !(ownsPresets && hasPresetMatches)) continue;
+        // server name) return nothing at all. Same for connector steps.
+        if (
+          entries.length === 0 &&
+          !(ownsPresets && hasPresetMatches) &&
+          !(ownsConnectors && hasConnectorMatches)
+        ) {
+          continue;
+        }
         result.push({
           key: `${category}:${groupLabel}`,
           category,
           label: groupLabel,
           color,
           showMcpPresets: ownsPresets,
+          showConnectorSteps: ownsConnectors,
           entries,
         });
       }
@@ -223,5 +295,27 @@ export class AgentsPalette {
 
   protected onPresetClick(preset: McpPreset): void {
     this.nodeDrag.requestAdd(mcpPresetEntryId(preset.id));
+  }
+
+  // ── Connector steps (P1-14) ────────────────────────────────────────────────
+
+  protected onConnectorStepDragStart(event: DragEvent, entry: ConnectorStepEntry): void {
+    event.dataTransfer?.setData(PHORMA_NODE_MIME, entry.entryId);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+    this.nodeDrag.start(entry.entryId);
+  }
+
+  protected onConnectorStepClick(entry: ConnectorStepEntry): void {
+    this.nodeDrag.requestAdd(entry.entryId);
+  }
+
+  /** Tooltip for one step: what it does, plus why it will not run yet. */
+  protected connectorStepTitle(group: ConnectorStepGroup, entry: ConnectorStepEntry): string {
+    const description = entry.step.description ?? `${entry.step.kind} step`;
+    const blocked =
+      group.missingSecrets.length > 0
+        ? ` Needs ${group.missingSecrets.join(', ')} in Connections before it can run.`
+        : '';
+    return `${description}${blocked} (click or drag to add)`;
   }
 }

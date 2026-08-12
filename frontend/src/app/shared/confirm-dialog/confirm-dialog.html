@@ -8,9 +8,6 @@
       (click)="$event.stopPropagation()"
     >
       <header class="phorma-confirm__header">
-        <span class="phorma-confirm__icon" [class.phorma-confirm__icon--danger]="dialog.tone === 'danger'">
-          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-        </span>
         <div>
           <h2>{{ dialog.title }}</h2>
           <p>{{ dialog.message }}</p>

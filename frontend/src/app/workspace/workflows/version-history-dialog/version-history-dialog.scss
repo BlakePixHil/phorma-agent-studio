@@ -14,7 +14,7 @@
 
 .phorma-versions__header { display: flex; gap: 14px; align-items: flex-start; padding: 20px; border-bottom: 1px solid var(--p-border-color); }
 .phorma-versions__header > div { flex: 1; }
-.phorma-versions__icon { display: grid; width: 36px; height: 36px; place-items: center; font-size: 18px; color: var(--p-primary-color); }
+
 h2, h3 { margin: 0; }
 h2 { font-size: 15px; font-weight: 700; }
 .phorma-versions__header p, .phorma-versions__diff-header p { margin: 5px 0 0; color: var(--p-text-muted-color); font-size: 12px; }

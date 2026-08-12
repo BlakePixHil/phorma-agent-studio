@@ -30,8 +30,23 @@ describe('AgentsPalette MCP grouping', () => {
   const headings = (): string[] =>
     [...root.querySelectorAll('.phorma-palette__heading')].map(el => el.textContent!.trim());
 
+  /**
+   * MCP sub-group headings only. Connector steps (P1-14) render their own
+   * sub-headings in the Data group and carry a `--connector` modifier, so the
+   * two families stay distinguishable here instead of one silently changing the
+   * other's expectations.
+   */
   const subheadings = (): string[] =>
-    [...root.querySelectorAll('.phorma-palette__subheading')].map(el => el.textContent!.trim());
+    [
+      ...root.querySelectorAll(
+        '.phorma-palette__subheading:not(.phorma-palette__subheading--connector)',
+      ),
+    ].map(el => el.textContent!.trim());
+
+  const connectorSubheadings = (): string[] =>
+    [...root.querySelectorAll('.phorma-palette__subheading--connector')].map(el =>
+      el.textContent!.trim(),
+    );
 
   it('splits MCP presets into Remote, Sign-in (OAuth) and Local sub-groups, remote first', () => {
     // Deployability decides the order: Remote servers are cloud-deployable,
@@ -77,6 +92,25 @@ describe('AgentsPalette MCP grouping', () => {
     search('zzzznotathing');
 
     expect(headings()).toEqual([]);
+    expect(connectorSubheadings()).toEqual([]);
     expect(root.querySelector('.phorma-palette__empty')).toBeTruthy();
+  });
+
+  /**
+   * P1-14: connector steps hang off the Data group the way MCP presets hang off
+   * Tools, and for the same reason - that group's visibility is load-bearing for
+   * them. A search matching only a connector name must keep Data alive.
+   */
+  it('renders the built-in connectors as sub-groups of Data', () => {
+    expect(connectorSubheadings().length).toBeGreaterThan(0);
+    expect(headings()).toContain('Data');
+  });
+
+  it('keeps the Data group when only a connector step matches the query', () => {
+    search('paginated');
+
+    expect(headings()).toContain('Data');
+    expect(connectorSubheadings().length).toBeGreaterThan(0);
+    expect(root.querySelector('.phorma-palette__empty')).toBeNull();
   });
 });

@@ -67,6 +67,26 @@ Node kinds are data plus strategy - the canvas is registry-driven and normally n
 Adding an MCP preset is a single entry in `MCP_PRESETS` (`core/node-catalog.ts`); palette,
 properties panel, settings Integrations, and the Rust stdio spawn path all pick it up.
 
+## Connector packaging (P1-14)
+
+A connector is one `*.connector.json` declaring a connection template, pre-configured data steps,
+mapping tables and optional starter workflows. Format, validation, packaging and every derivation
+live in `engine/src/connectors.ts` (pure, property-tested); the studio adds storage and install in
+`core/connectors.service.ts` over the IndexedDB `connectors` store.
+
+- Installed steps are NOT in `NODE_CATALOG`. They resolve through a one-function seam:
+  `registerConnectorStepResolver` in `core/node-catalog.ts`, installed by `ConnectorsService`, and
+  consulted by `findCatalogEntry` for `connector-step:` ids exactly like the `mcp-preset:` branch.
+  That seam exists to avoid a DI edge from `WorkflowService` into `ConnectorsService`, which would
+  close a cycle through `ConnectionsService`.
+- Instantiating a step yields an ORDINARY data node with no back-reference, so removing a connector
+  cannot break a workflow built from it. Do not add provenance fields to node data to "fix" this.
+- A bundle never carries a secret value, and installing never sets `Connection.allowWrites`.
+  `validateConnectorBundle` rejects a credential in any position rather than sanitizing it.
+- Adding a built-in connector is one entry in `BUILTIN_CONNECTOR_BUNDLES`
+  (`core/connectors-builtin.ts`); built-ins are derived at read time and never persisted. Validate
+  them with `npx -y tsx engine/test/connectors-builtin.e2e.mts`.
+
 ## Adding an assistant capability (action registry pattern)
 
 `core/studio-actions/` is the single description of every studio capability the AI assistant can
@@ -104,8 +124,9 @@ pull the builder, registry and cloud services into the layout shell at startup.
 
 ## Persistence
 
-- Local: IndexedDB, currently at v7. Stores include runs, `usage`, `chat-threads`,
-  `workflow-versions`. Every store keys workflows by `workflowKey: workflowId ?? 'draft'`.
+- Local: IndexedDB, currently at v10. Stores include runs, `usage`, `chat-threads`,
+  `workflow-versions`, `skills`, `prompts`, `connections`, `connectors`, `workflow-state`. Every
+  workflow-scoped store keys workflows by `workflowKey: workflowId ?? 'draft'`.
   Bumping the schema means bumping the version and adding a migration.
 - Layout and small settings: `localStorage` via `core/layout-storage.ts`
   (`phorma.layout.*` keys, `loadLayout`/`saveLayout`).

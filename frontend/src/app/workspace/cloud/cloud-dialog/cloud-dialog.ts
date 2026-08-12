@@ -3,7 +3,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
-import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
+
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { CloudDialogService } from '../cloud-dialog.service';
 import { CloudService } from '../../../core/cloud.service';
@@ -28,7 +28,7 @@ import { WorkflowService } from '../../../core/workflow.service';
 @Component({
   selector: 'app-cloud-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, ButtonModule, TooltipModule, PhormaCloudIcon],
+  imports: [DatePipe, DecimalPipe, ButtonModule, TooltipModule],
   templateUrl: './cloud-dialog.html',
   styleUrl: './cloud-dialog.scss',
 })

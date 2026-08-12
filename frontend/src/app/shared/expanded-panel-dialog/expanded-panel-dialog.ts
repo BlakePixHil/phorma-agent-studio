@@ -37,8 +37,6 @@ export class ExpandedPanelDialog {
   readonly panelId = input.required<ExpandablePanelId>();
 
   readonly title = input.required<string>();
-  /** Tabler icon class, e.g. `ti ti-message-2`. */
-  readonly icon = input.required<string>();
   readonly subtitle = input<string>('');
 
   /** CSS width for the card. */

@@ -8,6 +8,7 @@
 
 export * from './types.js';
 export * from './connections.js';
+export * from './connectors.js';
 export * from './data-host.js';
 export * from './capabilities.js';
 export * from './data-nodes.js';
