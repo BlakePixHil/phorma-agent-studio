@@ -1,6 +1,6 @@
 {
   "name": "phorma-agent-studio-backend",
-  "version": "0.2.0-beta.9",
+  "version": "0.2.0-beta.10",
   "private": true,
   "description": "Phorma Agent Studio Tauri 2.0 desktop shell.",
   "scripts": {
