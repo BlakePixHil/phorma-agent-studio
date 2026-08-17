@@ -1,0 +1,46 @@
+{
+  "name": "@phorma/cloud-aws",
+  "version": "0.2.0-beta.9",
+  "private": true,
+  "description": "Phorma Agent Studio AWS deployment target - CDK IaC application, Host_Adapter and CLI shim for ECS Fargate.",
+  "type": "module",
+  "bin": {
+    "phorma-aws": "./bin/phorma-aws.mjs"
+  },
+  "scripts": {
+    "check": "tsc --noEmit && npm run bundle:shim && cdk synth --quiet && node scripts/synth-image-reference.mjs && vitest --run src/infra && node scripts/check-no-scan.mjs && node scripts/check-adapter-real.mjs && node scripts/check-imports-declared.mjs && node scripts/check-engine-purity.mjs && node scripts/check-engine-alias.mjs && node scripts/check-versions.mjs && node scripts/check-docs.mjs",
+    "bundle:shim": "tsx src/shim/build.ts",
+    "test": "vitest --run",
+    "test:e2e": "node test/run-all.mjs"
+  },
+  "dependencies": {
+    "@aws-crypto/sha256-js": "5.2.0",
+    "@aws-sdk/client-apigatewaymanagementapi": "3.1110.0",
+    "@aws-sdk/client-cloudformation": "3.1110.0",
+    "@aws-sdk/client-cloudwatch": "3.1110.0",
+    "@aws-sdk/client-dynamodb": "3.1110.0",
+    "@aws-sdk/client-ec2": "3.1110.0",
+    "@aws-sdk/client-iam": "3.1110.0",
+    "@aws-sdk/client-kms": "3.1110.0",
+    "@aws-sdk/client-scheduler": "3.1110.0",
+    "@aws-sdk/client-secrets-manager": "3.1110.0",
+    "@aws-sdk/client-sts": "3.1110.0",
+    "@aws-sdk/credential-providers": "3.1110.0",
+    "@aws-sdk/lib-dynamodb": "3.1110.0",
+    "@aws-sdk/util-format-url": "3.972.44",
+    "@phorma/engine": "file:../engine",
+    "@smithy/protocol-http": "5.6.0",
+    "@smithy/signature-v4": "5.7.0",
+    "@smithy/url-parser": "4.5.0",
+    "aws-cdk-lib": "2.265.0",
+    "constructs": "10.8.1",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.12"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.1136.0",
+    "fast-check": "4.9.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

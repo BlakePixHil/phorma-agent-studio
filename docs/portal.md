@@ -314,10 +314,12 @@ page's light theme, and a reply streams in.
   their workflow id and owner instance name in state instead.
 - **Session instances never arm cron.** A hundred visitors must not create a
   hundred cron jobs.
-- **A deployed portal is only as new as your last deploy.** BYO workers need a
-  `git pull` plus `wrangler deploy` to pick up portal improvements. The studio
-  compares `cloud/src/build-info.ts` against the running worker and warns you.
-  Phorma Cloud users never see this: we deploy their runtime.
+- **A deployed portal is only as new as your last deploy.** BYO workers pick up
+  portal improvements when the operator updates the app, re-runs Settings > Cloud
+  > Deploy runtime > **Set up runtime files** (which refreshes the bundled worker
+  source in the app data workspace), and deploys again. The studio compares
+  `cloud/src/build-info.ts` against the running worker and warns you. Phorma Cloud
+  users never see this: we deploy their runtime.
 - **Never put `account_id` or a Phorma-owned binding in the default env of
   `cloud/wrangler.jsonc`.** It is the file BYO users deploy. Anything
   Phorma-specific belongs in `env.hosted`, and `cloud/test/deploy-config.test.mjs`

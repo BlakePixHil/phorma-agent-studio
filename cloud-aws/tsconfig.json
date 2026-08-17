@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.AsyncIterable"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "skipLibCheck": true,
+    // `src/core/sentinel.spec.ts` imports the committed cross-package corpus
+    // fixture (`test/fixtures/sentinel-corpus.json`) directly, the same way
+    // vitest resolves it. The package installs no `@types/node`, so reading it
+    // through `node:fs` would not type-check here.
+    "resolveJsonModule": true,
+    "declaration": true,
+    "noEmit": true,
+    "paths": {
+      "@phorma/engine": ["../engine/src/index.ts"],
+      "@phorma/engine/*": ["../engine/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -9,7 +9,8 @@
   "sideEffects": false,
   "scripts": {
     "test": "vitest --run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node test/run-all.mjs"
   },
   "devDependencies": {
     "fast-check": "4.9.0",

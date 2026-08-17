@@ -9,9 +9,18 @@
     >
       <header class="phorma-cloud__header">
         <div>
-          <h2>{{ provider() === 'phorma' ? 'Phorma Cloud' : 'Cloud' }}</h2>
+          <h2>{{ provider() === 'phorma' ? 'Phorma Cloud' : provider() === 'aws' ? 'AWS' : 'Cloud' }}</h2>
           @if (provider() === 'phorma') {
             <p>Run your agents on Phorma's infrastructure — no setup needed.</p>
+          } @else if (provider() === 'aws') {
+            <p>
+              Deploy to <strong>your</strong> AWS account (ECS Fargate). Phorma hosts nothing.
+              @if (awsRegionLabel(); as region) {
+                <span class="phorma-cloud__region">Region: {{ region }}</span>
+              } @else {
+                <span class="phorma-cloud__region phorma-cloud__region--none">Region not configured</span>
+              }
+            </p>
           } @else {
             <p>Deploy to <strong>your</strong> Cloudflare account. Phorma hosts nothing.</p>
           }
@@ -79,7 +88,7 @@
               <input
                 type="text"
                 class="phorma-cloud__input"
-                placeholder="Path to the repo's cloud/ folder"
+                placeholder="Runtime folder - set it up in Settings › Cloud"
                 [value]="cloud.cloudFolder()"
                 (input)="onFolderInput($event)"
               />
@@ -134,6 +143,133 @@
                 autocomplete="off"
               />
             </div>
+          </section>
+        }
+
+        <!--
+          BYO AWS body section. Every class here is one the Cloudflare body
+          already uses (__section, __heading, __row, __input, __hint, __note),
+          so the sheet grows by one label rule rather than a per-control block.
+          The configuration itself is edited in Settings - this surface only
+          plans, deploys, runs doctor and shows what a deploy discovered.
+        -->
+        @if (provider() === 'aws') {
+          <!-- 1 · Plan and deploy -->
+          <section class="phorma-cloud__section">
+            <h3 class="phorma-cloud__heading">1 · Plan and deploy</h3>
+            @if (!isDesktop) {
+              <p class="phorma-cloud__note">
+                <i class="ti ti-device-desktop" aria-hidden="true"></i>
+                Deploying to AWS needs the desktop app.
+              </p>
+            }
+            @if (!awsConfig.valid()) {
+              <p class="phorma-cloud__note">
+                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                {{ awsInvalidFieldsLabel() }}. Finish the AWS configuration in Settings.
+              </p>
+            }
+            <div class="phorma-cloud__row">
+              <button
+                pButton
+                type="button"
+                class="phorma-cloud__btn phorma-btn-content"
+                size="small"
+                [disabled]="awsControlsDisabled()"
+                (click)="runAwsPlanAndDeploy()"
+              >
+                @if (awsDeployRunning()) {
+                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                } @else {
+                  <i class="ti ti-cloud-up" aria-hidden="true"></i>
+                }
+                <span>Plan and deploy</span>
+              </button>
+              <button
+                pButton
+                type="button"
+                class="phorma-cloud__btn"
+                severity="secondary"
+                [text]="true"
+                size="small"
+                [disabled]="awsControlsDisabled()"
+                (click)="runAwsDoctor()"
+              >
+                @if (awsDoctorRunning()) {
+                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                } @else {
+                  <i class="ti ti-stethoscope" aria-hidden="true"></i>
+                }
+                <span>Doctor</span>
+              </button>
+            </div>
+            @if (awsCli.running()) {
+              <!--
+                No Cancel control: the Deploy_Runner exposes no cancellation for
+                a streamed command, and killing a cdk deploy mid-flight is worse
+                than letting it settle. The console link is the affordance.
+              -->
+              <div class="phorma-cloud__row">
+                <span class="phorma-cloud__hint">
+                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                  Running. Output is streaming to the console.
+                </span>
+                <button
+                  pButton
+                  type="button"
+                  class="phorma-cloud__btn"
+                  severity="secondary"
+                  [text]="true"
+                  size="small"
+                  (click)="openRunConsole()"
+                >
+                  <i class="ti ti-terminal-2" aria-hidden="true"></i>
+                  <span>Open console</span>
+                </button>
+              </div>
+            } @else {
+              <p class="phorma-cloud__hint">
+                Runs <code>npx phorma-aws plan</code>, then asks before
+                <code>cdk deploy</code>. Output streams to the console.
+              </p>
+            }
+          </section>
+
+          <!-- 2 · Discovered endpoints -->
+          <section class="phorma-cloud__section">
+            <h3 class="phorma-cloud__heading">2 · Discovered endpoints</h3>
+            <div class="phorma-cloud__row">
+              <label class="phorma-cloud__field-label" [attr.for]="awsFieldId('triggerApiUrl')">
+                Trigger API
+              </label>
+              <input
+                [id]="awsFieldId('triggerApiUrl')"
+                type="text"
+                class="phorma-cloud__input"
+                placeholder="Written by the deploy"
+                [value]="awsConfig.triggerApiUrl()"
+                readonly
+              />
+            </div>
+            <div class="phorma-cloud__row">
+              <label class="phorma-cloud__field-label" [attr.for]="awsFieldId('monitorApiUrl')">
+                Monitor API
+              </label>
+              <input
+                [id]="awsFieldId('monitorApiUrl')"
+                type="text"
+                class="phorma-cloud__input"
+                placeholder="Written by the deploy"
+                [value]="awsConfig.monitorApiUrl()"
+                readonly
+              />
+            </div>
+            @if (awsEndpointsIncomplete()) {
+              <p class="phorma-cloud__note">
+                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                Push, runs and live monitoring stay unavailable until a deploy completes.
+              </p>
+            }
           </section>
         }
 

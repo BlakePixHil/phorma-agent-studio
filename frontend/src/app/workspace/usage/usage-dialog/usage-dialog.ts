@@ -572,6 +572,10 @@ export class UsageDialog {
         return 'ti ti-circle-x';
       case 'stopped':
         return 'ti ti-player-stop';
+      case 'skipped':
+        return 'ti ti-circle-minus';
+      case 'running':
+        return 'ti ti-loader-2';
       default:
         return 'ti ti-loader-2';
     }

@@ -31,3 +31,4 @@ export * from './redact.js';
 export * from './data-http.js';
 export * from './fixtures.js';
 export * from './sql-statement.js';
+export * from './egress.js';

@@ -33,6 +33,23 @@
   },
   "bundle": {
     "active": true,
+    "resources": {
+      "../../engine/package.json": "deploy/engine/package.json",
+      "../../engine/src/": "deploy/engine/src/",
+      "../../cloud/package.json": "deploy/cloud/package.json",
+      "../../cloud/package-lock.json": "deploy/cloud/package-lock.json",
+      "../../cloud/tsconfig.json": "deploy/cloud/tsconfig.json",
+      "../../cloud/wrangler.jsonc": "deploy/cloud/wrangler.jsonc",
+      "../../cloud/src/": "deploy/cloud/src/",
+      "../../cloud/migrations/": "deploy/cloud/migrations/",
+      "../../cloud-aws/package.json": "deploy/cloud-aws/package.json",
+      "../../cloud-aws/package-lock.json": "deploy/cloud-aws/package-lock.json",
+      "../../cloud-aws/tsconfig.json": "deploy/cloud-aws/tsconfig.json",
+      "../../cloud-aws/cdk.json": "deploy/cloud-aws/cdk.json",
+      "../../cloud-aws/Dockerfile": "deploy/cloud-aws/Dockerfile",
+      "../../cloud-aws/bin/": "deploy/cloud-aws/bin/",
+      "../../cloud-aws/src/": "deploy/cloud-aws/src/"
+    },
     "targets": [
       "nsis",
       "app",

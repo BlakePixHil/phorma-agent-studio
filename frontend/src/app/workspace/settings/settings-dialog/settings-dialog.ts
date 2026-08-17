@@ -22,6 +22,19 @@ import { SettingsDialogService } from '../settings-dialog.service';
 import { CloudService } from '../../../core/cloud.service';
 import { PHORMA_CLOUD_DEFAULT_URL } from '../../../core/phorma-cloud-url';
 import { DeployConfigService } from '../../../core/deploy-config.service';
+import {
+  DEPLOY_TARGETS,
+  type DeployCommand,
+  type DeployTargetId,
+} from '../../../core/deploy/deploy-targets';
+import {
+  AWS_CONFIG_FILENAME,
+  AwsDeployConfigService,
+} from '../../../core/deploy/aws-deploy-config.service';
+import { AwsCliService } from '../../../core/deploy/aws-cli.service';
+import { DeployWorkspaceService } from '../../../core/deploy/deploy-workspace.service';
+import { WorkflowService } from '../../../core/workflow.service';
+import { ConnectionStoreService } from '../../../core/connection-store.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
@@ -55,6 +68,11 @@ import {
   PROVIDER_MODEL_SUGGESTIONS,
   type ModelProviderId,
 } from '../../../core/workflow.model';
+import {
+  deriveEgressAllowList,
+  type ConnectionSummary,
+  type EgressAllowList,
+} from '@phorma/engine';
 
 /** BYO providers that support a live model-list fetch. */
 const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
@@ -601,7 +619,13 @@ export class SettingsDialog {
   /** Signed-in Clerk user (null while loading / signed out). */
   protected readonly clerkUser = this.phormaCloud.user;
 
-  protected pickCloudProvider(choice: 'phorma' | 'cloudflare'): void {
+  /**
+   * Selects a Deploy_Target and persists it through
+   * {@link SettingsService.cloudProvider}. Typed as `DeployTargetId` so every
+   * registered target - including `aws` - is accepted by type as well as at
+   * runtime (Requirement 1.4).
+   */
+  protected pickCloudProvider(choice: DeployTargetId): void {
     this.settings.cloudProvider.set(choice);
     if (choice === 'phorma') void this.phormaCloud.refresh();
   }
@@ -630,6 +654,29 @@ export class SettingsDialog {
     this.cloud.setCloudFolder((event.target as HTMLInputElement | null)?.value ?? '');
   }
 
+  // ── Deploy runtime (bundled, so a BYO deploy needs no repository clone) ───
+
+  protected readonly deployWorkspace = inject(DeployWorkspaceService);
+
+  /**
+   * Unpacks the Cloudflare worker this app ships with, installs its
+   * dependencies, and points the runtime folder at it.
+   *
+   * The service owns the copy, the install and every message; this surface only
+   * stores the resulting path, because the folder setting belongs to
+   * `CloudService`.
+   */
+  protected async prepareCloudflareRuntime(): Promise<void> {
+    const path = await this.deployWorkspace.prepare('cloud');
+    if (path) this.cloud.setCloudFolder(path);
+  }
+
+  /** The same, for the AWS CDK application. */
+  protected async prepareAwsRuntime(): Promise<void> {
+    const path = await this.deployWorkspace.prepare('cloud-aws');
+    if (path) this.awsConfig.setCloudAwsDirectory(path);
+  }
+
   // ── Advanced BYO deploy overrides ────────────────────────────────────────
   // All optional. Leaving them blank deploys the committed wrangler.jsonc as-is.
 
@@ -643,6 +690,279 @@ export class SettingsDialog {
 
   protected onPortalDomainInput(event: Event): void {
     this.deployConfig.setPortalDomain((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  // ── BYO AWS target (custom template) ─────────────────────────────────────
+  //
+  // The AWS body section is bespoke `<input class="phorma-settings__input">`
+  // markup, like every other field in this dialog: `_field.scss`'s `chrome()`
+  // mixin is the shared recipe for these hand-rolled controls, and layering it
+  // over a `pInputText` would mean overriding a PrimeNG control's font-size,
+  // which desynchronizes its height from its neighbours. Every PrimeNG control
+  // the section DOES render (the folder picker, the tag buttons and the Plan,
+  // Deploy and Doctor controls) carries an explicit `size="small"`
+  // (Requirement 1.9).
+
+  protected readonly awsConfig = inject(AwsDeployConfigService);
+  protected readonly awsCli = inject(AwsCliService);
+  private readonly workflow = inject(WorkflowService);
+  private readonly connectionStore = inject(ConnectionStoreService);
+
+  /**
+   * Per-instance prefix for every `id` in the AWS section.
+   *
+   * Two instances of a panel body are routinely in the DOM at once in this app,
+   * and a spec can mount two fixtures in one browser, so a static `id` would
+   * duplicate and break every `<label for>` association. One counter keeps the
+   * prefix unique per component instance.
+   */
+  private static awsInstanceCount = 0;
+  private readonly awsScope = `aws-${(SettingsDialog.awsInstanceCount += 1)}`;
+
+  /** Scoped element id for one AWS field, e.g. `aws-1-accountId`. */
+  protected awsFieldId(field: string): string {
+    return `${this.awsScope}-${field}`;
+  }
+
+  /**
+   * The aggregate line the form shows while the configuration is incomplete
+   * (Requirement 2.5).
+   *
+   * Reads `invalidFieldCount` rather than counting again: the store enumerates
+   * field validity exactly once, so the count and the aggregate validity can
+   * never disagree.
+   */
+  protected readonly awsInvalidFieldsLabel = computed(() => {
+    const count = this.awsConfig.invalidFieldCount();
+    return count === 1 ? '1 field needs attention' : `${count} fields need attention`;
+  });
+
+  /** Which container image path a deploy will take (Requirement 4.7). */
+  protected readonly awsImageNotice = computed(() =>
+    this.awsConfig.imageUri()
+      ? 'The deploy will reference this image and run no local image build.'
+      : 'The deploy builds the container image from the runtime folder and needs a running Docker daemon.',
+  );
+
+  /** True while either discovered endpoint is absent (Requirement 9.6). */
+  protected readonly awsEndpointsIncomplete = computed(
+    () => !this.awsConfig.triggerApiUrl() || !this.awsConfig.monitorApiUrl(),
+  );
+
+  /**
+   * Plan, Deploy and Doctor are disabled in browser preview (Requirement 1.8),
+   * while a command is in flight, and while the aggregate validity is false
+   * (Requirement 2.5). The fields stay editable in all three states so an
+   * operator can prepare a configuration in the browser and deploy later.
+   */
+  protected readonly awsControlsDisabled = computed(
+    () => !this.isDesktop || this.awsCli.running() || !this.awsConfig.valid(),
+  );
+
+  /**
+   * Subnet ids as the comma-separated text the operator edits.
+   *
+   * A local draft rather than a `join()` of the stored array: the store
+   * normalizes on every write, so binding the joined value straight back would
+   * rewrite the input mid-keystroke and jump the caret.
+   */
+  protected readonly awsSubnetIdsText = signal('');
+
+  protected onAwsSubnetIdsInput(event: Event): void {
+    const raw = (event.target as HTMLInputElement | null)?.value ?? '';
+    this.awsSubnetIdsText.set(raw);
+    this.awsConfig.setSubnetIds(raw.split(','));
+  }
+
+  /**
+   * Cost-allocation tags as editable rows, held locally for the same reason as
+   * {@link awsSubnetIdsText}: the store holds a `Record`, and rebuilding the
+   * rows from it on every keystroke would collapse two rows the moment their
+   * keys briefly matched.
+   */
+  protected readonly awsTagRows = signal<{ key: string; value: string }[]>([]);
+
+  protected onAwsTagKeyInput(index: number, event: Event): void {
+    const key = (event.target as HTMLInputElement | null)?.value ?? '';
+    this.awsTagRows.update(rows => rows.map((row, i) => (i === index ? { ...row, key } : row)));
+    this.syncAwsTagSet();
+  }
+
+  protected onAwsTagValueInput(index: number, event: Event): void {
+    const value = (event.target as HTMLInputElement | null)?.value ?? '';
+    this.awsTagRows.update(rows => rows.map((row, i) => (i === index ? { ...row, value } : row)));
+    this.syncAwsTagSet();
+  }
+
+  protected addAwsTagRow(): void {
+    this.awsTagRows.update(rows => [...rows, { key: '', value: '' }]);
+  }
+
+  protected removeAwsTagRow(index: number): void {
+    this.awsTagRows.update(rows => rows.filter((_, i) => i !== index));
+    this.syncAwsTagSet();
+  }
+
+  /** Writes the editable rows back as the stored tag record, trimmed. */
+  private syncAwsTagSet(): void {
+    const tags: Record<string, string> = {};
+    for (const row of this.awsTagRows()) {
+      const key = row.key.trim();
+      if (key) tags[key] = row.value.trim();
+    }
+    this.awsConfig.setTagSet(tags);
+  }
+
+  protected onAwsAccountIdInput(event: Event): void {
+    this.awsConfig.setAccountId((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsRegionInput(event: Event): void {
+    this.awsConfig.setRegion((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsNamePrefixInput(event: Event): void {
+    this.awsConfig.setNamePrefix((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsPermissionsBoundaryArnInput(event: Event): void {
+    this.awsConfig.setPermissionsBoundaryArn(
+      (event.target as HTMLInputElement | null)?.value ?? '',
+    );
+  }
+
+  protected onAwsBootstrapQualifierInput(event: Event): void {
+    this.awsConfig.setBootstrapQualifier((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsVpcIdInput(event: Event): void {
+    this.awsConfig.setVpcId((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsAppCmkArnInput(event: Event): void {
+    this.awsConfig.setAppCmkArn((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsNotificationTargetArnInput(event: Event): void {
+    this.awsConfig.setNotificationTargetArn((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsRetentionDaysInput(event: Event): void {
+    const raw = ((event.target as HTMLInputElement | null)?.value ?? '').trim();
+    // An empty or non-numeric entry is stored as NaN so the validator reports it
+    // rather than silently substituting the 30-day default.
+    this.awsConfig.setRetentionDays(raw === '' ? Number.NaN : Number(raw));
+  }
+
+  protected onAwsImageUriInput(event: Event): void {
+    this.awsConfig.setImageUri((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected onAwsDirectoryInput(event: Event): void {
+    this.awsConfig.setCloudAwsDirectory((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  /** Picks the `cloud-aws/` folder with the native dialog (desktop only). */
+  protected async pickAwsDirectory(): Promise<void> {
+    try {
+      const folder = await this.tauri.selectFolderDialog('Select the runtime folder');
+      if (folder) this.awsConfig.setCloudAwsDirectory(folder);
+    } catch (error) {
+      this.toast.error(
+        'Folder picker unavailable',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  /**
+   * Runs the `plan` verb. The Deploy_Config_File is rewritten first so the CLI
+   * reads what the form currently holds (Requirement 3.6).
+   */
+  protected async runAwsPlan(): Promise<void> {
+    if (!(await this.writeAwsConfigFile())) return;
+    const cwd = this.awsConfig.cloudAwsDirectory();
+    const command = DEPLOY_TARGETS['aws'].planCommand?.({
+      cloudFolder: cwd,
+      workflowId: '',
+      baseUrl: '',
+    });
+    if (command) await this.awsCli.runCommand(command);
+  }
+
+  /**
+   * Rewrites the Deploy_Config_File and hands off to
+   * `AwsCliService.planAndDeploy`, which owns the plan-then-confirm-then-deploy
+   * ordering. This surface adds no second ordering rule.
+   */
+  protected async runAwsDeploy(): Promise<void> {
+    if (!(await this.writeAwsConfigFile())) return;
+    const cwd = this.awsConfig.cloudAwsDirectory();
+    await this.awsCli.planAndDeploy(
+      cwd,
+      await this.awsCdkEntryExists(cwd),
+      await this.awsEgressAllowList(),
+    );
+  }
+
+  /** Runs the `doctor` verb. Needs no config rewrite - it reads the file. */
+  protected async runAwsDoctor(): Promise<void> {
+    const command: DeployCommand = {
+      program: 'npx',
+      args: ['phorma-aws', 'doctor'],
+      cwd: this.awsConfig.cloudAwsDirectory(),
+    };
+    await this.awsCli.runCommand(command);
+  }
+
+  private async writeAwsConfigFile(): Promise<boolean> {
+    const written = await this.awsConfig.writeConfigFile();
+    if (!written) {
+      this.toast.error(
+        'Could not write the deploy configuration',
+        `The Studio writes ${AWS_CONFIG_FILENAME} into the cloud-aws folder before ` +
+          'running the CLI. Check the path.',
+      );
+    }
+    return written;
+  }
+
+  /**
+   * Whether the configured directory holds a CDK entry point. `AwsCliService`
+   * takes this as an argument so filesystem access stays with the caller.
+   */
+  private async awsCdkEntryExists(cloudAwsDir: string): Promise<boolean> {
+    if (!cloudAwsDir || !this.isDesktop) return false;
+    const separator = cloudAwsDir.includes('\\') ? '\\' : '/';
+    const path = `${cloudAwsDir.replace(/[\\/]$/, '')}${separator}cdk.json`;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke<string>('read_workflow_file', { path });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The egress allow-list the deploy writes to the console, derived from the
+   * active graph, the locally known connections and the configured model
+   * providers. Pure derivation lives in the engine.
+   */
+  private async awsEgressAllowList(): Promise<EgressAllowList> {
+    const spec = this.workflow.exportActiveSpec();
+    let connections: ConnectionSummary[] = [];
+    try {
+      connections = await this.connectionStore.list();
+    } catch {
+      connections = [];
+    }
+    const configured = this.settings.keyConfigured();
+    const defaultProvider = this.settings.defaultProvider();
+    const providers = MODEL_PROVIDERS.map(entry => entry.id).filter(
+      id => id === defaultProvider || configured[id] === true,
+    );
+    return deriveEgressAllowList({ specs: spec ? [spec] : [], connections, providers });
   }
 
   /** Worker secrets settable from the guided wizard (BYO Cloudflare). */
@@ -702,6 +1022,15 @@ export class SettingsDialog {
   }
 
   constructor() {
+    // Seed the two AWS fields that are edited as text but stored as structures.
+    // Done here rather than in an `effect()` on purpose: an effect that read the
+    // store and wrote the draft, while every keystroke writes the store from the
+    // draft, is the read-and-write-the-same-signal loop that has already OOM'd
+    // this dialog once.
+    this.awsSubnetIdsText.set(this.awsConfig.subnetIds().join(', '));
+    const tagRows = Object.entries(this.awsConfig.tagSet()).map(([key, value]) => ({ key, value }));
+    this.awsTagRows.set(tagRows.length > 0 ? tagRows : [{ key: '', value: '' }]);
+
     // Usage page (EPIC 2): refresh the ledgers when the page is opened.
     effect(() => {
       if (!this.dialog.visible() || this.dialog.activePageId() !== 'usage') return;

@@ -6,6 +6,8 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 
 ## Tauri / Desktop Shell
 
+- 2026-08-17 — `bundle.resources` in `tauri.conf.json` MUST be the object (map) form for paths outside `src-tauri`: the array form rewrites `../..` into `_up_/_up_` folders and the destination layout is load-bearing. Map form supports a directory key (`"../../cloud/src/": "deploy/cloud/src/"`), which preserves nested structure. Verified WITHOUT a release build: `cargo check` runs `tauri_build`, which copies resources into `backend/src-tauri/target/debug/`, so inspect that tree for the real layout. 15 entries, ~3.3MB. `deploy/{engine,cloud,cloud-aws}` as siblings is required twice over: both packages declare `@phorma/engine` as `file:../engine`, and `cloud-aws`'s CDK app walks four segments up from `src/infra/stack.ts` for its Docker build context, landing on `deploy/`.
+- 2026-08-17 — `cargo test` had NEVER run in CI even though `sql.rs`, `llm.rs` and `data.rs` carry unit tests. It does now, alongside `cargo check --locked`. `deploy_assets.rs`'s tests cover the copy: nested structure, `node_modules`/`cdk.out`/`dist` left alone, and replacing a read-only previous copy (resources in a signed app bundle can be read-only, so `fs::copy` over one fails - remove then copy).
 - 2026-07-03 — `"dragDropEnabled": false` on the window in `backend/src-tauri/tauri.conf.json` is REQUIRED for HTML5 drag-and-drop (palette → canvas) to work in the desktop app. Tauri defaults it to `true`, which hands drops to the OS file-drop handler; `dragover`/`drop` never reach the DOM. Works in browser, silently broken in Tauri. Needs app restart to take effect.
 - 2026-07-03 — Killing a spawned process on Windows: `child.kill()` only kills the `npm.cmd` wrapper, not the node child → orphan keeps the port. Use `taskkill /PID <pid> /T /F` (kill whole tree). Also kill any prior run before starting a new one.
 - 2026-07-03 — Spawn long-running dev processes with env `CI=true` so CLIs fail fast instead of prompting interactively (the console is output-only).
@@ -34,6 +36,12 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 
 ## UI / Styling
 
+- 2026-08-17 - BYO deploy runtimes now ship INSIDE the installer (`bundle.resources` -> `deploy_assets.rs` -> `core/deploy/deploy-workspace.service.ts`), so no user-facing copy may mention cloning, `git pull`, or `cd cloud`. The update path is "update the app, Set up runtime files again, Deploy". Mechanism, layout invariants and the CI guard are in the `desktop-rust` steering; the studio-side seam is in `structure`.
+- 2026-08-17 - `.phorma-settings__cloud-setup` cards had `margin-bottom: 14px` INSIDE a page body that is already a flex column with `gap: 10px`, so the real gap was 24px between cards whose own padding is 10px. Margin removed; the parent gap alone now gives a uniform 10px. Measure a gap as `next.top - previous.bottom` rather than reading the declaration - the container's `gap` is invisible in the rule you are editing.
+- 2026-08-17 - Note tones (`__note--info` / `--warn` / `--danger`) are driven by ONE custom property, `--phorma-note-accent`, consumed by a single shared `color-mix` rule block; a tone costs one line. Two things paid for: (1) `--info` pointed at bare `var(--p-primary-color)`, which does not exist under karma, and `color-mix` with an undefined property is invalid at computed-value time - `border-color` silently fell back to `currentColor` and the fill vanished, the same trap as the old `--p-border-color` bug. Always give a literal fallback. (2) Budget: the tones fit because `.phorma-settings__inline-warning` (which was `__note--warn` with different padding) was folded into the note plus a new `__note--indented`, its dead `-close` rule deleted, and five identical `code` blocks merged into one selector list. Net -97 bytes at 21850.
+- 2026-08-16 - The `anyComponentStyle` budget in `frontend/angular.json` is **22kB warning / 26kB error**, not the 20/24 several docs claimed (the `tech` steering is corrected). `settings-dialog.scss` compiles to 21850 bytes - measure with `npx sass --no-source-map --style=compressed <file> <out>` rather than a full build - so it has ~580 bytes of headroom and ONE new mixin expansion or rule block trips the warning. That is why the aws-byo-deploy AWS body section adds zero classes and zero SCSS: it reuses `__cloud-setup`, `__cloud-setup-intro`, `__input`, `__input--mono`, `__input--invalid`, `__hint`, `__note`, `__row`, `__row-label`, `__row--actions`, `__suffix` and `__btn`. `npm run build` prints a budget line only when one is EXCEEDED, so "no anyComponentStyle line in the output" is the pass signal - there is no number to read.
+- 2026-08-16 - `.phorma-settings__note` and `.phorma-settings__cloud-setup-intro` are both `display: flex`, so contiguous text becomes an anonymous flex item: inline `<code>` or `<strong>` inside one splits the sentence into a row of disconnected boxes (the same trap `.phorma-settings__row-note`'s comment documents). Notes carry an icon plus ONE plain text run; put inline `<code>` in `.phorma-settings__hint`, which is a normal `<p>`.
+- 2026-08-16 - Do NOT add `pInputText` to an element carrying `.phorma-settings__input`. That class applies `_field.scss`'s `chrome()` mixin AND `font-size: 12px`, and overriding font-size on a PrimeNG control desynchronizes its height from its neighbours (the size token drives height). The settings dialog's text fields are bespoke `<input>` by design - `_field.scss`'s own header says so. A requirement demanding an "explicit PrimeNG small size" is satisfied by the PrimeNG controls the surface really does render (buttons, selects), each carrying `size="small"`.
 - 2026-08-11 - `max-width: Nch` resolves against the element's OWN font-size, so putting it on a wrapper div (inherited 14/16px) and expecting it to constrain a large heading inside is wrong by a factor of 4. Bit us in `docs/pitch-deck.html`: a `max-width:30ch` wrapper squeezed a 62px `h1` into five lines and overflowed the frame by 103px. Constrain the heading itself (its own `ch` is correct) or use px on the wrapper. Same class of bug as the 14px-root rem hazard: never do unit arithmetic against an assumed font-size, measure it.
 - 2026-08-11 - Verifying a standalone HTML artifact with no Playwright installed: `chrome.exe --headless --disable-gpu --window-size=1280,720 --virtual-time-budget=3000 --dump-dom <file-url>` runs the page's JS and prints the resulting DOM, so a temporary probe script that writes measurements into `document.title` gives you real layout numbers to grep. `--print-to-pdf` needs `--headless=new` (old `--headless` silently produces no file) and an ABSOLUTE output path. Reading the PDF back: `[Text.Encoding]::GetEncoding(28591)`, not `::Latin1` (null on Windows PowerShell 5), and `[IO.File]` resolves paths against the process cwd, not the shell's.
 - 2026-08-10 - FIELD DESIGN LANGUAGE (soft/Framer-style): every PrimeNG form colour now points at a `--phorma-field-*` / `--phorma-control-*` / `--phorma-segment-*` / `--phorma-overlay-*` var defined per theme block in `styles.scss`, wired up once in `core/theme-preset.ts` (`PHORMA_SEMANTIC` + `PHORMA_COMPONENTS`, merged by `definePreset` in `app.config.ts`). Recipe: translucent fill, `border-color: transparent` on dark themes / 6% hairline on light, `shadow: none`, 8px radius, and a 1px `--p-primary-color` border as the ONLY focus indicator. Adding a theme mode = one `--phorma-field-*` block, no PrimeNG token names. GOTCHAS PAID FOR: (1) these colours MUST live in `colorScheme.light`/`colorScheme.dark`, not at the `semantic` level - PrimeNG emits the semantic block BEFORE the colour-scheme blocks in the same layer, so a semantic value loses to Aura's own on source order; (2) keep the resting `border-width` at 1px (transparent) or every field reflows 2px on focus; (3) Aura has NO `hoverBackground` for the default outlined input - only `filledHoverBackground` - so the hover/focus fill lift is a small unlayered rule block in `styles.scss`; (4) inputs with a value carry `.p-filled`, so the `filled*` tokens must be set too or valued fields diverge from empty ones.
@@ -113,6 +121,9 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 
 ## Cloud / Multi-Tenancy
 
+- 2026-08-17 - `DeployWorkspaceService.prepare('cloud' | 'cloud-aws')` is the one rail that makes a BYO deploy work without a repo: Rust copies the bundled runtime into `app_data_dir/deploy/<target>`, the service runs `npm install` there and writes a `.phorma-runtime-version` stamp ONLY after a zero exit, and the caller stores the returned path in `CloudService.cloudFolder` / `AwsDeployConfigService.cloudAwsDirectory`. The service deliberately injects neither config service (the folder settings own themselves, and `CloudService` sits on the NG0200 transport-cycle path). `npm install`, not `npm ci`: a lock that has drifted should cost a slower install, not a hard failure inside a first-run setup.
+- 2026-08-17 - `npx wrangler login` is still a terminal step, but it is repo-free (wrangler stores credentials machine-wide, so the folder does not matter). Do NOT try to run it through `run_streamed_command`: that rail sets `CI=true`, under which wrangler refuses to open the OAuth flow, and it has no cancellation, so a hung login would be unkillable. A `CLOUDFLARE_API_TOKEN` path would need an env parameter in Rust plus keychain storage - deliberately not built yet.
+- 2026-08-17 - `Toolbar.openCloud()` no longer toasts "Set up cloud deploys" before redirecting to Settings > Cloud. The dialog opens on that section with the choice on screen, so the toast only repeated what the user could already see and had to be dismissed. Same reasoning applies to any redirect that lands the user on the thing they need.
 - 2026-07-05 - Cloud provider choice is `SettingsService.cloudProvider` signal (`'phorma' | 'cloudflare' | null`, persisted as `phorma.layout.cloudProvider`). NULL means "not chosen" and drives the toolbar redirect: `Toolbar.openCloud()` sends unconfigured users to `settingsDialog.open('cloud')` instead of the Cloud dialog. Settings page id is `cloud`, custom template `cloud-provider` (two large cards when unset, tab strip + per-provider panel after).
 - 2026-07-05 - `CloudDialog` branches on `settings.cloudProvider()` (fallback `'cloudflare'`): phorma branch hides ALL wrangler/worker/token vocabulary (layman copy: "Publish workflow" / "Watch live"); cloudflare branch keeps the 3-step technical flow. `CloudService.effectiveWorkerUrl` picks `phormaCloudUrl` (default `https://phorma-agent-studio-cloud.phormalabs.workers.dev`, configurable) vs user's `workerUrl`.
 - 2026-07-05 - Cloud worker has two modes via `PHORMA_MODE=hosted` env: hosted = Clerk-only auth (fail closed, PHORMA_TOKEN fallback DISABLED), per-instance `ownerId` stamped on first `/workflow` push and enforced on every request/WS connect (403/4001 on mismatch). BYO mode (unset) = today's open/PHORMA_TOKEN behavior, fully backward compatible. `verifyToken` returns `AuthContext { userId }` (Clerk JWT `sub`), NOT a boolean — tenancy hangs off it. Optional `CLERK_JWT_KEY` (PEM) enables offline verification (no JWKS fetch on DO cold start); `CLERK_AUTHORIZED_PARTIES` guards azp.
@@ -241,6 +252,30 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 - 2026-07-19 — Context compression: `pricing.ts` `ModelPrice.contextTokens` synced from OpenRouter `context_length` (localStorage cache key bumped to `phorma.model-price-table.v2` — bump it whenever the row shape changes); engine gets `RunOptions.contextWindow` lookup fn. Compression keeps first user message + last 2 tool rounds, summary rides as a USER message (Anthropic rejects back-to-back assistant turns). Summarizer failure returns messages untouched — never fails the node.
 - 2026-07-19 — GOTCHA: `Record<ModelProviderId, …>` maps in cloud/ (PROVIDER_ENV_KEYS, OPENROUTER_SLUG_PREFIX) break silently/loudly when a provider is added to the union — lmstudio was missing from BOTH (one tsc error, one silent undefined-prefix bug). When adding a ModelProviderId, grep cloud/src for existing Record maps.
 - 2026-07-19 — Playwright vs canvas: click-to-add palette buttons drop nodes at the canvas centre (they can stack); node drags need a real movement threshold (small first move, then the real drag). Port-to-port wiring works by mouse.down on the port dot → move → up on the target port circle, but coordinates come from screenshots — re-screenshot after every layout change. PREFER `window.__phormaTest` (below) over any of this.
+
+## Test Suite Quality (audit 2026-08-14)
+
+- 2026-08-14 - THERE IS NOW CI: `.github/workflows/ci.yml` runs engine vitest + `tsc` + the 11 scenario scripts, cloud `test:unit` + `check`, frontend karma + production build, and `cargo check --locked` on every push and PR. Before it, `release.yml` was the only workflow (tag-triggered, build-only) and ~1700 assertions ran only when a human remembered. If you add a suite, add it to `ci.yml` in the same change or it does not exist.
+- 2026-08-14 - `engine/npm run test:e2e` (`engine/test/run-all.mjs`) runs all 11 `*.e2e.mts` scripts. `vitest.config.ts` EXCLUDES `test/**`, so `npm test` never touched them. The runner sets `TSX_TSCONFIG_PATH=frontend/tsconfig.json`: `ias-template.e2e.mts` and `connectors-builtin.e2e.mts` import frontend modules that resolve `@phorma/engine` through the path alias, and tsx applies `paths` from ONE tsconfig picked relative to the entry file. Adding the alias to `engine/tsconfig.json` does NOT work - tsx only applies paths to importers inside that tsconfig's directory.
+- 2026-08-14 - `ias-template.e2e.mts` had been silently dead: `connectors.model.ts` grew a VALUE import from `@phorma/engine`, so the script died at MODULE_NOT_FOUND with 0 of 11 checks run. A scenario script that crashes before its first assertion still prints nothing alarming. This is why the runner treats a non-zero exit as failure and why CI runs it.
+- 2026-08-14 - Bullshit-test patterns found and removed here; recognise them: (1) `engine/src/events.spec.ts` used `import type` ONLY and compared two literals it declared itself, claiming the union was "checked at compile time" while `vitest.config.ts` sets no `typecheck` - renaming `notify-sent` in `engine.ts` left it green. (2) `capabilities.spec.ts` Property 32 asserted `isBlocked(f) === f.some(x => x.severity === 'error')` with `isBlocked` defined as exactly that call - `x === x`, true even for a validator returning nothing. (3) `plan-op.spec.ts` compared `planOpCall(op).id` to `LEGACY_OP_ACTIONS[op]`, the constant the implementation returns - passes for any mapping. (4) `egress.spec.ts` had six shape-only properties (deduped/ordered/capped/lower-cased) that ALL hold for an empty list, so no test said which hosts a firewall rule may reach. (5) `deploy-config.test.mjs` paired migration tags by two independent `includes()` calls, so swapping the classes on v1 and v3 passed. (6) `connections-panel.spec.ts` rebound a built-in connector (impossible), swallowed it with `.catch(() => {})`, and asserted a negative over an empty list.
+- 2026-08-14 - Mirroring a production table into a test as an "oracle" is a shared-bug tautology, not a test. `egress.spec.ts` copied `PROVIDER_HOSTS`; changing `anthropic` to `api.anthropic.com.attacker.test` in BOTH passed. Where a count is needed, derive it by calling the function under test with a narrowed input instead.
+- 2026-08-14 - When a security assertion block sits inside `if (result)`, a timeout silently skips it and reports one failure instead of fourteen. `portal.e2e.mjs` hid its whole live redaction audit that way. Guard the other branch with an explicit `check(..., false, 'the audit did NOT run')`.
+- 2026-08-14 - `cloud/npm test` used to chain the portal e2e, which needs a manually started `wrangler dev` PLUS a local Ollama model, so the documented test command was red by default and only `test:unit` was ever run. `test` is now unit-only; `test:portal` stays manual.
+- 2026-08-14 - `cloud/src/releases.ts` now has `test/releases.test.mjs`, driving the real route with a fake R2 bucket. It had zero tests, and reintroducing the exact shipped `beta.10 < beta.9` string-compare bug passed the whole suite plus `npm run check`. Test version comparison through the 204-vs-200 the updater sees, not by exporting the comparator.
+- 2026-08-14 - `RunControllerService.apply()` (the app's only visualization contract, ~250 lines, 25+ event types) was untested. `run-controller.service.apply.spec.ts` now pins the credits/dollars split (`phormaCloudCostUsd` accumulates only when `provider === 'phorma-cloud'`) and the `scoped` suppression that keeps sub-workflow child events off the parent canvas while STILL counting their usage. `apply()` is synchronous signal-in/signal-out - feed event literals, read the signals, no run or transport needed.
+- 2026-08-14 - `connection-store.service.desktop.spec.ts` checked secret NAMES only, so `freezeResolved` could have leaked real keychain values with the whole 27-file suite green. It now asserts each value equals `hostSecretSentinel(id, key)` and that `secrets`/`config` are frozen. Any spec covering the keychain path must assert the sentinel, not the key set.
+- 2026-08-14 - Mutation testing is the only honest way to grade a test. Procedure that worked: read the file with `[IO.File]::ReadAllText($absolutePath)` (it resolves against the PROCESS cwd, not the shell's - use an absolute path), `.Replace()` one realistic bug, run the targeted suite, restore the exact original text. Do NOT `git checkout` to revert while in-flight feature work is uncommitted.
+- 2026-08-14 - Live BYO cost estimation needs a loaded pricing table: a `node-usage` event with token counts and no `costUsd` yields cost 0 and `estimated: false` in a bare TestBed, because `PricingService.estimator()` has no entries. Assert the estimated flag by sending `costSource: 'estimated'`, not by omitting the cost.
+- 2026-08-15 - Writing an "accepts exactly X" property against a regex-based validator: restate the shape as structural predicates (split the value at its separator, check each part's alphabet) instead of importing the production pattern. For `cloud-aws/src/core/config.ts`'s `IMAGE_URI_RE` the split is unambiguous because neither the tag nor the digest alphabet contains `@`, `:` or `/` - first `@` else last `:`. The independent oracle then makes both halves mutation-sensitive: relaxing the registry class to `[A-Za-z0-9.-]` fails on `DOCKER.IO/phorma:a`, and flipping `triggerApiUrl`'s trailing-slash flag fails on `https://.../`.
+- 2026-08-15 - The WHATWG URL parser rewrites scheme-relative forms for its six special schemes, so `new URL('https:/host')` yields `https://host/` and `new URL('HTTPS://host').protocol` is `https:`. Any oracle that restates an endpoint shape by string prefix must therefore lower-case the scheme comparison and keep `:`-bearing junk out of its free-form generator, or it will disagree with a `new URL`-based validator on inputs nobody documented. `config.ts` also checks `?`, `#` and surrounding whitespace against the SUPPLIED string because the parser normalizes all three away.
+- 2026-08-14 - Engine `tsc --noEmit -p tsconfig.json` covers `src/**` only, and `*.spec.ts` type errors sat in it unnoticed (a `WorkflowNode` literal missing `category`/`icon`/`position`, `WorkflowPort` literals using `type`/`label` instead of `name`/`role`). CI runs this step now. `test/**/*.mts` is still NOT type-checked - it needs `@types/node` for `process`, and 16 `startRun` calls omit the required `requestInput`.
+- 2026-08-16 - "The URL equals what the registry says" is not a test that the registry produced it: a literal in the service that agrees with the registry today passes. The half that bites is patching the registry entry (`DEPLOY_TARGETS[target].instanceUrl` and `endpoints[op].path` are plain mutable properties) to emit a sentinel, then asserting the emitted URL carries it and that no fragment the registry owns survives. Restore in a `finally` - `phorma` and `cloudflare` SHARE one endpoint table, so patching through one target patches the other. Parenthesize the sentinel (`/@registry-path(status)`), or the op name re-forms `/status` and the fragment scan false-fails. Check fragments only AFTER the base: `https://trigger.example.test` contains `/trigger` inside the scheme's `//`.
+- 2026-08-16 - `get_diagnostics` on a frontend spec came back clean on a `TS2352` (`CloudEndpointContext` cast to `Record<string, string>`) that `ng test`'s bundler then failed on. Treat a clean diagnostics read as necessary, never sufficient - run the suite.
+- 2026-08-16 - PowerShell's `>` redirect writes UTF-16LE, so a karma log captured that way matches nothing when read as utf8. Read it back with `readFileSync(path, 'utf16le')` and strip the ANSI colour codes (`/\u001b\[[0-9;]*m/g`) before grepping for `FAILED`. Piping karma through `Select-String` in the same command line also truncates and reorders in this shell - redirect, then parse in Node.
+- 2026-08-16 - A SECOND `TestBed.createComponent` does NOT put two panel-body instances in the DOM at once: Angular's `DOMTestComponentRenderer.insertRootElement` calls `removeAllRootElements()` first, so the earlier fixture's root is detached and every `getBoundingClientRect().width > 0` filter over it reports zero elements. To reproduce the duplicate-instance hazard (scoped ids, `<label for>` associations), keep `fixture.nativeElement` - which IS the `<div id="rootN">` host, so its `parentElement` is `<body>`, not the root - and re-append it to `document.body` after creating the second fixture, then `detectChanges()` both.
+- 2026-08-16 - Asserting "the form shows a message naming THIS field", match the rendered `__hint` on `startsWith(<visible label>)`, not `includes`. In the AWS section an invalid Region also invalidates the App CMK ARN, whose own message reads "in the region above", so a case-insensitive `includes('Region')` matches two hints and the count assertion false-fails. Every hint in that section opens with its field's label, which makes the prefix match the stronger assertion anyway. Related: an EMPTY region does not invalidate `appCmkArn` at all - its region check is `!region || match[1] === region` - so "clear the region" costs one invalid field, not two.
+- 2026-08-16 - Requirement 1.9's "explicit PrimeNG small size" is checkable in the DOM without reading the template: `size="small"` emits `p-button-sm`, `p-select-sm`, `p-inputtext-sm`, `p-textarea-sm`, `p-checkbox-sm` and nothing appears when the size is omitted. `p-inputnumber` and `p-selectbutton` carry NO size class of their own - they push it onto an inner `p-inputtext` / `p-button` - so checking the leaf classes covers the composites, and a `<p-*>` host tag outside the known table is the signal to extend it.
 
 ## E2E Test Harness (added 2026-07-19)
 
@@ -477,3 +512,613 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
 - 2026-08-10 - Playwright is NOT installed in this repo despite `docs/e2e-testing.md` being written against its API. `scripts/cdp.mjs` is a zero-dependency Chrome DevTools Protocol driver for browser checks (Node 24 global `WebSocket`, system Chrome at `C:/Program Files/Google/Chrome/Application/chrome.exe`): `node scripts/cdp.mjs http://localhost:7322 <snippets.mjs>`, snippet file default-exports `async (evaluate) => any` steps. Two gotchas found writing it: ESM has no `require`, and Chrome can still hold the temp profile directory when you `rmSync` it, so wrap the cleanup or an EPERM masks the actual result.
 - 2026-08-10 - Duplicate-id baseline for browser checks: PrimeNG 20's menubar renders NINE `p-menubar-submenu` `<ul>` elements with a literal `id="null"`. Third-party markup, present on a bare page load, NOT a regression in our panels. `document.querySelectorAll('[id]')` total-vs-unique will therefore never be equal - filter to ids you own.
 - 2026-08-10 - The connection editor's Secrets section used to be gated on `secretsSupported` (desktop keychain) alone, so a browser-parity user saw only a warning. It is now gated on keychain OR a configured deploy target, with the local save button disabled and titled "This host has no local secret store". Verified in a real browser: a bearer connection typed with `apiKey` in the auth field alone renders exactly one declared `apiKey` secret row, and the cloud upload button enables the moment a value is typed.
+
+## AWS Deployment Target (cloud-aws, in flight)
+
+- 2026-08-14 - A CDK Aspect that is exported but never registered is dead code, and nothing in a
+  normal test run notices. All six guardrails in `cloud-aws/src/infra/aspects.ts` sat unwired while
+  `template.spec.ts` carried six `it.todo` stubs admitting it. Wiring them into
+  `PhormaAwsHostStack` immediately surfaced a real bug: `MonitorApi`'s integration role was created
+  without the permissions boundary, which an organisation that mandates the boundary would have
+  rejected at deploy time. Register Aspects in the stack constructor, after every construct and
+  after `Tags.of`.
+- 2026-08-14 - `it.todo` is a silent backlog. `vitest --run` reports "6 todo" alongside a green
+  summary, so a checkpoint task reads as passing. Treat any `todo` in a spec as an unfinished task,
+  not a passing one.
+- 2026-08-14 - vitest does not type-check, so a spec file can compile-fail while its tests pass.
+  `cloud-aws` had 6 `error TS` in two spec files (invented `RunSource` `'api'`, `PortRole`
+  `'tool-in'`/`'tool-out'`, and `WorkflowConnection.sourceNodeId`) while `npm test` was green. The
+  real shapes: `RunSource` is manual/schedule/webhook/resume/eval/portal, a tool port role is
+  `'tools'`, and a connection is `{id, outputId, inputId, kind}` where the connector id is the port
+  base id plus `-in`/`-out`. Import the engine type instead of hand-copying a union.
+- 2026-08-14 - `as any` in a `.e2e.mts` scenario script hides shape drift until runtime.
+  `purge.e2e.mts` built a flat run record and crashed in `RunTableAdapter.upsert`, which reads
+  `record.summary.startedAt`. `RunRecord` is `{summary, graph, events}`. Type the fixture as
+  `RunRecord` rather than casting at the call site.
+- 2026-08-14 - The catalog entry id and the node kind differ for MCP tools: the `NODE_CATALOG` id is
+  `tool-mcp`, the `WorkflowNodeKind` is `mcp-tool`. `addNodeFromCatalog('mcp-tool')` returns null
+  and every downstream assertion fails on a null node.
+- 2026-08-14 - A shared assertion helper that only loops over findings asserts nothing when the
+  graph is clean. Karma reports it as "has no expectations" - worth grepping for, it marks a
+  vacuous test. Add the emptiness correspondence explicitly.
+- 2026-08-15 - `cloud-aws` now pins every dependency and devDependency exactly, enforced by
+  `scripts/check-versions.mjs` (local `file:`/`link:`/`workspace:` specs are exempt - they carry no
+  registry version). Adding a dependency with `^` or `~` fails `npm run check`. `tsx` is a runtime
+  dependency, not a devDependency: the CLI launcher spawns it. Pinning the AWS SDK at `3.1110.0`
+  emits one `npm warn ERESOLVE` - `@aws-sdk/lib-dynamodb@3.1110.0` pulls
+  `@aws-sdk/util-dynamodb@^3.996.8`, whose newest release peer-requires `client-dynamodb ^3.1111.0`.
+  It is a warning only; npm nests the resolution and install succeeds. Bumping all twelve
+  `@aws-sdk/*` pins to `3.1111.0` clears it if the noise ever matters.
+- 2026-08-15 - `cloud-aws/src/aws/table-ops-compile.ts` is the only place a `core/table-ops.ts`
+  write shape becomes an SDK command input. Two non-obvious rules keep it sound against the pure
+  evaluator: a `path` names ONE top-level attribute and is never split on `.` or `[n]` (the pure
+  evaluator reads `item[path]`, so splitting would disagree for an attribute literally named
+  `a.b`), and an empty `and`/`or` child list has to compile to an existence identity
+  (`attribute_exists(#p) OR attribute_not_exists(#p)` / the `AND` form) because DynamoDB has no
+  empty-conjunction syntax while `every`/`some` over nothing are true/false. DynamoDB `ADD` takes a
+  value operand only, so the compiler throws on a non-literal `AddAction` instead of mistranslating
+  it.
+- 2026-08-15 - `cloud-aws` installs no `@types/node`, so a bare `process.stdout` reference fails
+  `tsc --noEmit`. Do not add `@types/node` for one stream: read it through
+  `(globalThis as { process?: { stdout?: Sink } }).process?.stdout` inside the factory and declare
+  the one member you use locally (`stdout-log-writer.ts` does this). Same rule keeps the lookup out
+  of module load, which the credential-free Check_Pipeline requires of every `src/aws/` module.
+- 2026-08-15 - CloudWatch metric names and Phorma `MetricName` values are not the same alphabet:
+  `telemetry.ts` uses kebab-case, and `ObservabilityConstruct`'s alarms are declared against
+  PascalCase (`LeaseTakeover`, `FailedScheduledRun`). `metric-publisher.ts` maps between them with
+  an exhaustive `Record<MetricName, string>`, so a new metric fails the type-check until it is
+  named. `FailedScheduledRun` still has no producer - the six telemetry metrics include
+  `skipped-scheduled-run`, not a failed one - so that alarm cannot fire yet.
+- 2026-08-15 - `SchedulerAdapter`'s retry backoff (`100/200/2000ms`) made two failure-injecting
+  property tests in `scheduler.spec.ts` sleep ~300ms per example: 100 examples each, 31s per test,
+  63s of a 69s suite. Fixed with an injectable `Sleep` seam - an optional 5th constructor argument
+  defaulting to the real `delay` - and a `noSleep` no-op in the spec. Retry counts, the 30s push
+  timeout and every assertion are unchanged; the two tests now run in 62ms and 128ms. Reach for the
+  seam, never for a lower `numRuns`: the repo floor is 100 examples per property.
+- 2026-08-15 - EventBridge Scheduler's `ListSchedules` returns `ScheduleSummary`, which carries no
+  cron, timezone or role - only name, ARN, group, state and the target ARN. Filling the port's
+  `ScheduleEntry` therefore needs a `GetSchedule` per listed name (`scheduler:GetSchedule` is
+  already on the Runtime policy). Also: `ScheduleExpression` wants a wrapped six-field
+  `cron(...)`. **Superseded 2026-08-17 on the translation half:** appending the year wildcard is
+  wrong (it leaves `*` in both day fields, which AWS rejects) and the day-of-week remap now exists.
+  `core/cron.ts translateCron` owns the whole dialect conversion; `scheduler-backend.ts` adds only
+  the wrapper. The `ListSchedules`-carries-no-cron point still holds, and `listSchedules` now takes a
+  required `namePrefix`.
+- 2026-08-15 - A CDK synth inside a property body is the other expensive-loop shape (sibling of the
+  `SchedulerAdapter` sleep entry above). `role-disjointness.spec.ts` paid ~160ms per example and 67s
+  per file, and three agents hit the 30s `testTimeout` on it under load. Two levers, both keeping
+  100 examples and every assertion: (1) memoize `Template` on a canonical serialization of the WHOLE
+  options object - sorted keys, `undefined` and empty objects dropped - so a second axis folds into
+  the key later; a `Template` is read-only here and `toJSON()` even hands back the SAME object each
+  call, so sharing one instance is safe. (2) `process.env.CDK_VALIDATION = 'false'` skips
+  `aws-cdk-lib`'s bundled `@aws/cloudformation-validate` WASM linter, which is HALF of every
+  `app.synth()` (161ms -> 82ms). Set it in `beforeAll` and restore in `afterAll`; the real gate is
+  untouched since `npm run check` runs `cdk synth` in its own process. Result: 62.7s -> 20.6s,
+  slowest test 16s -> 7.4s. Measure before assuming a cache helps: the trust-shape generators here
+  emit 82-100 DISTINCT values per 100 examples, so memoization alone bought only 8s.
+- 2026-08-15 - `RunTableAdapter` fences on held-lease state: with a lease held every run-scoped
+  write goes out as a `TransactWriteItems` whose item 0 is the lease `ConditionCheck`, and
+  `core/lease.ts` exposes `fencedDeletes` so run-scoped deletes take the same path as writes rather
+  than a bare `DeleteItem`.
+- 2026-08-15 - `FakeDocumentTableClient`'s `requests` array holds the VERBATIM SDK command inputs,
+  not a normalized summary. That is what lets Property 8 assert item 0 of a fenced transaction is
+  the lease `ConditionCheck` and Property 11 assert no read is a `Scan`. Keep it verbatim when
+  extending the fake.
+- 2026-08-15 - Concurrent subagent edits to one shared source file surface as confusing
+  cross-test failures in unrelated specs (for example `this.table.update is not a function` from a
+  half-applied `RunTableAdapter` port switch). Re-run the suite before believing such a failure and
+  before triaging it as a real regression.
+- 2026-08-15 - `cloud-aws` installs no `@types/node`, and `server/index.ts` needs `node:http`. The
+  `globalThis` trick that covers `process` (`aws/stdout-log-writer.ts`, `server/startup.ts`) cannot
+  satisfy an IMPORT, so the package carries `src/server/node-http.d.ts`: one ambient
+  `declare module 'node:http'` with only the members the listener touches. Two shapes matter -
+  methods return `void` (Node's real `this` is assignable to it, and so is a hand-built test
+  double), and event listeners stay `(...args: any[]) => void` so a fake never has to reproduce an
+  overload set. Adding `@types/node` later means deleting that file in the same change, or two
+  declarations of `node:http` collide. Timers still come from `lib: DOM`, so `unref()` needs a
+  guarded `as unknown as { unref?: () => void }`.
+- 2026-08-15 - A body-size cap has to stop BUFFERING on the offending chunk, but must not
+  `req.destroy()` before the refusal is written - destroying first drops the connection and the
+  client sees `fetch failed` instead of the 413. Write the 413, then destroy in the `res.end`
+  flush callback. Verified over a real loopback listener.
+- 2026-08-15 - `src/server/index.ts` self-starts (the container runs the esbuild bundle as
+  `node server.mjs`), so it guards with an `import.meta.url` vs `process.argv[1]` suffix compare.
+  Under vitest or `tsx` the entry is the runner, so importing the module for a test binds no port.
+- 2026-08-15 - `fc.assert(fc.asyncProperty(...))` returns a Promise, so a SYNCHRONOUS vitest `it`
+  callback that neither `await`s nor returns it proves nothing: the `it` resolves before the first
+  example runs, and an assertion failure inside the property escapes the test. vitest reports
+  "N passed" and prints an "Unhandled Rejection ... asyncThrowIfFailed" block with exit code 1 - a
+  green summary next to a non-zero exit that reads as unrelated noise. Eight such callbacks sat in
+  `runner.spec.ts`, `runner-resume.spec.ts`, `runner-options.spec.ts` and `runner-lease-ordering.spec.ts`
+  (four more in `trigger-contention.spec.ts`); with a deliberate bug in the lease acquire condition
+  all of them still said "passed". Detect it by grepping `fc.assert(` and checking BOTH that the line
+  reads `await fc.assert(` and that the enclosing callback is `async` - one without the other is
+  still vacuous. Never trust a green vitest summary that comes with a non-zero exit code.
+- 2026-08-15 - Awaiting a property is necessary but not sufficient. After the fix above, two
+  properties in `runner-options.spec.ts` (Property 24) still passed with the runner declaring its own
+  capability record (`id: 'aws-ecs'`, `stdioMcp: true`) AND with `maxExecutions: 1` failing every
+  run: they assert on the IMPORTED `AWS_CAPABILITIES` constant rather than on what `executeRun`
+  passed, and filter for a `'tool'` call type that no fake in the file ever records. Two properties
+  in `runner.spec.ts` (Property 23) compare `startRun` to `startRun`, so deleting the engine's
+  `node-started` emission leaves them green. A property whose assertions read only constants, or
+  compare production code to itself, cannot fail - check that a property FAILS under an injected bug
+  before believing the coverage.
+- 2026-08-15 - `cloud-aws/test/server-e2e.e2e.mts` is the only test that binds a real socket, and
+  two seams are worth knowing before extending it. (1) `startServer` builds the listener itself, so
+  the `adapters` override of `createRequestListener` is NOT reachable through `StartServerOptions`;
+  to make a real handler throw over a real request, replace one function on `handle.routes` (for
+  example `handle.routes.purge`) - the listener reads `deps.routes` per request, so the mutation
+  takes effect immediately. (2) The health flag flips to `ok` BEFORE `listen`, so a socket can never
+  observe `starting` in production; drive the 503 answers by calling `handle.health.set(...)` after
+  the bind. Bind `port: 0` and read `handle.port`. `shutdown(handle, 'SIGTERM')` with an injected
+  `exit` is the right way to exercise the drain path: on Windows `process.kill(pid, 'SIGTERM')` ends
+  the process outright rather than raising a signal.
+- 2026-08-15 - The Container_Image dual path lives entirely in `infra/stack.ts`: `resolveContainerImage`
+  is called once and `ComputeConstruct` takes a ready `image: ecs.ContainerImage`, so neither path
+  branches inside the construct. Three things are worth knowing. (1) `REPO_ROOT` is derived from
+  `import.meta.url` with plain string work, NOT `process.cwd()` and not `node:path` - `cloud-aws` has
+  no `@types/node`, and `ImportMeta.url` is typed by `lib.dom`, which the package already includes. A
+  cwd-derived path would also silently follow whatever directory the `cdk` CLI was launched from.
+  (2) A `DockerImageAsset` needs no daemon and no credentials at synth: it stages and fingerprints the
+  context and writes one `dockerImages` entry into the assets manifest, publishing into the BOOTSTRAP
+  container repository (`cdk-{qualifier}-container-assets-...`), so the stack declares no
+  `AWS::ECR::Repository` for it. It does need the directory and the Dockerfile to exist, or synth
+  fails with `CannotFindFile`. (3) Asset staging COPIES the context into `cdk.out/asset.<hash>/`, and
+  the context here is the repository root - so the outdir sits inside the context. `cdk.out` and
+  `**/cdk.out` are in `IMAGE_CONTEXT_EXCLUDES` for that reason as much as for fingerprint stability:
+  synthesizing with any other outdir name inside the repo (an `App({ outdir: 'tmp-out' })` in a
+  scratch script, `cdk synth --output cdk.out.ref`) recurses until the path length kills it, and the
+  wreckage needs `robocopy /MIR` from an empty directory to delete on Windows. Use the default
+  `cdk.out`, or an outdir outside the repository.
+- 2026-08-15 - `IMAGE_CONTEXT_EXCLUDES` (and the repo-root `.dockerignore` that mirrors it) covers the
+  sibling packages, `docs`, `.kiro`, `node_modules` and build output, so a frontend edit cannot change
+  the image fingerprint. It does NOT cover `.github`, `.agents`, `.vscode`, `scripts`, `agent.md`,
+  `README.md` or `skills-lock.json` - those still stage into the asset, so appending to
+  `.github/agent-memory.md` DOES change the asset hash and forces an image republish on the next
+  deploy. Extend both lists together if that ever matters.
+- 2026-08-15 - The two container image paths do NOT cost the same to synthesize, and it decides
+  whether a property test fits the 30s `testTimeout`. The asset path fingerprints the repository
+  build context on every `app.synth()` (~400-600ms); the reference path builds no `DockerImageAsset`
+  at all (~100ms). `role-disjointness.spec.ts`'s three trust-shape properties generate 100 DISTINCT
+  ARNs each, so every example misses the template cache: on the asset path they took 43-62s and
+  timed out. They assert only on `deployTrust`, which is identical on both paths, so they now
+  synthesize with an `imageUri` set - 7s each, file 153s -> 24s. Rule: a property that does not
+  assert on the image should synthesize on the reference path. Disjointness itself is asserted on
+  both paths, since the ECR grants are derived from the image choice.
+- 2026-08-15 - No `AWS::ECR::Repository` exists in the estate on either image path, and the ECR
+  grants are derived rather than pointed at a construct. `SecretsConstruct`'s `${prefix}-host`
+  repository was dead - a `DockerImageAsset` publishes into the bootstrap repository, so nothing
+  ever pushed to it. `IdentityConstruct` now takes `imageChoice: ContainerImageChoice` instead of
+  `ecrRepo` and calls `imagePullRepositoryArn`: the bootstrap repository ARN built from the
+  CONFIGURED qualifier on the asset path, the ARN parsed out of `imageUri` on an ECR reference
+  (account and region come from the reference - a cross-account pull is normal), and `undefined` for
+  a non-ECR registry (ghcr.io, docker.io, `public.ecr.aws`, an internal Harbor). On `undefined` the
+  repository-scoped statement is OMITTED, on both the execution and deployment roles - Fargate makes
+  no `ecr:*` call for those pulls, and a guessed ARN would be a dead statement while `*` would hand
+  the role every repository in the account. `ecr:GetAuthorizationToken` stays on `*` unconditionally:
+  the API takes no resource, and its shape must not depend on parsing an operator-supplied hostname.
+- 2026-08-15 - `check-docs.mjs` derives resource coverage template -> guide only, so removing a
+  resource leaves its `TYPE_TO_GUIDE_TERM` entry inert rather than failing: the ECR mapping stayed
+  green while describing a resource the stack can no longer produce. Delete the entry when the
+  resource goes; the unknown-type branch then demands a guide mention if one is ever added back,
+  which means prose in the "Resources the IaC_App creates" section must avoid the bare word
+  `repository` or it satisfies that fallback by accident. The guide's `### 3.8 Container image
+  source` exists because `DOCKER_UNAVAILABLE_MESSAGE` and every `PREREQUISITE_DOCS_ITEMS` entry cite
+  a section by number - a citation with no section is a dead pointer, now caught by a check that
+  extracts the citations from `preflight.ts` and matches them against the `### N.M Title` headings.
+  Carving a section body out of the guide needs a regex WITHOUT the `m` flag: with it, `$` in the
+  terminating lookahead matches end of line and the body stops at the heading itself.
+- 2026-08-15 - Asserting an asset manifest from a spec: read it off the synthesized assembly, not off
+  disk. `assembly.artifacts.filter(cxapi.AssetManifestArtifact.isAssetManifestArtifact)[0].contents`
+  (import `aws-cdk-lib/cx-api`) is the parsed `<stackname>.assets.json`, so `contents.dockerImages`
+  gives the entry count and each `destinations[*].repositoryName` with no `fs` read - which matters
+  because `cloud-aws` has no `@types/node`. `stackArtifact.assets` is EMPTY here (the legacy
+  `aws:cdk:asset` metadata is off outside the CLI), so an assertion written against it passes
+  vacuously. `Template.fromStack(stack)` already synthesizes the app, so a following `app.synth()`
+  returns the same assembly for free - keep the `App` around instead of a Template-only helper if a
+  spec needs both. Shapes: asset path container `Image` is
+  `{ 'Fn::Sub': '{account}.dkr.ecr.{region}.${AWS::URLSuffix}/cdk-{qualifier}-container-assets-{account}-{region}:{sourceHash}' }`
+  and the manifest entry's `imageTag` is that same hash; the `imageUri` path is a plain verbatim
+  string with `dockerImages: {}`. `assembly.manifest.missing` being empty is the machine-checkable
+  proxy for "synth needed no credentials" (a context provider is what forces an AWS call), and
+  `entry.source.{directory,dockerFile}` is the proxy for "the build is deferred to publish, so no
+  Docker daemon".
+- 2026-08-15 - Asset-path synth cost is dominated by OS page-cache warmth, not by CPU: the same
+  `template.spec.ts` first test measured 14.1s, 10.2s, 7.3s and 0.6s across runs minutes apart, and
+  `new cdk.App()` with no `outdir` stages into an os-tmpdir `cdk.out*` (so a spec cannot recurse into
+  its own build context - that hazard is real only for an explicit in-repo outdir). Do not read a
+  single timing as a regression, and do not chase the 400-600ms figure in the entry above as if it
+  were stable. The defence is structural: synthesize each image path ONCE per file and share it
+  (`template.spec.ts` memoizes by image path in a `Map` and primes both in a `beforeAll(..., 30_000)`
+  - the hook timeout is NOT covered by `testTimeout: 30_000` and defaults to 10s).
+- 2026-08-15 - The Server_Entry env contract is asserted from `src/server/env.ts`'s THREE lists, and
+  picking the wrong one silently breaks the assertion. `TASK_DEFINITION_ENV_NAMES` is the seven
+  `PHORMA_*` names `compute.ts` sets; `AGENT_PROVIDED_ENV_NAMES` is `['AWS_REGION']`, which the ECS
+  agent injects and the template must NOT set; `REQUIRED_ENV_NAMES` is the union, so asserting the
+  template over it always fails on `AWS_REGION`. `template.spec.ts` asserts the correspondence in
+  BOTH directions (every declared name present, no undeclared name present) plus a non-empty value
+  per name - a name-only check passes on `""`, which `readServerEnv` treats as absent. Values are CDK
+  tokens, so the value check reads the unresolved node (`Ref`/`Fn::Join` accepted, empty string or
+  empty object rejected) rather than expecting a string.
+- 2026-08-15 - `cloud-aws/scripts/check-imports-declared.mjs` is the reverse of `check-versions.mjs`:
+  the latter asserts every manifest entry is an exact pin, the former asserts every bare specifier
+  imported under `bin/`, `src/aws/` and `src/cli/` is IN the manifest. Both directions are needed -
+  the CLI shim shipped importing eight undeclared packages and every verb died on module resolution.
+  Two traps when writing that kind of guard. (1) A `from '...'`-only regex misses nothing, because
+  static value imports, `import type`, `export {x} from` and `export type {x} from` all end in the
+  same `from` clause - but a separate pattern IS needed for `import('...')`, or the guard goes blind
+  on `bin/phorma-aws.mjs` and `infra/preflight.ts`, which load the SDK dynamically on purpose.
+  (2) A scoped package is `@scope/name`; only a third segment is a subpath. Splitting on the first
+  `/` turns `@aws-sdk/client-ec2` into the non-package `@aws-sdk` and the guard passes vacuously.
+- 2026-08-15 - `cloud-aws/scripts/*.spec.ts` runs NOWHERE today: `vitest.config.ts` includes only
+  `src/**/*.spec.ts` and `tsconfig.json` includes only `src/**/*.ts` and `test/**/*.ts`. A guard spec
+  placed beside its script (as the aws-byo-deploy design specifies for Properties 25 and 26) is
+  silently never executed and never type-checked. Add `scripts/**/*.spec.ts` to the vitest include
+  when adding one. The guards export a `check*(root)` function and only run the CLI half when invoked
+  directly (`pathToFileURL(process.argv[1]).href === import.meta.url`), so a spec can point them at a
+  fixture tree without tripping `process.exit`.
+- 2026-08-15 - `cloud-aws/vitest.config.ts` `include` used to be `src/**/*.spec.ts` only, so the
+  two guard property tests that live beside their guards (`scripts/check-adapter-real.spec.ts`,
+  `scripts/check-imports-declared.spec.ts`) ran NOWHERE and `npm test` reported success having never
+  executed them. `include` is now `['src/**/*.spec.ts', 'scripts/**/*.spec.ts']`; adding a spec
+  outside `src/` means widening it in the same change. `npm run check` narrows to
+  `vitest --run src/infra` and is unaffected. Those two specs must stay OUT of `tsconfig.json`
+  `include`: adding `scripts/**/*.ts` produces 10 errors (`TS2307` for `node:fs/promises`, `node:os`,
+  `node:path`, `node:url` because the package installs no `@types/node`, plus `TS7016` for the
+  `.mjs` guard import with `allowJs` off). vitest transpiles without type-checking, so they run
+  regardless - measured, not assumed.
+- 2026-08-15 - A guard property test is only worth something if it asserts the violation set
+  EXACTLY. `check-adapter-real.spec.ts` seeds an arbitrary subset of eight violation kinds into a
+  generated tree under `os.tmpdir()` (never under `cloud-aws/`, whose `cdk.out` carries whole-repo
+  asset copies with a second `PhormaAwsHostStack`), then asserts one violation per seeded kind AND
+  `violations.length === kinds.length`. The count half is what holds the negative controls the guard
+  is most likely to regress on: an `@aws-sdk`/`node:http` import named in a doc comment, `cdk
+  bootstrap` in prose beside a real `bootstrapQualifier`, the creation-only `fromManagedPolicyArn` /
+  `fromVpcAttributes` / `fromKeyArn` reads, and `*.spec.ts` files that legitimately name a fake or a
+  fixture stack. Prove non-vacuity by mutation in both directions - drop one seeded file (the
+  per-kind assertion must fail) and emit one unseeded violation (the count must fail).
+- 2026-08-15 - `cloud-aws/bin/phorma-aws.mjs` is now a 30-line launcher (was 435 lines, 14.3 kB): it
+  `tsImport`s `../src/cli/main.ts` through `tsx/esm/api` and assigns
+  `process.exitCode = await runVerb(process.argv.slice(2))`. Nothing else belongs in it. The old shim
+  carried untyped second copies of the config parse, the Sentinel_Envelope encoder and the whole
+  existence preflight, and none of it was type-checked or tested - one of those copies imported
+  `formatUrl` from `@smithy/url-parser`, which that package does not export, so `monitor-url` was
+  dead on arrival. Assign `process.exitCode`, never call `process.exit`: exiting mid-write truncates
+  the final `__phorma__:` envelope line the Studio is waiting for. `tsx` is a runtime `dependency` at
+  an exact pin for this reason, and `check-imports-declared.mjs` enforces that `tsx/esm/api` resolves
+  to it. Measured after the change: no verb exits 1 with the usage line on stderr and nothing on
+  stdout, `doctor` with no `cdk.context.phorma.json` exits 2, an unknown verb and an under-supplied
+  verb both exit 1.
+- 2026-08-15 - A CDK `--context key=value` argument arrives at the app as a STRING. The CLI's
+  `parseStringContextListToObject` splits on the first `=` and stores the right-hand side verbatim;
+  only the `context` block in `cdk.json` and `cdk.context.json` carry real JSON values. `infra/app.ts`
+  tested `typeof rawConfig === 'object'`, so the `--context phorma:config=<json>` every CLI verb
+  passes (`cli/config-file.ts` `cdkConfigContextArgs`) was silently ignored and EVERY `cdk
+  diff`/`deploy`/`synth` synthesized the placeholder config - account `000000000000`, name prefix
+  `phorma-check`, no `imageUri`, the operator's boundary and region gone. The reading now lives in
+  `infra/context-config.ts` (`configFromContext` accepts a string or an object and throws on a
+  malformed one rather than falling back) with `context-config.spec.ts` beside it, because `app.ts`
+  synthesizes on import and no spec can import it. The end-to-end guard is
+  `scripts/synth-image-reference.mjs` asserting the assembly contains a template named from the
+  config's `namePrefix`: a context that never lands makes the whole second synth vacuous, and the
+  file name is what proves it landed.
+- 2026-08-15 - The check pipeline synthesizes BOTH container image paths:
+  `cdk synth --quiet` covers the asset path (no context, so the placeholder config carries no
+  `imageUri`) and `node scripts/synth-image-reference.mjs` covers the reference path. It is a script,
+  not a second inline `cdk synth`, because a JSON literal in an npm script is not portable across
+  `cmd.exe` and `sh` quoting - spawn `node_modules/aws-cdk/bin/cdk` with an argument array through
+  `process.execPath` and no shell instead. Its `--output` is `cdk.out/image-path`, NESTED under
+  `cdk.out`: that is the third safe outdir option alongside the two in the entry above, and the only
+  one that needs no new exclusion, because `cdk.out` is already in `IMAGE_CONTEXT_EXCLUDES`, already
+  gitignored and already in `check-adapter-real.mjs`'s `SKIP_DIRS`. A sibling `cdk.out.image` recursed
+  until the path length killed it, and cost an hour of "the synth hangs" before the memory entry
+  above turned out to have said so already. `CDK_OUTDIR` set in a shell leaks into every later `npm
+  run check` in that shell and produces the same wreckage - unset it rather than trusting a deleted
+  directory to stay deleted.
+- 2026-08-15 - `.github/workflows/ci.yml` now runs `cloud-aws`: `npm install --legacy-peer-deps`,
+  then `npm run check`, then `npm test`, in the `checks` job after the `cloud` steps. Nothing in this
+  package ran in CI before, so every guard added in Requirement 13 was advisory until those steps
+  existed. `npm ci` is NOT usable: `cloud-aws/` is still untracked, so there is no committed
+  `package-lock.json` to install from, and the other three install steps use
+  `npm install --legacy-peer-deps` anyway. No engine install is needed - `@phorma/engine` resolves
+  through the tsconfig path alias into `engine/src`, which the checkout supplies. Node 20 on the
+  runner is enough: the guards use `import.meta.dirname` (20.11+) and nothing reaches for a Node 21
+  or 22 API.
+- 2026-08-16 - Two things about the Sentinel_Envelope that a gap-detection test has to encode. (1) The
+  wire format has NO terminator line, so the expected set is `0..max(seq)` and deleting the HIGHEST
+  sequence lowers `max` instead of punching a hole: it decodes ok with a truncated payload, and only
+  deleting the sole sentinel line produces the no-envelope error (which carries no `missingSeq`).
+  Asserting "one line removed always fails" is wrong at every size. (2) A single-hole mutation cannot
+  distinguish a lowest-first gap scan from a highest-first one - both name the same sequence. To catch
+  that bug the enumeration needs a TWO-hole case: re-tagging sequence k as `max+2` leaves holes at k
+  and at the old `max`, and only a lowest-first scan answers k. `frontend/src/app/core/deploy/sentinel-envelope.spec.ts`
+  covers 1332 such cases by exhaustive enumeration (size x arrival order x noise x content, then every
+  single mutation); `fast-check` is an `engine` dependency only and must not be added to `frontend`.
+- 2026-08-16 - `CloudService` no longer spells out a request anywhere. Every endpoint goes through one
+  private `call(op, ctx, payload?)` that reads the spec from `DEPLOY_TARGETS[provider].endpoints`
+  (method, scope, path, body reshaper, unwrap) and dispatches through a `CloudTransport`
+  (`fetch-bearer` for both Cloudflare targets, `aws-cli` for `aws`). Adding a host is a route table;
+  adding a credential model is a transport. Rules the conversion had to hold, all easy to break:
+  a transport THROWS on a transport failure and on an unparseable body, because that is what `fetch`
+  and `Response.json()` did at the eleven call sites and every existing `catch` depends on it; an
+  HTTP status is never a failure kind (`AwsRequestService` reports a 409 as `ok: true`); a declared
+  `body` reshaper is also the marker for "this endpoint sends a body", so the read routes send none;
+  and an absent operation returns `{ ok: 'unsupported' }`, which the caller resolves to that
+  operation's documented absent value (`deployedStatus` stays `null` = unknown, `connectionSecretNames()`
+  returns `[]`) - never to a fabricated route.
+- 2026-08-16 - The two hosts disagree on `usage?since=`: the Worker reads epoch milliseconds, the AWS
+  host rejects anything that is not ISO 8601. Only the "unbounded" case can be expressed as registry
+  data (each entry defaults to its own epoch form); a real window has to be converted per target
+  before it goes into `CloudEndpointContext`. Same class of trap as the caller-minted `runId` the AWS
+  trigger requires and the Cloudflare body reshaper drops.
+- 2026-08-16 - `AwsDeployConfigService.triggerApiUrl` is discovery-written and persisted, so a spec
+  that sets it leaks into every LATER spec's injector through localStorage - `configured()` then reads
+  true in a test that never configured anything. Same hazard as `cloudWorkerUrl` and `cloudToken`.
+  Reset it in an `afterEach`. Karma runs one browser for the whole suite, so any `saveLayout`-backed
+  signal is global state.
+- 2026-08-16 - `frontend` reaches a `cloud-aws` fixture through a tsconfig path alias, not a copy:
+  `resolveJsonModule: true` plus `"@cloud-aws/sentinel-corpus.json": ["../cloud-aws/test/fixtures/sentinel-corpus.json"]`
+  in `frontend/tsconfig.json`, exactly the mechanism `@phorma/engine` already uses to import out of
+  the package. So `sentinel-envelope.spec.ts` asserts against the bytes `gen-sentinel-corpus.mts`
+  committed, and regeneration needs no second step on the Studio side. Karma `files`/`proxies` was
+  the alternative and is worse: there is no `karma.conf` today (the `@angular/build:karma` builder
+  generates one), and an async fetch turns a missing fixture into a runtime 404 instead of a
+  compile error. A generated TS mirror under `src/` is worse still - it gives the two packages
+  somewhere to disagree, which is the whole failure mode Property 3 exists to catch. Adding the
+  alias touches the shared tsconfig, so re-run `npm run build`; the initial-bundle budget WARNING
+  (2.59 MB against the 2 MB warning threshold) is pre-existing and not a failure.
+- 2026-08-16 - Two teeth a corpus-replay agreement test needs, both learned by mutation. (1) Assert
+  the corpus's own `prefix` field equals the local `SENTINEL_PREFIX`, and pull chunk lengths through
+  a helper that returns -1 on a non-framing line instead of `parse(line)!.body` - a prefix drift
+  otherwise surfaces as `TypeError: Cannot read properties of null`, which names nothing. (2) A
+  49 kB payload compared with a bare `toBe` prints two walls of `x` and Jasmine truncates whichever
+  end mattered; compare length, then report the first differing index with an 8-before/24-after
+  window. That turned "reassemble in Map insertion order" from an unreadable dump into
+  `chunk-boundary-straddle order=reversed noise=clean: payload diverges at index 0 of 49172`.
+  Also: only the REVERSED/rotated arrival orders catch the insertion-order bug, since as-emitted
+  insertion order already equals sequence order.
+- 2026-08-16 - `chunk-boundary-straddle` in the sentinel corpus cuts at 49150 bytes, NOT the 49152
+  budget, because the encoder backs off the 4-byte `U+1F642` that starts at byte 49150. Assert that
+  gap explicitly (first chunk strictly below the budget, byte at the budget offset is `0b10xxxxxx`,
+  byte at the cut is `0b11110xxx`) with `multi-chunk` as the ASCII control that DOES cut exactly at
+  the budget. Without those the case passes for any encoder that happens not to corrupt the split.
+- 2026-08-16 - ANY frontend spec that does `spyOn(window, 'fetch')` and then asserts on the FULL set
+  of observed requests is flaky: `ModelPricingService`'s constructor does
+  `queueMicrotask(() => this.sync())`, so every TestBed injector kicks a
+  `GET https://openrouter.ai/api/v1/models` that lands in the spy at an unpredictable point (it
+  short-circuits only while its 24h localStorage cache is fresh, which depends on whether an earlier
+  spec's real network call succeeded). `cloud.service.spec.ts` Property 21 records a request only when
+  its URL starts with one of the three configured deploy-target bases, and overrides the Phorma Cloud
+  URL to a synthetic host so no assertion is addressed at the real production name.
+- 2026-08-16 - Property 21 (transport selection) is 3 targets x 11 operations x 2 concurrency states,
+  driven ONLY through public `CloudService` methods, and each case compares one array of
+  `"<transportId> <METHOD> <url>"` lines against the sequence derived from that target's own
+  `endpoints` table. One comparison then catches a transport chosen by operation, an AWS path that
+  falls back to `fetch`, a route borrowed from the other host's table, a missing request and an extra
+  one - and an absent operation is expressed as "contributes no line" rather than as a special case.
+  Verified by three mutations (`fetchTransport` in `call`; transport chosen by `endpoint.method`; a
+  `AwsCliService.running` read-gate and a write). Two traps: a draft workflow mints a fresh
+  `wf-<base36>` id on EVERY `exportActiveSpec()` call, so pin it with a spy or no expected URL is
+  computable; and drive the monitor URL through the transport's `monitorSocketUrl`, never by replacing
+  the global `WebSocket` - karma uses it to reach its own server.
+- 2026-08-16 - `AwsDeployConfigService` persists every field through `effect()`, NOT from its setters, so a spec that clears the signals in `afterEach` leaks anyway: the effect is still queued when the next `TestBed` injector reads `localStorage`. Property 23 hit it as 11 red specs whose "all fields empty" state saw a leaked `awsAccountId: '123'` from a sibling case. Two fixes, both wanted: end the cleanup with `TestBed.inject(ApplicationRef).tick()` to flush the queued writes, and have each case CLEAR the store before applying its own state so it never depends on what the injector loaded. Note `retentionDays` is the one field whose "cleared" value is its default 30, not blank - it is the only validator that is not valid-when-empty.
+- 2026-08-16 - `AwsDeployConfigService.valid()` USED to be a conjunction of per-field validators each shaped `!value || pattern.test(value)`, so an untouched store reported VALID and requirement 12.5's aggregate-validity half of `CloudService.configured()` was vacuous for a fresh install. Fixed in task 13.1: a REQUIRED field's validator now tests the value directly (empty fails), an OPTIONAL field's keeps the `!value ||` escape, and `valid` plus `invalidFieldCount` both read one `fieldValidity` array so there is no second source of truth. Required is read off `parseAwsDeployConfig` - accountId, region, namePrefix, permissionsBoundaryArn, bootstrapQualifier, alarmNotificationArn, one cost-allocation tag, retentionDays - plus `cloudAwsDirectory`, which the Studio needs to write the file at all. Consequence for specs: setting `triggerApiUrl` alone no longer makes the `aws` target configured, so any harness that drives an `aws` operation gated on `configured()` (`listRuns`, `fetchUsage`, `refreshStatus`, `triggerHttp`, the portal routes) must populate a COMPLETE config. `pushWorkflow` is gated on a base URL only, which is why `capability-gate.spec.ts` survived unchanged.
+- 2026-08-16 - The Studio's Deploy_Config_File carries its provenance notice as the `$generatedBy` MEMBER, never as leading `//` lines. The header version was unreadable to its own consumer: `cloud-aws/src/cli/config-file.ts` does one bare `JSON.parse` on purpose (so no second parser can grow there) and `parseAwsDeployConfig` ignores unknown members. Prove a change to `buildConfigFile()` end to end by calling `AwsDeployConfigService.prototype.buildConfigFile.call(fakeThis)` from a `tsx` script - the method only reads signal getters off `this`, so a plain object of `() => value` runs the real body with no Angular injector, and the output can go straight into the real `parseAwsDeployConfig`. Instantiating the service in Node fails with NG0203 instead.
+- 2026-08-16 - Reaching the REAL `socket.onmessage` handler `CloudService.connect()` installs is doable in karma, contrary to the Property 21 note: swap `window.WebSocket` for a stand-in ONLY across the one `await cloud.connect(...)` and restore it in a `finally`, and make the stand-in DELEGATE to the real constructor for any URL that is not one of the suite's synthetic `*.example.test` monitor hosts. Karma's own socket is long open by then and nothing between the presign and `new WebSocket(...)` yields to a macrotask, so no reconnect can land inside the window - measured across two full randomized runs. A stand-in that captured every URL is what would break the runner. Copying the handler into the spec is the trap: it passes forever while the real one transforms events.
+- 2026-08-16 - "Passed without transformation" needs BOTH halves or it is vacuous. Deep equality (canonical JSON with keys sorted at every depth, so a re-serialization that reorders members is allowed) cannot see `{ ...event }` - a shallow copy is deep-equal. Spy `JSON.parse` with `callThrough` and pull the handler's own parse result off the matching call's `returnValue`, then assert the object `apply` received is either that exact reference OR shares no nested reference with it (a real re-serialization shares none, a shallow copy shares every one). Read the parse result BEFORE the spec parses the frame itself, or the "parsed exactly once" filter counts the spec's own call.
+- 2026-08-16 - `Readonly<Record<RunEventType, RunEvent>>` is the only corpus guard that survives the union growing: a 43rd member of the `RunEvent` union fails to compile in `cloud.service.spec.ts` instead of silently going uncovered. Pair it with a per-entry `frames[type].type === type` check, which is what catches the copy-paste. All 42 types are covered today.
+- 2026-08-16 - `connect()`'s `onmessage` catch does NOT swallow every non-event frame, and a property asserting it does is asserting a wish. `JSON.parse` throwing (plain text, truncated JSON) and `null` (the `type` read throws) never reach `apply`; a bare JSON scalar or array parses fine, has no `type`, and IS relayed to `apply` verbatim. Harmless - `RunControllerService.apply` switches on `type` and matches nothing - but assert the real split (`reachesApply` per frame) plus "no malformed frame reaches `apply` carrying a `type`", not a blanket exclusion.
+- 2026-08-16 - Mutation-checking Property 28 in `cloud.service.spec.ts`: `{ ...event }` fails 17 specs naming the shared path (`Unexpected $[0] = '$.usage'`), dropping the `monitor-synced` early return fails 50 (`exactly the event, never the sentinel: Expected 3 to be 1`), and coercing `at` to a string fails 49 with the exact divergence index (`diverges at index 43 of 389`). Note the coercion mutation does not compile as `event.at` - `node-token` has no `at`, so it needs a cast.
+- 2026-08-16 - You cannot spy `validateAgainstCapabilities` from a frontend spec: `cloud.service.ts` imports it as a named binding and the karma bundler resolves it to a direct call, so there is no namespace object left to patch. To enumerate a finding SET over the severity lattice anyway (Property 29 in `cloud.service.spec.ts`), fix the graph and vary the CONNECTION INVENTORY the deployed host returns - one `http-request` node per slot with a RELATIVE url and its own `connectionId`, then per slot: present + `config.baseUrl` + no declared secret = no finding, present + NO `baseUrl` = exactly one warning (undeterminable egress is the validator's only warning rule), present + `baseUrl` + one declared secret with `secretsPresent: 0` = exactly one error. 3^4 = 81 sets with the graph untouched, and it makes the inventory read causally load-bearing: answer it `[]` and every slot yields an error AND a warning. Pin the lattice point twice - once through the validator (for message text a spec must not copy) and once independently as one finding per non-clean slot at that slot's severity attributed to that slot's node.
+- 2026-08-16 - Mutation-checking Property 29: gating on `findings.length > 0` fails 27 specs (the 15 warning-only sets plus all 12 host-rejection cases, `the requests a push made: Expected $.length = 1 to equal 2`), moving `reportCapabilityFindings` inside the abort branch fails 23 with the missing console line printed verbatim, and dropping the host-findings report fails 10. Assert the Problems console as `level | message` lines in order, not by `some(...)` substring: severity mapping (`error` finding -> `error` level) is half of requirement 12.2 and a substring search passes on the wrong level.
+- 2026-08-16 - `configureCloudHarness` in `cloud.service.spec.ts` already spies `exportActiveSpec`, so a later property that needs a different graph must RE-TARGET that spy (`(workflow.exportActiveSpec as jasmine.Spy).and.callFake(...)`) - a second `spyOn` throws "already been spied upon" and a second harness means a second TestBed. Same rule for the `AwsRequestService.send` fake: re-target it and push into `harness.log` yourself. Never widen the shared `RESPONSE_BODY` to make a case's data appear; Properties 21 and 22 assert against it.
+- 2026-08-16 - A frontend property over a config STORE can enumerate its own field set: `Object.keys(service)` filtered to values that are functions carrying `.set` yields exactly the writable signals (a `computed()` has no `.set`), so `AWS_CONFIG_FIELDS` in `aws-deploy.spec.ts` is checked against the live store and a field added to `AwsDeployConfigService` fails Property 17 by name instead of going uncovered. Pair it with an exact emitted-member assertion (`Object.keys(parsed).sort()`), which turns a new emitted member into a named failure rather than a silent pass.
+- 2026-08-16 - Property 17 (config file round trip) does not enumerate 2^15 vectors: 15 fields is 32768 cases and jasmine allocates a result per expectation. Cut the space along the axis that changes the emitted SHAPE - the 7 fields whose emptiness OMITS a member (the 2 `vpc` halves plus 5 optionals) exhaustively at 2^7, crossed with the 8 shape-insensitive fields carried as one all-empty/all-populated block, plus one single-field-empty vector each = 264 cases in 9 specs. Mutation-checked: a `//` provenance header fails all 9 ("lines beginning with //: Expected $.length = 1 to equal 0", then "SyntaxError: Unexpected token /" from the bare parse), `vpcId || subnetIds.length` fails 8 naming the partial state, and dropping the trim in `setRegion` fails 5 with "Expected '  us-east-1  ' to equal 'us-east-1'".
+- 2026-08-16 - Two AWS_Config_Fields are edited as text but stored as structures (`subnetIds` is a
+  `string[]`, `tagSet` a `Record`), and binding `[value]` straight back from the store fights the
+  caret: the store normalizes on every write, so a joined value rewrites the input mid-keystroke, and
+  rebuilding tag rows from a `Record` collapses two rows the instant their keys briefly match. Both
+  are held as LOCAL draft signals seeded once in the constructor body and written through on input.
+  Seeding with an `effect()` would be the read-and-write-the-same-signal loop that has already OOM'd
+  this dialog.
+- 2026-08-16 - `npm test -- --watch=false --browsers=ChromeHeadless` does NOT work on Windows here:
+  npm swallows both flags, karma runs headed in watch mode and never exits. Use
+  `npx ng test --watch=false --browsers=ChromeHeadless`. Suite total after task 13.8 is 757.
+- 2026-08-16 - Property 19 (aggregate validity truth table, `frontend/src/app/core/deploy/aws-deploy.spec.ts`) is NOT a 3^15 product, and two of the reasons are properties of the fields rather than of the enumeration: `retentionDays` has no MISSING state (a number signal whose cleared value is its valid default of 30) and `cloudAwsDirectory` has no INVALID state (a presence-only validator - whether the path exists on disk is the CLI preflight's question). That leaves 3^13 x 2 x 2 = 6377292, cut to 563 vectors by depth: all-valid, every single-field deviation (28, each also asserting all 15 per-field signals so the count is attributable), every unordered PAIR of deviations exhaustively (365, which is what makes the count additive rather than "at least one"), a full 3-state product over `region` x `appCmkArn` x `accountId` x `imageUri` against two backgrounds (162), and 7 whole-set extremes. Mutation-checked: a required validator made valid-when-empty again fails 5 specs (`accountId=missing: fields needing attention, expected [accountId]: Expected 0 to be 1`), dropping `tagSetValid()` from `fieldValidity` fails 13 (`Expected 7 to be 8` on the fresh-install vector), and re-expressing `valid` as its own conjunction that omits one field fails 5 (`cloudAwsDirectory=missing: aggregate validity, outstanding [cloudAwsDirectory]: Expected true to be false`).
+- 2026-08-16 - `appCmkArn` is the ONE AWS_Config_Field whose validity is not independent: it is valid only when its ARN's region equals `region`, so a valid `us-east-1` key becomes INVALID the moment the region holds anything else non-empty (region empty skips the check via the validator's `!region` escape). Any enumeration over field states has to model that as a cross-field oracle, or every region-invalid case is off by one. `vpcId` and `subnetIds` are NOT coupled this way - their joint rule lives in `buildConfigFile()`, not in validity, so a populated `vpcId` with no subnets is aggregate-VALID and silently emits no `vpc` member.
+- 2026-08-16 - Requirement 2.5's "count of invalid or missing fields" must be read as the count of fields failing requirement 2.4, not the count of empty inputs: counting an empty OPTIONAL would tell the operator to fill in `triggerApiUrl`, which endpoint discovery owns and no operator can type, and would report 15 on a fresh install where 8 are actionable.
+- 2026-08-16 - The `notificationTargetArn` gap survives on purpose and no aggregate truth table can see it: the store validates a generic ARN while `parseAwsDeployConfig` demands an SNS topic ARN, so `arn:aws:sqs:...` passes the form and dies in the CLI. It is a disagreement between two validators for ONE field, which is requirement 2.8's cross-package agreement, not 2.4's. Pick invalid samples that fail BOTH shapes so a property over the store stays green when the store is tightened.
+- 2026-08-16 - `frontend/node_modules` has NO local prettier, so `npx prettier --check` downloads a fresh prettier whose default `arrowParens: "always"` disagrees with most of this repo - `aws-deploy-config.service.ts` and `cloud.service.spec.ts` fail it untouched. Do not treat that check as a gate. Verify `printWidth: 100` with a 6-line node script over the file's lines instead, and match the surrounding file's arrow style by eye.
+- 2026-08-16 - Frontend suite total is 806 after task 13.4 (Property 19 adds 49 specs to `aws-deploy.spec.ts`), 862 once task 13.9's `settings-dialog.aws.spec.ts` lands.
+- 2026-08-16 - Stage 14 checkpoint baseline, all green: frontend **879** specs (two randomized runs agreed, so the localStorage-seeding `afterEach` that flushes `effect()` writes with `ApplicationRef.tick()` before `localStorage.clear()` holds under reordering), `initial` 2.62 MB against the 2 MB warning (pre-existing, NOT a failure) and NO `anyComponentStyle` line; `cloud-aws` 49 files / 637 tests; `cloud` check and 12 `test:unit` suites unaffected. `settings-dialog.scss` measures 21946 compressed bytes, and the budget parses `22kB` as 22528, so the real headroom is 582 bytes - the AWS body section in stage 15 lands in the CLOUD dialog sheet, not this one.
+- 2026-08-16 - Endpoint discovery is testable under karma without stubbing a dynamic import, and both halves matter. `AwsDeployConfigService.writeConfigFile()` is a PUBLIC method, so `spyOn(config, 'writeConfigFile').and.callFake(async () => { written.push(config.buildConfigFile()); return true; })` captures the exact text the write path was handed, at the moment of the write - which is a real assertion on "the file was rewritten with these values", where re-serialising after the call would pass even if nothing was written. `AwsCliService.executeStreamedCommand` is private but assignable on the instance (`(service as unknown as {executeStreamedCommand: ...}).executeStreamedCommand = ...`), which is what makes the `outputs` verb fallback drivable AND lets a test assert the fallback did NOT fire - the assertion that catches treating a decoded-but-PARTIAL `deploy-outputs` envelope as undecodable. Property 20 in `aws-deploy.spec.ts` enumerates 7 outputs documents x 2 delivery routes plus a sequence gap and a wrong-kind envelope, 16 cases, and seeds two non-empty previous endpoint URLs first: against an untouched store both fields are empty, so "the previously stored values are unchanged" passes even when the code wrongly persists `''`.
+- 2026-08-16 - Frontend suite total is 879 after task 13.6 (Property 20 adds 17 specs to `aws-deploy.spec.ts`), from 862.
+- 2026-08-16 - EventBridge Scheduler has NO API Gateway target type, so the schedule target the
+  stack passes (`triggerApi.scheduledRunRouteArn`, an `arn:aws:execute-api:...` ARN) is invalid:
+  Scheduler takes either a templated target from a closed list or a universal
+  `arn:aws:scheduler:::aws-sdk:{service}:{operation}`, and an `execute-api` ARN is a valid target for
+  an EventBridge RULE, a different service. `CreateSchedule` is therefore rejected at SPEC-PUSH time
+  (`SchedulerAdapter.sync` runs from `handleSpecPush`), so any workflow with a `schedule-trigger` node
+  carrying a non-blank cron cannot be deployed to the AWS host at all. Operator-visible symptom:
+  `POST /workflows/{id}/spec` answers 500 `{"error":"Internal error"}` and the Studio toasts
+  `Push failed` / `Internal error`; the real cause is only in the handler-error log line. The spec is
+  written BEFORE the sync, so the spec persists while the schedule set does not. Two more holes from
+  the same root: the schedule `Input` carries `{workflowId,nodeId,source}` with no `runId` and the
+  trigger route 400s without one, and `SchedulerAdapter.handleScheduleFire` has no live caller so the
+  skipped-scheduled-run metric can never be published.
+  **FIXED 2026-08-17 - this entry is kept for the diagnosis only, and its "workaround today" and
+  "deferred to a follow-up spec" are obsolete.** The target is now the Schedule_Shim Lambda, the shim
+  mints the `runId`, and the trigger route calls `handleScheduleFire`. There were also two further
+  defects this entry did not catch: the cron dialect translation was inverted against AWS, and
+  schedule names were unscoped so a push wiped other workflows. See the 2026-08-17 entries at the end
+  of this section.
+- 2026-08-16 - `check-docs.mjs` extracts several guide sections with regexes whose terminator is
+  `(?=\n##\s*\d)`, which does NOT match a `### N.M` subheading (`\s*` matches zero chars and `#` is
+  not `\d`), so numbered subsections can be added inside sections 7, 9 and 3 without truncating the
+  extracted body. The Verify extraction is `##\s*\d*\.?\s*Verify` with no `^` anchor and takes the
+  FIRST match, so a `### Verify ...` subheading placed before `## 7. Verify` would hijack it - name
+  subheadings anything else. Renumbering top-level sections 1-3 is what breaks the guard, because
+  every `PREREQUISITE_DOCS_ITEMS` citation and `DOCKER_UNAVAILABLE_MESSAGE` points at 3.4/3.5/3.6/3.8.
+- 2026-08-16 - `AwsCliService.runCommand` reported NOTHING on a non-zero exit, so requirement 5.7's
+  `aws sso login` message was unreachable: `doctor` reaches the CLI only through `runCommand`, and
+  only `planAndDeploy` called `reportExitFailure`. Found while writing task 15.2's examples and fixed
+  there (report when `!success && exitCode !== null` - a `null` exit code means the invocation itself
+  failed and `executeStreamedCommand` has already toasted, so reporting again double-toasts one
+  failure). The summary names the verb off `command.args[1]`, giving "Doctor failed" / "Plan failed".
+  Lesson for the class: a private helper whose docstring names a verb no caller passes it is a
+  wiring gap, not a style detail.
+- 2026-08-16 - The negative half of a "written BEFORE the CLI ran" ordering assertion cannot be a
+  fixed number of task turns. `CloudDialog.runAwsPlanAndDeploy` reaches `planAndDeploy` through two
+  MACROTASKS (the `@tauri-apps/api/core` dynamic import in the cdk-entry probe, and the IndexedDB
+  read in the egress derivation), so a mutation that starts the config write without awaiting it
+  hides behind them and passes three microtask turns. Gate the write on a promise the spec releases
+  by hand and give the deploy path a real-time budget (`happensWithin(pred, 750)`) instead: a correct
+  implementation can never reach `planAndDeploy` while the write is pending however long you wait, so
+  the budget only bounds how much of a wrong implementation's head start is observed - there is no
+  flake in either direction. Same fix needed for "a disabled control reached nothing".
+- 2026-08-16 - "No cancel control" is asserted as a CLOSED SET of accessible names for the whole
+  Cloud dialog card (`aria-label` first, else collapsed text), not as the absence of a keyword: the
+  set pins `Change cloud provider | Plan and deploy | Doctor | Open console | Push workflow |
+  Connect monitor | Close` while running and the same minus `Open console` while idle. Verified by
+  mutation - adding a "Cancel deploy" button fails on the array diff AND on the keyword guard, where
+  a keyword-only test would still pass for a control labelled "Halt".
+- 2026-08-16 - Frontend suite total is 894 after task 15.2 (`cloud-dialog.aws.spec.ts` adds 15
+  examples), from 879. Two randomized runs agreed. `mount()` for `CloudDialog` must open
+  `CloudDialogService` first (the whole template is behind `@if (dialog.visible())`) and stub
+  `CloudService.refreshStatus`, which the constructor effect fires on every open.
+- 2026-08-17 - `aws-byo-deploy` final checkpoint (task 17), all eleven commands green with no fix
+  needed: `cloud-aws` check exit 0 (11 steps, infra vitest 6 files / 137 tests, 25 exact pins, 5
+  packages at 0.2.0-beta.9) and `npm test` 49 files / 637 tests; `server-e2e`, `lease-contention` and
+  `zombie-fencing` all `ALL PASS`; `engine` 48 files / 1282 tests; `cloud` check exit 0 (the
+  multiple-environments wrangler advisory is expected) and 12 `test:unit` suites; frontend **894**
+  specs on two randomized runs that agreed; frontend build exit 0 with `initial` 2.62 MB raw /
+  548.83 kB transfer, one pre-existing budget WARNING (short of 2.00 MB by 621.95 kB) and NO
+  `anyComponentStyle` line; `cargo check` exit 0 as the unchanged baseline (no Rust file in this
+  feature). Both known gaps re-confirmed as still-open-by-design: the `notificationTargetArn`
+  generic-ARN vs SNS-ARN disagreement (`ARN_RE` in `aws-deploy-config.service.ts` vs
+  `SNS_TOPIC_ARN_RE` in `cloud-aws/src/core/config.ts`, documented in section 10.7) and the
+  EventBridge Scheduler cron limitation. No code tried to fix either at the time.
+  **The cron half is CLOSED as of 2026-08-17** - see the Schedule_Shim entries below. The
+  `notificationTargetArn` disagreement is still open.
+- 2026-08-17 - **EventBridge Scheduler has NO API Gateway target**, templated or universal. Its
+  templated list is closed (CodeBuild, CodePipeline, ECS `RunTask`, EventBridge `PutEvents`,
+  Inspector, Kinesis, Firehose, Lambda `Invoke`, SageMaker, SNS, SQS, Step Functions) and the
+  universal target invokes AWS SDK operations of the shape
+  `arn:aws:scheduler:::aws-sdk:{service}:{operation}`. An `execute-api` ARN with `*` path
+  placeholders IS a valid target for an EventBridge **rule**, which is a different service - that
+  ARN shape is Rules semantics wired into Scheduler, and it is why `CreateSchedule` failed and took
+  every cron-carrying spec push down with it. Fixed by a Lambda hop: `src/shim/schedule-shim.ts`,
+  `{prefix}-schedule-shim`, invoked by Scheduler and making the signed
+  `POST /workflows/{id}/trigger` itself. Do not "fix" this by pointing a target at a route again; a
+  `template.spec.ts` assertion now fails if `PHORMA_SCHEDULE_TARGET_ARN` ever contains
+  `execute-api`.
+- 2026-08-17 - The Lambda shim was chosen over draining an SQS queue in the Fargate task, and the
+  reason is not cost. A queue drain would have been a SECOND ingress into a run, so the lease
+  acquire, the 409 contention answer and the unfenced skip record would each have had a second
+  implementation site inside `server/` - the most invariant-dense layer here. The shim reuses the
+  existing trigger route, so a scheduled run is byte-identical to a manual one and `server/` needed
+  no new code path. It is also cheaper: the shim runs OUTSIDE the VPC against the public
+  IAM-guarded `execute-api` endpoint, where a queue would have needed an eleventh interface endpoint
+  (~15 USD/month across two AZs) purely so the task could poll. The closed "no Lambda" decision in
+  the spec was about the WebSocket routes, a hot bidirectional path; it does not transfer to a cold
+  fire-and-forget trigger, and Lambda's 15-minute ceiling is irrelevant because the run happens on
+  Fargate.
+- 2026-08-17 - **AWS cron is not Unix cron, and the old code had it backwards in both directions.**
+  Three differences: six fields with a trailing year, day-of-week `1-7` from Sunday (Unix is `0-6`
+  with `7` also Sunday, so AWS is `(unix % 7) + 1`), and `*` may not appear in BOTH day fields -
+  exactly one of day-of-month and day-of-week must carry `?`. So the old
+  "append a year wildcard" turned the single most common expression a user can type, `0 12 * * *`,
+  into `cron(0 12 * * * *)`, which AWS rejects. Meanwhile the old validator ran `parseInt('?')`, got
+  `NaN` and returned false, so an operator who worked out the AWS dialect themselves was refused
+  locally; and it allowed day-of-week `0`, which AWS refuses. The accepted set and the deployable set
+  were nearly disjoint. `core/cron.ts translateCron` now owns validation AND translation as ONE pass
+  (they are the same question), and `scheduler-backend.ts scheduleExpression` only adds the
+  `cron(...)` wrapper. `L`, `W` and `#` day-of-week fields pass through unremapped, since none is
+  Unix syntax and remapping `6L` would silently move the schedule by a day.
+- 2026-08-17 - A latent data-loss bug found while fixing cron, unrelated to it: the IaC creates ONE
+  schedule group per DEPLOYMENT (`{prefix}-schedules`), but `scheduleName` was a single opaque
+  58-hex-char digest with no recoverable workflow id, so `deleteAllForWorkflow` listed the WHOLE
+  group and deleted every entry. A spec push for workflow B therefore deleted workflow A's
+  schedules, unrecoverably - the rollback path only undoes creates from the failing push. The
+  in-code comment hand-waved it ("the schedule group is scoped to one workflow in this adapter"),
+  which the IaC contradicts. Fixed by making names two-segment
+  (`sched-{16 hex of workflow}-{40 hex of node}`, 63 chars inside the 64 limit) with a
+  `schedulePrefix(workflowId)` export, and making `namePrefix` a REQUIRED parameter of
+  `SchedulerBackend.listSchedules` so an unscoped list is unrepresentable. `FakeSchedulerBackend`
+  honours the prefix deliberately: a fake that ignored it would accept the bug again.
+- 2026-08-17 - This bug class survived a green suite because the FAKE was more permissive than AWS.
+  `generators.ts` labelled plain five-field Unix expressions as "valid cron", and Property 17 checked
+  them against a 40-line COPY of the old Unix validator pasted into the spec, so the test and the
+  code agreed on a classification AWS rejects. The engine steering already warns never to mirror a
+  production table into a spec as an oracle; the same applies to a validator. Property 17 now calls
+  `translateCron` directly and asserts the STORED expression equals the translated form, not the
+  operator input.
+- 2026-08-17 - The orphan-schedule path (`ScheduleStore.handleScheduleFire`) had no caller at all, so
+  the `FailedScheduledRun`/`skipped-scheduled-run` alarm could never fire. It is now called from the
+  trigger route, but AFTER the lease acquire, never before: Property 6
+  (`runner-lease-ordering.spec.ts`) requires the lease conditional write to be the FIRST Run_Table
+  operation of every trigger "with no preceding read", and a spec-presence check is a read. So the
+  route takes the lease, checks, and on an absent spec deletes the schedule, publishes the metric,
+  releases the lease and answers 404. The release is best-effort inside a `try` - a lease left held
+  expires within `LEASE_TTL_MS` anyway, which beats failing the response and having Scheduler retry a
+  workflow that cannot run.
+- 2026-08-17 - The shim must NOT throw on 409 or 404. Throwing is the retry signal to Scheduler and
+  the thing that raises the Lambda invocation-error metric, so throwing on 409 ("another Runner holds
+  the lease") would page someone every time the concurrency guard did its job correctly, and throwing
+  on 404 would retry a workflow whose schedule has already been deleted. Only 5xx, 4xx other than
+  those two, and transport failures throw.
+- 2026-08-17 - The Lambda asset is pre-built and consumed with `lambda.Code.fromAsset` on a plain
+  directory, NOT with `NodejsFunction`. `NodejsFunction` bundles at synth time and falls back to
+  **Docker** when local esbuild resolution fails, which would make the pipeline's no-Docker guarantee
+  depend on what happens to be installed. The build runs BEFORE both `cdk synth` calls in `check` and
+  the ordering is load bearing - with `dist/` removed, synth dies with
+  `«CannotFindAsset» Cannot find asset at ...\dist\schedule-shim`. `dist/` is gitignored and is in
+  `IMAGE_CONTEXT_EXCLUDES`, `.dockerignore` and `check-deploy-bundle.mjs`'s `NOT_BUNDLED`, or the shim
+  bundle would churn the container image fingerprint on every deploy. The bundle is ~957 kB because
+  the AWS SDK and Smithy packages are bundled in rather than taken from the Lambda runtime - every
+  other module here is pinned exactly, and signing with whatever version AWS happens to deploy would
+  break that.
+- 2026-08-17 - The shim builder had to move OUT of `scripts/` and into `src/shim/build.ts`, and
+  `check-deploy-bundle.mjs` is what caught it. A BYO deploy runs from a workspace the installer
+  unpacked, and `cloud-aws/scripts/` is in that guard's `NOT_BUNDLED` list ("check-pipeline guards,
+  not part of a deploy") while `src/` ships - so a builder under `scripts/` could never run on a real
+  operator machine and every cron deploy would have died at synth. `cli/plan.ts` and `cli/deploy.ts`
+  now call `bundleShimForCdk` (`cli/shim-bundle.ts`) before any `cdk` step, which also means the
+  bundle is rebuilt from the shipped source on every plan and deploy rather than being a stale
+  artefact carried in the installer. Consequence: `esbuild` moved to `dependencies`, since
+  devDependencies cannot be assumed in the workspace. `package.json` runs it as
+  `"bundle:shim": "tsx src/shim/build.ts"` - `tsx` is already a runtime dependency and `cdk.json`
+  already runs the CDK app through it, so this needed no new tooling. General lesson: before putting
+  anything on the deploy path under `scripts/`, check `NOT_BUNDLED` - "it works in the repo" is not
+  the same as "it works for an operator".
+- 2026-08-17 - `check-deploy-bundle.mjs` also fails on any stray top-level file in `cloud/`,
+  `cloud-aws/` or `engine/`, which is a useful accident: it caught a `test-out.txt` left behind from
+  piping test output to a file. Clean scratch files up, or the guard does it for you.
+- 2026-08-17 - `cloud-aws` had EIGHT scenario scripts and no runner, so CI ran none of them -
+  `vitest.config.ts` excludes `test/**`, exactly the gap `engine/test/run-all.mjs` exists to close.
+  Added `cloud-aws/test/run-all.mjs` plus `npm run test:e2e` and a CI step. Unlike the engine runner
+  it needs NO `TSX_TSCONFIG_PATH` override: every script here resolves `@phorma/engine` through
+  `cloud-aws/tsconfig.json`, which is the tsconfig tsx already picks relative to the entry file.
+- 2026-08-17 - `testTimeout` in `cloud-aws/vitest.config.ts` went 30s -> 90s. The first `src/infra`
+  test to synthesize pays for the whole stack (Docker image asset fingerprinting the repo context,
+  now plus the Schedule_Shim asset being staged and hashed) and was measured at 10-21s depending on
+  page-cache warmth, which flaked at 30s. That is a ceiling for a known-slow setup, not cover for a
+  slow test - the per-file memoization described in the 2026-08-15 entry above is still the real
+  defence.
+- 2026-08-17 - A `*/` sequence inside a block comment ENDS the comment. Writing `` `*/5 * * * *` ``
+  in a JSDoc block in `generators.ts` produced a `[PARSE_ERROR] Unexpected token` from oxc pointing
+  at the comment line, which reads like a syntax error in the code below it. Cron expressions with
+  step syntax belong in a line comment or in prose that avoids the sequence.
+- 2026-08-17 - vitest's `expect(promise).rejects.toThrow(predicate)` does NOT accept a predicate
+  function - it throws `Cannot read properties of undefined (reading 'constructor')`, which looks
+  like a bug in the code under test rather than in the assertion. To assert on a property of a
+  rejection (message length, a field), capture it: `await p.then(() => undefined, e => e as Error)`
+  and assert on the result.
+- 2026-08-17 - Verified after this change: `cloud-aws` `npm run check` exit 0 (12 steps now, infra
+  vitest 6 files / 138 tests, 25 exact pins, docs correspondence over 25 template resource types),
+  `npm test` 51 files / **698** tests, and `npm run test:e2e` 8/8 scenario scripts including the new
+  `schedule-fire.e2e.mts`, which walks push -> schedule created with the translated cron and the
+  shim target -> shim fires -> run starts -> second fire answers 409 -> purged workflow deletes the
+  orphan and publishes the metric. Whether `CreateSchedule` accepts the Lambda target and whether the
+  shim's signed call lands is still NOT provable without a real account, so it stays checklist rows
+  12 and 13 in `docs/deploy-aws.md` section 7.1.

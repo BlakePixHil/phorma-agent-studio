@@ -7,6 +7,7 @@
 
 mod commands;
 mod data;
+mod deploy_assets;
 mod llm;
 mod mcp;
 mod oauth;
@@ -46,6 +47,7 @@ pub fn run() {
             data::data_request,
             sql::sql_query,
             process::run_streamed_command,
+            deploy_assets::prepare_deploy_workspace,
             mcp::http_request,
             mcp::mcp_connect,
             mcp::mcp_call,

@@ -34,7 +34,7 @@ export type RunSource = 'manual' | 'schedule' | 'webhook' | 'resume' | 'eval' | 
 export type RunEnvironment = 'local' | 'cloud';
 
 /** Terminal (or in-flight) status of a recorded run. */
-export type RunRecordStatus = 'running' | 'completed' | 'failed' | 'stopped';
+export type RunRecordStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'skipped';
 
 /** One usage rollup bucket (per node or per model). */
 export interface RunUsageBucket {

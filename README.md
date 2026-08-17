@@ -141,21 +141,28 @@ Rules to avoid breaking it:
 
 ## Deploy to the cloud (your Cloudflare account)
 
-One-time setup in `cloud/`:
+The worker source ships inside the installer, so a user needs no checkout of this
+repository. One-time setup:
 
-```powershell
-cd cloud
-npm install
-npx wrangler login
-npx wrangler secret put ANTHROPIC_API_KEY   # repeat per provider you use
-npx wrangler secret put PHORMA_TOKEN        # protects your endpoints (recommended)
-```
+1. **Settings → Cloud → Your own Cloudflare → Deploy runtime → Set up runtime
+   files.** The studio unpacks the worker this app version carries into its app
+   data folder and runs `npm install` there, streaming to the console.
+2. `npx wrangler login` once in any terminal. Wrangler stores the credentials for
+   the whole machine, so the folder it runs in does not matter.
+3. Set provider secrets from the same settings card (it streams
+   `wrangler secret put`), plus `PHORMA_TOKEN` to protect your endpoints.
 
-Then in the studio: toolbar **☁ Cloud** → pick the `cloud/` folder → **Deploy**
-(streams `wrangler deploy` into the console) → paste the worker URL + token →
-**Push workflow** → **Connect monitor**. While connected, **Run** triggers the
-deployed instance and the canvas animates its RunEvents live — identical to a
-local run. Schedule triggers arm real cron jobs in the worker; webhook
-triggers accept `POST {worker}/agents/workflow-agent/{workflow-id}/trigger`.
+Then in the studio: toolbar **☁ Cloud** → **Deploy** (streams `wrangler deploy`
+into the console) → paste the worker URL + token → **Push workflow** →
+**Connect monitor**. While connected, **Run** triggers the deployed instance and
+the canvas animates its RunEvents live — identical to a local run. Schedule
+triggers arm real cron jobs in the worker; webhook triggers accept
+`POST {worker}/agents/workflow-agent/{workflow-id}/trigger`.
 
-Local cloud testing without an account: `npx wrangler dev` in `cloud/`.
+Re-run **Set up runtime files** after the app updates: it refreshes the worker
+source, so the next deploy carries the newer portal and runtime. The studio
+compares your worker's build against the app's and warns you when it is behind.
+
+Working from this repo instead? Point the runtime folder at `cloud/` after
+`npm install` there. Local cloud testing without an account: `npx wrangler dev`
+in `cloud/`.

@@ -154,6 +154,14 @@
   line-height: 1.4;
 }
 
+/* Label beside a read-only field in a __row (discovered AWS endpoints). */
+.phorma-cloud__field-label {
+  flex: 0 0 96px;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.6));
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .phorma-cloud__hint {
   margin: 2px 0 0;
   color: var(--p-text-muted-color, rgba(248, 250, 252, 0.6));
@@ -203,4 +211,21 @@
 :host ::ng-deep .phorma-cloud__btn--icon.p-button.p-button-icon-only {
   min-width: 0;
   padding: 0.5rem;
+}
+
+/* ── Region_Pin indicator ────────────────────────────────────────────────── */
+.phorma-cloud__region {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--p-primary-color, #8578f6);
+
+  &--none {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.5));
+  }
 }

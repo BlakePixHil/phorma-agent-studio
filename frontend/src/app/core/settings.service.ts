@@ -15,9 +15,10 @@ const BROWSER_MCP_SECRETS_STORAGE = 'phorma.mcp-secrets';
  * Where deployed workflows run:
  *  - `'phorma'` — Phorma Cloud, the managed offering (subscription).
  *  - `'cloudflare'` — the user's own Cloudflare account (free, technical).
+ *  - `'aws'` — the user's own AWS account (ECS Fargate).
  *  - `null` — not chosen yet; deploy actions redirect to Settings → Cloud.
  */
-export type CloudProviderChoice = 'phorma' | 'cloudflare' | null;
+export type CloudProviderChoice = 'phorma' | 'cloudflare' | 'aws' | null;
 
 /**
  * Scope for MCP secrets: node-scoped values override preset-scoped

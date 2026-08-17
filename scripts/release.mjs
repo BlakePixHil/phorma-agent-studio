@@ -24,6 +24,7 @@ const targets = [
   'backend/src-tauri/Cargo.toml',
   'backend/package.json',
   'cloud/package.json',
+  'cloud-aws/package.json',
   'engine/package.json',
   'frontend/package.json',
   // Source constants, not manifests: the worker bundle and the Angular app

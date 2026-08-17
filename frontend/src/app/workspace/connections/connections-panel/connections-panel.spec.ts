@@ -21,6 +21,7 @@ describe('ConnectionsPanel layout', () => {
   let connections: ConnectionsService;
   let connectors: ConnectorsService;
   const createdIds: string[] = [];
+  const installedConnectorIds: string[] = [];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({ imports: [ConnectionsPanel] }).compileComponents();
@@ -38,6 +39,13 @@ describe('ConnectionsPanel layout', () => {
   });
 
   afterEach(async () => {
+    for (const id of installedConnectorIds.splice(0)) {
+      try {
+        await connectors.remove(id);
+      } catch {
+        /* already gone */
+      }
+    }
     for (const id of createdIds.splice(0)) {
       try {
         await connections.remove(id);
@@ -132,22 +140,64 @@ describe('ConnectionsPanel layout', () => {
     installDialog.close();
   });
 
-  it('names the connection a connector is bound to, and flags one that was deleted', async () => {
+  /**
+   * The previous version of this test rebound a BUILT-IN connector, which
+   * cannot be rebound, swallowed the rejection with `.catch(() => {})`, and then
+   * asserted only `not.toMatch(/^conn-/)` over a badge list that was empty. It
+   * tested neither half of its own title. Installing a real user connector is
+   * what makes both halves observable.
+   */
+  it('names the connection a connector is bound to, and labels one that was deleted', async () => {
     const id = await addConnection('Acme production');
-    const [connector] = connectors.connectors();
-    expect(connector).toBeTruthy();
+    const installed = await connectors.installFromText(
+      JSON.stringify({
+        format: 1,
+        id: 'cx-panel-spec',
+        name: 'Panel spec connector',
+        version: '1.0.0',
+        connection: {
+          type: 'http',
+          configFields: [{ name: 'baseUrl', label: 'Base URL', required: true }],
+          secretFields: [{ name: 'apiToken', label: 'API token' }],
+          auth: { mode: 'bearer', secretKey: 'apiToken' },
+        },
+        steps: [
+          {
+            id: 'list-things',
+            label: 'List things',
+            kind: 'http-request',
+            data: { method: 'GET', url: '/things', responseMode: 'json' },
+          },
+        ],
+      }),
+      { config: { baseUrl: 'https://api.acme.test' } },
+    );
+    expect(installed.ok).toBeTrue();
+    if (!installed.ok) return;
+    installedConnectorIds.push(installed.connector.id);
+    if (installed.connection) createdIds.push(installed.connection.id);
 
-    await connectors.rebind(connector!.id, id).catch(() => {
-      // Built-ins are not stored, so they cannot be rebound; skip in that case.
-    });
+    await connectors.rebind(installed.connector.id, id);
+    await fixture.whenStable();
     fixture.detectChanges();
 
-    const badges = () =>
+    const badges = (): string[] =>
       [...root.querySelectorAll('.phorma-connections__connectors-list .phorma-card__badge')].map(el =>
         el.textContent!.trim(),
       );
 
-    // Whether or not the rebind applied, no row may ever show a raw connection id.
+    // Half one: the bound row shows the connection NAME.
+    expect(badges()).toContain('Acme production');
+
+    // Half two: deleting the connection leaves a readable label, not a raw id.
+    // A `conn-...` string in a panel row reads as a rendering bug.
+    await connections.remove(id);
+    createdIds.splice(createdIds.indexOf(id), 1);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(badges()).toContain('Connection removed');
+    expect(badges()).not.toContain('Acme production');
     for (const text of badges()) {
       expect(text).not.toMatch(/^conn-/);
     }

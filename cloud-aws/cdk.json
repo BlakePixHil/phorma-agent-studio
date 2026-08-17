@@ -1,0 +1,9 @@
+{
+  "app": "npx -y tsx src/infra/app.ts",
+  "context": {
+    "@aws-cdk/core:bootstrapQualifier": "phorma"
+  },
+  "watch": {
+    "include": ["src/infra/**"]
+  }
+}

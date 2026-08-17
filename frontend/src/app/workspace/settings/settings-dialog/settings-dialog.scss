@@ -1,5 +1,13 @@
 @use '../../../shared/field' as field;
 
+// Prose that belongs to a row (hints, validation errors, an indented note) is a
+// SIBLING of the row rather than a child, so it has to be indented by hand to
+// line up with the control instead of the label. These constants are that offset,
+// and they are declared here because notes near the top of the sheet use them.
+$settings-row-label-w: 130px;
+$settings-row-gap: 8px;
+$settings-row-indent: $settings-row-label-w + $settings-row-gap;
+
 :host {
   display: contents;
 }
@@ -210,10 +218,52 @@
   font-size: 12px;
   line-height: 1.6;
 
-  i {
+  // Direct child only: a note may host action links that carry their own icon,
+  // and a descendant selector would size and offset those too.
+  > i {
     margin-top: 2px;
     font-size: 13px;
     flex: 0 0 auto;
+  }
+
+  // Sits under a labelled row rather than under a card, so it lines up with the
+  // control column instead of the label column.
+  &--indented {
+    margin: 6px 0 0 $settings-row-indent;
+  }
+
+  // Tone. The undecorated note is CONTEXT; these three say what a note is for,
+  // and a wall of identically grey boxes is what made "8 fields need attention"
+  // read like a caption instead of a blocker. One custom property drives the
+  // border, the fill and the icon, so adding a tone costs a single line.
+  //
+  // `--info`: what the next action will do. `--warn`: a capability that is not
+  // available yet. `--danger`: something the user must fix before proceeding.
+  &--info,
+  &--warn,
+  &--danger {
+    border-color: color-mix(in srgb, var(--phorma-note-accent) 32%, transparent);
+    background: color-mix(in srgb, var(--phorma-note-accent) 9%, transparent);
+    color: var(--p-text-color);
+
+    > i {
+      color: var(--phorma-note-accent);
+    }
+  }
+
+  // The literal fallback is not decoration: `color-mix` with an undefined custom
+  // property is invalid at computed-value time, so `border-color` silently falls
+  // back to `currentColor` and the tone renders as a text-coloured hairline.
+  &--info {
+    --phorma-note-accent: var(--p-primary-color, #8578f6);
+  }
+
+  &--warn {
+    --phorma-note-accent: var(--phorma-accent-amber, #f59e0b);
+  }
+
+  &--danger {
+    --phorma-note-accent: var(--phorma-accent-red, #ef4444);
   }
 }
 
@@ -335,13 +385,6 @@
 }
 
 /* ── Bespoke rows (API keys / integrations / default model) ──────────────── */
-// Prose that belongs to a row (hints, validation errors) is a SIBLING of the
-// row rather than a child, so it has to be indented by hand to line up with the
-// control instead of the label. These two constants are that offset.
-$settings-row-label-w: 130px;
-$settings-row-gap: 8px;
-$settings-row-indent: $settings-row-label-w + $settings-row-gap;
-
 .phorma-settings__row {
   display: flex;
   align-items: center;
@@ -369,13 +412,22 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   font-size: 13px;
   line-height: 1.5;
   color: var(--p-text-muted-color);
+}
 
-  code {
-    padding: 0.05em 0.4em;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
-    font-size: 0.92em;
-  }
+/* Inline `<code>` chrome for every prose class in this sheet. ONE rule on
+   purpose: five identical copies of it cost ~250 compiled bytes against a
+   22kB `anyComponentStyle` budget this sheet already sits close to. Only the
+   wrapping differs per class, and that stays with the class below. */
+.phorma-settings__hint code,
+.phorma-settings__cloud-setup-steps code,
+.phorma-settings__cloud-setup-note code,
+.phorma-settings__row-error code,
+.phorma-settings__row-note code {
+  padding: 0.05em 0.4em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+  font-size: 0.92em;
+  color: var(--p-text-color);
 }
 
 .phorma-settings__provider-select {
@@ -389,26 +441,9 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   min-width: 0;
 }
 
-/* Small dismissable warning shown under the model row on fetch failure. */
-.phorma-settings__inline-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 6px 0 0 138px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--phorma-accent-amber) 40%, transparent);
-  background: color-mix(in srgb, var(--phorma-accent-amber) 10%, transparent);
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--p-text-color);
-
-  > i {
-    margin-top: 1px;
-    color: var(--phorma-accent-amber);
-  }
-}
-
+/* The model-row warnings used to carry their own box (`__inline-warning`), which
+   was `__note--warn` with different padding. They now use the note itself plus
+   `__note--indented`; only the parts a note has no opinion about live here. */
 .phorma-settings__inline-warning-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -422,19 +457,7 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   font-size: 12px;
 }
 
-.phorma-settings__inline-warning-close {
-  flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--p-text-muted-color);
-  cursor: pointer;
-  line-height: 1;
 
-  &:hover {
-    color: var(--p-text-color);
-  }
-}
 
 /* Underlined text link for deep-links within the settings dialog
    (e.g. "Add API key" in the missing-key warning). Mirrors the
@@ -867,12 +890,18 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
 }
 
 /* ── Cloud provider ──────────────────────────────────────────────────────── */
+/* One step of a deploy setup, as a card. The provider bodies are a STACK of
+   these, so the outer spacing is deliberately tighter than the inner: cards that
+   sit further apart than the rows inside them read as unrelated sections rather
+   than as one sequence. */
 .phorma-settings__cloud-setup {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
-  padding: 12px 14px;
+  gap: 8px;
+  // No bottom margin: the page body these stack in is a flex column that already
+  // spaces its children, and the margin was ADDING to that gap - 24px between
+  // cards whose own padding is 10px, which read as unrelated sections.
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--p-border-color);
   background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
@@ -921,11 +950,6 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   }
 
   code {
-    padding: 0.05em 0.4em;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
-    font-size: 0.92em;
-    color: var(--p-text-color);
     word-break: break-all;
   }
 }
@@ -940,11 +964,6 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   color: var(--p-text-muted-color);
 
   code {
-    padding: 0.05em 0.4em;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
-    font-size: 0.92em;
-    color: var(--p-text-color);
     // Short identifiers, so wrap at the token boundary. `break-all` splits them
     // mid-word ("wrangler.byo. jsonc"), which reads as a typo.
     overflow-wrap: break-word;
@@ -998,9 +1017,11 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   }
 }
 
+// Three targets now (phorma, cloudflare, aws). A fixed `1fr 1fr` left the third
+// card half-width on its own row; auto-fit keeps the row even at any pane width.
 .phorma-settings__providers {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
@@ -1243,7 +1264,6 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   min-width: 64px;
 }
 
-:host ::ng-deep .phorma-settings__btn--icon.p-button.p-button-icon-only {
-  min-width: 0;
-  padding: 0.5rem;
+:host ::ng-deep .phorma-input-icon-btn.p-button {
+  align-self: stretch;
 }

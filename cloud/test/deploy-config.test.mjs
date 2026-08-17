@@ -122,13 +122,34 @@ console.log('\nGenerated override: mirrors the committed config');
 
   // The generated override REPLACES the committed config, so a class or a
   // migration tag missing here silently drops a binding from every BYO deploy.
-  EXPECTED_DO_CLASSES.forEach((cls, index) => {
-    const tag = `v${index + 1}`;
-    check(
-      `generator declares the ${tag} migration for ${cls}`,
-      serviceText.includes(`tag: '${tag}'`) && serviceText.includes(`'${cls}'`),
-    );
-  });
+  //
+  // Parsed as PAIRS, not as two independent substring searches. `includes("tag:
+  // 'v1'") && includes("'WorkflowAgent'")` is true even when v1 is attached to
+  // the wrong class - swapping the classes on v1 and v3 passed the previous
+  // version of this check, and a scrambled `new_sqlite_classes` tag breaks every
+  // BYO deploy exactly the way a missing one does.
+  const generatorMigrations = (() => {
+    const block = /const DO_MIGRATIONS = \[([\s\S]*?)\]\s*as const;/.exec(serviceText);
+    if (!block) return null;
+    const pairs = [];
+    const entry = /\{\s*tag:\s*'([^']+)'\s*,\s*new_sqlite_classes:\s*\[([^\]]*)\]/g;
+    let match;
+    while ((match = entry.exec(block[1])) !== null) {
+      const classes = match[2]
+        .split(',')
+        .map(name => name.trim().replace(/^'|'$/g, ''))
+        .filter(Boolean);
+      pairs.push([match[1], classes]);
+    }
+    return pairs;
+  })();
+
+  check('generator declares a parseable DO_MIGRATIONS list', Array.isArray(generatorMigrations));
+  check(
+    'generator pairs every migration tag with the SAME class as the committed config',
+    JSON.stringify(generatorMigrations) === JSON.stringify(migrationShape(committed.migrations)),
+    JSON.stringify(generatorMigrations),
+  );
   check(
     'generator uses the committed compatibility date',
     serviceText.includes(`'${committed.compatibility_date}'`),

@@ -5,12 +5,26 @@ import { firstValueFrom } from 'rxjs';
 import {
   CLOUDFLARE_CAPABILITIES,
   validateAgainstCapabilities,
+  type CapabilityFinding,
   type ConnectionSummary,
   type RunEvent,
   type RunRecord,
   type RunRecordSummary,
   type UsageLedgerEntry,
 } from '@phorma/engine';
+
+import {
+  DEPLOY_TARGETS,
+  type CloudEndpointContext,
+  type CloudOperation,
+  type ConnectionsPushPayload,
+  type SecretWritePayload,
+  type SpecPushPayload,
+  type TriggerPayload,
+} from './deploy/deploy-targets';
+import type { CloudTransport } from './deploy/cloud-transport';
+import { AwsDeployConfigService } from './deploy/aws-deploy-config.service';
+import { AwsRequestService } from './deploy/aws-request.service';
 
 import { ConnectionStoreService } from './connection-store.service';
 import { DeployConfigService, BYO_CONFIG_FILENAME } from './deploy-config.service';
@@ -52,11 +66,58 @@ function toConnectionMetadata(
 // `phorma-cloud-url.ts`, a leaf module the run path can import without closing
 // the RunController -> ModelTransport -> PhormaCloud -> Cloud DI cycle.
 
+/** An HTTP answer the selected target rejected, with the host's own message. */
+interface CloudCallFailure {
+  ok: false;
+  status: number;
+  /** The host's own `error` message, or null when it sent none. */
+  hostError: string | null;
+  /** `hostError`, or `HTTP <status>` - the message most callers surface. */
+  error: string;
+  /** The parsed failure body, for the caller that reads another field. */
+  detail: unknown;
+}
+
+/**
+ * One dispatched endpoint call.
+ *
+ * `'unsupported'` is a first-class outcome, not an error: the selected target
+ * declares no route for the operation, and the caller resolves it to that
+ * operation's documented absent value (Requirement 12.6).
+ */
+type CloudCallResult<T> =
+  { ok: true; status: number; value: T } | CloudCallFailure | { ok: 'unsupported' };
+
+/** A body parsed leniently, as `response.json().catch(() => null)` does. */
+function parseJsonBody(body: string): unknown {
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** The host's own `error` message, or null when the body carries none. */
+function readErrorMessage(detail: unknown): string | null {
+  const value = (detail as { error?: unknown } | null | undefined)?.error;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * Capability findings a host returned alongside a rejection (Requirement 16.8).
+ * The host's own findings are authoritative, so they reach the Problems console
+ * even though the push already failed.
+ */
+function readFindings(detail: unknown): CapabilityFinding[] {
+  const value = (detail as { findings?: unknown } | null | undefined)?.findings;
+  return Array.isArray(value) ? (value as CapabilityFinding[]) : [];
+}
+
 /**
  * The studio's bridge to the deployed cloud runtime.
  *
  * - **Deploy**: streams `npx wrangler deploy` (run by the Rust backend inside
- *   the repo's `cloud/` folder) into the console.
+ *   the runtime folder `DeployWorkspaceService` prepared) into the console.
  * - **Push**: uploads the active workflow spec to its WorkflowAgent instance.
  * - **Monitor**: a WebSocket whose RunEvents feed the SAME
  *   `RunControllerService.apply()` path as local runs - cloud runs animate
@@ -76,12 +137,22 @@ export class CloudService {
   private readonly clerk = inject(ClerkService);
   private readonly deployConfig = inject(DeployConfigService);
   private readonly connectionStore = inject(ConnectionStoreService);
+  // Both sit BELOW this service and inject neither it nor
+  // `RunControllerService`, so the known NG0200 cycle is untouched.
+  private readonly awsConfig = inject(AwsDeployConfigService);
+  private readonly awsRequest = inject(AwsRequestService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
   /** Bearer token matching the worker's PHORMA_TOKEN secret (optional). */
   readonly token = signal(loadLayout('cloudToken', ''));
-  /** Absolute path of the repo's cloud/ folder (deploy runs wrangler there). */
+  /**
+   * Absolute path of the runtime folder wrangler deploys from.
+   *
+   * Normally the workspace `DeployWorkspaceService` unpacks out of the installer,
+   * so a production install needs no checkout of the Phorma repository. A
+   * developer can still point it at their own `cloud/` folder.
+   */
   readonly cloudFolder = signal(loadLayout('cloudFolder', ''));
   /** Phorma Cloud base URL (configurable for staging; defaults to prod). */
   readonly phormaCloudUrl = signal(loadPhormaCloudUrl());
@@ -89,20 +160,35 @@ export class CloudService {
   /** The user's chosen deploy target (null until picked in Settings → Cloud). */
   readonly provider = computed(() => this.settings.cloudProvider());
 
-  /** Base URL actually used for push/monitor, per the chosen provider. */
-  readonly effectiveWorkerUrl = computed(() =>
-    this.provider() === 'phorma' ? this.phormaCloudUrl() : this.workerUrl(),
-  );
+  /**
+   * Base URL actually used for push/monitor, per the chosen provider.
+   *
+   * `aws` reads the discovered Trigger_API URL, which no operator types: it is
+   * empty until a deploy completes, and every AWS call is unreachable while it
+   * is.
+   */
+  readonly effectiveWorkerUrl = computed(() => {
+    const provider = this.provider();
+    if (provider === 'phorma') return this.phormaCloudUrl();
+    if (provider === 'aws') return this.awsConfig.triggerApiUrl();
+    return this.workerUrl();
+  });
 
   /**
    * Whether the chosen provider has enough configuration for push/monitor.
    * Phorma Cloud needs only the built-in URL (auth is checked at request
-   * time); own-Cloudflare needs the user's worker URL.
+   * time); own-Cloudflare needs the user's worker URL; `aws` needs BOTH a valid
+   * aggregate configuration and a discovered Trigger_API URL (Requirement
+   * 12.5) - a well-formed configuration that has never deployed reaches
+   * nothing.
    */
   readonly configured = computed(() => {
     const provider = this.provider();
     if (provider === 'phorma') return this.phormaCloudUrl().length > 0;
     if (provider === 'cloudflare') return this.workerUrl().length > 0;
+    if (provider === 'aws') {
+      return this.awsConfig.valid() && this.awsConfig.triggerApiUrl().length > 0;
+    }
     return false;
   });
 
@@ -127,7 +213,15 @@ export class CloudService {
   readonly statusLoading = signal(false);
 
   private socket: WebSocket | null = null;
+  /**
+   * Workflow id the live monitor socket is attached to. Every ControlFrame sent
+   * over an AWS socket carries it, because the Monitor_API's `$default` template
+   * can only read it from the frame body (see {@link send}).
+   */
+  private monitorWorkflowId = '';
   private deployCounter = 0;
+  /** Feeds the caller-minted run id an HTTP trigger sends. */
+  private triggerCounter = 0;
 
   constructor() {
     // Persist connection settings across sessions.
@@ -153,10 +247,10 @@ export class CloudService {
     this.phormaCloudUrl.set(savePhormaCloudUrl(url));
   }
 
-  /** Picks the cloud/ folder with the native dialog (desktop only). */
+  /** Picks the runtime folder with the native dialog (desktop only). */
   async pickCloudFolder(): Promise<void> {
     try {
-      const folder = await this.tauri.selectFolderDialog('Select the cloud/ folder');
+      const folder = await this.tauri.selectFolderDialog('Select the runtime folder');
       if (folder) this.setCloudFolder(folder);
     } catch (error) {
       this.toast.error('Folder picker unavailable', error instanceof Error ? error.message : String(error));
@@ -172,7 +266,10 @@ export class CloudService {
     }
     const cwd = this.cloudFolder();
     if (!cwd) {
-      this.toast.warning('Set the cloud folder', "Pick the repo's cloud/ folder first.");
+      this.toast.warning(
+        'Set up the deploy runtime',
+        'Settings > Cloud > Deploy runtime unpacks the worker this app ships with.',
+      );
       return;
     }
     if (!this.deployConfig.valid()) {
@@ -280,17 +377,13 @@ export class CloudService {
    * caller that is only trying to render.
    */
   async connectionSecretNames(): Promise<string[]> {
-    const base = this.effectiveWorkerUrl();
-    if (!base) return [];
+    if (!this.effectiveWorkerUrl()) return [];
     try {
-      const response = await fetch(`${base}/api/connection-secrets`, {
-        headers: await this.headers(),
-      });
-      if (!response.ok) return [];
-      const body = (await response.json()) as { secrets?: { name?: unknown }[] };
-      return (body.secrets ?? [])
-        .map(entry => entry.name)
-        .filter((name): name is string => typeof name === 'string');
+      // Requirement 12.6: a target that lists no secret names (AWS Secrets
+      // Manager entries are written, never read back) resolves to the empty
+      // list, which is this method's documented absent value anyway.
+      const result = await this.call<string[]>('list-secret-names', { workflowId: '' });
+      return result.ok === true ? result.value : [];
     } catch {
       return [];
     }
@@ -332,13 +425,13 @@ export class CloudService {
     }
     this.savingSecret.set(`${connectionId}:${secretKey}`);
     try {
-      const response = await fetch(`${base}/api/connection-secrets`, {
-        method: 'POST',
-        headers: await this.headers(),
-        body: JSON.stringify({ connectionId, secretKey, value }),
-      });
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
+      const result = await this.call(
+        'put-secret',
+        { workflowId: '', connectionId, secretKey },
+        { value } satisfies SecretWritePayload,
+      );
+      if (result.ok === 'unsupported') throw this.unsupportedError('put-secret');
+      if (result.ok === false) throw new Error(result.error);
       if (!options?.silent) {
         this.toast.success('Secret sent to the cloud', `${secretKey} is available to deployed runs.`);
       }
@@ -382,7 +475,10 @@ export class CloudService {
     }
     const cwd = this.cloudFolder();
     if (!cwd) {
-      this.toast.warning('Set the cloud folder', "Pick the repo's cloud/ folder first.");
+      this.toast.warning(
+        'Set up the deploy runtime',
+        'Settings > Cloud > Deploy runtime unpacks the worker this app ships with.',
+      );
       return;
     }
     if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
@@ -454,14 +550,16 @@ export class CloudService {
    * settings pill can say something actionable.
    */
   async testConnection(): Promise<void> {
-    const base = this.effectiveWorkerUrl();
+    // The `default` instance, shaped by the registry rather than by a literal
+    // path (Requirement 12.4).
+    const base = this.instanceUrl('default');
     if (!base) {
       this.toast.warning('Set the worker URL', 'Enter your deployed worker URL first.');
       return;
     }
     this.connectionTest.set('testing');
     try {
-      const response = await fetch(`${base}/agents/workflow-agent/default/status`, {
+      const response = await fetch(`${base}/status`, {
         headers: await this.headers(),
       });
       if (response.status === 401 || response.status === 403) {
@@ -524,36 +622,49 @@ export class CloudService {
     }
 
     try {
-      // Requirement 3.6: the worker's connection inventory comes ONLY from
-      // this dedicated route — names, types and auth modes, never a secret
+      // Requirement 3.6: the host's connection inventory comes ONLY from
+      // connection metadata - names, types and auth modes, never a secret
       // value. Pushed before validation so the Capability_Validator checks
-      // the SAME inventory `WorkerConnectionStore` will resolve against.
-      await this.pushConnectionMetadata(base);
+      // the SAME inventory the target host will resolve against. A target that
+      // folds this into the spec push declares no separate route, and the
+      // metadata travels in the `push-spec` payload below instead.
+      const summaries = await this.connectionStore.list();
+      const metadata = summaries.map(toConnectionMetadata);
+      await this.pushConnectionMetadata(spec.id, metadata);
 
-      // Requirement 17.11: validate against Worker_Host's own capability
-      // record and its own connection inventory, after default materialisation
-      // and before the deployment request. Any error finding aborts the push.
-      const connections = await this.fetchConnectionInventory(base);
-      const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, connections);
+      // Requirements 16.3, 16.4: validate against the selected target's
+      // capability record and the target's connection inventory, after default
+      // materialisation and before the deployment request. Any error finding
+      // aborts the push. Write all findings to the Problems console either way.
+      const provider = this.settings.cloudProvider();
+      const capabilities = provider
+        ? DEPLOY_TARGETS[provider].capabilities
+        : CLOUDFLARE_CAPABILITIES;
+      const connections = await this.fetchConnectionInventory(spec.id);
+      const findings = validateAgainstCapabilities(spec, capabilities, connections);
+      // Always write findings to Problems console (Requirement 16.4).
+      this.reportCapabilityFindings(findings);
       const errors = findings.filter(finding => finding.severity === 'error');
       if (errors.length > 0) {
-        this.reportCapabilityFindings(findings);
         this.toast.error(
           'Push aborted',
           `${errors.length} problem${errors.length === 1 ? '' : 's'} would prevent this workflow ` +
-            `from running on ${CLOUDFLARE_CAPABILITIES.label}. See the Problems console.`,
+            `from running on ${capabilities.label}. See the Problems console.`,
         );
         return false;
       }
 
-      const response = await fetch(`${base}/workflow`, {
-        method: 'POST',
-        headers: await this.headers(),
-        body: JSON.stringify(spec),
-      });
-      if (!response.ok) {
-        const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(detail?.error ?? `HTTP ${response.status}`);
+      const result = await this.call(
+        'push-spec',
+        { workflowId: spec.id },
+        { spec, connections: metadata } satisfies SpecPushPayload,
+      );
+      if (result.ok === 'unsupported') throw this.unsupportedError('push-spec');
+      if (result.ok === false) {
+        // Requirement 16.8: when the Host_Adapter returns its own findings,
+        // treat them as authoritative and write them to the Problems console.
+        this.reportCapabilityFindings(readFindings(result.detail));
+        throw new Error(result.error);
       }
       await this.versions.recordDeploy(rawSpec).catch(() => undefined);
       this.deployedStatus.set({ hasWorkflow: true, savedAt: new Date().toISOString() });
@@ -567,45 +678,53 @@ export class CloudService {
   }
 
   /**
-   * Pushes every locally known connection's METADATA to the worker's
-   * dedicated route (Requirements 2.2, 3.6): names, types, non-secret
-   * `config` and `secretKeys` NAMES only — never a secret value. The worker
-   * pairs each entry with its own `CONN_*` secrets at resolve time.
+   * Pushes every locally known connection's METADATA to the target's dedicated
+   * route (Requirements 2.2, 3.6): names, types, non-secret `config` and
+   * `secretKeys` NAMES only - never a secret value. The host pairs each entry
+   * with its own secret store at resolve time.
+   *
+   * A target that declares no separate route folds this into its spec push, so
+   * an absent route is a no-op here rather than a failure: the same metadata
+   * reaches the host in one request instead of two.
    */
-  private async pushConnectionMetadata(base: string): Promise<void> {
-    const summaries = await this.connectionStore.list();
-    const connections = summaries.map(toConnectionMetadata);
-    const response = await fetch(`${base}/connections`, {
-      method: 'POST',
-      headers: await this.headers(),
-      body: JSON.stringify({ connections }),
-    });
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(detail?.error ?? `Could not push connection metadata (HTTP ${response.status}).`);
+  private async pushConnectionMetadata(
+    workflowId: string,
+    connections: readonly unknown[],
+  ): Promise<void> {
+    const result = await this.call(
+      'push-connections',
+      { workflowId },
+      { connections } satisfies ConnectionsPushPayload,
+    );
+    if (result.ok === 'unsupported') return;
+    if (result.ok === false) {
+      throw new Error(
+        result.hostError ?? `Could not push connection metadata (HTTP ${result.status}).`,
+      );
     }
   }
 
   /**
-   * Reads back the Worker_Host connection inventory — the same
-   * `ConnectionSummary[]` `WorkerConnectionStore.list()` produces, carrying
+   * Reads back the host's connection inventory — the same
+   * `ConnectionSummary[]` the deployed connection store produces, carrying
    * secret-present counts and no secret value — for push-time validation
    * (Requirement 17.11).
    */
-  private async fetchConnectionInventory(base: string): Promise<ConnectionSummary[]> {
-    const response = await fetch(`${base}/connections`, { headers: await this.headers() });
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+  private async fetchConnectionInventory(workflowId: string): Promise<ConnectionSummary[]> {
+    const result = await this.call<ConnectionSummary[]>('read-connections', { workflowId });
+    if (result.ok === 'unsupported') return [];
+    if (result.ok === false) {
       throw new Error(
-        detail?.error ?? `Could not read the worker's connection inventory (HTTP ${response.status}).`,
+        result.hostError ??
+          `Could not read the worker's connection inventory (HTTP ${result.status}).`,
       );
     }
-    const body = (await response.json()) as { connections?: ConnectionSummary[] };
-    return Array.isArray(body.connections) ? body.connections : [];
+    return Array.isArray(result.value) ? result.value : [];
   }
 
   /** Every returned finding, oldest first, into the Problems console. */
   private reportCapabilityFindings(findings: { severity: 'error' | 'warning'; message: string }[]): void {
+    if (findings.length === 0) return;
     this.terminal.open('problems');
     for (const finding of findings) {
       this.terminal.append('problems', finding.severity === 'error' ? 'error' : 'warning', finding.message);
@@ -655,10 +774,12 @@ export class CloudService {
     const base = this.instanceUrl(workflowId);
     if (!base || !this.configured()) return null;
     try {
-      const response = await fetch(`${base}/status`, { headers: await this.headers() });
-      if (!response.ok) return null;
-      const body = (await response.json()) as { hasWorkflow?: boolean; savedAt?: string | null };
-      return { hasWorkflow: body.hasWorkflow === true, savedAt: body.savedAt ?? null };
+      // Requirement 12.6: a target that declares no status route resolves to
+      // `null`, the unknown value - never to "not deployed".
+      const result = await this.call<{ hasWorkflow: boolean; savedAt: string | null }>('status', {
+        workflowId,
+      });
+      return result.ok === true ? result.value : null;
     } catch {
       return null;
     }
@@ -677,13 +798,12 @@ export class CloudService {
     const base = this.instanceUrl(workflowId);
     if (!base) return false;
     try {
-      const response = await fetch(`${base}/workflow/purge`, {
-        method: 'DELETE',
-        headers: await this.headers(),
-      });
-      if (!response.ok) {
-        const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(detail?.error ?? `Could not remove the workflow (HTTP ${response.status}).`);
+      const result = await this.call('purge', { workflowId });
+      if (result.ok === 'unsupported') throw this.unsupportedError('purge');
+      if (result.ok === false) {
+        throw new Error(
+          result.hostError ?? `Could not remove the workflow (HTTP ${result.status}).`,
+        );
       }
       this.deployedStatus.set({ hasWorkflow: false, savedAt: null });
       this.deployedStatusWorkflowId.set(workflowId);
@@ -753,9 +873,11 @@ export class CloudService {
     const base = this.instanceUrl(workflowId);
     if (!base || !this.configured()) return null;
     try {
-      const response = await fetch(`${base}/runs`, { headers: await this.headers() });
-      if (!response.ok) return null;
-      return (await response.json()) as { runs: RunRecordSummary[]; activeRunId: string | null };
+      const result = await this.call<{ runs: RunRecordSummary[]; activeRunId: string | null }>(
+        'run-history',
+        { workflowId },
+      );
+      return result.ok === true ? result.value : null;
     } catch {
       return null;
     }
@@ -770,15 +892,27 @@ export class CloudService {
     const base = this.instanceUrl(workflowId);
     if (!base || !this.configured()) return null;
     try {
-      const response = await fetch(`${base}/usage?since=${since}`, {
-        headers: await this.headers(),
+      const result = await this.call<UsageLedgerEntry[]>('usage', {
+        workflowId,
+        since: this.usageSince(since),
       });
-      if (!response.ok) return null;
-      const body = (await response.json()) as { usage?: UsageLedgerEntry[] };
-      return body.usage ?? [];
+      return result.ok === true ? result.value : null;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * `since` in the representation the selected host validates.
+   *
+   * The two hosts disagree: the Worker reads epoch milliseconds, the AWS host
+   * rejects anything that is not ISO 8601. An unbounded window is left
+   * undefined so each registry entry supplies its own epoch default, which is
+   * the only part of this that can be expressed as data.
+   */
+  private usageSince(since: number): string | undefined {
+    if (!Number.isFinite(since) || since <= 0) return undefined;
+    return this.provider() === 'aws' ? new Date(since).toISOString() : String(since);
   }
 
   // ── Portal (EPIC 9) ────────────────────────────────────────────────────────
@@ -889,11 +1023,8 @@ export class CloudService {
     const base = this.instanceUrl(workflowId);
     if (!base) return null;
     try {
-      const response = await fetch(`${base}/runs/${encodeURIComponent(runId)}`, {
-        headers: await this.headers(),
-      });
-      if (!response.ok) return null;
-      return (await response.json()) as RunRecord;
+      const result = await this.call<RunRecord | null>('run-detail', { workflowId, runId });
+      return result.ok === true ? result.value : null;
     } catch {
       return null;
     }
@@ -918,13 +1049,35 @@ export class CloudService {
     }
     this.disconnect();
 
-    const wsUrl = new URL(base.replace(/^http/, 'ws'));
-    const authToken = await this.resolveAuthToken();
-    if (authToken) wsUrl.searchParams.set('token', authToken);
+    // Only the URL differs by credential model. `aws` opens a presigned
+    // Monitor_API `$connect` URL (Requirement 11.1); `phorma` and `cloudflare`
+    // keep the existing `?token=` query shape (Requirement 11.4). The presign
+    // happens HERE, inside `connect()`, so every reconnect attempt presigns
+    // afresh and an expired 300 second URL recovers on its own
+    // (Requirement 11.8).
+    let socketUrl: string;
+    if (this.provider() === 'aws') {
+      try {
+        socketUrl = await this.transport().monitorSocketUrl(base, targetId);
+      } catch (error) {
+        // Requirement 11.5: name the failure and open no socket. `connection`
+        // is still `disconnected` from the `disconnect()` above, so returning
+        // here cannot leave the UI stuck on `connecting`.
+        this.toast.error(
+          'Monitor unavailable',
+          error instanceof Error ? error.message : String(error),
+        );
+        return;
+      }
+    } else {
+      socketUrl = this.tokenSocketUrl(base, await this.resolveAuthToken());
+    }
 
     this.connection.set('connecting');
-    const socket = new WebSocket(wsUrl);
+    const socket = new WebSocket(socketUrl);
     this.socket = socket;
+    // The id every ControlFrame carries on the AWS path (see `send`).
+    this.monitorWorkflowId = targetId;
 
     socket.onopen = () => {
       this.connection.set('connected');
@@ -965,6 +1118,7 @@ export class CloudService {
   disconnect(): void {
     const socket = this.socket;
     this.socket = null;
+    this.monitorWorkflowId = '';
     this.connection.set('disconnected');
     this.runController.remoteApprovalSender = null;
     this.runController.remoteEventSender = null;
@@ -985,18 +1139,23 @@ export class CloudService {
   ): Promise<{ runId: string }> {
     const base = this.instanceUrl(workflowId);
     if (!base || !this.configured()) throw new Error('Cloud worker is not configured.');
-    const response = await fetch(`${base}/trigger`, {
-      method: 'POST',
-      headers: await this.headers(),
-      body: JSON.stringify({ input, ...(source ? { source } : {}) }),
-    });
-    const body = (await response.json().catch(() => null)) as {
-      ok?: boolean;
-      runId?: string;
-      error?: string;
-    } | null;
-    if (!response.ok || !body?.ok || !body.runId) {
-      throw new Error(body?.error ?? `Trigger failed (HTTP ${response.status}).`);
+    // Minted here because the AWS host requires the caller to supply the run id
+    // (its lease is keyed on it). The Cloudflare route table drops it, so the
+    // Worker keeps minting its own.
+    this.triggerCounter += 1;
+    const runId = `run-${Date.now().toString(36)}-${this.triggerCounter}`;
+    const result = await this.call<{ ok?: boolean; runId?: string; error?: string } | null>(
+      'trigger',
+      { workflowId, runId },
+      { input, ...(source ? { source } : {}) } satisfies TriggerPayload,
+    );
+    if (result.ok === 'unsupported') throw this.unsupportedError('trigger');
+    if (result.ok === false) {
+      throw new Error(result.hostError ?? `Trigger failed (HTTP ${result.status}).`);
+    }
+    const body = result.value;
+    if (!body?.ok || !body.runId) {
+      throw new Error(body?.error ?? `Trigger failed (HTTP ${result.status}).`);
     }
     return { runId: body.runId };
   }
@@ -1026,17 +1185,185 @@ export class CloudService {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
+  /**
+   * Sends one ControlFrame over the monitor socket.
+   *
+   * On the AWS path the frame carries an extra `workflowId` member, because
+   * outside `$connect` the Monitor_API has no query string and `AWS_IAM`
+   * authorization populates no authorizer - so its `$default` request template
+   * reads the workflow id from the frame body with `$input.path('$.workflowId')`
+   * to build the `wf#{workflowId}` partition key (Requirement 11.7). Added in
+   * this ONE place rather than at the five call sites, and ONLY for `aws`: the
+   * Cloudflare wire format must not change. `parseFrame` in `cloud-aws` inspects
+   * only `type` and the union's own fields, so the extra member is inert there.
+   */
   private send(frame: object): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(JSON.stringify(frame));
+    const payload =
+      this.provider() === 'aws' ? { ...frame, workflowId: this.monitorWorkflowId } : frame;
+    this.socket.send(JSON.stringify(payload));
     return true;
   }
 
-  /** Instance URL for a workflow id: {worker}/agents/workflow-agent/{id}. */
+  /**
+   * The monitor socket URL both Cloudflare targets use: the instance URL with
+   * `http`/`https` swapped for `ws`/`wss` and the bearer token as a `token`
+   * query parameter, which is the only way a browser WebSocket can carry it.
+   */
+  private tokenSocketUrl(instanceBase: string, token: string | null): string {
+    const url = new URL(instanceBase.replace(/^http/, 'ws'));
+    if (token) url.searchParams.set('token', token);
+    return url.toString();
+  }
+
+  // ── The transport seam and the endpoint dispatcher ─────────────────────────
+
+  /**
+   * `fetch` plus an `Authorization: Bearer` header - the credential model both
+   * Cloudflare targets use.
+   *
+   * A transport failure THROWS, exactly as `fetch` does, because
+   * `CloudTransportResponse` describes an HTTP answer and has no failure
+   * variant. That is what keeps every existing `catch` in this service working
+   * unchanged.
+   */
+  private readonly fetchTransport: CloudTransport = {
+    id: 'fetch-bearer',
+    send: async (url, init) => {
+      const response = await fetch(url, {
+        method: init.method,
+        headers: await this.headers(),
+        body: init.body,
+      });
+      return { status: response.status, ok: response.ok, body: await response.text() };
+    },
+    monitorSocketUrl: async instanceBase =>
+      this.tokenSocketUrl(instanceBase, await this.resolveAuthToken()),
+  };
+
+  /**
+   * The signed request the `phorma-aws request` verb makes, because an
+   * AWS_IAM-authorized route needs SigV4 and the webview holds no AWS
+   * credentials (Requirement 10.8).
+   *
+   * An HTTP status is never a failure here: `AwsRequestService` reports a 409 as
+   * `ok: true` with `status: 409`, so only "no response arrived at all" throws.
+   */
+  private readonly awsTransport: CloudTransport = {
+    id: 'aws-cli',
+    send: async (url, init) => {
+      const result = await this.awsRequest.send(url, init);
+      if (!result.ok) throw new Error(result.message);
+      const { status, body } = result.response;
+      return { status, ok: status >= 200 && status < 300, body };
+    },
+    /**
+     * Presigns a Monitor_API `$connect` URL through the CLI's `monitor-url`
+     * verb (Requirement 11.1). `instanceBase` is deliberately unused: the
+     * signature covers the host, the path and the signed `workflowId` query
+     * parameter, so re-deriving any of it here would fight the signature.
+     *
+     * Throws on a failed presign, like `send` does, so `connect()` can toast
+     * the failure and return before it opens a socket (Requirement 11.5). The
+     * URL is good for 300 seconds and is never cached (Requirement 11.8).
+     */
+    monitorSocketUrl: async (_instanceBase, workflowId) => {
+      const result = await this.awsRequest.monitorUrl(workflowId);
+      if (!result.ok) throw new Error(result.message);
+      return result.url;
+    },
+  };
+
+  /**
+   * Which credential model carries a request. Selected by the persisted deploy
+   * target and nothing else - never by operation, never by URL.
+   */
+  private readonly transport = computed<CloudTransport>(() =>
+    this.provider() === 'aws' ? this.awsTransport : this.fetchTransport,
+  );
+
+  /**
+   * Dispatches one logical operation against the selected target.
+   *
+   * Everything host-specific is data: the endpoint registry supplies the
+   * method, the scope, the path, the request-body reshaper and the response
+   * unwrapper, and the {@link CloudTransport} seam supplies the credential
+   * model. Nothing here knows which host it is talking to, which is what keeps
+   * each of the eleven endpoint methods at exactly one call.
+   *
+   * Three outcomes, all returned rather than thrown:
+   *
+   * - `{ ok: true }` with the unwrapped value, for a 2xx.
+   * - `{ ok: false }` for any other status, carrying the host's own message.
+   * - `{ ok: 'unsupported' }` when this target declares no route for `op`, or
+   *   when there is no base URL to address (the caller has already guarded
+   *   that, and both mean "do not attempt this request").
+   *
+   * A transport failure and an unparseable body both throw, matching `fetch`
+   * and `Response.json()`, so every existing catch block behaves as before.
+   */
+  private async call<T>(
+    op: CloudOperation,
+    ctx: CloudEndpointContext,
+    payload?: unknown,
+  ): Promise<CloudCallResult<T>> {
+    const endpoint = DEPLOY_TARGETS[this.provider() ?? 'cloudflare'].endpoints[op];
+    if (!endpoint) return { ok: 'unsupported' };
+
+    const base =
+      endpoint.scope === 'instance' ? this.instanceUrl(ctx.workflowId) : this.effectiveWorkerUrl();
+    if (!base) return { ok: 'unsupported' };
+
+    // A declared `body` reshaper is also the marker for "this endpoint sends a
+    // request body": the read routes declare none and send none.
+    const requestBody = endpoint.body?.(payload, ctx);
+    const response = await this.transport().send(`${base}${endpoint.path(ctx)}`, {
+      method: endpoint.method,
+      body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const detail = parseJsonBody(response.body);
+      const hostError = readErrorMessage(detail);
+      return {
+        ok: false,
+        status: response.status,
+        hostError,
+        error: hostError ?? `HTTP ${response.status}`,
+        detail,
+      };
+    }
+
+    const parsed = JSON.parse(response.body) as unknown;
+    return {
+      ok: true,
+      status: response.status,
+      value: (endpoint.unwrap ? endpoint.unwrap(parsed) : parsed) as T,
+    };
+  }
+
+  /**
+   * The refusal for an operation this target declares no route for, in the
+   * cases where there IS no sensible absent value - a write the operator asked
+   * for cannot silently do nothing.
+   */
+  private unsupportedError(op: CloudOperation): Error {
+    const label = DEPLOY_TARGETS[this.provider() ?? 'cloudflare'].label;
+    return new Error(`${label} has no ${op} route.`);
+  }
+
+  /**
+   * Instance URL for a workflow id, shaped by the selected target's registry
+   * entry and nowhere else (Requirement 12.4): `/agents/workflow-agent/{id}` on
+   * Cloudflare, `/workflows/{id}` on AWS.
+   */
   private instanceUrl(workflowId: string): string | null {
     const base = this.effectiveWorkerUrl();
-    if (!base || !workflowId) return base ? `${base}/agents/workflow-agent/default` : null;
-    return `${base}/agents/workflow-agent/${encodeURIComponent(workflowId)}`;
+    if (!base) return null;
+    return DEPLOY_TARGETS[this.provider() ?? 'cloudflare'].instanceUrl(
+      base,
+      workflowId || 'default',
+    );
   }
 
   private async headers(): Promise<Record<string, string>> {

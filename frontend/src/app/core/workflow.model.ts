@@ -998,3 +998,8 @@ export function canConnectPorts(source: PortRole, target: PortRole): boolean {
   }
   return source === 'message-out' && target === 'message-in';
 }
+
+// ── Run record types (structural twin of engine/src/run-record.ts) ───────────
+
+/** Terminal (or in-flight) status of a recorded run. */
+export type RunRecordStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'skipped';

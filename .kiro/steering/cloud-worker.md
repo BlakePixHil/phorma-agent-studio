@@ -14,10 +14,13 @@ user's own Cloudflare account and keys).
 
 - `cloud/` must depend on the `ai` package - the `agents` SDK imports it dynamically and wrangler
   bundling fails with "Could not resolve ai" otherwise.
-- Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`). No Cloudflare
-  account needed. `npx wrangler dev` gives a full local Durable Object for E2E, and
-  `npm test` runs the portal, projection, embed, deploy-config, connections, data-host,
-  workflow-state, and run-wiring suites.
+- Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.
+  `check` runs no tests, so it alone is not verification. No Cloudflare account needed.
+  `npm test` = `test:unit`: projection, embed, deploy-config, connections, data-host,
+  workflow-state, portal-cleanup, run-wiring, status, releases, plus two Miniflare suites
+  (deploy-validation, connection-secrets). `npm run test:portal` is separate and MANUAL - it
+  needs `npx wrangler dev` on 8799 plus a local Ollama model, which is also what gives you a full
+  local Durable Object for E2E.
 - Wrangler/esbuild honours tsconfig `paths`, so `@phorma/engine` resolves exactly as in the frontend.
 - Durable Object state uses the Agents SDK `this.sql` tagged template (embedded SQLite):
   `run_journal`, `usage_ledger`, workflow state, portal registry.

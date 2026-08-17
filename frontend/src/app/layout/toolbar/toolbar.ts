@@ -694,6 +694,10 @@ export class Toolbar {
    * Opens the cloud deploy/monitor dialog — unless no cloud provider has
    * been chosen (or it's missing required config), in which case the user
    * is routed to Settings → Cloud to pick one first.
+   *
+   * No toast on that route: the settings dialog opens on the Cloud section with
+   * the choice on screen, so a warning only repeats what the user can already
+   * see and has to be dismissed.
    */
   protected openCloud(): void {
     const provider = this.settings.cloudProvider();
@@ -702,7 +706,6 @@ export class Toolbar {
       (provider === 'cloudflare' && !this.cloud.workerUrl()) ||
       (provider === 'phorma' && !this.isSignedIn());
     if (needsSetup) {
-      this.toast.warning('Set up cloud deploys', 'Choose where your agents run first.');
       this.settingsDialog.open('cloud');
       return;
     }

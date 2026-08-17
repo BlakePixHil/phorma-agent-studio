@@ -297,9 +297,9 @@
                         />
                         @if (settings.keyConfigured()[provider.id]) {
                           <p-button
-                            styleClass="phorma-settings__btn phorma-settings__btn--icon"
+                            styleClass="phorma-input-icon-btn phorma-input-icon-btn--danger"
                             [text]="true"
-                            severity="danger"
+                            severity="secondary"
                             size="small"
                             icon="ti ti-trash"
                             pTooltip="Remove stored key"
@@ -376,7 +376,10 @@
                       }
                     </div>
                     @if (missingKeyWarning(); as providerLabel) {
-                      <div class="phorma-settings__inline-warning" role="status">
+                      <div
+                        class="phorma-settings__note phorma-settings__note--warn phorma-settings__note--indented"
+                        role="status"
+                      >
                         <i class="ti ti-alert-triangle" aria-hidden="true"></i>
                         <span class="phorma-settings__inline-warning-text">
                           No {{ providerLabel }} API key configured. Add one to use this provider.
@@ -424,7 +427,10 @@
                       <p class="phorma-settings__note">Loading installed Ollama models…</p>
                     }
                     @if (settings.defaultProvider() === 'ollama' && ollamaFetched() && ollamaModels().length === 0) {
-                      <div class="phorma-settings__inline-warning" role="status">
+                      <div
+                        class="phorma-settings__note phorma-settings__note--info phorma-settings__note--indented"
+                        role="status"
+                      >
                         <i class="ti ti-info-circle" aria-hidden="true"></i>
                         <span class="phorma-settings__inline-warning-text">
                           @if (ollamaRunning()) {
@@ -588,9 +594,9 @@
                                   />
                                   @if (settings.mcpSecretsConfigured()[presetFlagKey(preset.id, field.name)]) {
                                     <p-button
-                                      styleClass="phorma-settings__btn phorma-settings__btn--icon"
+                                      styleClass="phorma-input-icon-btn phorma-input-icon-btn--danger"
                                       [text]="true"
-                                      severity="danger"
+                                      severity="secondary"
                                       size="small"
                                       icon="ti ti-trash"
                                       pTooltip="Remove stored value"
@@ -724,6 +730,7 @@
                         >
                           <app-phorma-cloud-icon />
                           <h5>Phorma Cloud</h5>
+                          <span class="phorma-settings__chip">Managed</span>
                           <p>
                             Run your agents on Phorma's infrastructure. No setup required -
                             sign in and deploy. Subscription.
@@ -736,9 +743,24 @@
                         >
                           <i class="ti ti-brand-cloudflare" aria-hidden="true"></i>
                           <h5>Your own Cloudflare</h5>
+                          <span class="phorma-settings__chip">Bring your own</span>
                           <p>
                             Deploy the runtime to your own Cloudflare account with wrangler.
                             Free - you pay Cloudflare directly. Technical setup.
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          class="phorma-settings__provider-card"
+                          (click)="pickCloudProvider('aws')"
+                        >
+                          <i class="ti ti-brand-aws" aria-hidden="true"></i>
+                          <h5>Your own AWS</h5>
+                          <span class="phorma-settings__chip">Bring your own</span>
+                          <p>
+                            Deploy the runtime to your own AWS account on ECS Fargate. You own
+                            the account, the keys and the bill. Your platform team issues the
+                            identifiers.
                           </p>
                         </button>
                       </div>
@@ -765,6 +787,17 @@
                         >
                           <i class="ti ti-brand-cloudflare" aria-hidden="true"></i>
                           Your own Cloudflare
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          class="phorma-settings__provider-tab"
+                          [class.phorma-settings__provider-tab--active]="settings.cloudProvider() === 'aws'"
+                          [attr.aria-selected]="settings.cloudProvider() === 'aws'"
+                          (click)="pickCloudProvider('aws')"
+                        >
+                          <i class="ti ti-brand-aws" aria-hidden="true"></i>
+                          Your own AWS
                         </button>
                       </div>
 
@@ -873,13 +906,15 @@
                           </p>
                           <ol class="phorma-settings__cloud-setup-steps">
                             <li>
-                              Point the <code>cloud/</code> folder below at your clone of the
-                              Phorma Agent Studio repo, then run
-                              <code>npm install --legacy-peer-deps</code> in it once.
+                              Press <strong>Set up runtime files</strong> below. The worker source
+                              ships inside this app - the studio unpacks it and installs its
+                              dependencies for you.
                             </li>
                             <li>
-                              Authenticate wrangler with your Cloudflare account:
-                              <code>npx wrangler login</code>
+                              Authenticate wrangler with your Cloudflare account: run
+                              <code>npx wrangler login</code> once in any terminal. It stores the
+                              credentials for your whole machine, so the folder you run it in does
+                              not matter.
                             </li>
                             <li>
                               Press <strong>Deploy</strong> in the Cloud dialog. Nothing needs
@@ -892,12 +927,96 @@
                               the deployed Worker URL into the field below.
                             </li>
                           </ol>
-                          <p class="phorma-settings__cloud-setup-note">
-                            Portal improvements reach your worker when you
-                            <code>git pull</code> and Deploy again - the studio tells you when
-                            yours is behind.
+                        </div>
+
+                        <!-- 1 - Deploy runtime -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-package" aria-hidden="true"></i>
+                            Deploy runtime
+                          </p>
+                          <div class="phorma-settings__row">
+                            <span class="phorma-settings__row-label">
+                              Runtime folder
+                              <app-info-popover label="Runtime folder" heading="What is the runtime folder?">
+                                <p>
+                                  The folder wrangler runs in. It holds the worker source this
+                                  version of the app carries, plus its installed dependencies.
+                                </p>
+                                <p>
+                                  Set up runtime files fills it in for you, under this app's data
+                                  folder. Point it somewhere else only if you are working from a
+                                  checkout of the Phorma repository.
+                                </p>
+                              </app-info-popover>
+                            </span>
+                            <input
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="Set up runtime files to fill this in"
+                              [value]="cloud.cloudFolder()"
+                              (input)="onCloudFolderInput($event)"
+                              aria-label="Cloudflare runtime folder"
+                            />
+                            @if (isDesktop) {
+                              <button
+                                pButton
+                                type="button"
+                                class="phorma-input-icon-btn"
+                                severity="secondary"
+                                [text]="true"
+                                size="small"
+                                (click)="cloud.pickCloudFolder()"
+                                aria-label="Browse for the runtime folder"
+                              >
+                                <i class="ti ti-folder-open" aria-hidden="true"></i>
+                              </button>
+                            }
+                          </div>
+                          <div class="phorma-settings__row phorma-settings__row--actions">
+                            <button
+                              pButton
+                              type="button"
+                              class="phorma-settings__btn"
+                              severity="secondary"
+                              [outlined]="true"
+                              size="small"
+                              [disabled]="!isDesktop || deployWorkspace.busy()"
+                              (click)="prepareCloudflareRuntime()"
+                            >
+                              @if (deployWorkspace.preparing() === 'cloud') {
+                                <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                              } @else {
+                                <i class="ti ti-package-import" aria-hidden="true"></i>
+                              }
+                              <span>Set up runtime files</span>
+                            </button>
+                          </div>
+                          @if (deployWorkspace.preparing() === 'cloud') {
+                            <p class="phorma-settings__note phorma-settings__note--info">
+                              <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                              Unpacking the runtime and installing dependencies. Output is
+                              streaming to the console.
+                            </p>
+                          } @else if (!isDesktop) {
+                            <p class="phorma-settings__note phorma-settings__note--info">
+                              <i class="ti ti-device-desktop" aria-hidden="true"></i>
+                              Setting up the runtime writes to disk and runs npm, so it needs the
+                              desktop app.
+                            </p>
+                          }
+                          <p class="phorma-settings__hint">
+                            Run this again after the app updates: it refreshes the worker source so
+                            your next deploy carries the newest portal and runtime.
                           </p>
                         </div>
+
+                        <!-- 2 - Worker endpoint -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-plug-connected" aria-hidden="true"></i>
+                            Worker endpoint
+                          </p>
                         <div class="phorma-settings__row">
                           <span class="phorma-settings__row-label">
                             Worker URL
@@ -954,37 +1073,49 @@
                             aria-label="Worker bearer token"
                           />
                         </div>
-                        <div class="phorma-settings__row">
-                          <span class="phorma-settings__row-label">
-                            cloud/ folder
-                            <app-info-popover label="Cloud folder" heading="What is the cloud/ folder?">
-                              <p>
-                                The local path to the <code>cloud/</code> folder from the Phorma
-                                Agent Studio repo. Wrangler commands (deploy, secret put) run here.
-                              </p>
-                              <p>
-                                Example: <code>C:\\Dev\\phorma\\phorma-agent-studio\\cloud</code>
-                                on Windows, or <code>/home/you/phorma-agent-studio/cloud</code> on
-                                macOS/Linux.
-                              </p>
-                            </app-info-popover>
-                          </span>
-                          <input
-                            type="text"
-                            class="phorma-settings__input phorma-settings__input--mono"
-                            placeholder="Path to the repo's cloud/ folder (for deploys)"
-                            [value]="cloud.cloudFolder()"
-                            (input)="onCloudFolderInput($event)"
-                            aria-label="Path to the cloud folder"
+                        <!-- Connection test -->
+                        <div class="phorma-settings__row phorma-settings__row--actions">
+                          <p-button
+                            styleClass="phorma-settings__btn"
+                            [outlined]="true"
+                            size="small"
+                            icon="ti ti-antenna"
+                            label="Test connection"
+                            [loading]="cloud.connectionTest() === 'testing'"
+                            [disabled]="!cloud.workerUrl()"
+                            (onClick)="cloud.testConnection()"
                           />
+                          @switch (cloud.connectionTest()) {
+                            @case ('ok') {
+                              <span class="phorma-settings__pill phorma-settings__pill--ok">
+                                <i class="ti ti-circle-check" aria-hidden="true"></i> Reachable
+                              </span>
+                            }
+                            @case ('auth-failed') {
+                              <span class="phorma-settings__pill phorma-settings__pill--warn">
+                                <i class="ti ti-lock-x" aria-hidden="true"></i> Auth failed - check the token
+                              </span>
+                            }
+                            @case ('unreachable') {
+                              <span class="phorma-settings__pill phorma-settings__pill--err">
+                                <i class="ti ti-plug-connected-x" aria-hidden="true"></i> Unreachable
+                              </span>
+                            }
+                          }
+                        </div>
                         </div>
 
                         <!--
-                          Advanced deploy overrides. Everything here is optional: with all
-                          three blank the studio deploys the committed wrangler.jsonc
-                          unchanged. Filling any of them makes the studio write a
-                          gitignored wrangler.byo.jsonc so the tracked config stays clean.
+                          3 - Advanced deploy overrides. Everything here is optional: with all
+                          three blank the studio deploys the runtime's own wrangler.jsonc
+                          unchanged. Filling any of them makes the studio write a generated
+                          wrangler.byo.jsonc beside it so the shipped config stays untouched.
                         -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-adjustments" aria-hidden="true"></i>
+                            Advanced
+                          </p>
                         <div class="phorma-settings__row">
                           <span class="phorma-settings__row-label">
                             Account ID
@@ -1087,44 +1218,19 @@
                         @if (deployConfig.needsOverride()) {
                           <p class="phorma-settings__row-note">
                             <i class="ti ti-file-code" aria-hidden="true"></i>
-                            Deploy writes <code>cloud/wrangler.byo.jsonc</code> with these
-                            settings. It is gitignored, so <code>git pull</code> stays clean.
+                            Deploy writes <code>wrangler.byo.jsonc</code> beside the runtime's own
+                            config, so setting up runtime files again keeps these settings.
                           </p>
                         }
-
-                        <!-- Connection test -->
-                        <div class="phorma-settings__row phorma-settings__row--actions">
-                          <p-button
-                            styleClass="phorma-settings__btn"
-                            [outlined]="true"
-                            size="small"
-                            icon="ti ti-antenna"
-                            label="Test connection"
-                            [loading]="cloud.connectionTest() === 'testing'"
-                            [disabled]="!cloud.workerUrl()"
-                            (onClick)="cloud.testConnection()"
-                          />
-                          @switch (cloud.connectionTest()) {
-                            @case ('ok') {
-                              <span class="phorma-settings__pill phorma-settings__pill--ok">
-                                <i class="ti ti-circle-check" aria-hidden="true"></i> Reachable
-                              </span>
-                            }
-                            @case ('auth-failed') {
-                              <span class="phorma-settings__pill phorma-settings__pill--warn">
-                                <i class="ti ti-lock-x" aria-hidden="true"></i> Auth failed - check the token
-                              </span>
-                            }
-                            @case ('unreachable') {
-                              <span class="phorma-settings__pill phorma-settings__pill--err">
-                                <i class="ti ti-plug-connected-x" aria-hidden="true"></i> Unreachable
-                              </span>
-                            }
-                          }
                         </div>
 
-                        <!-- Worker secrets wizard (desktop: streams wrangler secret put) -->
+                        <!-- 4 - Worker secrets wizard (desktop: streams wrangler secret put) -->
                         @if (isDesktop) {
+                          <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-key" aria-hidden="true"></i>
+                            Worker secrets
+                          </p>
                           <div class="phorma-settings__secrets">
                             <p class="phorma-settings__hint">
                               Set provider secrets on your worker without leaving the studio.
@@ -1198,13 +1304,605 @@
                               needs no terminal. Set <code>KEY_ENC_SECRET</code> here once to
                               enable it.
                             </p>
-                            @if (!cloud.cloudFolder()) {
-                              <p class="phorma-settings__hint">
-                                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-                                Set the cloud/ folder above first - wrangler runs there.
+                          </div>
+                          @if (!cloud.cloudFolder()) {
+                            <p class="phorma-settings__note phorma-settings__note--warn">
+                              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                              Set up the runtime files first - wrangler runs in that folder.
+                            </p>
+                          }
+                          </div>
+                        }
+                      }
+
+                      <!--
+                        BYO AWS body section. Every class here is one the
+                        Cloudflare body already uses (__cloud-setup,
+                        __cloud-setup-intro, __input, __input--mono,
+                        __input--invalid, __hint, __note): the anyComponentStyle
+                        budget on this sheet is 22kB warning / 26kB error and it
+                        is the largest sheet in the app, so per-field styling is
+                        the wrong place to spend it. Notes and group intros are
+                        FLEX containers, so each one carries an icon plus a
+                        single text run - inline <code> or <strong> inside them
+                        becomes its own flex item and the prose breaks into a row
+                        of disconnected boxes.
+                      -->
+                      @if (settings.cloudProvider() === 'aws') {
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-brand-aws" aria-hidden="true"></i>
+                            Deploy the runtime to your own AWS account on ECS Fargate. Enter the
+                            identifiers your platform team issued, then plan and deploy from the
+                            desktop app.
+                          </p>
+                        </div>
+
+                        <!-- 1 - Account and region -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-id" aria-hidden="true"></i>
+                            Account and region
+                          </p>
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('accountId')"
+                            >
+                              Account ID
+                            </label>
+                            <input
+                              [id]="awsFieldId('accountId')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="123456789012"
+                              [value]="awsConfig.accountId()"
+                              (input)="onAwsAccountIdInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.accountIdValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.accountIdValid()) {
+                            <p class="phorma-settings__hint">
+                              Account ID must be exactly 12 digits.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('region')"
+                            >
+                              Region
+                            </label>
+                            <input
+                              [id]="awsFieldId('region')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="eu-west-1"
+                              [value]="awsConfig.region()"
+                              (input)="onAwsRegionInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.regionValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.regionValid()) {
+                            <p class="phorma-settings__hint">
+                              Region must be an AWS region code such as eu-west-1.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('namePrefix')"
+                            >
+                              Name prefix
+                            </label>
+                            <input
+                              [id]="awsFieldId('namePrefix')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="acme-agents"
+                              [value]="awsConfig.namePrefix()"
+                              (input)="onAwsNamePrefixInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.namePrefixValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.namePrefixValid()) {
+                            <p class="phorma-settings__hint">
+                              Name prefix must be 1 to 32 lower-case letters, digits or hyphens.
+                            </p>
+                          }
+                        </div>
+
+                        <!-- 2 - Platform prerequisites -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-shield-lock" aria-hidden="true"></i>
+                            Platform prerequisites
+                            <app-info-popover
+                              label="Platform prerequisites"
+                              heading="What to ask your platform team for"
+                            >
+                              <p>
+                                The Studio creates none of these. Each field below names one thing
+                                your AWS platform team already owns, so ask them for:
                               </p>
+                              <p>
+                                an IAM permissions boundary policy to attach to every role the
+                                deploy creates; the qualifier of a CDK bootstrap stack in the
+                                target account and region; a VPC with private subnets that can
+                                reach your data sources; a customer-managed KMS key for
+                                application data; and an SNS topic for alarm notifications.
+                              </p>
+                              <p>
+                                Deploys fail closed: a missing or malformed value is reported by
+                                <code>Plan</code> before anything is created.
+                              </p>
+                            </app-info-popover>
+                          </p>
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('permissionsBoundaryArn')"
+                            >
+                              Permissions boundary
+                            </label>
+                            <input
+                              [id]="awsFieldId('permissionsBoundaryArn')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="arn:aws:iam::123456789012:policy/PlatformBoundary"
+                              [value]="awsConfig.permissionsBoundaryArn()"
+                              (input)="onAwsPermissionsBoundaryArnInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.permissionsBoundaryArnValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.permissionsBoundaryArnValid()) {
+                            <p class="phorma-settings__hint">
+                              Permissions boundary must be an IAM policy ARN, for example
+                              <code>arn:aws:iam::123456789012:policy/PlatformBoundary</code>.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('bootstrapQualifier')"
+                            >
+                              Bootstrap qualifier
+                            </label>
+                            <input
+                              [id]="awsFieldId('bootstrapQualifier')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="phorma"
+                              [value]="awsConfig.bootstrapQualifier()"
+                              (input)="onAwsBootstrapQualifierInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.bootstrapQualifierValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.bootstrapQualifierValid()) {
+                            <p class="phorma-settings__hint">
+                              Bootstrap qualifier must be 1 to 10 letters or digits, matching the
+                              CDK bootstrap stack your platform team created.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('vpcId')"
+                            >
+                              VPC ID
+                            </label>
+                            <input
+                              [id]="awsFieldId('vpcId')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="vpc-0a1b2c3d4e5f60718"
+                              [value]="awsConfig.vpcId()"
+                              (input)="onAwsVpcIdInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.vpcIdValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.vpcIdValid()) {
+                            <p class="phorma-settings__hint">
+                              VPC ID must look like <code>vpc-0a1b2c3d4e5f60718</code>.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('subnetIds')"
+                            >
+                              Subnet IDs
+                            </label>
+                            <input
+                              [id]="awsFieldId('subnetIds')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="subnet-0a1b2c3d, subnet-0c2d4e6f"
+                              [value]="awsSubnetIdsText()"
+                              (input)="onAwsSubnetIdsInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.subnetIdsValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.subnetIdsValid()) {
+                            <p class="phorma-settings__hint">
+                              Subnet IDs must each look like <code>subnet-0a1b2c3d</code>, separated
+                              by commas.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('appCmkArn')"
+                            >
+                              App CMK ARN
+                            </label>
+                            <input
+                              [id]="awsFieldId('appCmkArn')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="arn:aws:kms:eu-west-1:123456789012:key/2f9a1b2c"
+                              [value]="awsConfig.appCmkArn()"
+                              (input)="onAwsAppCmkArnInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.appCmkArnValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.appCmkArnValid()) {
+                            <p class="phorma-settings__hint">
+                              App CMK ARN must be a KMS key ARN in the region above, for example
+                              <code>arn:aws:kms:eu-west-1:123456789012:key/2f9a1b2c</code>.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('notificationTargetArn')"
+                            >
+                              Alarm topic ARN
+                            </label>
+                            <input
+                              [id]="awsFieldId('notificationTargetArn')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="arn:aws:sns:eu-west-1:123456789012:platform-alarms"
+                              [value]="awsConfig.notificationTargetArn()"
+                              (input)="onAwsNotificationTargetArnInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.notificationTargetArnValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.notificationTargetArnValid()) {
+                            <p class="phorma-settings__hint">
+                              Alarm topic ARN must be an ARN carrying a region and account, for
+                              example <code>arn:aws:sns:eu-west-1:123456789012:platform-alarms</code>.
+                            </p>
+                          }
+                        </div>
+
+                        <!-- 3 - Operations -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-tags" aria-hidden="true"></i>
+                            Operations
+                          </p>
+                          @for (tag of awsTagRows(); track $index) {
+                            <div class="phorma-settings__row">
+                              <label
+                                class="phorma-settings__row-label"
+                                [attr.for]="awsFieldId('tagSet-key-' + $index)"
+                              >
+                                {{ $first ? 'Cost allocation tags' : 'Tag ' + ($index + 1) }}
+                              </label>
+                              <input
+                                [id]="awsFieldId('tagSet-key-' + $index)"
+                                type="text"
+                                class="phorma-settings__input"
+                                placeholder="Key, e.g. app"
+                                [value]="tag.key"
+                                (input)="onAwsTagKeyInput($index, $event)"
+                                [class.phorma-settings__input--invalid]="!awsConfig.tagSetValid()"
+                              />
+                              <input
+                                [id]="awsFieldId('tagSet-value-' + $index)"
+                                type="text"
+                                class="phorma-settings__input"
+                                placeholder="Value, e.g. phorma"
+                                [value]="tag.value"
+                                (input)="onAwsTagValueInput($index, $event)"
+                                [attr.aria-label]="'Cost allocation tag ' + ($index + 1) + ' value'"
+                                [class.phorma-settings__input--invalid]="!awsConfig.tagSetValid()"
+                              />
+                              <button
+                                pButton
+                                type="button"
+                                class="phorma-input-icon-btn phorma-input-icon-btn--danger"
+                                severity="secondary"
+                                [text]="true"
+                                size="small"
+                                [disabled]="awsTagRows().length <= 1"
+                                (click)="removeAwsTagRow($index)"
+                                [attr.aria-label]="'Remove cost allocation tag ' + ($index + 1)"
+                              >
+                                <i class="ti ti-trash" aria-hidden="true"></i>
+                              </button>
+                            </div>
+                          }
+                          @if (!awsConfig.tagSetValid()) {
+                            <p class="phorma-settings__hint">
+                              Cost allocation tags need at least one row whose key and value are
+                              both filled in.
+                            </p>
+                          }
+                          <div class="phorma-settings__row phorma-settings__row--actions">
+                            <button
+                              pButton
+                              type="button"
+                              class="phorma-settings__btn"
+                              severity="secondary"
+                              [text]="true"
+                              size="small"
+                              (click)="addAwsTagRow()"
+                            >
+                              <i class="ti ti-plus" aria-hidden="true"></i>
+                              <span>Add tag</span>
+                            </button>
+                          </div>
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('retentionDays')"
+                            >
+                              Log retention
+                            </label>
+                            <input
+                              [id]="awsFieldId('retentionDays')"
+                              type="number"
+                              class="phorma-settings__input phorma-settings__input--number"
+                              min="1"
+                              max="366"
+                              step="1"
+                              [value]="awsConfig.retentionDays()"
+                              (input)="onAwsRetentionDaysInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.retentionDaysValid()"
+                            />
+                            <span class="phorma-settings__suffix">days</span>
+                          </div>
+                          @if (!awsConfig.retentionDaysValid()) {
+                            <p class="phorma-settings__hint">
+                              Log retention must be a whole number of days from 1 to 366.
+                            </p>
+                          }
+                        </div>
+
+                        <!-- 4 - Container image -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-package" aria-hidden="true"></i>
+                            Container image
+                          </p>
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('imageUri')"
+                            >
+                              Image URI
+                            </label>
+                            <input
+                              [id]="awsFieldId('imageUri')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="Optional - registry/repository:tag published by your platform team"
+                              [value]="awsConfig.imageUri()"
+                              (input)="onAwsImageUriInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.imageUriValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.imageUriValid()) {
+                            <p class="phorma-settings__hint">
+                              Image URI must be an OCI reference: registry/repository:tag or
+                              registry/repository&#64;sha256:digest.
+                            </p>
+                          }
+                          <p class="phorma-settings__note phorma-settings__note--info">
+                            <i class="ti ti-file-code" aria-hidden="true"></i>
+                            {{ awsImageNotice() }}
+                          </p>
+                        </div>
+
+                        <!-- 5 - Deploy runtime -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-package" aria-hidden="true"></i>
+                            Deploy runtime
+                          </p>
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('cloudAwsDirectory')"
+                            >
+                              Runtime folder
+                            </label>
+                            <input
+                              [id]="awsFieldId('cloudAwsDirectory')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="Set up runtime files to fill this in"
+                              [value]="awsConfig.cloudAwsDirectory()"
+                              (input)="onAwsDirectoryInput($event)"
+                              [class.phorma-settings__input--invalid]="!awsConfig.cloudAwsDirectoryValid()"
+                            />
+                            @if (isDesktop) {
+                              <button
+                                pButton
+                                type="button"
+                                class="phorma-input-icon-btn"
+                                severity="secondary"
+                                [text]="true"
+                                size="small"
+                                (click)="pickAwsDirectory()"
+                                aria-label="Browse for the runtime folder"
+                              >
+                                <i class="ti ti-folder-open" aria-hidden="true"></i>
+                              </button>
                             }
                           </div>
+                          <div class="phorma-settings__row phorma-settings__row--actions">
+                            <button
+                              pButton
+                              type="button"
+                              class="phorma-settings__btn"
+                              severity="secondary"
+                              [outlined]="true"
+                              size="small"
+                              [disabled]="!isDesktop || deployWorkspace.busy()"
+                              (click)="prepareAwsRuntime()"
+                            >
+                              @if (deployWorkspace.preparing() === 'cloud-aws') {
+                                <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                              } @else {
+                                <i class="ti ti-package-import" aria-hidden="true"></i>
+                              }
+                              <span>Set up runtime files</span>
+                            </button>
+                          </div>
+                          @if (!awsConfig.cloudAwsDirectoryValid()) {
+                            <p class="phorma-settings__hint">
+                              Runtime folder is required: set up the runtime files, or point it at a
+                              cloud-aws folder you manage yourself.
+                            </p>
+                          }
+                          @if (deployWorkspace.preparing() === 'cloud-aws') {
+                            <p class="phorma-settings__note phorma-settings__note--info">
+                              <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                              Unpacking the CDK application and installing dependencies. Output is
+                              streaming to the console.
+                            </p>
+                          } @else {
+                            <p class="phorma-settings__note">
+                              <i class="ti ti-info-circle" aria-hidden="true"></i>
+                              The CDK application ships inside this app, so there is nothing to
+                              clone. Set it up again after an app update, and your next deploy
+                              carries the newer runtime.
+                            </p>
+                          }
+                        </div>
+
+                        <!-- 6 - Discovered endpoints -->
+                        <div class="phorma-settings__cloud-setup">
+                          <p class="phorma-settings__cloud-setup-intro">
+                            <i class="ti ti-plug-connected" aria-hidden="true"></i>
+                            Discovered endpoints
+                          </p>
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('triggerApiUrl')"
+                            >
+                              Trigger API URL
+                            </label>
+                            <input
+                              [id]="awsFieldId('triggerApiUrl')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="Written by the deploy"
+                              [value]="awsConfig.triggerApiUrl()"
+                              readonly
+                              [class.phorma-settings__input--invalid]="!awsConfig.triggerApiUrlValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.triggerApiUrlValid()) {
+                            <p class="phorma-settings__hint">
+                              Trigger API URL must be an https URL with no query, fragment or
+                              trailing slash.
+                            </p>
+                          }
+                          <div class="phorma-settings__row">
+                            <label
+                              class="phorma-settings__row-label"
+                              [attr.for]="awsFieldId('monitorApiUrl')"
+                            >
+                              Monitor API URL
+                            </label>
+                            <input
+                              [id]="awsFieldId('monitorApiUrl')"
+                              type="text"
+                              class="phorma-settings__input phorma-settings__input--mono"
+                              placeholder="Written by the deploy"
+                              [value]="awsConfig.monitorApiUrl()"
+                              readonly
+                              [class.phorma-settings__input--invalid]="!awsConfig.monitorApiUrlValid()"
+                            />
+                          </div>
+                          @if (!awsConfig.monitorApiUrlValid()) {
+                            <p class="phorma-settings__hint">
+                              Monitor API URL must be a wss URL with no query or fragment.
+                            </p>
+                          }
+                          @if (awsEndpointsIncomplete()) {
+                            <p class="phorma-settings__note phorma-settings__note--warn">
+                              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                              Push, runs and live monitoring stay unavailable until a deploy
+                              completes.
+                            </p>
+                          }
+                        </div>
+
+                        <!-- Plan, Deploy and Doctor -->
+                        @if (!awsConfig.valid()) {
+                          <p class="phorma-settings__note phorma-settings__note--danger">
+                            <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                            {{ awsInvalidFieldsLabel() }}
+                          </p>
+                        }
+                        @if (!isDesktop) {
+                          <p class="phorma-settings__note phorma-settings__note--info">
+                            <i class="ti ti-device-desktop" aria-hidden="true"></i>
+                            Deploying to AWS runs the AWS CLI and CDK on your machine. Use the
+                            desktop app to plan, deploy or run doctor.
+                          </p>
+                        }
+                        <div class="phorma-settings__row phorma-settings__row--actions">
+                          <button
+                            pButton
+                            type="button"
+                            class="phorma-settings__btn"
+                            severity="secondary"
+                            [outlined]="true"
+                            size="small"
+                            [disabled]="awsControlsDisabled()"
+                            (click)="runAwsPlan()"
+                          >
+                            <i class="ti ti-list-check" aria-hidden="true"></i>
+                            <span>Plan</span>
+                          </button>
+                          <button
+                            pButton
+                            type="button"
+                            class="phorma-settings__btn phorma-btn-content"
+                            size="small"
+                            [disabled]="awsControlsDisabled()"
+                            (click)="runAwsDeploy()"
+                          >
+                            <i class="ti ti-cloud-up" aria-hidden="true"></i>
+                            <span>Deploy</span>
+                          </button>
+                          <button
+                            pButton
+                            type="button"
+                            class="phorma-settings__btn"
+                            severity="secondary"
+                            [text]="true"
+                            size="small"
+                            [disabled]="awsControlsDisabled()"
+                            (click)="runAwsDoctor()"
+                          >
+                            <i class="ti ti-stethoscope" aria-hidden="true"></i>
+                            <span>Doctor</span>
+                          </button>
+                        </div>
+                        @if (awsCli.running()) {
+                          <p class="phorma-settings__hint">
+                            <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                            Running. Output is streaming to the console.
+                          </p>
                         }
                       }
                     }

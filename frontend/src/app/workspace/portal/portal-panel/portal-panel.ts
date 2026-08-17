@@ -202,7 +202,9 @@ export class PortalPanel {
         return 'ti ti-circle-x';
       case 'stopped':
         return 'ti ti-player-stop';
-      default:
+      case 'skipped':
+        return 'ti ti-circle-minus';
+      case 'running':
         return 'ti ti-loader-2';
     }
   }

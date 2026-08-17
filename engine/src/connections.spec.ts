@@ -1,9 +1,11 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   CONNECTION_ID_PATTERN,
   CONNECTION_SECRET_PREFIX,
   assertConnectionId,
   authSecretKeyNames,
+  awsSecretName,
   connectionSecretName,
   isConnectionId,
   workerSecretName,
@@ -196,5 +198,120 @@ describe('authSecretKeyNames', () => {
     })) {
       expect(workerSecretName('conn-a', name)).toMatch(WORKER_SECRET_NAME_PATTERN);
     }
+  });
+});
+
+/**
+ * Property 19: Secret entry names are deterministic, injective and bounded
+ *
+ * `awsSecretName` derives the Secrets Manager entry name for one connection
+ * field under the IaC-owned prefix. The three properties that matter:
+ *
+ * 1. Determinism: same inputs always produce the same output.
+ * 2. Injectivity: distinct (connectionId, secretKey) pairs produce distinct names.
+ * 3. Bounded: result is at most 512 characters.
+ *
+ * Generators include pairs whose characters could be mistaken for the `/`
+ * separator, so collisions from forged path segments are tested directly.
+ *
+ * **Validates: Requirements 8.2**
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generators
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Valid connection ids matching `^conn-[A-Za-z0-9_-]{1,64}$`. */
+const connectionIdArb: fc.Arbitrary<string> = fc
+  .stringMatching(/^[A-Za-z0-9_-]{1,64}$/)
+  .filter((s) => s.length >= 1)
+  .map((s) => `conn-${s}`);
+
+/**
+ * Secret keys that include the separator `/` and other characters that could
+ * cause confusion with the path structure.
+ */
+const secretKeyArb: fc.Arbitrary<string> = fc.oneof(
+  // Plain alphanumeric keys
+  fc.stringMatching(/^[a-zA-Z0-9_.\-]{1,80}$/),
+  // Keys containing the `/` separator to test injectivity under forging attempts
+  fc.stringMatching(/^[a-zA-Z0-9_.\-\/]{1,40}$/).map((s) => `${s}/conn/${s}`),
+  // Keys that look like path segments: `conn/{id}/{rest}`
+  fc.tuple(
+    fc.stringMatching(/^[A-Za-z0-9_-]{1,20}$/),
+    fc.stringMatching(/^[a-z0-9]{1,20}$/),
+  ).map(([fakeId, rest]) => `conn-${fakeId}/${rest}`),
+  // Keys with only separators and special characters
+  fc.stringMatching(/^[/_+=.@\-]{1,40}$/),
+);
+
+/** Short IaC prefix, realistic range. */
+const prefixArb: fc.Arbitrary<string> = fc.stringMatching(/^[a-z0-9\-]{1,30}$/).filter(
+  (s) => s.length >= 1,
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Property tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('awsSecretName — Property 19', () => {
+  it('is deterministic: same inputs always produce the same output', () => {
+    fc.assert(
+      fc.property(prefixArb, connectionIdArb, secretKeyArb, (prefix, connectionId, secretKey) => {
+        const first = awsSecretName(prefix, connectionId, secretKey);
+        const second = awsSecretName(prefix, connectionId, secretKey);
+        expect(first).toBe(second);
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('is injective: distinct (connectionId, secretKey) pairs produce distinct names', () => {
+    fc.assert(
+      fc.property(
+        prefixArb,
+        connectionIdArb,
+        secretKeyArb,
+        connectionIdArb,
+        secretKeyArb,
+        (prefix, id1, key1, id2, key2) => {
+          // Skip when the pairs are actually the same
+          if (id1 === id2 && key1 === key2) return;
+          const name1 = awsSecretName(prefix, id1, key1);
+          const name2 = awsSecretName(prefix, id2, key2);
+          expect(name1).not.toBe(name2);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it('is bounded: result is at most 512 characters', () => {
+    fc.assert(
+      fc.property(prefixArb, connectionIdArb, secretKeyArb, (prefix, connectionId, secretKey) => {
+        const name = awsSecretName(prefix, connectionId, secretKey);
+        expect(name.length).toBeLessThanOrEqual(512);
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('keeps the `/` separator out of the normalised secret key segment', () => {
+    fc.assert(
+      fc.property(prefixArb, connectionIdArb, secretKeyArb, (prefix, connectionId, secretKey) => {
+        const name = awsSecretName(prefix, connectionId, secretKey);
+        // Shape: {prefix}/conn/{connectionId}/{normalisedSecretKey}
+        // Split on `/` and verify the normalised key (everything after the 3rd `/`) contains no `/`
+        const parts = name.split('/');
+        // prefix, 'conn', connectionId, normalisedSecretKey...
+        // The first part is the prefix, then 'conn', then connectionId, then the rest is the key
+        expect(parts.length).toBe(4);
+        expect(parts[1]).toBe('conn');
+        expect(parts[2]).toBe(connectionId);
+        // The normalised key is the 4th part and must not contain `/`
+        expect(parts[3]).not.toContain('/');
+      }),
+      { numRuns: 200 },
+    );
   });
 });

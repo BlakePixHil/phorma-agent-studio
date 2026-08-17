@@ -151,11 +151,35 @@ export const CLOUDFLARE_CAPABILITIES: HostCapabilities = {
   },
 };
 
+/**
+ * AWS (ECS Fargate): the only deployed host that reaches a private network and
+ * runs MSSQL. Stdio MCP and interactive OAuth are absent because the container
+ * has no display and no user session. Cron fires through EventBridge Scheduler.
+ */
+export const AWS_CAPABILITIES: HostCapabilities = {
+  id: 'aws-fargate',
+  label: 'AWS (ECS Fargate)',
+  nodeKinds: [...ALL_NODE_KINDS],
+  sqlDrivers: ['postgres', 'mysql', 'mssql', 'sqlite'],
+  connectionTypes: [...ALL_CONNECTION_TYPES],
+  connectionSecretScheme: 'aws-secrets-manager',
+  features: {
+    cron: true,
+    durableState: true,
+    fixtures: true,
+    privateNetworkEgress: true,
+    stdioMcp: false,
+    // An OAuth session never leaves the device that signed in.
+    mcpOAuth: false,
+  },
+};
+
 /** Every declared host record, keyed by `HostCapabilities.id`. */
 export const HOST_CAPABILITIES: Readonly<Record<string, HostCapabilities>> = {
   [TAURI_DESKTOP_CAPABILITIES.id]: TAURI_DESKTOP_CAPABILITIES,
   [BROWSER_CAPABILITIES.id]: BROWSER_CAPABILITIES,
   [CLOUDFLARE_CAPABILITIES.id]: CLOUDFLARE_CAPABILITIES,
+  [AWS_CAPABILITIES.id]: AWS_CAPABILITIES,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -495,6 +519,19 @@ function secretRemedy(
         ` Store ${names.length === 1 ? 'it' : 'them'} on the deployed worker as ${shown}` +
         ` - use the cloud button beside the secret in Connections, or ` +
         `\`npx wrangler secret put ${names[0]}\` - then push again.`
+      );
+    }
+    case 'aws-secrets-manager': {
+      const entry = `phorma/conn/${id}/${missing[0]}`;
+      const shown =
+        missing.length > 2
+          ? `${missing.slice(0, 2).map((key) => `phorma/conn/${id}/${key}`).join(', ')}, ...`
+          : missing.map((key) => `phorma/conn/${id}/${key}`).join(', ');
+      return (
+        ` Create ${missing.length === 1 ? 'it' : 'them'} in AWS Secrets Manager as ${shown}` +
+        ` - use the cloud button beside the secret in Connections, or the AWS CLI:` +
+        ` \`aws secretsmanager create-secret --name ${entry} --secret-string <value>\`` +
+        ` - then push again.`
       );
     }
     case 'os-keychain':

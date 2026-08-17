@@ -224,7 +224,11 @@ export interface FixtureStore {
  * - `cloudflare-worker-env`: a `CONN_*` worker secret / vault entry.
  * - `none`: this host cannot hold a connection secret at all.
  */
-export type ConnectionSecretScheme = 'os-keychain' | 'cloudflare-worker-env' | 'none';
+export type ConnectionSecretScheme =
+  | 'os-keychain'
+  | 'cloudflare-worker-env'
+  | 'aws-secrets-manager'
+  | 'none';
 
 /**
  * What a host can actually run. Used for run-time guardrails and push-time

@@ -58,10 +58,37 @@ describe('planOpCall - legacy Plan_Op compatibility (Requirement 4.3)', () => {
     });
   });
 
-  it('covers every legacy op form', () => {
+  /**
+   * Literal ids, deliberately. The rest of this file compares against
+   * `LEGACY_OP_ACTIONS`, and `planOpCall` returns members of that same object -
+   * so `expect(planOpCall({op:'add'}).id).toBe(LEGACY_OP_ACTIONS.add)` is the
+   * constant compared to itself and holds for ANY mapping, including a wrong
+   * one. These two cases are what actually anchor the persisted-thread contract
+   * to real action ids.
+   */
+  it('maps each legacy op form to its documented action id', () => {
+    const expected: Record<string, string> = {
+      add: 'graph_add_node',
+      connect: 'graph_connect_nodes',
+      update: 'graph_update_node',
+      remove: 'graph_remove_node',
+      disconnect: 'graph_remove_connection',
+    };
     for (const op of ['add', 'connect', 'update', 'remove', 'disconnect'] as const) {
-      expect(planOpCall({ op }, NO_REFS).id).withContext(op).toBe(LEGACY_OP_ACTIONS[op]);
+      expect(planOpCall({ op }, NO_REFS).id).withContext(op).toBe(expected[op]);
     }
+  });
+
+  it('declares exactly those five legacy ops and no others', () => {
+    // A sixth entry here means a chat thread persisted today would replay
+    // through a mapping no released build ever wrote.
+    expect(LEGACY_OP_ACTIONS).toEqual({
+      add: 'graph_add_node',
+      connect: 'graph_connect_nodes',
+      update: 'graph_update_node',
+      remove: 'graph_remove_node',
+      disconnect: 'graph_remove_connection',
+    });
   });
 });
 

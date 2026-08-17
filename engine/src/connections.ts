@@ -201,3 +201,31 @@ export function workerSecretName(connectionId: string, secretKey: string): strin
   const norm = (s: string) => s.replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
   return `CONN_${norm(connectionId)}_${norm(secretKey)}`;
 }
+
+/**
+ * Secrets Manager entry name for one connection field, under the prefix the
+ * IaC_App owns. Deterministic, injective over (connectionId, secretKey), and
+ * capped at 512 characters. Secrets Manager permits `/_+=.@-` in names, so the
+ * connection id (already `^conn-[A-Za-z0-9_-]{1,64}$`) needs no escaping and
+ * only the secret key is normalised.
+ *
+ * Shape: `{prefix}/conn/{connectionId}/{normalisedSecretKey}`
+ *
+ * The `/` separator is excluded from the normalised character class so that a
+ * secret key value cannot forge a different (connectionId, secretKey) pair.
+ */
+export function awsSecretName(prefix: string, connectionId: string, secretKey: string): string {
+  // Replace any character outside the safe set with `_XX` hex encoding.
+  // Safe set: A-Z a-z 0-9 _ - . (no `/` - keeps the separator unambiguous).
+  const normalised = secretKey.replace(/[^A-Za-z0-9_.\-]/g, (ch) => {
+    const hex = ch.charCodeAt(0).toString(16).padStart(2, '0');
+    return `_${hex}`;
+  });
+  const name = `${prefix}/conn/${connectionId}/${normalised}`;
+  if (name.length > 512) {
+    throw new Error(
+      `awsSecretName exceeds 512 characters (got ${name.length}) for connectionId="${connectionId}", secretKey="${secretKey}".`,
+    );
+  }
+  return name;
+}

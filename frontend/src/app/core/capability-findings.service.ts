@@ -2,7 +2,6 @@ import { Injectable, computed, effect, inject, signal, untracked } from '@angula
 
 import {
   BROWSER_CAPABILITIES,
-  CLOUDFLARE_CAPABILITIES,
   TAURI_DESKTOP_CAPABILITIES,
   validateAgainstCapabilities,
   type CapabilityFinding,
@@ -10,6 +9,7 @@ import {
 } from '@phorma/engine';
 
 import { ConnectionStoreService } from './connection-store.service';
+import { DEPLOY_TARGETS, type DeployTargetId } from './deploy/deploy-targets';
 import { findMcpPreset } from './node-catalog';
 import { PhormaCloudService, tierLabel } from './phorma-cloud.service';
 import { SettingsService } from './settings.service';
@@ -18,13 +18,13 @@ import { WorkflowService } from './workflow.service';
 
 /**
  * Capability findings for the active graph against the active LOCAL host
- * (Requirements 17.8, 17.9, 17.15) — the shared read used by the canvas node
+ * (Requirements 17.8, 17.9, 17.15) - the shared read used by the canvas node
  * badge and, indirectly, the properties panel's own per-node computed.
  *
  * Deliberately top-level-graph only: the canvas and the properties panel
  * both render the currently open document's graph, never the inside of an
  * embedded sub-workflow (those open as their own read-only tab), so there is
- * no `subWorkflows` traversal here — that full-graph walk belongs to
+ * no `subWorkflows` traversal here - that full-graph walk belongs to
  * `RunControllerService.start()` before `startRun` (Requirement 17.9's other
  * call site), which validates the complete portable spec including every
  * embedded sub-workflow.
@@ -44,7 +44,7 @@ export class CapabilityFindingsService {
   private readonly settings = inject(SettingsService);
   private readonly phormaCloud = inject(PhormaCloudService);
 
-  /** The local host's capability record — Desktop inside Tauri, Browser otherwise. */
+  /** The local host's capability record - Desktop inside Tauri, Browser otherwise. */
   readonly activeHostCapabilities = computed(() =>
     this.tauri.isDesktop ? TAURI_DESKTOP_CAPABILITIES : BROWSER_CAPABILITIES,
   );
@@ -73,8 +73,18 @@ export class CapabilityFindingsService {
   );
 
   /**
-   * Findings against the DEPLOY target (the Cloudflare Worker record), reported
-   * as warnings.
+   * The selected deploy target's capability record, resolved from
+   * `DEPLOY_TARGETS`. Returns null when no target is chosen.
+   */
+  private readonly deployCapabilities = computed(() => {
+    const provider = this.settings.cloudProvider();
+    if (!provider) return null;
+    return DEPLOY_TARGETS[provider as DeployTargetId]?.capabilities ?? null;
+  });
+
+  /**
+   * Findings against the selected DEPLOY target's capability record, reported
+   * as warnings with `deployOnly: true`.
    *
    * A workflow can be perfectly runnable locally and still be undeployable -
    * a local stdio MCP server is the canonical case. Validating only the local
@@ -88,15 +98,16 @@ export class CapabilityFindingsService {
    * never sees cloud vocabulary.
    */
   readonly deployFindings = computed<CapabilityFinding[]>(() => {
-    if (this.settings.cloudProvider() === null) return [];
+    const capabilities = this.deployCapabilities();
+    if (!capabilities) return [];
     const local = this.activeHostCapabilities();
-    if (local.id === CLOUDFLARE_CAPABILITIES.id) return [];
+    if (local.id === capabilities.id) return [];
     // Findings the local host already reports are shown at their own severity;
     // only the deploy-specific delta belongs here.
     const localMessages = new Set(this.localFindings().map(finding => finding.message));
     return validateAgainstCapabilities(
       { graph: this.workflow.graph() },
-      CLOUDFLARE_CAPABILITIES,
+      capabilities,
       this.connectionSummaries(),
     )
       .filter(finding => !localMessages.has(finding.message))
@@ -159,7 +170,7 @@ export class CapabilityFindingsService {
       message:
         `Your Phorma Cloud plan (${planName}) allows ${budget} schedule ${budget === 1 ? 'trigger' : 'triggers'} ` +
         `per workflow. This schedule will not run in the cloud - the worker arms schedules in order and ` +
-        `skips the rest. Upgrade your plan in Settings → Cloud to arm all schedules.`,
+        `skips the rest. Upgrade your plan in Settings > Cloud to arm all schedules.`,
     }));
   });
 

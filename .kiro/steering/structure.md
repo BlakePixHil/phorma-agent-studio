@@ -122,6 +122,18 @@ question. Extra workflows reach the model as a capped identity-only block
 only `WorkflowService`: the tab bar consumes it, and reaching for `AssistantChatService` there would
 pull the builder, registry and cloud services into the layout shell at startup.
 
+## BYO deploy runtimes ship inside the installer
+
+A BYO deploy runs a CLI in a folder that holds the runtime source. That folder is NOT expected to be
+a checkout of this repo: `cloud/`, `cloud-aws/` and `engine/` are bundled as Tauri resources and
+materialized into `app_data_dir/deploy/` by `core/deploy/deploy-workspace.service.ts`
+(Settings > Cloud > Deploy runtime > Set up runtime files), which then runs `npm install` there and
+stores the path in `CloudService.cloudFolder` or `AwsDeployConfigService.cloudAwsDirectory`.
+
+Consequences for copy and docs: never tell a user to clone, `git pull`, or `cd cloud`. The update
+path is "update the app, set up runtime files again, deploy". Mechanism and guards are in the
+`desktop-rust` steering.
+
 ## Persistence
 
 - Local: IndexedDB, currently at v10. Stores include runs, `usage`, `chat-threads`,

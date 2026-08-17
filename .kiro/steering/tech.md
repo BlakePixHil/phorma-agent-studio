@@ -4,8 +4,9 @@ inclusion: always
 
 # Tech stack and commands
 
-Versions are pinned in the four `package.json` files plus `backend/src-tauri/Cargo.toml`. All
-four packages share ONE version number (currently `0.2.0-beta.8`) - see `release.md` steering.
+Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud`, `cloud-aws` and
+`engine`, plus `backend/src-tauri/Cargo.toml`. All five packages share ONE version number (currently
+`0.2.0-beta.9`), which `cloud-aws/scripts/check-versions.mjs` enforces - see `release.md` steering.
 
 ## Stack
 
@@ -45,15 +46,32 @@ or start them as a background process.
 
 ```powershell
 cd frontend; npm run build                       # production build: the ONLY thing that checks Angular budgets
+cd frontend; npm test -- --watch=false --browsers=ChromeHeadless   # karma + jasmine, ~3s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
+cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
+cd cloud;    npm run test:unit                   # 12 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
+cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
+cd cloud-aws; npm test                           # vitest --run (unit + property tests)
+cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
+cd backend/src-tauri; cargo test                 # 29 unit tests (sql, llm, data, deploy_assets)
+node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
 ```
+
+`npm test -- --watch=false --browsers=ChromeHeadless` in `frontend/` does NOT forward those flags
+through this npm version (it warns "Unknown cli config" and runs `ng test` in WATCH mode). Use
+`npx ng test --watch=false --browsers=ChromeHeadless` when you need it to exit.
+
+`.github/workflows/ci.yml` runs every one of these on push and PR, plus
+`engine`'s `tsc --noEmit`. Adding a suite means adding it to `ci.yml` in the same
+change. `cloud`'s `npm run test:portal` stays out of CI on purpose: it needs a
+manually started `wrangler dev` and a local model.
 
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
-- Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 20kB
-  warning / 24kB error. Consolidate duplicated SCSS rules before raising a budget. Keep heavy
+- Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
+  warning / 26kB error. Consolidate duplicated SCSS rules before raising a budget. Keep heavy
   deps (chart.js) behind `@defer (on immediate)`.
 - `engine/` has no local TypeScript install. For a type-only check there use
   `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json`. Running `npx tsc` inside

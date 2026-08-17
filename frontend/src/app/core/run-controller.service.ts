@@ -635,7 +635,11 @@ export class RunControllerService {
     });
     this.viewingHistoricalRunId.set(record.summary.id);
     this.terminal.setPhase(
-      record.summary.status === 'running' ? 'idle' : record.summary.status,
+      record.summary.status === 'running'
+        ? 'idle'
+        : record.summary.status === 'skipped'
+          ? 'stopped'
+          : record.summary.status,
     );
   }
 

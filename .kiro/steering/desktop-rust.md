@@ -7,7 +7,7 @@ fileMatchPattern: ["backend/**/*.rs", "backend/src-tauri/**/*.json", "backend/sr
 
 `backend/src-tauri/src/` is the native surface: `llm.rs` (streaming LLM proxy + OS keychain),
 `process.rs` (spawning), `mcp.rs` (stdio MCP sessions), `oauth.rs`, `sql.rs`, `data.rs`,
-`ollama.rs`, `commands.rs`, `lib.rs`.
+`ollama.rs`, `deploy_assets.rs` (materializes the bundled deploy runtimes), `commands.rs`, `lib.rs`.
 
 ## Rules
 
@@ -43,6 +43,25 @@ stdio MCP is NEWLINE-DELIMITED JSON-RPC, not LSP `Content-Length` framing. Sessi
 `mcp.rs`, keyed by tool node id; `mcp_connect` resolves node-scoped secrets first, then preset
 scope. Remote MCP goes through the engine's `HttpMcpClient` (streamable HTTP - responses may be SSE
 or plain JSON, parse both).
+
+## Bundled deploy runtimes
+
+`bundle.resources` in `tauri.conf.json` ships `cloud/`, `cloud-aws/` and the `engine/` they both
+resolve `@phorma/engine` through, so a production install can deploy to a user's own Cloudflare or
+AWS account with no checkout of this repository. About 3.3MB of source.
+
+- It MUST stay the object (map) form. The array form rewrites `../..` into `_up_/_up_` directories,
+  and the destination layout is what makes the runtime work.
+- Destination layout is load-bearing: `deploy/{engine,cloud,cloud-aws}` as siblings. Both packages
+  declare `@phorma/engine` as `file:../engine`, and `cloud-aws`'s CDK app derives its Docker build
+  context by walking four segments up from `src/infra/stack.ts`, landing on `deploy/` - the exact
+  parent `cloud-aws/Dockerfile` copies `cloud-aws/` and `engine/` from.
+- `deploy_assets::prepare_deploy_workspace` copies a target into `app_data_dir/deploy/<target>`,
+  never deleting `node_modules`, `cdk.out` or `dist`, and reports `dependenciesReady` from a
+  `.phorma-runtime-version` stamp the FRONTEND writes only after `npm install` exits zero.
+- `scripts/check-deploy-bundle.mjs` (in CI) fails when a listed path disappears or when a new
+  top-level entry of those three packages is neither bundled nor excluded with a reason. Without it a
+  missing resource is invisible until a user's deploy breaks.
 
 ## tauri.conf.json
 

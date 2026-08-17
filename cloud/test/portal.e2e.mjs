@@ -273,7 +273,17 @@ let sessionId = null;
   const result = await awaitTurn('e2e-support', sessionId);
   check('turn reaches a terminal event', !!result, 'timed out');
 
-  if (result) {
+  if (!result) {
+    // Everything below - the entire live redaction audit, which is the security
+    // core of this file - lives inside the `if (result)` branch. A timed-out
+    // turn used to skip all of it while reporting a single failure, so a run
+    // could look "1 check failed" when ~14 security assertions never executed.
+    check(
+      'the live redaction audit ran',
+      false,
+      'turn timed out, so NONE of the redaction assertions executed - treat this run as no evidence, not as a pass',
+    );
+  } else {
     check('stream is text/event-stream', result.contentType.includes('text/event-stream'));
     const done = result.events.find(event => event.type === 'done');
     check('turn completes', !!done, JSON.stringify(result.events.map(e => e.type)));
@@ -397,7 +407,18 @@ console.log('\nPortal E2E: rate limiting');
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId: id, message: 'again' }),
   });
-  check('429 carries Retry-After', blocked.status !== 429 || !!blocked.headers.get('Retry-After'));
+  // Asserted unconditionally. The previous form was
+  // `blocked.status !== 429 || !!header`, which passes whenever the request is
+  // NOT rate-limited - and the loop above has already consumed the window, so
+  // that was the common case. Rate-limit headers went effectively unasserted.
+  check('a further request inside the window is still blocked', blocked.status === 429, `status ${blocked.status}`);
+  const retryAfter = blocked.headers.get('Retry-After');
+  check('429 carries Retry-After', !!retryAfter, String(retryAfter));
+  check(
+    'Retry-After is a positive number of seconds',
+    Number.isFinite(Number(retryAfter)) && Number(retryAfter) > 0,
+    String(retryAfter),
+  );
 }
 
 // 7 ── Scoped tokens
@@ -545,7 +566,17 @@ console.log('\nPortal E2E: embedding');
     closedCsp.includes("frame-ancestors 'none'"),
     closedCsp,
   );
-  check('X-Frame-Options is not relied upon', closed.status === 200);
+  // Named for what it checks. The previous version asserted `closed.status === 200`
+  // under the title "X-Frame-Options is not relied upon", so the header it was
+  // named after was never looked at. CSP frame-ancestors is the control; a
+  // legacy X-Frame-Options alongside it cannot express an allow-list and would
+  // contradict the CSP once embedding IS enabled.
+  check('the closed portal still serves', closed.status === 200, `status ${closed.status}`);
+  check(
+    'no legacy X-Frame-Options header is sent',
+    closed.headers.get('X-Frame-Options') === null,
+    String(closed.headers.get('X-Frame-Options')),
+  );
 
   // A malformed origin must BLOCK publishing rather than being silently
   // dropped: quietly discarding it would leave the owner believing a site is

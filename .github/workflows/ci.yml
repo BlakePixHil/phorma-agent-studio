@@ -1,0 +1,156 @@
+# Continuous integration - the gate that was missing.
+#
+# Before this file, `release.yml` was the only workflow in the repo and it is
+# tag-triggered and build-only. Nothing ran the test suites automatically, so
+# roughly 1700 assertions across four packages - the secret fail-closed path,
+# the capability deploy gate, the credits/dollars split, journal replay,
+# sub-workflow frame identity, the portal redaction projection - only ran when
+# somebody remembered the command. One engine scenario script had been dead long
+# enough for its import chain to grow past it, with nobody noticing.
+#
+# Everything here runs in well under ten minutes.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── engine, cloud and frontend ──────────────────────────────────────────
+  checks:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # frontend deps come first: the engine's cross-package scenario scripts
+      # resolve `@phorma/engine` through frontend/tsconfig.json.
+      - name: Install dependencies (frontend)
+        run: npm install --legacy-peer-deps
+        working-directory: frontend
+
+      - name: Install dependencies (engine)
+        run: npm install --legacy-peer-deps
+        working-directory: engine
+
+      - name: Install dependencies (cloud)
+        run: npm install --legacy-peer-deps
+        working-directory: cloud
+
+      - name: Install dependencies (cloud-aws)
+        run: npm install --legacy-peer-deps
+        working-directory: cloud-aws
+
+      # ── installer payload ───────────────────────────────────────────────
+      # The BYO deploy runtimes ship inside the installer as Tauri resources, so
+      # a production install needs no checkout of this repo. The manifest is a
+      # hand-written path list: this guard fails when a listed path disappears or
+      # when a new top-level entry of cloud/, cloud-aws/ or engine/ is neither
+      # bundled nor explicitly excluded. Cheap, and it runs before the suites
+      # because a missing resource is invisible until a user's deploy breaks.
+      - name: Deploy bundle manifest
+        run: node scripts/check-deploy-bundle.mjs
+
+      # ── engine ──────────────────────────────────────────────────────────
+      - name: Engine unit and property tests
+        run: npm test
+        working-directory: engine
+
+      - name: Engine type check
+        run: ../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json
+        working-directory: engine
+
+      - name: Engine scenario scripts
+        run: npm run test:e2e
+        working-directory: engine
+
+      # ── cloud ───────────────────────────────────────────────────────────
+      # `test:unit` deliberately, not `test`: the portal e2e needs a running
+      # `wrangler dev` plus a local model, so it stays a manual command.
+      - name: Cloud unit tests
+        run: npm run test:unit
+        working-directory: cloud
+
+      - name: Cloud type check and deploy dry-run
+        run: npm run check
+        working-directory: cloud
+
+      # ── cloud-aws ───────────────────────────────────────────────────────
+      # `check` is the pre-deploy gate: tsc, both container image synthesis
+      # paths, the infra template and IAM assertions, then the seven static
+      # guards. It runs with no AWS credentials and no Docker daemon, which is
+      # exactly what a runner has. The guards are only a gate once this step
+      # exists - nothing here ran in CI before.
+      #
+      # `@phorma/engine` resolves through cloud-aws's tsconfig path alias into
+      # `engine/src`, so the checkout supplies it and no engine install is
+      # needed for these two steps.
+      - name: Cloud AWS check pipeline
+        run: npm run check
+        working-directory: cloud-aws
+
+      - name: Cloud AWS unit and property tests
+        run: npm test
+        working-directory: cloud-aws
+
+      # The scenario scripts drive the real Server_Entry over loopback against
+      # the fakes. `vitest.config.ts` excludes `test/**`, so `npm test` above
+      # does NOT run them - without this step a crash before the first assertion
+      # would look like silence.
+      - name: Cloud AWS scenario scripts
+        run: npm run test:e2e
+        working-directory: cloud-aws
+
+      # ── frontend ────────────────────────────────────────────────────────
+      - name: Frontend unit tests
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+        working-directory: frontend
+
+      # The production build is the ONLY thing that checks Angular budgets;
+      # `ng serve` and `tsc` do not.
+      - name: Frontend production build
+        run: npm run build
+        working-directory: frontend
+
+  # ── Rust desktop shell ──────────────────────────────────────────────────
+  rust:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('backend/src-tauri/Cargo.lock') }}
+
+      - name: Cargo check
+        run: cargo check --locked
+        working-directory: backend/src-tauri
+
+      # The crate's unit tests (SQL statement safety, provider key scopes, data
+      # request shaping, the deploy-runtime copy) had never run in CI.
+      - name: Cargo test
+        run: cargo test --locked
+        working-directory: backend/src-tauri

@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 
 import type { Connection } from '@phorma/engine';
 
-import { ConnectionStoreService } from './connection-store.service';
+import { ConnectionStoreService, hostSecretSentinel } from './connection-store.service';
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { TauriService } from './tauri.service';
 
@@ -127,5 +127,59 @@ describe('ConnectionStoreService (desktop host)', () => {
     expect(
       (service as unknown as { resolved: Map<string, unknown> }).resolved.has(conn.id),
     ).toBeTrue();
+  });
+
+  /**
+   * The rule the whole sentinel mechanism exists for: secrets stay out of the
+   * webview. The test above checks the secret NAMES, so `freezeResolved` could
+   * be changed to put real keychain values in that map and every other case in
+   * this file would still pass. That is the one thing a spec named after the
+   * keychain path must not leave unchecked.
+   */
+  it('hands out a sentinel per declared secret, never a value (Requirement 3.3)', async () => {
+    const conn = connection('conn-desktop-sentinel', { mode: 'bearer', secretKey: 'apiKey' }, [
+      'apiKey',
+      'refreshToken',
+    ]);
+    await db.saveConnection(conn);
+    savedIds.push(conn.id);
+
+    stubPresence({ apiKey: true, refreshToken: true });
+
+    const resolved = await service.resolve(conn.id);
+
+    for (const key of ['apiKey', 'refreshToken']) {
+      expect(resolved.secrets[key]).withContext(key).toBe(hostSecretSentinel(conn.id, key));
+      // A sentinel names the connection and key so Rust can look the value up;
+      // it must be exactly that and carry no material of its own.
+      expect(resolved.secrets[key]).withContext(key).toContain(conn.id);
+      expect(resolved.secrets[key]).withContext(key).toContain(key);
+    }
+  });
+
+  it('freezes secrets and config so a node cannot mutate the resolved bundle (Requirement 2.6)', async () => {
+    const conn = connection('conn-desktop-frozen', { mode: 'bearer', secretKey: 'apiKey' }, [
+      'apiKey',
+    ]);
+    await db.saveConnection(conn);
+    savedIds.push(conn.id);
+
+    stubPresence({ apiKey: true });
+
+    const resolved = await service.resolve(conn.id);
+
+    expect(Object.isFrozen(resolved.secrets)).toBeTrue();
+    expect(Object.isFrozen(resolved.config)).toBeTrue();
+
+    // Frozen in the strong sense: a write is refused, not silently applied.
+    const before = resolved.secrets['apiKey'];
+    try {
+      (resolved.secrets as Record<string, string>)['apiKey'] = 'injected';
+      (resolved.secrets as Record<string, string>)['smuggled'] = 'injected';
+    } catch {
+      /* strict mode throws; either way the assertions below hold */
+    }
+    expect(resolved.secrets['apiKey']).toBe(before);
+    expect(resolved.secrets['smuggled']).toBeUndefined();
   });
 });

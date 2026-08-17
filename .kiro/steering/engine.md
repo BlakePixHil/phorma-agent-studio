@@ -72,8 +72,17 @@ Design intent and requirement numbering for all of the above live in
   `fast-check` with shared arbitraries in `src/test/generators.ts`; in-memory hosts such as
   `src/test/memory-state-store.ts` back the store contracts.
 - A property test asserts a named claim from the spec. Keep the claim reference in the test name so
-  the link back to `.kiro/specs/deterministic-data-path/` survives.
-- Scenario tests are `test/*.e2e.mts`, run with `npx -y tsx engine/test/<name>.e2e.mts`: build a
+  the link back to `.kiro/specs/deterministic-data-path/` survives. A property that restates the
+  implementation's own guard, or compares a function to itself, is not a test - shape-only claims
+  (deduped, ordered, capped, lower-cased) all hold for an empty result, so pair every one with a
+  case that pins CONTENTS.
+- Never mirror a production constant table into a spec as an "oracle". A copy shares the bug you are
+  hunting: an `egress.spec.ts` copy of `PROVIDER_HOSTS` passed with a hostile hostname in both.
+- `npm run test:e2e` runs all 11 scenario scripts (`test/run-all.mjs`). Do not add a scenario script
+  without it being picked up there - `vitest.config.ts` excludes `test/**`, so `npm test` will not
+  run it and a crash before the first assertion looks like silence.
+- Scenario tests are `test/*.e2e.mts`, run individually with `npx -y tsx engine/test/<name>.e2e.mts`
+  (cross-package ones need `TSX_TSCONFIG_PATH=frontend/tsconfig.json`): build a
   graph with tiny node/edge helpers, drive `startRun` with a fake `ModelClient` and stub
   `waitForEvent` / `requestApproval`, assert on the collected `RunEvent` list. Orders of magnitude
   faster than a browser - prefer it for any engine-only behaviour.

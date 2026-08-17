@@ -1,0 +1,21 @@
+# Mirrors IMAGE_CONTEXT_EXCLUDES in cloud-aws/src/infra so a hand-run
+# `docker build -f cloud-aws/Dockerfile .` from the repository root sees the same
+# context the CDK Docker image asset fingerprints. The image needs only cloud-aws/
+# and engine/; everything else is excluded so an unrelated edit cannot trigger an
+# image rebuild.
+node_modules
+**/node_modules
+frontend
+backend
+cloud
+mcp
+docs
+.git
+.kiro
+cdk.out
+**/cdk.out
+**/*.spec.ts
+# Schedule_Shim Lambda bundle. Rebuilt before every synth and never COPYed by the
+# Dockerfile, so including it would churn the image fingerprint on every deploy.
+dist
+**/dist

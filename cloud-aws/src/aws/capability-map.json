@@ -1,0 +1,12 @@
+{
+  "spec": "src/aws/document-table-client.ts",
+  "journal": "src/aws/document-table-client.ts",
+  "runHistory": "src/aws/document-table-client.ts",
+  "runEvents": "src/aws/document-table-client.ts",
+  "usageLedger": "src/aws/document-table-client.ts",
+  "workflowState": "src/aws/document-table-client.ts",
+  "connections": "src/aws/secrets-backend.ts",
+  "schedules": "src/aws/scheduler-backend.ts",
+  "monitor": "src/aws/monitor-backend.ts",
+  "lease": "src/aws/document-table-client.ts"
+}
