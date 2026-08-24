@@ -52,6 +52,21 @@ const NOT_BUNDLED = {
   'engine/vitest.config.ts': 'test runner configuration',
 };
 
+/**
+ * NOT_BUNDLED entries that exist only after a local build or CLI run. The
+ * liveness check at the bottom must skip them: a fresh checkout has none of
+ * them, so requiring them to exist fails every CI run while passing on any
+ * machine that happens to have built. A stale entry here is pruned when the
+ * tool that writes the path goes away, which is a code change, not a state one.
+ */
+const GENERATED = new Set([
+  'cloud/.wrangler/',
+  'cloud/dist/',
+  'cloud-aws/cdk.context.json',
+  'cloud-aws/cdk.out/',
+  'cloud-aws/dist/',
+]);
+
 /** Packages whose top-level entries must be accounted for. */
 const PACKAGES = ['cloud', 'cloud-aws', 'engine'];
 
@@ -105,7 +120,14 @@ for (const pkg of PACKAGES) {
   }
 }
 
+for (const entry of GENERATED) {
+  if (!(entry in NOT_BUNDLED)) {
+    failures.push(`GENERATED names "${entry}", which is not in NOT_BUNDLED - one of the two is stale`);
+  }
+}
+
 for (const entry of Object.keys(NOT_BUNDLED)) {
+  if (GENERATED.has(entry)) continue;
   const path = resolve(ROOT, entry);
   if (!existsSync(path)) {
     failures.push(`NOT_BUNDLED names "${entry}", which no longer exists - prune it`);

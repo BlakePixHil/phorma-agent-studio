@@ -22,6 +22,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const targets = [
   'backend/src-tauri/tauri.conf.json',
   'backend/src-tauri/Cargo.toml',
+  // The lock records the workspace crate's own version, so bumping Cargo.toml
+  // without it makes `cargo check --locked` (which CI runs) fail with "cannot
+  // update the lock file ... because --locked was passed".
+  'backend/src-tauri/Cargo.lock',
   'backend/package.json',
   'admin/package.json',
   'cloud/package.json',
@@ -53,6 +57,33 @@ function setTomlVersion(path, version) {
     return line;
   });
   writeFileSync(file, out.join('\n'));
+}
+
+/**
+ * Rewrites the workspace crate's own `version` inside Cargo.lock, leaving every
+ * dependency entry alone. The crate name is read from Cargo.toml rather than
+ * hardcoded, so a rename cannot make this silently no-op. Throws when the entry
+ * is absent, because a stale lock only surfaces later as a `--locked` failure.
+ */
+function setCargoLockVersion(path, version) {
+  const file = resolve(root, path);
+  const name = readFileSync(resolve(root, 'backend/src-tauri/Cargo.toml'), 'utf8').match(
+    /^name\s*=\s*"([^"]+)"/m,
+  )?.[1];
+  if (!name) throw new Error('Could not read the crate name from Cargo.toml');
+
+  const lines = readFileSync(file, 'utf8').split('\n');
+  const nameIndex = lines.findIndex(line => line.trim() === `name = "${name}"`);
+  if (nameIndex === -1) throw new Error(`Could not find package "${name}" in ${path}`);
+
+  const versionIndex = lines.findIndex(
+    (line, index) => index > nameIndex && /^version\s*=/.test(line),
+  );
+  if (versionIndex === -1 || versionIndex > nameIndex + 3) {
+    throw new Error(`Could not find the version of "${name}" in ${path}`);
+  }
+  lines[versionIndex] = `version = "${version}"`;
+  writeFileSync(file, lines.join('\n'));
 }
 
 function setTauriConfVersion(path, version) {
@@ -97,7 +128,8 @@ for (const target of targets) {
     console.log(`  would bump ${target}`);
     continue;
   }
-  if (target.endsWith('.toml')) setTomlVersion(target, version);
+  if (target.endsWith('Cargo.lock')) setCargoLockVersion(target, version);
+  else if (target.endsWith('.toml')) setTomlVersion(target, version);
   else if (target.endsWith('tauri.conf.json')) setTauriConfVersion(target, version);
   else if (target.endsWith('.ts')) setConstVersion(target, version);
   else setJsonVersion(target, version);
