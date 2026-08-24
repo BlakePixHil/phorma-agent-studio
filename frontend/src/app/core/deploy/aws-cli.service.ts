@@ -18,15 +18,17 @@
  *   (Req 9.2, 9.3, 9.4).
  *
  * Injections: TauriService, TerminalOutputService, ToastService,
- * ConfirmDialogService, AwsDeployConfigService - NEVER CloudService (DI cycle
- * hazard). `AwsDeployConfigService` injects only `TauriService`, so the edge
- * added for endpoint discovery closes no cycle.
+ * ConfirmDialogService, AwsDeployConfigService, TelemetryService - NEVER
+ * CloudService (DI cycle hazard). `AwsDeployConfigService` and
+ * `TelemetryService` inject only `TauriService`, so neither edge closes a cycle.
  */
 import { Injectable, inject, signal } from '@angular/core';
 
 import type { EgressAllowList } from '@phorma/engine';
 
 import { TauriService } from '../tauri.service';
+import { counterName } from '../telemetry-catalog';
+import { TelemetryService } from '../telemetry.service';
 import { TerminalOutputService } from '../terminal-output.service';
 import { ToastService } from '../../shared/toast/toast.service';
 import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
@@ -69,6 +71,9 @@ export class AwsCliService {
   private readonly toast = inject(ToastService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly awsConfig = inject(AwsDeployConfigService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge reaches nothing on the deploy or run path.
+  private readonly telemetry = inject(TelemetryService);
 
   /** True while any AWS command is in flight. Guards concurrent execution. */
   readonly running = signal(false);
@@ -130,6 +135,12 @@ export class AwsCliService {
         return;
       }
 
+      // One `deploy.started:aws` per initiated deploy (3.1, 3.2). Counted here
+      // rather than at the top of this method because everything above is the
+      // plan: a plan that failed, or a confirmation the operator declined,
+      // started no deploy. Nothing below retries, so this cannot count twice.
+      this.telemetry.count(counterName('deploy.started', 'aws'));
+
       // Run deploy command. Its `deploy-outputs` envelope is collected instead of
       // printed, so the endpoints can be read back without a base64 framing line
       // landing in the operator's console.
@@ -139,6 +150,12 @@ export class AwsCliService {
         this.toast.success('Deployed', 'AWS infrastructure updated.');
         await this.discoverEndpoints(cloudAwsDir, collected);
       } else {
+        // One `error:deploy` per counted `deploy.started:aws`, at the same seam
+        // and for the same reason (Requirements 3.1, 3.2). A plan that failed
+        // above started no deploy and is not counted here. The exit code and
+        // every line of CLI output stay in the terminal: `recordError` takes the
+        // category and nothing else (11.3).
+        this.telemetry.recordError('deploy');
         this.reportExitFailure('Deploy failed', deployResult.exitCode);
       }
     } finally {

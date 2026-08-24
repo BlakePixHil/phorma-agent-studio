@@ -16,6 +16,7 @@ import { loadPhormaCloudUrl } from './phorma-cloud-url';
 import { PhormaCloudService } from './phorma-cloud.service';
 import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
+import { TelemetryService } from './telemetry.service';
 
 /**
  * Chooses the model transport for local runs:
@@ -35,6 +36,10 @@ export class ModelTransportService {
   private readonly tauri = inject(TauriService);
   private readonly settings = inject(SettingsService);
   private readonly phormaCloud = inject(PhormaCloudService);
+  // Safe DI direction even though this service sits on the known NG0200 cycle:
+  // `TelemetryService` is a leaf that injects only `TauriService`, so it cannot
+  // reach back into `RunControllerService`.
+  private readonly telemetry = inject(TelemetryService);
 
   /** The ModelClient local runs should use. */
   create(): ModelClient {
@@ -48,7 +53,12 @@ export class ModelTransportService {
     // RunControllerService. The value rarely changes and is re-read on every
     // create() call, so it stays current enough.
     const cloudBaseUrl = loadPhormaCloudUrl();
-    return new CompositeModelClient(byoClient, this.phormaCloud, cloudBaseUrl);
+    const composite = new CompositeModelClient(byoClient, this.phormaCloud, cloudBaseUrl);
+    // The engine's `FetchModelClient` cannot count anything itself — it is pure
+    // TypeScript with no Angular — so the studio-side transport seam counts for
+    // it. Wrapping the composite (not each inner client) is what keeps one
+    // failed inference call to exactly one counter.
+    return new CountedModelClient(composite, this.telemetry);
   }
 
   /**
@@ -329,6 +339,46 @@ class CompositeModelClient implements ModelClient {
     }
     return this.byo.stream(request);
   }
+}
+
+/**
+ * Counts a failed inference call, then rethrows it untouched (Requirements 3.1,
+ * 3.2, 11.3). Only a CATEGORY is recorded: `recordError` has no parameter a
+ * message, a status or a stack could travel in, and the error object itself
+ * never leaves this file.
+ *
+ * One wrapper around the composite, rather than one per inner client, is what
+ * keeps a single failed call to a single counter. A consumer that abandons the
+ * stream early (the stop button) closes the generator instead of throwing, so a
+ * deliberate stop counts nothing.
+ */
+class CountedModelClient implements ModelClient {
+  constructor(
+    private readonly inner: ModelClient,
+    private readonly telemetry: TelemetryService,
+  ) {}
+
+  async *stream(request: ModelRequest): AsyncIterable<ModelChunk> {
+    try {
+      yield* this.inner.stream(request);
+    } catch (error) {
+      this.telemetry.recordError(modelErrorCategory(error));
+      throw error;
+    }
+  }
+}
+
+/**
+ * `model-call` when a provider (or the Phorma Cloud proxy) answered and the
+ * answer was a failure, `network` when the request never produced a response.
+ * `fetch` rejects with a bare `TypeError` for a DNS, connect, TLS or CORS
+ * failure, which is the only signal the browser gives us — the desktop path goes
+ * through Rust, where a transport failure arrives as an ordinary `Error` that
+ * cannot be told apart from a provider error, so it stays on `model-call`.
+ */
+function modelErrorCategory(error: unknown): 'model-call' | 'network' {
+  if (error instanceof ModelRequestError) return 'model-call';
+  return error instanceof Error && error.name === 'TypeError' ? 'network' : 'model-call';
 }
 
 /**

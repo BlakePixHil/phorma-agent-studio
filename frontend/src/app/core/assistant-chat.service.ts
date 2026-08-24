@@ -14,6 +14,8 @@ import {
 } from './assistant-chat.model';
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { loadLayout, saveLayout } from './layout-storage';
+import { counterName } from './telemetry-catalog';
+import { TelemetryService } from './telemetry.service';
 import { WorkflowBuilderService, isCreditsError } from './workflow-builder.service';
 import { WorkflowService } from './workflow.service';
 
@@ -34,6 +36,9 @@ export class AssistantChatService {
   private readonly storage = inject(IndexedDbStorageService);
   private readonly builder = inject(WorkflowBuilderService);
   private readonly workflow = inject(WorkflowService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so it cannot pull anything back into this service.
+  private readonly telemetry = inject(TelemetryService);
 
   /** Threads for the active workflow, newest first. */
   readonly threads = signal<ChatThread[]>([]);
@@ -132,6 +137,10 @@ export class AssistantChatService {
     const trimmed = request.trim();
     if (!trimmed || this.busy()) return;
     if (!this.builder.modeAvailable(mode)) return;
+
+    // One count per accepted invocation, past every guard and before any model
+    // work, so a streamed turn counts once rather than per chunk (3.1, 3.2).
+    this.telemetry.count(counterName('assistant.invoked', mode));
 
     if (!this.activeThread()) this.newThread();
     const model = this.resolvedModel();

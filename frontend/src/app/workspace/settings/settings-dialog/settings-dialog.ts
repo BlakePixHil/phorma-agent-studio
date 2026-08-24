@@ -63,6 +63,7 @@ import {
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
 import { InfoPopover } from '../../../shared/info-popover/info-popover';
+import { PrivacySettings } from '../privacy/privacy-settings';
 import {
   MODEL_PROVIDERS,
   PROVIDER_MODEL_SUGGESTIONS,
@@ -96,7 +97,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, InfoPopover],
+  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, InfoPopover, PrivacySettings],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })

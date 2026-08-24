@@ -178,6 +178,13 @@ export interface Env extends TenantEnv, PortalRegistryEnv, SecretVaultEnv {
   CLERK_JWT_KEY?: string;
   /** Comma-separated origins allowed as JWT azp (token replay protection). */
   CLERK_AUTHORIZED_PARTIES?: string;
+  /**
+   * Comma-separated Clerk user ids allowed to read `/api/admin/telemetry/*`
+   * (the Owner_Allowlist). Absent or empty means NO access, never open access —
+   * the allowlist is the only key to that surface. Hosted only:
+   * `npx wrangler secret put TELEMETRY_ADMIN_USER_IDS --env hosted`.
+   */
+  TELEMETRY_ADMIN_USER_IDS?: string;
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
   GEMINI_API_KEY?: string;

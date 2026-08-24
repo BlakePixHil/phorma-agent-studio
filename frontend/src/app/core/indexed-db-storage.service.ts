@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 
 import {
   STATE_LIST_DEFAULT_LIMIT,
@@ -24,6 +24,7 @@ import type { PromptEntry } from './prompt-library.model';
 import type { SkillDef } from './skills.model';
 import type { WorkflowSpec } from './workflow.model';
 import { WORKFLOW_VERSIONS_KEEP, type WorkflowVersion } from './workflow-versions.model';
+import { TelemetryService } from './telemetry.service';
 
 const DB_NAME = 'phorma-agent-studio-db';
 const DB_VERSION = 10;
@@ -132,6 +133,10 @@ const WORKFLOW_STATE_BY_WORKFLOW = 'by-workflow';
  */
 @Injectable({ providedIn: 'root' })
 export class IndexedDbStorageService {
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService` and no storage service, so this edge cannot come back here.
+  private readonly telemetry = inject(TelemetryService);
+
   private dbPromise: Promise<IDBDatabase> | null = null;
 
   /**
@@ -903,15 +908,31 @@ export class IndexedDbStorageService {
         }
       };
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error('Could not open IndexedDB.'));
+      request.onerror = () => {
+        // A database that will not open is the one storage failure every caller
+        // inherits, so it is counted here rather than in each of them
+        // (Requirements 3.1, 3.2). Category only: `DOMException.name` and its
+        // message stay local, because `recordError` has no parameter for them.
+        this.telemetry.recordError('storage');
+        reject(request.error ?? new Error('Could not open IndexedDB.'));
+      };
     });
     return this.dbPromise;
   }
 
+  /**
+   * Every store operation in this service goes through here, so one failed
+   * IndexedDB request is one `storage` counter (Requirements 3.1, 3.2, 11.3).
+   * A request that fails aborts its transaction, so a single logical failure
+   * cannot count twice on this path.
+   */
   private request<T>(request: IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'));
+      request.onerror = () => {
+        this.telemetry.recordError('storage');
+        reject(request.error ?? new Error('IndexedDB request failed.'));
+      };
     });
   }
 }

@@ -1,5 +1,6 @@
 import {
   ApplicationConfig,
+  ErrorHandler,
   provideBrowserGlobalErrorListeners,
   provideZoneChangeDetection,
   inject,
@@ -19,6 +20,7 @@ import {
   type ThemePaletteId,
 } from './core/theme-palettes';
 import { PHORMA_COMPONENTS, PHORMA_SEMANTIC } from './core/theme-preset';
+import { TelemetryErrorHandler } from './core/telemetry-error-handler';
 import { CLERK_PUBLISHABLE_KEY } from '../environments/clerk';
 
 /**
@@ -72,6 +74,10 @@ const PhormaPreset = definePreset(Aura, {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    // Counts `error:unknown` for a throw no surface classified, then delegates to
+    // Angular's own reporting unchanged. The global listeners above are what
+    // route a window `error` or `unhandledrejection` here as well.
+    { provide: ErrorHandler, useClass: TelemetryErrorHandler },
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
     // Initialise Clerk (ngx-clerk v0.2.0 exposes ClerkService.__init rather

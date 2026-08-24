@@ -95,6 +95,9 @@
   //   KEY_ENC_SECRET              - base64 32-byte AES-GCM key for stored runtime keys
   //   OPENROUTER_PROVISIONING_KEY - mints per-tenant credit-limited runtime keys
   //   PHORMA_ADMIN_TOKEN          - guards /api/provision + /api/deactivate
+  //   TELEMETRY_ADMIN_USER_IDS    - comma-separated Clerk user ids allowed to read
+  //                                 /api/admin/telemetry/* (absent or empty = 403
+  //                                 for everyone, which is the intended default)
   // One-time setup:
   //   npx wrangler d1 create phorma-cloud            (paste id below)
   //   npx wrangler kv namespace create TENANTS       (paste id below)
@@ -108,7 +111,29 @@
       "account_id": "a088bd7c3fb962dfb28d003e8478dffe",
       "vars": {
         "PHORMA_MODE": "hosted",
-        "ALLOWED_ORIGINS": "http://localhost:7322,tauri://localhost,https://tauri.localhost"
+        // The studio origins, plus the telemetry admin dashboard (the
+        // `phorma-admin` worker). The dashboard belongs HERE because it is a
+        // browser app on a real origin calling the authenticated
+        // `/api/admin/telemetry/*` routes, so it has to pass the same CORS
+        // check as the studio. The telemetry INGEST route (`/telemetry`) is the
+        // opposite case: it answers its own preflight with an open CORS set and
+        // never consults this list, precisely so accepting anonymous rollups
+        // from anywhere does not widen the authenticated `/api/*` surface. A
+        // custom dashboard domain would need adding here too.
+        //
+        // `http://localhost:7323` is the dashboard's dev server, the counterpart
+        // of `http://localhost:7322` for the studio. Without it a local
+        // `npm start` in `admin/` gets `Access-Control-Allow-Origin:
+        // http://localhost:7322` (the list head is the fallback for an
+        // unlisted origin) and every request fails the browser CORS check
+        // before the authorization gate ever runs.
+        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev"
+      },
+      // Telemetry retention pass, daily at 03:17 UTC (the odd minute keeps it
+      // off the top-of-hour crowd). HOSTED ONLY on purpose: a BYO deployment has
+      // no `DB` binding and nothing to prune, so it gets no cron at all.
+      "triggers": {
+        "crons": ["17 3 * * *"]
       },
       "durable_objects": {
         "bindings": [

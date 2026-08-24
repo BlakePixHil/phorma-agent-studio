@@ -4,6 +4,7 @@ import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
+import { TelemetryService } from './telemetry.service';
 
 /** Profile + quota returned by the hosted control plane's `GET /api/me`. */
 export interface PhormaCloudProfile {
@@ -109,6 +110,10 @@ function normalizeProfile(profile: PhormaCloudProfile): PhormaCloudProfile {
 @Injectable({ providedIn: 'root' })
 export class PhormaCloudService {
   private readonly clerk = inject(ClerkService);
+  // Safe DI direction even though this service sits on the known NG0200 cycle:
+  // `TelemetryService` is a leaf that injects only `TauriService`, so it cannot
+  // reach `CloudService` or `RunControllerService` from here.
+  private readonly telemetry = inject(TelemetryService);
 
   /** Current Clerk user (null until Clerk loads / when signed out). */
   readonly user = toSignal(this.clerk.user$, { initialValue: null });
@@ -259,6 +264,12 @@ export class PhormaCloudService {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       if (!response.ok) {
+        // A 401 from the control plane means the session the studio holds is not
+        // accepted: the one authentication failure this service can observe, and
+        // the only status counted here (Requirements 3.1, 3.2). Category only -
+        // the status, the body and the error text stay local, because
+        // `recordError` has no parameter they could travel in.
+        if (response.status === 401) this.telemetry.recordError('auth');
         const detail = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(detail?.error ?? `Phorma Cloud responded with HTTP ${response.status}.`);
       }

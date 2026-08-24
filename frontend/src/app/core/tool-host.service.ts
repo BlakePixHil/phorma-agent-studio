@@ -18,6 +18,7 @@ import { ConnectionStoreService } from './connection-store.service';
 import { McpOAuthService } from './mcp-oauth.service';
 import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
+import { TelemetryService } from './telemetry.service';
 
 /**
  * The studio's {@link ToolHost}: how local runs discover and execute tools.
@@ -33,6 +34,9 @@ export class ToolHostService implements ToolHost {
   private readonly settings = inject(SettingsService);
   private readonly oauth = inject(McpOAuthService);
   private readonly connections = inject(ConnectionStoreService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge reaches nothing on the run path.
+  private readonly telemetry = inject(TelemetryService);
 
   /** HTTP MCP clients, keyed by tool node id (reused across a run). */
   private readonly httpMcpClients = new Map<string, HttpMcpClient>();
@@ -54,7 +58,33 @@ export class ToolHostService implements ToolHost {
     }
   }
 
+  /**
+   * Executes one tool call. A throw is counted once here as `tool-call` and
+   * rethrown untouched (Requirements 3.1, 3.2, 11.3) - the category is all that
+   * is recorded, and `recordError` has no parameter the message or the stack
+   * could travel in.
+   *
+   * A failure this method turns into an `Error: ...` RESULT is deliberately not
+   * counted: the model receives it, can recover from it, and the run continues,
+   * so it is a tool answer rather than a failed call. An MCP session that cannot
+   * be reached from here counts as `tool-call` and not as `mcp`, because
+   * `listMcpTools` already owns the connect seam and one failure gets one
+   * counter.
+   */
   async callTool(node: WorkflowNode, nativeName: string, argumentsJson: string): Promise<string> {
+    try {
+      return await this.dispatchTool(node, nativeName, argumentsJson);
+    } catch (error) {
+      this.telemetry.recordError('tool-call');
+      throw error;
+    }
+  }
+
+  private async dispatchTool(
+    node: WorkflowNode,
+    nativeName: string,
+    argumentsJson: string,
+  ): Promise<string> {
     switch (node.kind) {
       case 'http-tool': {
         const request = buildHttpToolRequest(node, argumentsJson);
@@ -98,7 +128,24 @@ export class ToolHostService implements ToolHost {
 
   // ── MCP ────────────────────────────────────────────────────────────────────
 
+  /**
+   * The MCP connect path: a stdio session spawned through Rust, or an HTTP
+   * session opened by the engine's client, followed by the server's tool list.
+   * Every way this can fail - no desktop shell, a missing URL, a missing token,
+   * a spawn that dies, a server that refuses - is counted once as `mcp`
+   * (Requirements 3.1, 3.2, 11.3). Category only: the error is rethrown
+   * untouched and nothing about it is recorded.
+   */
   private async listMcpTools(node: WorkflowNode): Promise<Omit<ResolvedTool, 'nodeId'>[]> {
+    try {
+      return await this.connectMcp(node);
+    } catch (error) {
+      this.telemetry.recordError('mcp');
+      throw error;
+    }
+  }
+
+  private async connectMcp(node: WorkflowNode): Promise<Omit<ResolvedTool, 'nodeId'>[]> {
     const data = node.data as {
       transport?: 'stdio' | 'sse';
       command?: string;

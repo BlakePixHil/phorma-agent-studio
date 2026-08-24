@@ -21,6 +21,8 @@ import { PhormaCloudService } from './phorma-cloud.service';
 import { SettingsService } from './settings.service';
 import { planOpCall } from './studio-actions/plan-op';
 import { StudioActionRegistryService } from './studio-actions/studio-action-registry.service';
+import { counterName } from './telemetry-catalog';
+import { TelemetryService } from './telemetry.service';
 import { WorkflowService } from './workflow.service';
 import {
   buildAgentSystemPrompt,
@@ -101,6 +103,10 @@ export class WorkflowBuilderService {
   private readonly actions = inject(StudioActionRegistryService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly context = inject(AssistantContextService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge cannot close the known NG0200 cycle through
+  // `ModelTransportService -> PhormaCloudService -> CloudService`.
+  private readonly telemetry = inject(TelemetryService);
 
   readonly status = signal<BuilderStatus>('idle');
   /** Plan-mode playback progress (null outside of applying). */
@@ -182,6 +188,11 @@ export class WorkflowBuilderService {
     if (this.running) return;
     const trimmed = request.trim();
     if (!trimmed) return;
+
+    // The Ctrl+P builder entry point. `BuilderMode` is a subset of
+    // `AssistantMode`, so the palette's mode is already a catalog dimension;
+    // one count per accepted build, not per model round trip (3.1, 3.2).
+    this.telemetry.count(counterName('assistant.invoked', mode));
 
     this.cancelled = false;
     this.error.set(null);

@@ -37,6 +37,7 @@ import { isHosted, type AuthEnv } from './auth';
 import { WORKER_BUILD } from './build-info';
 import { portalIndex, type PortalIndex } from './portal-registry';
 import { secretVault, type SecretVaultEnv } from './secret-vault';
+import { ensureTelemetrySchema } from './telemetry';
 
 /** Per-component health. `unknown` means "not part of this deployment". */
 export type ComponentStatus = 'operational' | 'degraded' | 'outage' | 'unknown';
@@ -202,16 +203,18 @@ export async function collectStatus(env: StatusEnv): Promise<StatusPayload> {
   const hosted = isHosted(env);
   const notice = await readNotice(env);
 
-  const [runtime, database, plans, vault, portals, downloads, auth, inference] = await Promise.all([
-    timed(() => probeRuntime(env)),
-    timed(() => probeDatabase(env, hosted)),
-    timed(() => probePlanStore(env, hosted)),
-    timed(() => probeVault(env, hosted)),
-    timed(() => probePortals(env)),
-    timed(() => probeDownloads(env, hosted)),
-    timed(() => probeAuth(env, hosted)),
-    timed(() => probeInference(env, hosted)),
-  ]);
+  const [runtime, database, plans, vault, portals, downloads, auth, inference, telemetry] =
+    await Promise.all([
+      timed(() => probeRuntime(env)),
+      timed(() => probeDatabase(env, hosted)),
+      timed(() => probePlanStore(env, hosted)),
+      timed(() => probeVault(env, hosted)),
+      timed(() => probePortals(env)),
+      timed(() => probeDownloads(env, hosted)),
+      timed(() => probeAuth(env, hosted)),
+      timed(() => probeInference(env, hosted)),
+      timed(() => probeTelemetry(env)),
+    ]);
 
   const components: StatusComponent[] = [
     describe('runtime', 'Workflow runtime', 'Runs your deployed workflows and streams live traces.', true, null, runtime),
@@ -222,6 +225,7 @@ export async function collectStatus(env: StatusEnv): Promise<StatusPayload> {
     describe('downloads', 'Downloads and updates', 'Installer downloads and the in-app auto-updater.', false, null, downloads),
     describe('auth', 'Sign-in', 'Account sign-in and session verification.', true, 'Clerk', auth),
     describe('inference', 'Hosted models', 'Model calls billed to your Phorma Cloud credits.', true, 'OpenRouter', inference),
+    describe('telemetry', 'Usage telemetry', 'Anonymous product usage counters.', false, null, telemetry),
   ];
 
   const status = rollup(components, notice);
@@ -498,6 +502,22 @@ async function probeInference(env: StatusEnv, hosted: boolean): Promise<ProbeRes
   if (!response.ok) {
     return { status: 'outage', detail: 'Model provider is not responding correctly.' };
   }
+  return OK;
+}
+
+/**
+ * Telemetry_Store reachability. Runs the self-healing schema creation first, so
+ * a deployment whose migrations were never applied reports operational rather
+ * than "no such table", then reads one row off `telemetry_rollups`. An empty
+ * table answers null, which is a normal state and not a fault.
+ *
+ * `critical: false` at the call site, and `unknown` without `DB`: a BYO Worker
+ * collects nothing, and telemetry being down must never turn the badge red.
+ */
+async function probeTelemetry(env: StatusEnv): Promise<ProbeResult> {
+  if (!env.DB) return absent('This deployment does not collect telemetry.');
+  await ensureTelemetrySchema(env.DB);
+  await env.DB.prepare('SELECT 1 FROM telemetry_rollups LIMIT 1').first<{ ok: number }>();
   return OK;
 }
 

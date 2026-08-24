@@ -41,3 +41,36 @@ pub fn write_workflow_file(path: String, content: String) -> Result<(), String> 
     fs::write(&path, content)
         .map_err(|error| format!("Could not write workflow '{}': {error}", path.display()))
 }
+
+/// Reports a coarse operating system version string, for example
+/// `Windows 11 Pro (24H2)` or `Darwin 14.5`.
+///
+/// Used by the anonymous telemetry rollup, so it must never carry a machine
+/// name, a user name, or any other identifier: only the OS product and its
+/// version. Infallible by construction - an unavailable lookup degrades to
+/// `unknown` rather than an error, so the caller never has to branch.
+#[tauri::command]
+#[must_use]
+pub fn os_version() -> String {
+    let long = sysinfo::System::long_os_version()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if let Some(long) = long {
+        return long;
+    }
+
+    let name = sysinfo::System::name()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let version = sysinfo::System::os_version()
+        .or_else(sysinfo::System::kernel_version)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+
+    match (name, version) {
+        (Some(name), Some(version)) => format!("{name} {version}"),
+        (Some(name), None) => name,
+        (None, Some(version)) => version,
+        (None, None) => "unknown".to_owned(),
+    }
+}

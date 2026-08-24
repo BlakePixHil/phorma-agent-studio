@@ -205,7 +205,7 @@ failure. This is the pre-deploy gate. In order:
    install.
 9. `check-engine-purity.mjs` - no AWS SDK in `engine/`
 10. `check-engine-alias.mjs` - engine resolves only through `@phorma/engine`
-11. `check-versions.mjs` - five packages one version, every pin exact, `aws-cdk-lib` and `tsx` both
+11. `check-versions.mjs` - six packages one version, every pin exact, `aws-cdk-lib` and `tsx` both
     in `dependencies`
 12. `check-docs.mjs` - `docs/deploy-aws.md` section order, resource coverage derived from the
     synthesized template, troubleshooting strings derived from source

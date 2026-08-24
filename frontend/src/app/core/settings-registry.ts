@@ -61,7 +61,8 @@ export type SettingsCustomTemplate =
   | 'default-model'
   | 'integrations'
   | 'cloud-provider'
-  | 'usage-stats';
+  | 'usage-stats'
+  | 'privacy';
 
 export interface SettingsSectionDef {
   id: string;
@@ -397,6 +398,21 @@ export class SettingsRegistryService {
               set: value => this.settings.autoUpdate.set(!!value),
             },
           ],
+        },
+      ],
+    },
+    {
+      id: 'privacy',
+      label: 'Privacy',
+      icon: 'ti ti-shield-lock',
+      description: 'Anonymous usage counters and what leaves this machine.',
+      sections: [
+        {
+          id: 'telemetry',
+          settings: [],
+          customTemplate: 'privacy',
+          keywords: ['privacy', 'telemetry', 'analytics', 'usage', 'anonymous',
+                     'opt out', 'data', 'install id', 'policy'],
         },
       ],
     },

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Asserts that all five monorepo packages carry the same version number and
+ * Asserts that every monorepo package carries the same version number and
  * that every dependency and devDependency in cloud-aws is an exact pin
  * (a bare version, no ^, ~, range or tag).
  *
@@ -21,11 +21,12 @@ const packages = [
   'cloud/package.json',
   'engine/package.json',
   'cloud-aws/package.json',
+  'admin/package.json',
 ];
 
 let failures = 0;
 
-// --- Check 1: all five packages share one version number ---
+// --- Check 1: every package shares one version number ---
 
 const versions = packages.map(pkg => {
   const json = JSON.parse(readFileSync(resolve(root, pkg), 'utf8'));
@@ -40,7 +41,7 @@ if (distinct.length !== 1) {
   }
   failures++;
 } else {
-  console.log(`All 5 packages at version ${distinct[0]}`);
+  console.log(`All ${packages.length} packages at version ${distinct[0]}`);
 }
 
 // --- Check 2: every cloud-aws dependency is an exact pin ---

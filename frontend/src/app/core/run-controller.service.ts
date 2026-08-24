@@ -45,6 +45,8 @@ import { RUN_HISTORY_LIMIT, RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
 import { SqlHostService } from './sql-host.service';
 import { TauriService } from './tauri.service';
+import { counterName } from './telemetry-catalog';
+import { TelemetryService } from './telemetry.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowStateService } from './workflow-state.service';
@@ -182,6 +184,11 @@ export class RunControllerService {
   private readonly sqlHost = inject(SqlHostService);
   private readonly workflowState = inject(WorkflowStateService);
   private readonly fixtureStore = inject(FixtureStoreService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge cannot close the known NG0200 cycle
+  // (`RunControllerService -> ModelTransportService -> PhormaCloudService ->
+  // CloudService -> RunControllerService`).
+  private readonly telemetry = inject(TelemetryService);
 
   private handle: RunHandle | null = null;
   private traceCounter = 0;
@@ -791,6 +798,10 @@ export class RunControllerService {
 
     switch (event.type) {
       case 'run-started':
+        // RunEvents are the only visualization contract, and `apply()` is the
+        // single funnel both the local engine and the cloud WebSocket feed, so
+        // one call here covers both run paths.
+        this.telemetry.count(counterName('run.started'));
         this.terminal.setPhase('running');
         if (this.settings.autoOpenConsoleOnRun()) this.terminal.open('run');
         this.console('run', 'info', `Run started${event.input ? ` — "${event.input}"` : ''}.`);
@@ -1070,12 +1081,17 @@ export class RunControllerService {
         break;
 
       case 'run-completed':
+        this.telemetry.count(counterName('run.completed'));
         this.terminal.setPhase('completed');
         this.console('run', 'success', 'Run completed.');
         this.finishRun();
         break;
 
       case 'run-failed':
+        // Category only. The error text stays local: `recordError` has no
+        // parameter a message or a stack could travel in.
+        this.telemetry.count(counterName('run.error'));
+        this.telemetry.recordError('engine');
         this.terminal.setPhase('failed');
         this.console('problems', 'error', event.error);
         // Catch the exact moment a Phorma Cloud tenant runs out of credits —

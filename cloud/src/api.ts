@@ -15,6 +15,11 @@ import { isConnectionId, workerSecretName } from '@phorma/engine';
 import { verifyRequest, isHosted, type AuthEnv } from './auth';
 import { secretVault, SECRET_VAULT_MAX_VALUE_CHARS, type SecretVaultEnv } from './secret-vault';
 import {
+  handleTelemetryAdminRequest,
+  TELEMETRY_ADMIN_PREFIX,
+  type TelemetryAdminEnv,
+} from './telemetry-admin';
+import {
   TenantStore,
   creditsForTier,
   currentMonth,
@@ -27,7 +32,7 @@ import {
   type TenantEnv,
 } from './tenants';
 
-export type ApiEnv = AuthEnv & TenantEnv & SecretVaultEnv;
+export type ApiEnv = AuthEnv & TenantEnv & SecretVaultEnv & TelemetryAdminEnv;
 
 /** JSON responder bound to the current request's CORS headers. */
 type Respond = (body: unknown, status?: number) => Response;
@@ -186,6 +191,21 @@ async function routeApiRequest(
   // terminal trip and a hosted tenant cannot run it at all.
   if (url.pathname === '/api/connection-secrets') {
     return handleConnectionSecretRequest(request, env, respond);
+  }
+
+  // ── /api/admin/telemetry/* — owner-only telemetry aggregates (9.1) ─────────
+  // Also deliberately ABOVE the hosted-bindings gate: this surface carries its
+  // own authorization (`verifyRequest` plus the TELEMETRY_ADMIN_USER_IDS
+  // allowlist) and its own D1 handling, so a tenant-store outage must not turn
+  // an owner's dashboard read into a 501 about bindings it never touches.
+  if (url.pathname.startsWith(TELEMETRY_ADMIN_PREFIX)) {
+    // The handler re-checks the prefix and answers null on a non-match, which
+    // the branch above has already ruled out. `??` keeps the return type honest
+    // without a cast rather than pretending that null is reachable.
+    return (
+      (await handleTelemetryAdminRequest(request, env, url, respond)) ??
+      respond({ error: 'Not found.' }, 404)
+    );
   }
 
   const store = new TenantStore(env);

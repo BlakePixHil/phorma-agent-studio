@@ -23,6 +23,7 @@ const targets = [
   'backend/src-tauri/tauri.conf.json',
   'backend/src-tauri/Cargo.toml',
   'backend/package.json',
+  'admin/package.json',
   'cloud/package.json',
   'cloud-aws/package.json',
   'engine/package.json',

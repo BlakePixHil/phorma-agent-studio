@@ -15,6 +15,49 @@ export class TauriService {
   /** True when running inside the Tauri desktop runtime. */
   readonly isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+  /** Resolved once per session; `null` until the first {@link osVersion} call. */
+  private osVersionCache: string | null = null;
+
+  /**
+   * Coarse operating system version string, for example `Windows 11 Pro`.
+   *
+   * Resolves through the native `os_version` command on desktop. In a plain
+   * browser, and whenever the native lookup rejects, it falls back to the user
+   * agent platform string, then to a static `'unknown'`. Never throws, and
+   * caches the resolved value for the lifetime of the session so repeat callers
+   * cost nothing.
+   */
+  async osVersion(): Promise<string> {
+    if (this.osVersionCache !== null) return this.osVersionCache;
+
+    let resolved = '';
+    if (this.isDesktop) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const native = await invoke<string>('os_version');
+        resolved = typeof native === 'string' ? native.trim() : '';
+      } catch {
+        resolved = '';
+      }
+    }
+
+    this.osVersionCache = resolved || this.userAgentPlatform() || 'unknown';
+    return this.osVersionCache;
+  }
+
+  /**
+   * Best-effort platform string from the user agent, preferring the modern
+   * `userAgentData` hint over the deprecated `navigator.platform`. Returns an
+   * empty string when neither is available.
+   */
+  private userAgentPlatform(): string {
+    if (typeof navigator === 'undefined') return '';
+    const hint = (navigator as Navigator & { userAgentData?: { platform?: unknown } })
+      .userAgentData?.platform;
+    const candidate = typeof hint === 'string' && hint.trim() ? hint : navigator.platform;
+    return typeof candidate === 'string' ? candidate.trim() : '';
+  }
+
   /**
    * Opens a native open-file dialog for a workflow document and reads it.
    * Returns `null` when the user cancels.

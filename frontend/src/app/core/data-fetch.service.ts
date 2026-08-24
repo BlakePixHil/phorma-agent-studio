@@ -14,6 +14,7 @@ import {
 
 import { ConnectionStoreService } from './connection-store.service';
 import { TauriService } from './tauri.service';
+import { TelemetryService } from './telemetry.service';
 
 /**
  * `DataFetchService` — outbound HTTP for data nodes (design §7.1, §7.2, §13;
@@ -72,6 +73,9 @@ interface DataResponseDto {
 export class DataFetchService {
   private readonly tauri = inject(TauriService);
   private readonly connections = inject(ConnectionStoreService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge reaches nothing on the run path.
+  private readonly telemetry = inject(TelemetryService);
 
   /**
    * The `DataFetcher` handed to `RunOptions.dataFetch`. Bound as a field so the
@@ -79,8 +83,25 @@ export class DataFetchService {
    */
   readonly fetch: DataFetcher = (request) => this.perform(request);
 
+  /**
+   * The single seam both backends pass through, so a request that produced no
+   * response is counted exactly once as `network` (Requirements 3.1, 3.2, 11.3).
+   * Category only - the {@link DataTransportError} carries a message and a
+   * failure kind, and neither reaches `recordError`, which has no parameter for
+   * them. An HTTP status is never a failure here, so a 4xx or 5xx response
+   * counts nothing, and anything rejected before a socket opened (an
+   * unresolvable connection, a malformed request) is not a network failure and
+   * counts nothing either.
+   */
   private async perform(request: DataRequest): Promise<DataResponse> {
-    return this.tauri.isDesktop ? this.performDesktop(request) : this.performBrowser(request);
+    try {
+      return await (this.tauri.isDesktop
+        ? this.performDesktop(request)
+        : this.performBrowser(request));
+    } catch (error) {
+      if (error instanceof DataTransportError) this.telemetry.recordError('network');
+      throw error;
+    }
   }
 
   private async performDesktop(request: DataRequest): Promise<DataResponse> {

@@ -63,6 +63,27 @@
         "line": 87,
         "marker": "NOTE"
       }
+    },
+    {
+      "id": "scan-leqhut",
+      "text": "on \"prefix of the submitted value\": the implementation trims before it",
+      "description": "[NOTE] cloud/test/telemetry.test.mjs:600",
+      "tags": [
+        "note",
+        "cloud/test/telemetry.test.mjs",
+        "cloud/test/telemetry.test.mjs:600"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1787568811512,
+      "order": 5000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/telemetry.test.mjs",
+        "line": 600,
+        "marker": "NOTE"
+      }
     }
   ]
 }

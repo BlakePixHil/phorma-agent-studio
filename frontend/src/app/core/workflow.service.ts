@@ -5,6 +5,8 @@ import { SettingsService } from './settings.service';
 import { SkillsService } from './skills.service';
 import { buildNodeFromCatalog, findCatalogEntry } from './node-catalog';
 import { loadLayout, saveLayout } from './layout-storage';
+import { counterName } from './telemetry-catalog';
+import { TelemetryService } from './telemetry.service';
 import { ToastService } from '../shared/toast/toast.service';
 import { ConfirmDialogService } from '../shared/confirm-dialog/confirm-dialog.service';
 import { WorkflowVersionsService } from './workflow-versions.service';
@@ -71,6 +73,9 @@ export class WorkflowService {
   private readonly toast = inject(ToastService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly versions = inject(WorkflowVersionsService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so it cannot pull anything back into this service.
+  private readonly telemetry = inject(TelemetryService);
 
   /** Debounce handle for the autosave effect. */
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -608,6 +613,10 @@ export class WorkflowService {
     const entry = findCatalogEntry(entryId);
     if (!entry) return null;
     const node = buildNodeFromCatalog(entry, position);
+    // Counted on the resolved node, not on `entryId`: a `connector-step:` or
+    // `mcp-preset:` palette id resolves to an ordinary node whose `kind` is in
+    // the catalog, and anything else is discarded by `count` (3.1, 3.2).
+    this.telemetry.count(counterName('node.created', node.kind));
     this.mutateGraph(graph => ({ ...graph, nodes: [...graph.nodes, node] }));
     return node;
   }

@@ -4,9 +4,10 @@ inclusion: always
 
 # Tech stack and commands
 
-Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud`, `cloud-aws` and
-`engine`, plus `backend/src-tauri/Cargo.toml`. All five packages share ONE version number (currently
-`0.2.0-beta.9`), which `cloud-aws/scripts/check-versions.mjs` enforces - see `release.md` steering.
+Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud`, `cloud-aws`,
+`engine` and `admin`, plus `backend/src-tauri/Cargo.toml`. All six packages share ONE version number
+(currently `0.2.0-beta.10`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
+`release.md` steering.
 
 ## Stack
 
@@ -17,9 +18,10 @@ Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud
 | Engine | `@phorma/engine` - pure TypeScript, no framework deps, consumed through a tsconfig path alias (no build step) |
 | Desktop | Tauri v2, Rust 1.77+, plugins: dialog, opener, process, updater |
 | Cloud | Cloudflare Worker + `agents` SDK (`WorkflowAgent` Durable Object, embedded SQLite), wrangler 4, `@clerk/backend` |
-| Tests | engine: vitest 4 + fast-check 4 (`*.spec.ts`) and `tsx` scenario scripts (`test/*.e2e.mts`); frontend: karma + jasmine; cloud: `tsx`/`node` test scripts + miniflare |
+| Admin | `admin/` - separate Angular 20 telemetry dashboard (PrimeNG 20 Aura, Tailwind v4, `ngx-clerk`), deployed as a Worker serving static assets, isolated from every other package |
+| Tests | engine: vitest 4 + fast-check 4 (`*.spec.ts`) and `tsx` scenario scripts (`test/*.e2e.mts`); frontend and admin: karma + jasmine (+ fast-check 4); cloud: `tsx`/`node` test scripts + miniflare |
 
-Dev port is **7322**. Phorma Code owns 7321 - never collide.
+Dev port is **7322**, and `admin` serves on **7323**. Phorma Code owns 7321 - never collide.
 
 ## Install
 
@@ -27,6 +29,7 @@ Dev port is **7322**. Phorma Code owns 7321 - never collide.
 cd frontend; npm install --legacy-peer-deps   # ALWAYS --legacy-peer-deps here
 cd ../backend; npm install                    # installs the Tauri CLI; skipping it breaks `npm run dev`
 cd ../cloud;   npm install
+cd ../admin;   npm install --legacy-peer-deps # telemetry dashboard, same PrimeNG/Clerk peer clash
 ```
 
 `@angular/cdk` must stay on v20 to match Angular core.
@@ -36,6 +39,7 @@ cd ../cloud;   npm install
 ```powershell
 cd backend;  npm run dev     # desktop shell + Angular dev server together
 cd frontend; npm start       # browser only, http://localhost:7322
+cd admin;    npm start       # telemetry dashboard only, http://localhost:7323
 cd cloud;    npx wrangler dev # local Durable Object, no Cloudflare account needed
 ```
 
@@ -46,22 +50,29 @@ or start them as a background process.
 
 ```powershell
 cd frontend; npm run build                       # production build: the ONLY thing that checks Angular budgets
-cd frontend; npm test -- --watch=false --browsers=ChromeHeadless   # karma + jasmine, ~3s
+cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1003 specs, ~11s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
 cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
-cd cloud;    npm run test:unit                   # 12 worker suites (`test` is the same; the portal e2e is manual)
+cd cloud;    npm run test:unit                   # 15 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
 cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)
 cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
 cd backend/src-tauri; cargo test                 # 29 unit tests (sql, llm, data, deploy_assets)
+cd admin; npm run build                          # dashboard production build: 786 kB initial, 1.5MB warning / 2MB error
+cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 38 specs, ~15s
 node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
+node scripts/check-telemetry-catalog.mjs         # the two Counter_Catalog twins and the D1 migration still agree
+node scripts/check-telemetry-isolation.mjs       # TelemetryService import list is still a DI leaf
+node scripts/check-telemetry-secrets.mjs         # after the admin build: no admin secret, no sk_ key in the bundle
+node scripts/check-admin-conventions.mjs         # dashboard templates: Tabler icons, no p-dialog, explicit sizes
 ```
 
-`npm test -- --watch=false --browsers=ChromeHeadless` in `frontend/` does NOT forward those flags
-through this npm version (it warns "Unknown cli config" and runs `ng test` in WATCH mode). Use
-`npx ng test --watch=false --browsers=ChromeHeadless` when you need it to exit.
+`npm test -- --watch=false --browsers=ChromeHeadless` in `frontend/` and `admin/` does NOT forward
+those flags through npm 10 or 11 (11 warns "Unknown cli config", 10 drops them silently) and
+`ng test` then defaults to WATCH mode, which never exits. Always use the `npx ng test` form above,
+in scripts and in CI.
 
 `.github/workflows/ci.yml` runs every one of these on push and PR, plus
 `engine`'s `tsc --noEmit`. Adding a suite means adding it to `ci.yml` in the same
@@ -71,8 +82,10 @@ manually started `wrangler dev` and a local model.
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
-  warning / 26kB error. Consolidate duplicated SCSS rules before raising a budget. Keep heavy
-  deps (chart.js) behind `@defer (on immediate)`.
+  warning / 26kB error. `initial` currently sits at 2.66MB, so the warning is expected and only the
+  3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
+  786kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
+  (chart.js) behind `@defer (on immediate)`.
 - `engine/` has no local TypeScript install. For a type-only check there use
   `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json`. Running `npx tsc` inside
   `engine/` tries to fetch the bogus `tsc` package and prompts interactively.

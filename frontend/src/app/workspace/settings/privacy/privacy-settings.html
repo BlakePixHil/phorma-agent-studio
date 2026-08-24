@@ -1,0 +1,162 @@
+<!-- 1. Consent. The only control that changes Consent_State. -->
+<div class="phorma-privacy__setting">
+  <div class="phorma-privacy__setting-text">
+    <label class="phorma-privacy__setting-label" for="privacy-telemetry-enabled">
+      Share anonymous usage counters
+    </label>
+    <p class="phorma-privacy__setting-desc">
+      Counts of which features get used, grouped by day. Never your prompts, workflows or
+      data. Turning this off discards everything counted so far and anything waiting to
+      upload.
+    </p>
+  </div>
+  <div class="phorma-privacy__setting-control">
+    <p-toggleswitch
+      inputId="privacy-telemetry-enabled"
+      size="small"
+      ariaLabel="Share anonymous usage counters"
+      [ngModel]="telemetry.enabled()"
+      (ngModelChange)="onEnabledChange($event)"
+    />
+  </div>
+</div>
+
+<!-- 2. Install ID. -->
+<h4 class="phorma-privacy__heading">Install ID</h4>
+<p class="phorma-privacy__desc">
+  A random identifier for this installation, generated on this machine. It is tied to no
+  account, no hardware and no network address, and it goes nowhere except the ingest
+  endpoint.
+</p>
+<div class="phorma-privacy__id-row">
+  <input
+    pInputText
+    pSize="small"
+    type="text"
+    class="phorma-privacy__id"
+    readonly
+    aria-label="Install ID"
+    [value]="telemetry.installId()"
+  />
+  <button
+    type="button"
+    pButton
+    severity="secondary"
+    size="small"
+    class="phorma-input-icon-btn"
+    [outlined]="true"
+    [disabled]="telemetry.installId().length === 0"
+    pTooltip="Copy install ID"
+    tooltipPosition="top"
+    aria-label="Copy the install ID"
+    (click)="copyInstallId()"
+  >
+    <i class="ti ti-copy" aria-hidden="true"></i>
+  </button>
+  <button
+    type="button"
+    pButton
+    severity="secondary"
+    size="small"
+    class="phorma-input-icon-btn phorma-input-icon-btn--danger"
+    [outlined]="true"
+    pTooltip="Reset install ID"
+    tooltipPosition="top"
+    aria-label="Reset the install ID"
+    (click)="resetInstallId()"
+  >
+    <i class="ti ti-refresh" aria-hidden="true"></i>
+  </button>
+</div>
+
+<!-- 3. What is collected, derived from the catalog and ENV_KEYS. -->
+<h4 class="phorma-privacy__heading">What is collected</h4>
+<p class="phorma-privacy__desc">
+  {{ counterNameCount }} counters in total, drawn from a closed list in the source. Every
+  one is a count of something happening, so a counter can hold a number and nothing else.
+</p>
+<dl class="phorma-privacy__list">
+  @for (family of counterFamilies; track family.family) {
+    <div class="phorma-privacy__list-row">
+      <dt class="phorma-privacy__term">{{ family.label }}</dt>
+      <dd class="phorma-privacy__def">
+        <code class="phorma-privacy__code">{{ family.family }}</code>
+        <span class="phorma-privacy__count">
+          {{ family.names }}{{ family.names === 1 ? ' counter' : ' counters' }}
+        </span>
+      </dd>
+    </div>
+  }
+</dl>
+
+<p class="phorma-privacy__desc">
+  Each daily rollup also carries these {{ envFields.length }} facts about this install:
+</p>
+<dl class="phorma-privacy__list">
+  @for (field of envFields; track field.key) {
+    <div class="phorma-privacy__list-row">
+      <dt class="phorma-privacy__term">
+        <code class="phorma-privacy__code">{{ field.key }}</code>
+      </dt>
+      <dd class="phorma-privacy__def">{{ field.label }}</dd>
+    </div>
+  }
+</dl>
+
+<p class="phorma-privacy__note phorma-privacy__note--info">
+  <i class="ti ti-shield-lock" aria-hidden="true"></i>
+  Never collected: prompt text, workflow or node names, node configuration, run inputs and
+  outputs, model responses, connection names, credentials, file paths, account identifiers,
+  and your network address.
+</p>
+
+<!-- 4. Exactly what would be uploaded next. -->
+<h4 class="phorma-privacy__heading">Pending upload</h4>
+<p class="phorma-privacy__desc">
+  The exact object the uploader would send next. Nothing outside it leaves this machine.
+</p>
+<p class="phorma-privacy__meta">
+  <span>
+    <i class="ti ti-stack-2" aria-hidden="true"></i>
+    {{ telemetry.queueLength() }} waiting to upload
+  </span>
+  <span>
+    <i class="ti ti-file-x" aria-hidden="true"></i>
+    {{ telemetry.rejectedCount() }} rejected and dropped
+  </span>
+</p>
+@if (preview(); as json) {
+  <pre class="phorma-privacy__preview">{{ json }}</pre>
+} @else if (!telemetry.enabled()) {
+  <p class="phorma-privacy__note">
+    <i class="ti ti-cloud-off" aria-hidden="true"></i>
+    Nothing is pending. Collection is off, so no counters are being kept.
+  </p>
+} @else {
+  <p class="phorma-privacy__note">
+    <i class="ti ti-loader-2" aria-hidden="true"></i>
+    Nothing is pending yet. Collection starts shortly after the studio finishes loading.
+  </p>
+}
+
+<!-- 5. Policy. -->
+<h4 class="phorma-privacy__heading">Privacy policy</h4>
+<p class="phorma-privacy__desc">
+  The full policy, including how long rollups are kept, lives at
+  <code class="phorma-privacy__code">{{ policyUrl }}</code>
+</p>
+<div class="phorma-privacy__policy">
+  <button
+    type="button"
+    pButton
+    severity="secondary"
+    size="small"
+    class="phorma-privacy__policy-btn"
+    [text]="true"
+    aria-label="Open the privacy policy"
+    (click)="openPolicy()"
+  >
+    <i class="ti ti-external-link" aria-hidden="true"></i>
+    <span>Read the privacy policy</span>
+  </button>
+</div>

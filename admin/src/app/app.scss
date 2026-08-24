@@ -1,0 +1,112 @@
+/* rem maths here is against a 14px root (see styles.scss), never 16. */
+
+.admin-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+
+  &__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.857rem 1.143rem; /* 12px 16px */
+    border-bottom: 1px solid var(--admin-border);
+    background: var(--admin-panel-bg);
+  }
+
+  &__brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.143rem; /* 16px */
+    font-weight: 700;
+  }
+
+  &__brand-name {
+    white-space: nowrap;
+  }
+
+  &__range-error {
+    display: flex;
+    align-items: center;
+    gap: 0.429rem; /* 6px */
+    margin: 0;
+    padding: 0.429rem 1.143rem;
+    border-bottom: 1px solid var(--admin-border);
+    color: var(--p-red-500);
+    font-size: 0.857rem; /* 12px */
+  }
+
+  &__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 1.143rem;
+  }
+}
+
+.admin-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.571rem; /* 8px */
+  margin-left: auto;
+
+  &__presets {
+    display: flex;
+    align-items: center;
+    gap: 0.286rem; /* 4px */
+  }
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: 0.429rem;
+  }
+
+  &__label {
+    color: var(--admin-text-muted);
+    font-size: 0.857rem;
+  }
+
+  &__input {
+    width: 9.286rem; /* 130px, enough for a native date control */
+  }
+
+  &__summary {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.857rem;
+    white-space: nowrap;
+  }
+}
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.286rem;
+  padding: 0.571rem 1.143rem;
+  border-bottom: 1px solid var(--admin-border);
+
+  &__link {
+    display: flex;
+    align-items: center;
+    gap: 0.429rem;
+    padding: 0.357rem 0.714rem; /* 5px 10px */
+    border-radius: var(--p-border-radius-md, 0.429rem);
+    color: var(--admin-text-muted);
+    font-size: 0.929rem; /* 13px */
+    text-decoration: none;
+
+    &:hover {
+      background: var(--p-content-hover-background);
+      color: var(--p-text-color);
+    }
+
+    &--active {
+      background: var(--p-highlight-background);
+      color: var(--p-highlight-color);
+      font-weight: 600;
+    }
+  }
+}

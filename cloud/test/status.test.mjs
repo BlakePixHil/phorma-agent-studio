@@ -56,7 +56,8 @@ function healthyEnv(overrides = {}) {
     WorkflowAgent: namespaceStub({ publishedSpec: async () => null }),
     PortalIndex: namespaceStub({ resolve: async () => null }),
     SecretVault: namespaceStub({ entries: async () => [] }),
-    DB: { prepare: () => ({ first: async () => ({ ok: 1 }) }) },
+    // `batch` is here for the telemetry probe's self-healing schema creation.
+    DB: { prepare: () => ({ first: async () => ({ ok: 1 }) }), batch: async () => [] },
     TENANTS: { get: async () => null },
     RELEASES: { head: async () => ({ size: 1024 }) },
     ...overrides,
@@ -166,7 +167,12 @@ console.log('\nAggregation');
   check('healthy deployment is green', payload.indicator === 'green');
   check('summary reads well', payload.summary === 'All systems operational', payload.summary);
   check('mode reports hosted', payload.mode === 'hosted');
-  check('every component is probed', payload.components.length === 8);
+  check(
+    'every component is probed',
+    payload.components.map(entry => entry.id).join(',') ===
+      'runtime,api,plans,vault,portals,downloads,auth,inference,telemetry',
+    payload.components.map(entry => entry.id).join(','),
+  );
   check(
     'no component is unknown on a fully bound worker',
     payload.components.every(entry => entry.status === 'operational'),
@@ -269,6 +275,8 @@ console.log('\nBYO deployment');
   check('absent downloads are unknown', byId(payload, 'downloads').status === 'unknown');
   check('absent Clerk is unknown', byId(payload, 'auth').status === 'unknown');
   check('absent hosted inference is unknown', byId(payload, 'inference').status === 'unknown');
+  // 12.7: no D1 means no telemetry store, which must not read as degraded.
+  check('the absent telemetry store is unknown', byId(payload, 'telemetry').status === 'unknown');
   check('the runtime is still probed', byId(payload, 'runtime').status === 'operational');
 }
 

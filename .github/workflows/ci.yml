@@ -51,6 +51,10 @@ jobs:
         run: npm install --legacy-peer-deps
         working-directory: cloud-aws
 
+      - name: Install dependencies (admin)
+        run: npm install --legacy-peer-deps
+        working-directory: admin
+
       # ── installer payload ───────────────────────────────────────────────
       # The BYO deploy runtimes ship inside the installer as Tauri resources, so
       # a production install needs no checkout of this repo. The manifest is a
@@ -60,6 +64,23 @@ jobs:
       # because a missing resource is invisible until a user's deploy breaks.
       - name: Deploy bundle manifest
         run: node scripts/check-deploy-bundle.mjs
+
+      # ── telemetry static guards ─────────────────────────────────────────
+      # Three of the four telemetry guards need nothing but the checkout, so they
+      # run here beside the deploy manifest: a counter-name drift, a widened
+      # service import list or a PrimeNG convention slip is a two-second read and
+      # there is no reason to learn about it after a ten-minute build.
+      #
+      # The fourth guard, `check-telemetry-secrets.mjs`, scans the BUILT dashboard
+      # bundle and therefore runs after the dashboard production build below.
+      - name: Telemetry catalog parity
+        run: node scripts/check-telemetry-catalog.mjs
+
+      - name: Telemetry service isolation
+        run: node scripts/check-telemetry-isolation.mjs
+
+      - name: Admin dashboard conventions
+        run: node scripts/check-admin-conventions.mjs
 
       # ── engine ──────────────────────────────────────────────────────────
       - name: Engine unit and property tests
@@ -112,8 +133,13 @@ jobs:
         working-directory: cloud-aws
 
       # ── frontend ────────────────────────────────────────────────────────
+      # `npx ng test` deliberately, not `npm test -- --watch=false`: npm 10 (the
+      # version node 20 ships) drops those two flags silently and npm 11 warns
+      # "Unknown cli config" and drops them too, so the script runs a bare
+      # `ng test`. The karma builder defaults `watch` to true with no CI
+      # detection, so that would sit in WATCH mode and burn the job timeout.
       - name: Frontend unit tests
-        run: npm test -- --watch=false --browsers=ChromeHeadless
+        run: npx ng test --watch=false --browsers=ChromeHeadless
         working-directory: frontend
 
       # The production build is the ONLY thing that checks Angular budgets;
@@ -121,6 +147,25 @@ jobs:
       - name: Frontend production build
         run: npm run build
         working-directory: frontend
+
+      # ── admin dashboard ─────────────────────────────────────────────────
+      # `npx ng test` deliberately, not `npm test -- --watch=false`: this npm
+      # version does not forward those flags through the script, so `npm test`
+      # would sit in WATCH mode and burn the job timeout.
+      - name: Admin dashboard unit tests
+        run: npx ng test --watch=false --browsers=ChromeHeadless
+        working-directory: admin
+
+      - name: Admin dashboard production build
+        run: npm run build
+        working-directory: admin
+
+      # Must come AFTER the dashboard build: this guard reads the emitted bundle
+      # under `admin/dist/admin/browser` looking for an `sk_`-prefixed key or a
+      # `CLERK_SECRET` reference, and it treats a missing bundle as a hard failure
+      # whenever `CI` is set precisely so it can never pass by scanning nothing.
+      - name: Telemetry secret scan
+        run: node scripts/check-telemetry-secrets.mjs
 
   # ── Rust desktop shell ──────────────────────────────────────────────────
   rust:

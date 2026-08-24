@@ -1,0 +1,221 @@
+// Body of the Settings dialog `privacy` page. Angular scopes component styles,
+// so the surrounding `.phorma-settings__*` recipes do not reach in here - this
+// sheet restates only the handful this section actually uses, at the same
+// values, so the page reads as part of the dialog. Root font size is 14px, so
+// every rem here is against 14 (0.857rem = 12px).
+//
+// Only the `<pre>` and the read-only id field carry chrome, and both take it
+// from theme tokens rather than hardcoded colours.
+
+:host {
+  display: flex;
+  flex-direction: column;
+  // Matches `.phorma-settings__section`'s own gap, so the section reads as one
+  // rhythm rather than two.
+  gap: 10px;
+  // A direct child of a flex column collapses to its header height without
+  // this, which is how this page first rendered as an empty strip.
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+/* ── Consent row ─────────────────────────────────────────────────────────── */
+.phorma-privacy__setting {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 0;
+}
+
+.phorma-privacy__setting-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.phorma-privacy__setting-label {
+  display: block;
+  font-size: 0.893rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.phorma-privacy__setting-desc {
+  margin: 3px 0 0;
+  font-size: 0.929rem;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-privacy__setting-control {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* ── Section headings and prose ──────────────────────────────────────────── */
+.phorma-privacy__heading {
+  margin: 10px 0 0;
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-privacy__desc {
+  margin: 0;
+  font-size: 0.857rem;
+  line-height: 1.6;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-privacy__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--p-border-color);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 0.857rem;
+  line-height: 1.6;
+
+  > i {
+    margin-top: 2px;
+    font-size: 0.929rem;
+    flex: 0 0 auto;
+  }
+
+  // Tone follows the dialog's own note recipe: one custom property drives the
+  // border, the fill and the icon.
+  &--info {
+    --phorma-privacy-accent: var(--p-primary-color, #8578f6);
+
+    border-color: color-mix(in srgb, var(--phorma-privacy-accent) 32%, transparent);
+    background: color-mix(in srgb, var(--phorma-privacy-accent) 9%, transparent);
+    color: var(--p-text-color);
+
+    > i {
+      color: var(--phorma-privacy-accent);
+    }
+  }
+}
+
+/* ── Install ID ──────────────────────────────────────────────────────────── */
+.phorma-privacy__id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Chrome comes from the PrimeNG field tokens; only the monospace face and the
+   flex behaviour are local. Deliberately no `font-size`: the size token drives
+   the control height, and overriding it here would desynchronize the two
+   buttons beside it. */
+.phorma-privacy__id {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
+}
+
+/* ── Collected-data definition lists ─────────────────────────────────────── */
+.phorma-privacy__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.phorma-privacy__list-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--p-text-color) 6%, transparent);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.phorma-privacy__term {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.857rem;
+  color: var(--p-text-color);
+}
+
+.phorma-privacy__def {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-privacy__code {
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
+  font-size: 0.786rem;
+  color: var(--p-text-color);
+  overflow-wrap: anywhere;
+}
+
+.phorma-privacy__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Pending upload ──────────────────────────────────────────────────────── */
+.phorma-privacy__meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color);
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+}
+
+.phorma-privacy__preview {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--p-border-color);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  color: var(--p-text-color);
+  font-family: var(--phorma-font-mono, ui-monospace, monospace);
+  font-size: 0.786rem;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* ── Policy ──────────────────────────────────────────────────────────────── */
+.phorma-privacy__policy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.phorma-privacy__policy-btn.p-button {
+  gap: 6px;
+  padding-left: 0;
+  padding-right: 0;
+}

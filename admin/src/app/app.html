@@ -1,0 +1,90 @@
+<!--
+  The auth switch. Each branch is exclusive, and the dashboard branch is the only
+  one that contains `router-outlet`, so no view is constructed - and no view
+  request is issued - unless there is a session and no 403 (Requirements 10.3,
+  10.4).
+-->
+@if (!signedIn()) {
+  <admin-signed-out />
+} @else if (forbidden()) {
+  <admin-not-authorized />
+} @else {
+  <div class="admin-shell">
+    <header class="admin-shell__header">
+      <div class="admin-shell__brand">
+        <i class="ti ti-chart-histogram" aria-hidden="true"></i>
+        <span class="admin-shell__brand-name">Phorma Telemetry</span>
+      </div>
+
+      <div class="admin-range" role="group" aria-label="Date range">
+        <div class="admin-range__presets">
+          @for (preset of presets; track preset) {
+            <button
+              pButton
+              type="button"
+              size="small"
+              class="phorma-btn-content"
+              [text]="activePreset() !== preset"
+              [attr.aria-pressed]="activePreset() === preset"
+              (click)="selectPreset(preset)"
+            >
+              <span>{{ preset }} days</span>
+            </button>
+          }
+        </div>
+
+        <label class="admin-range__field">
+          <span class="admin-range__label">From</span>
+          <input
+            pInputText
+            pSize="small"
+            type="date"
+            class="admin-range__input"
+            [value]="draftFrom()"
+            (change)="onFromInput($event)"
+          />
+        </label>
+
+        <label class="admin-range__field">
+          <span class="admin-range__label">To</span>
+          <input
+            pInputText
+            pSize="small"
+            type="date"
+            class="admin-range__input"
+            [value]="draftTo()"
+            (change)="onToInput($event)"
+          />
+        </label>
+
+        <p class="admin-range__summary">{{ days() }} days</p>
+      </div>
+
+      <clerk-user-button />
+    </header>
+
+    @if (rangeRejected()) {
+      <p class="admin-shell__range-error" role="status">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        <span>{{ rangeRejectedMessage }}</span>
+      </p>
+    }
+
+    <nav class="admin-nav" aria-label="Telemetry views">
+      @for (item of nav; track item.route) {
+        <a
+          class="admin-nav__link"
+          routerLinkActive="admin-nav__link--active"
+          [routerLink]="['/', item.route]"
+        >
+          <i class="ti {{ item.icon }}" aria-hidden="true"></i>
+          <span>{{ item.label }}</span>
+        </a>
+      }
+    </nav>
+
+    <main class="admin-shell__body">
+      <router-outlet />
+    </main>
+  </div>
+}

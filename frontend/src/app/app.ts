@@ -11,6 +11,7 @@ import { TestHarnessService } from './core/test-harness.service';
 import { WorkflowService } from './core/workflow.service';
 import { PanelRegistryService } from './core/panel-registry.service';
 import { UpdateService } from './core/update.service';
+import { TelemetryService } from './core/telemetry.service';
 import { BottomTerminal } from './layout/terminal/bottom-terminal';
 import { TerminalOutputService } from './core/terminal-output.service';
 import { AgentsPalette } from './workspace/palette/agents-palette/agents-palette';
@@ -27,6 +28,7 @@ import { OnboardingDialog } from './workspace/onboarding/onboarding-dialog/onboa
 import { OnboardingService } from './workspace/onboarding/onboarding.service';
 import { CommandPalette } from './workspace/command-palette/command-palette';
 import { AiReviewBar } from './workspace/command-palette/ai-review-bar';
+import { TelemetryNotice } from './workspace/settings/privacy/telemetry-notice';
 import { AssistantPanel } from './workspace/assistant/assistant-panel/assistant-panel';
 import { AssistantDialog } from './workspace/assistant/assistant-dialog/assistant-dialog';
 import { PromptDialog } from './workspace/prompt/prompt-dialog/prompt-dialog';
@@ -73,6 +75,7 @@ import { Toast } from './shared/toast/toast';
     OnboardingDialog,
     CommandPalette,
     AiReviewBar,
+    TelemetryNotice,
     AssistantPanel,
     AssistantDialog,
     PromptDialog,
@@ -102,6 +105,8 @@ export class App {
   protected readonly updates = inject(UpdateService);
   private readonly onboarding = inject(OnboardingService);
   private readonly testHarness = inject(TestHarnessService);
+  // Read by the template: the First_Run_Notice host gate.
+  protected readonly telemetry = inject(TelemetryService);
 
   protected readonly title = signal('Phorma Agent Studio');
 
@@ -115,6 +120,10 @@ export class App {
     this.onboarding.maybeAutoOpen();
     // Dev-only programmatic E2E harness (window.__phormaTest). No-op in prod.
     this.testHarness.install();
+    // Anonymous usage telemetry. Returns synchronously and defers its own work
+    // onto an idle callback, so it never sits on the first-paint path (4.9), and
+    // it swallows every failure so startup continues without it (5.7).
+    this.telemetry.bootstrap();
   }
 
   /** Toolbar height (px) — the tab bar sits directly below it. */

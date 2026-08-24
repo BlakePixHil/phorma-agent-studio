@@ -1,0 +1,31 @@
+// Phorma Agent Studio - telemetry admin dashboard.
+//
+// A STATIC ASSET Worker. It has no `main`, no bindings and no secrets: the
+// dashboard is a browser app that talks to the authenticated
+// `/api/admin/telemetry/*` routes on the `phorma-agent-studio-cloud` Worker with
+// a Clerk session token. Nothing privileged lives here.
+//
+// The worker name must stay `phorma-admin`: the resulting origin
+// `https://phorma-admin.phorma-agent-studio.workers.dev` is listed in
+// `ALLOWED_ORIGINS` under `env.hosted` in `cloud/wrangler.jsonc`, so renaming
+// the worker silently breaks CORS for every admin request. A custom domain
+// would need adding to that list too.
+//
+// Deploy (independent of the installer and of the cloud Worker):
+//   1. npx wrangler login
+//   2. npm run build      # writes dist/admin/browser
+//   3. npx wrangler deploy
+{
+  "name": "phorma-admin",
+  "compatibility_date": "2025-05-01",
+  "assets": {
+    // The Angular application builder writes the browser bundle here
+    // (`outputPath: dist/admin` plus the builder's own `browser` subfolder).
+    "directory": "./dist/admin/browser",
+    // Client-side routing: unknown paths serve index.html rather than 404.
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

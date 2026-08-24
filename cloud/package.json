@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "check": "tsc --noEmit && wrangler deploy --dry-run --outdir=dist",
     "test": "npm run test:unit",
-    "test:unit": "tsx test/portal-projection.test.mjs && tsx test/portal-embed.test.mjs && tsx test/deploy-config.test.mjs && tsx test/connections.test.mjs && tsx test/data-host.test.mjs && tsx test/workflow-state.test.mjs && tsx test/portal-cleanup.test.mjs && tsx test/run-wiring.test.mjs && tsx test/status.test.mjs && tsx test/releases.test.mjs && node test/deploy-validation.test.mjs && node test/connection-secrets.test.mjs",
+    "test:unit": "tsx test/portal-projection.test.mjs && tsx test/portal-embed.test.mjs && tsx test/deploy-config.test.mjs && tsx test/connections.test.mjs && tsx test/data-host.test.mjs && tsx test/workflow-state.test.mjs && tsx test/portal-cleanup.test.mjs && tsx test/run-wiring.test.mjs && tsx test/status.test.mjs && tsx test/releases.test.mjs && tsx test/telemetry.test.mjs && node test/deploy-validation.test.mjs && node test/connection-secrets.test.mjs && node test/telemetry-ingest.test.mjs && node test/telemetry-admin.test.mjs",
     "test:portal": "node test/portal.e2e.mjs"
   },
   "dependencies": {
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250620.0",
+    "fast-check": "4.9.0",
     "miniflare": "4.20260426.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",

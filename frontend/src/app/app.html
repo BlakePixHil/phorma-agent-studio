@@ -203,6 +203,15 @@
   <!-- ── AI edit review bar (Revert / Keep after an AI build) ── -->
   <app-ai-review-bar />
 
+  <!--
+    ── First-run telemetry disclosure ──
+    Deliberately not a dialog: a non-modal card above the status bar that never
+    blocks the workspace and carries no role="dialog".
+  -->
+  @if (telemetry.noticePending()) {
+    <app-telemetry-notice />
+  }
+
   <!-- ── Toast notifications (frosted glass, top-right) ── -->
   <app-toast />
 

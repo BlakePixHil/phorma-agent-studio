@@ -35,6 +35,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::read_workflow_file,
             commands::write_workflow_file,
+            commands::os_version,
             llm::set_provider_key,
             llm::has_provider_key,
             llm::list_bedrock_models,

@@ -39,6 +39,7 @@ import {
   registerConnectorStepResolver,
   type NodeCatalogEntry,
 } from './node-catalog';
+import { TelemetryService } from './telemetry.service';
 
 /** What an install needs that the bundle cannot supply. */
 export interface ConnectorInstallOptions {
@@ -87,6 +88,9 @@ export type ConnectorInstallResult =
 export class ConnectorsService {
   private readonly storage = inject(IndexedDbStorageService);
   private readonly connections = inject(ConnectionsService);
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge cannot pull anything back into this service.
+  private readonly telemetry = inject(TelemetryService);
 
   private readonly installedState = signal<InstalledConnector[]>([]);
 
@@ -164,11 +168,19 @@ export class ConnectorsService {
   /**
    * Parses connector file text, adding the app-version gate the pure parser
    * cannot make (it has no idea which build it runs in).
+   *
+   * A rejected file counts once as `validation` (Requirements 3.1, 3.2). No
+   * finding, path or file content is recorded - `recordError` takes the category
+   * and nothing else (11.3).
    */
   parse(text: string): ConnectorParseResult {
     const result = parseConnectorBundle(text);
-    if (!result.ok) return result;
+    if (!result.ok) {
+      this.telemetry.recordError('validation');
+      return result;
+    }
     if (!satisfiesMinAppVersion(result.bundle, APP_VERSION)) {
+      this.telemetry.recordError('validation');
       return {
         ok: false,
         findings: [
@@ -236,7 +248,13 @@ export class ConnectorsService {
     options: ConnectorInstallOptions = {},
   ): Promise<ConnectorInstallResult> {
     const findings = validateConnectorBundle(bundle);
-    if (findings.some(finding => finding.severity === 'error')) return { ok: false, findings };
+    if (findings.some(finding => finding.severity === 'error')) {
+      // The connector validation surface. `installFromText` returns before
+      // reaching here when `parse` already refused the file, so a rejected file
+      // counts once rather than twice (Requirements 3.1, 3.2, 11.3).
+      this.telemetry.recordError('validation');
+      return { ok: false, findings };
+    }
 
     const source = options.source ?? 'file';
     if (source === 'builtin') {

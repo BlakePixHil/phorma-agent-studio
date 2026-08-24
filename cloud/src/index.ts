@@ -26,6 +26,7 @@ import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
 import { handleStatusRequest, type StatusEnv } from './status';
+import { handleTelemetryRequest, runTelemetryRetention, type TelemetryEnv } from './telemetry';
 import { SecretVault } from './secret-vault';
 import { WorkflowAgent, type Env } from './workflow-agent';
 
@@ -62,6 +63,14 @@ export default {
     // to fix that would also widen the authenticated `/api/*` surface.
     const statusResponse = await handleStatusRequest(request, env as StatusEnv, ctx);
     if (statusResponse) return statusResponse;
+
+    // Anonymous telemetry ingest. Matched HERE for the same two reasons `/status.*`
+    // is matched first: it answers its own preflight with a CORS set that is
+    // independent of ALLOWED_ORIGINS (widening that var would widen the
+    // authenticated `/api/*` surface too), and it is deliberately unauthenticated,
+    // so it must not fall into the `/api/*` branch.
+    const telemetryResponse = await handleTelemetryRequest(request, env as TelemetryEnv, ctx);
+    if (telemetryResponse) return telemetryResponse;
 
     // CORS preflight for the studio (Tauri webview / localhost dev).
     if (request.method === 'OPTIONS') {
@@ -154,5 +163,20 @@ export default {
       }
     }
     return response;
+  },
+
+  // Cron. The telemetry retention pass prunes rollups past the 400 day window
+  // and stale ingest rate windows; the cron itself is configured under
+  // `env.hosted` only, since a BYO deployment has no `DB` and nothing to prune.
+  //
+  // The trailing `.catch()` is the containment: a rejected retention promise
+  // must not surface as a Worker error, and a failed pass has to leave existing
+  // rows in place and the ingest route answering normally.
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    ctx.waitUntil(runTelemetryRetention(env as TelemetryEnv).catch(() => undefined));
   },
 };

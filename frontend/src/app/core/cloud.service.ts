@@ -32,6 +32,8 @@ import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
 import { SkillsService } from './skills.service';
 import { WorkflowVersionsService } from './workflow-versions.service';
+import { counterName } from './telemetry-catalog';
+import { TelemetryService } from './telemetry.service';
 import { TauriService } from './tauri.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { WorkflowService } from './workflow.service';
@@ -141,6 +143,10 @@ export class CloudService {
   // `RunControllerService`, so the known NG0200 cycle is untouched.
   private readonly awsConfig = inject(AwsDeployConfigService);
   private readonly awsRequest = inject(AwsRequestService);
+  // Safe DI direction even though this service sits inside the known NG0200
+  // cycle: `TelemetryService` is a leaf that injects only `TauriService`, so it
+  // cannot reach back into `RunControllerService`.
+  private readonly telemetry = inject(TelemetryService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -621,6 +627,18 @@ export class CloudService {
       return false;
     }
 
+    // One `deploy.started` per initiated deploy: past every guard, before any
+    // network work, and outside the pipeline below so a retried request inside
+    // it cannot count twice (3.1, 3.2). The dimension is read from the chosen
+    // provider, so it names the target the spec is actually heading to rather
+    // than assuming one. `aws` deliberately does not count here - an AWS deploy
+    // starts at the `cdk deploy` step in `AwsCliService`, and counting both
+    // would fold two different actions into one counter.
+    const deployTarget = this.provider();
+    if (deployTarget === 'phorma' || deployTarget === 'cloudflare') {
+      this.telemetry.count(counterName('deploy.started', deployTarget));
+    }
+
     try {
       // Requirement 3.6: the host's connection inventory comes ONLY from
       // connection metadata - names, types and auth modes, never a secret
@@ -646,6 +664,13 @@ export class CloudService {
       this.reportCapabilityFindings(findings);
       const errors = findings.filter(finding => finding.severity === 'error');
       if (errors.length > 0) {
+        // The spec validation surface: the push is abandoned because the spec
+        // cannot run on the chosen target. Counted once as `validation` and
+        // deliberately not as `deploy` - the deploy never started, and this
+        // branch returns rather than throwing, so the catch below cannot also
+        // count it (Requirements 3.1, 3.2). No finding text is recorded: the
+        // category is the whole payload (11.3).
+        this.telemetry.recordError('validation');
         this.toast.error(
           'Push aborted',
           `${errors.length} problem${errors.length === 1 ? '' : 's'} would prevent this workflow ` +
@@ -672,6 +697,11 @@ export class CloudService {
       this.toast.success('Workflow pushed', `"${spec.name}" is live in the cloud.`);
       return true;
     } catch (error) {
+      // Every way a push can fail lands here - connection metadata, inventory
+      // read, the spec push itself - so one abandoned deploy is one `deploy`
+      // counter (Requirements 3.1, 3.2). The message goes to the toast, never to
+      // telemetry: `recordError` takes the category and nothing else (11.3).
+      this.telemetry.recordError('deploy');
       this.toast.error('Push failed', error instanceof Error ? error.message : String(error));
       return false;
     }

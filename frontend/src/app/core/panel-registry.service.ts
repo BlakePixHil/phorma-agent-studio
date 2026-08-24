@@ -1,5 +1,7 @@
-import { effect, Injectable, signal, computed } from '@angular/core';
+import { effect, inject, Injectable, signal, computed } from '@angular/core';
 import { loadLayout, saveLayout } from './layout-storage';
+import { counterName } from './telemetry-catalog';
+import { TelemetryService } from './telemetry.service';
 
 export interface PanelTab {
   id: string;
@@ -50,6 +52,11 @@ const DEFAULT_TABS: PanelTab[] = [
  */
 @Injectable({ providedIn: 'root' })
 export class PanelRegistryService {
+  // Safe DI direction: `TelemetryService` is a leaf that injects only
+  // `TauriService`, so this edge cannot pull a service back into the layout
+  // shell that reads this registry at startup.
+  private readonly telemetry = inject(TelemetryService);
+
   private readonly _tabs = signal<PanelTab[]>(this.loadTabs());
 
   private readonly _activeLeft  = signal<string>(loadLayout('activeLeft', 'agents'));
@@ -105,8 +112,14 @@ export class PanelRegistryService {
     // reveals Runs) so activation never points at an invisible tab.
     const tab = this._tabs().find(t => t.id === tabId);
     if (tab && !tab.visible) this.showTab(tabId);
+    const previous = side === 'left' ? this._activeLeft() : this._activeRight();
     if (side === 'left') this._activeLeft.set(tabId);
     else this._activeRight.set(tabId);
+    // This is the one seam where a tab BECOMES active on a side, so it is where
+    // an open is counted. Re-activating the tab that is already active on this
+    // side changes nothing, so it is a render, not an open, and is skipped.
+    // An unknown id is discarded by `count` (3.1, 3.2).
+    if (previous !== tabId) this.telemetry.count(counterName('panel.opened', tabId));
   }
 
   /** Show a hidden tab in its sidebar. */

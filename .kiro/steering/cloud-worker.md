@@ -16,11 +16,18 @@ user's own Cloudflare account and keys).
   bundling fails with "Could not resolve ai" otherwise.
 - Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.
   `check` runs no tests, so it alone is not verification. No Cloudflare account needed.
-  `npm test` = `test:unit`: projection, embed, deploy-config, connections, data-host,
-  workflow-state, portal-cleanup, run-wiring, status, releases, plus two Miniflare suites
-  (deploy-validation, connection-secrets). `npm run test:portal` is separate and MANUAL - it
-  needs `npx wrangler dev` on 8799 plus a local Ollama model, which is also what gives you a full
-  local Durable Object for E2E.
+  `npm test` = `test:unit`, 15 suites: projection, embed, deploy-config, connections, data-host,
+  workflow-state, portal-cleanup, run-wiring, status, releases, telemetry, plus four Miniflare
+  suites (deploy-validation, connection-secrets, telemetry-ingest, telemetry-admin).
+  `npm run test:portal` is separate and MANUAL - it needs `npx wrangler dev` on 8799 plus a local
+  Ollama model, which is also what gives you a full local Durable Object for E2E.
+- A Miniflare `dispatchFetch` costs one loopback socket per request - miniflare sets `reset: true`
+  on runtime requests, so its undici pool cannot keep the connection alive. Four Miniflare suites
+  in one chain, two of them property suites, leave enough sockets in TIME_WAIT to exhaust the
+  Windows ephemeral port range, and a property fails mid-run on `connect EADDRINUSE`. Pass new
+  workers through `withLoopbackRetry` (`cloud/test/miniflare-loopback.mjs`), as the two telemetry
+  suites do, instead of lowering iteration counts. It retries connect-time port exhaustion only;
+  every other error still propagates on the first attempt.
 - Wrangler/esbuild honours tsconfig `paths`, so `@phorma/engine` resolves exactly as in the frontend.
 - Durable Object state uses the Agents SDK `this.sql` tagged template (embedded SQLite):
   `run_journal`, `usage_ledger`, workflow state, portal registry.
@@ -72,8 +79,9 @@ phorma-labs.com renders as its footer indicator and `/status` page.
 - Matched FIRST in `index.ts`, before the generic `OPTIONS` branch, because they answer with open
   CORS (`*`). Do not "fix" a cross-origin failure by adding the website to `ALLOWED_ORIGINS` - that
   widens the authenticated `/api/*` surface too.
-- Eight components, each with a functional probe: WorkflowAgent DO, D1, KV, SecretVault DO,
-  PortalIndex DO, R2, Clerk, OpenRouter. `critical: true` on runtime, D1, KV, Clerk and OpenRouter.
+- Nine components, each with a functional probe: WorkflowAgent DO, D1, KV, SecretVault DO,
+  PortalIndex DO, R2, Clerk, OpenRouter, telemetry store (D1 `telemetry_rollups`). `critical: true`
+  on runtime, D1, KV, Clerk and OpenRouter.
 - Rollup: critical outage -> red, any degraded or non-critical outage -> amber, else green. An
   absent binding is `unknown` and is EXCLUDED, so a BYO worker never reads as broken.
 - Always answers HTTP 200, even during an outage. A non-200 makes browsers and generic monitors

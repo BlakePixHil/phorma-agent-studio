@@ -1,0 +1,313 @@
+/* ============================================================================
+   Phorma telemetry admin dashboard - global styles
+   - Tailwind CSS v4 (processed by @tailwindcss/postcss)
+   - PrimeNG (Aura) theme tokens, configured in app/app.config.ts
+   - Tabler Icons - the ONLY icon set (Requirement 10.14). PrimeIcons is not
+     installed here either, so `pi pi-*` cannot render.
+   This package shares no stylesheet with `frontend/`; it is deliberately
+   isolated and only mirrors the same conventions.
+   ============================================================================ */
+
+@import 'tailwindcss';
+@plugin 'tailwindcss-primeui';
+
+/* Tabler Icons font - MIT. Class pattern is `ti ti-<name>`. */
+@import '@tabler/icons-webfont/dist/tabler-icons.css';
+
+/* Dark mode is driven by the `.app-dark` class on <html>, matching the PrimeNG
+   `darkModeSelector` in app.config.ts. */
+@custom-variant dark (&:where(.app-dark, .app-dark *));
+
+:root {
+  /* 14px root, the same as the studio, so `size="small"` PrimeNG controls land
+     at the same height. rem maths here is against 14, never 16. */
+  font-size: 14px;
+
+  --admin-canvas-bg: #f6f7f9;
+  --admin-panel-bg: rgba(255, 255, 255, 0.72);
+  --admin-border: rgba(0, 0, 0, 0.08);
+  --admin-text-muted: rgba(60, 64, 76, 0.72);
+}
+
+:root.app-dark {
+  --admin-canvas-bg: #0c0a10;
+  --admin-panel-bg: rgba(19, 15, 25, 0.88);
+  --admin-border: rgba(255, 255, 255, 0.08);
+  --admin-text-muted: rgba(226, 224, 235, 0.62);
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+ * Lifts inline button content above PrimeNG v20's opaque `::before` overlay.
+ *
+ * A solid (non-outlined) `pButton` paints a `position:absolute; z-index:0;
+ * inset:0` overlay in the button's own background colour, so a bare text label
+ * or a static `<i>` renders UNDERNEATH it and the button looks empty. This class
+ * establishes a stacking context, pushes `::before` behind it, and lifts every
+ * element child. Mirrors the studio's utility of the same name.
+ */
+.phorma-btn-content.p-button {
+  isolation: isolate;
+
+  &::before {
+    z-index: -1;
+  }
+
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+body {
+  background: var(--admin-canvas-bg);
+  color: var(--p-text-color);
+  font-family:
+    'Nunito',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================================
+   Shared view chrome
+   The five views differ in their numbers, not their layout, so the card, grid,
+   table, stat and state classes live HERE rather than five times over in
+   component styles. Global, so the `anyComponentStyle` budget stays quiet and a
+   spacing change is one edit.
+   rem maths is against a 14px root, never 16.
+   ============================================================================ */
+
+.admin-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.143rem; /* 16px */
+
+  &__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.857rem;
+  }
+
+  &__title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    font-size: 1.286rem; /* 18px */
+    font-weight: 700;
+  }
+
+  &__range {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.857rem; /* 12px */
+  }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.143rem;
+  }
+
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.571rem; /* 8px */
+  }
+
+  &__section-title {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.857rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+}
+
+/* Stat cards: as many per row as fit, never narrower than 11rem (154px). */
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.857rem;
+}
+
+/* Tables: two per row on a wide viewport, one on a narrow one. */
+.admin-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 0.857rem;
+}
+
+.admin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.571rem;
+  padding: 0.857rem 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--p-border-radius-lg, 0.571rem);
+  background: var(--admin-panel-bg);
+
+  &__title {
+    display: flex;
+    align-items: center;
+    gap: 0.429rem; /* 6px */
+    margin: 0;
+    font-size: 0.929rem; /* 13px */
+    font-weight: 600;
+  }
+}
+
+.admin-stat {
+  gap: 0.286rem; /* 4px */
+
+  &__label {
+    display: flex;
+    align-items: center;
+    gap: 0.429rem;
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.857rem;
+  }
+
+  &__value {
+    margin: 0;
+    font-size: 1.714rem; /* 24px */
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+
+  &__note {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.786rem; /* 11px */
+  }
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.929rem;
+
+  &__caption {
+    /* The heading above the table already says this; the caption is for
+       assistive technology only. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  th,
+  td {
+    padding: 0.357rem 0.5rem; /* 5px 7px */
+    border-bottom: 1px solid var(--admin-border);
+    text-align: left;
+  }
+
+  thead th {
+    color: var(--admin-text-muted);
+    font-size: 0.786rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  tbody tr:last-child th,
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  &__label {
+    display: flex;
+    align-items: center;
+    gap: 0.429rem;
+    font-weight: 500;
+  }
+
+  &__number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Marks the row the Worker's reporting threshold folded groups into. */
+  &__fold {
+    padding: 0.071rem 0.357rem; /* 1px 5px */
+    border-radius: 999px;
+    background: var(--p-content-hover-background);
+    color: var(--admin-text-muted);
+    font-size: 0.714rem; /* 10px */
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+}
+
+.admin-chart {
+  /* Fixed height: chart.js needs a bounded box with maintainAspectRatio off. */
+  height: 18.571rem; /* 260px */
+}
+
+.admin-footnote {
+  display: flex;
+  align-items: center;
+  gap: 0.429rem;
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: 0.786rem;
+
+  code {
+    font-size: 0.786rem;
+  }
+}
+
+/* Loading, empty and failed chrome (see views/view-state-rail.ts). */
+.admin-view-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.714rem; /* 10px */
+  padding: 3.429rem 1.143rem; /* 48px 16px */
+  border: 1px solid var(--admin-border);
+  border-radius: var(--p-border-radius-lg, 0.571rem);
+  background: var(--admin-panel-bg);
+  text-align: center;
+
+  &__icon,
+  &__spinner {
+    font-size: 1.714rem;
+    color: var(--admin-text-muted);
+  }
+
+  &__spinner {
+    animation: admin-spin 1.1s linear infinite;
+  }
+
+  &__message {
+    margin: 0;
+    color: var(--admin-text-muted);
+  }
+}
+
+@keyframes admin-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-view-state__spinner {
+    animation: none;
+  }
+}
