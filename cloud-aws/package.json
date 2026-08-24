@@ -1,6 +1,6 @@
 {
   "name": "@phorma/cloud-aws",
-  "version": "0.2.0-beta.10",
+  "version": "0.2.0-beta.11",
   "private": true,
   "description": "Phorma Agent Studio AWS deployment target - CDK IaC application, Host_Adapter and CLI shim for ECS Fargate.",
   "type": "module",
