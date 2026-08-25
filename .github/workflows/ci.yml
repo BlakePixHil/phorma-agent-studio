@@ -28,10 +28,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24, not 20: `cloud/test/workflow-state.test.mjs` imports
+      # `node:sqlite` at module scope to exercise the Durable Object state store
+      # against a real database. That module does not exist on Node 20 and needs
+      # `--experimental-sqlite` on 22, so on anything older the suite dies at
+      # import with ERR_UNKNOWN_BUILTIN_MODULE and takes the whole job with it.
+      # Do not lower this to keep it matching release.yml, which builds the app
+      # and runs no tests.
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       # frontend deps come first: the engine's cross-package scenario scripts
       # resolve `@phorma/engine` through frontend/tsconfig.json.
