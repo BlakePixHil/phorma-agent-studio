@@ -58,6 +58,19 @@
     gap: 0.286rem; /* 4px */
   }
 
+  /* The selected trailing window. A class, not a PrimeNG severity or `[text]`
+     flip: see the comment in app.html. Both states are text buttons, so only
+     the fill and the text colour move and the row never reflows. */
+  &__preset.p-button {
+    color: var(--admin-text-muted);
+  }
+
+  &__preset--active.p-button {
+    background: var(--p-highlight-background);
+    color: var(--p-highlight-color);
+    font-weight: 600;
+  }
+
   &__field {
     display: flex;
     align-items: center;

@@ -5,6 +5,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { TooltipModule } from 'primeng/tooltip';
 
+import { InfoPopover } from '../../../shared/info-popover/info-popover';
 import { McpOAuthService } from '../../../core/mcp-oauth.service';
 import {
   COUNTER_CATALOG,
@@ -18,8 +19,13 @@ import { TelemetryService } from '../../../core/telemetry.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
 
-/** Where the plain-language policy lives. Shared with the First_Run_Notice. */
-export const PRIVACY_POLICY_URL = 'https://phorma.dev/privacy';
+/**
+ * Where the plain-language policy lives.
+ *
+ * ONE constant for both surfaces: this page's policy button and the
+ * First_Run_Notice's, so the two links cannot drift apart.
+ */
+export const PRIVACY_POLICY_URL = 'https://phorma-labs.com/privacy';
 
 /** One Counter_Catalog family, described for a human. */
 export interface CollectedCounterFamily {
@@ -100,7 +106,14 @@ function describeCounterFamilies(): readonly CollectedCounterFamily[] {
 @Component({
   selector: 'app-privacy-settings',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, ButtonModule, InputTextModule, ToggleSwitchModule, TooltipModule],
+  imports: [
+    FormsModule,
+    ButtonModule,
+    InputTextModule,
+    ToggleSwitchModule,
+    TooltipModule,
+    InfoPopover,
+  ],
   templateUrl: './privacy-settings.html',
   styleUrl: './privacy-settings.scss',
 })

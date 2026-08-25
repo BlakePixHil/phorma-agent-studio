@@ -2,7 +2,6 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 
 import { McpOAuthService } from '../../../core/mcp-oauth.service';
-import { COUNTER_CATALOG } from '../../../core/telemetry-catalog';
 import { TelemetryService } from '../../../core/telemetry.service';
 import { SettingsDialogService } from '../settings-dialog.service';
 import { ToastService } from '../../../shared/toast/toast.service';
@@ -12,6 +11,13 @@ import { PRIVACY_POLICY_URL } from './privacy-settings';
  * First_Run_Notice - the one-time disclosure that anonymous usage counters are
  * collected (1.2), shown again only when `CURRENT_DISCLOSURE_VERSION` is bumped
  * (1.8) and never again once dismissed (1.3).
+ *
+ * The copy is deliberately SHORT and carries no numbers. A first-run card is a
+ * disclosure and a signpost, not the full accounting: it says what is collected
+ * in one line and points at Privacy settings, which derives the exact counter
+ * list, the environment fields and the pending payload from the code itself.
+ * Naming a counter total here was both intimidating and a second place for the
+ * same fact to go stale.
  *
  * DELIBERATELY NOT A DIALOG. It carries no `role="dialog"`, traps no focus, and
  * covers no part of the workspace: a disclosure the user has not asked for must
@@ -35,9 +41,9 @@ import { PRIVACY_POLICY_URL } from './privacy-settings';
       <div class="phorma-tnotice__body">
         <p class="phorma-tnotice__title">Anonymous usage counters are on</p>
         <p class="phorma-tnotice__text">
-          Phorma counts which features get used so the studio can be improved. Counts only,
-          {{ counterCount }} of them, grouped by day: never your prompts, workflows, data or
-          credentials. It also records your app version, platform, locale and timezone.
+          Phorma collects anonymous usage data to improve the studio. Never your prompts,
+          workflows, data or credentials. You can see exactly what is sent, and turn it off,
+          in Privacy settings.
         </p>
         <div class="phorma-tnotice__actions">
           <button
@@ -208,9 +214,6 @@ export class TelemetryNotice {
   // The app's one external-link helper: `plugin-opener` on desktop, a
   // `noopener` tab in the browser.
   private readonly links = inject(McpOAuthService);
-
-  /** How many counter names the catalog permits, read from the catalog itself. */
-  protected readonly counterCount = COUNTER_CATALOG.size;
 
   /** Hides the notice for this disclosure version, on every later start (1.3). */
   protected dismiss(): void {

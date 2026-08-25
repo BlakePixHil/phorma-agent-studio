@@ -18,13 +18,24 @@
 
       <div class="admin-range" role="group" aria-label="Date range">
         <div class="admin-range__presets">
+          <!--
+            The active look is an Angular CLASS binding, never a PrimeNG input.
+            `pButton` applies its style classes imperatively (`addClass` in
+            `onAfterViewInit`) and re-applies them only from the `label`, `icon`,
+            `iconPos` and `severity` setters, so a `[text]` that flips at runtime
+            updates the binding and never the DOM: the button that was active at
+            first paint stayed solid forever while `aria-pressed` moved
+            correctly. Keep `[text]` constant and let Angular own the one class
+            that changes.
+          -->
           @for (preset of presets; track preset) {
             <button
               pButton
               type="button"
               size="small"
-              class="phorma-btn-content"
-              [text]="activePreset() !== preset"
+              class="phorma-btn-content admin-range__preset"
+              [text]="true"
+              [class.admin-range__preset--active]="activePreset() === preset"
               [attr.aria-pressed]="activePreset() === preset"
               (click)="selectPreset(preset)"
             >

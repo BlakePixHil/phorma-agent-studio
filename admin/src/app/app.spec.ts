@@ -590,6 +590,47 @@ describe('App range control', () => {
     await settle();
     http.verify();
   });
+
+  /**
+   * The rendered highlight, not the state behind it.
+   *
+   * Every other test here reads signals, and all of them passed while the
+   * highlight was visibly stuck on the opening preset: `pButton` applies its
+   * style classes imperatively and re-applies them only from the `label`,
+   * `icon`, `iconPos` and `severity` setters, so the `[text]` flip that used to
+   * carry the active look never reached the DOM. `aria-pressed` moved the whole
+   * time, which is why the state assertions were no defence. Assert the class a
+   * visitor can actually see.
+   */
+  it('moves the active preset highlight in the DOM, not only in aria-pressed', async () => {
+    const fixture = await createShell({ signedIn: true });
+    const host: HTMLElement = fixture.nativeElement;
+
+    const presets = () =>
+      Array.from(host.querySelectorAll<HTMLButtonElement>('.admin-range__preset'));
+    const highlighted = () =>
+      presets()
+        .filter((button) => button.classList.contains('admin-range__preset--active'))
+        .map((button) => button.textContent?.trim());
+    const pressed = () =>
+      presets()
+        .filter((button) => button.getAttribute('aria-pressed') === 'true')
+        .map((button) => button.textContent?.trim());
+
+    expect(presets().length).toBe(RANGE_PRESET_DAYS.length);
+    expect(highlighted()).toEqual([`${OPENING_DAYS} days`]);
+
+    const seven = presets().find((button) => button.textContent?.includes('7 days'));
+    expect(seven).toBeDefined();
+    seven?.click();
+    fixture.detectChanges();
+
+    // Exactly one highlight, on the preset that is now selected, and the visible
+    // state agrees with the announced one.
+    expect(highlighted()).toEqual(['7 days']);
+    expect(pressed()).toEqual(['7 days']);
+    expect(TestBed.inject(DateRangeService).days()).toBe(7);
+  });
 });
 
 // --- Examples: the auth switch ---------------------------------------------

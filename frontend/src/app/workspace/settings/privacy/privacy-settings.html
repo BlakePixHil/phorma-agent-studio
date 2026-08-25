@@ -1,9 +1,35 @@
 <!-- 1. Consent. The only control that changes Consent_State. -->
 <div class="phorma-privacy__setting">
   <div class="phorma-privacy__setting-text">
-    <label class="phorma-privacy__setting-label" for="privacy-telemetry-enabled">
-      Share anonymous usage counters
-    </label>
+    <div class="phorma-privacy__setting-heading">
+      <label class="phorma-privacy__setting-label" for="privacy-telemetry-enabled">
+        Share anonymous usage counters
+      </label>
+      <!--
+        Why, not what. The lists below already answer "what is collected" in
+        detail; this answers the question a reader asks first, and it lives in a
+        popover so the page opens on the control rather than on an explanation.
+      -->
+      <app-info-popover
+        icon="ti-help-circle"
+        label="Why Phorma collects usage counters"
+        heading="Why we collect this"
+      >
+        <p>
+          Counts tell us which parts of the studio people actually reach. A node kind nobody
+          adds, a panel nobody opens, or a deploy target that fails more often than it
+          succeeds are all things we cannot see from support requests alone.
+        </p>
+        <p>
+          In practice it decides what we fix and build next, and it tells us when a release
+          has broken something on a platform we do not run day to day.
+        </p>
+        <p>
+          It is counts only, never content, and the studio works exactly the same with this
+          off.
+        </p>
+      </app-info-popover>
+    </div>
     <p class="phorma-privacy__setting-desc">
       Counts of which features get used, grouped by day. Never your prompts, workflows or
       data. Turning this off discards everything counted so far and anything waiting to
@@ -92,13 +118,19 @@
 <p class="phorma-privacy__desc">
   Each daily rollup also carries these {{ envFields.length }} facts about this install:
 </p>
+<!--
+  Same column contract as the counter table above: the plain-language descriptor
+  on the left, the raw value hard right. The key used to sit on the left, which
+  put a short `<code>` against a long sentence and made the two tables read as
+  different shapes.
+-->
 <dl class="phorma-privacy__list">
   @for (field of envFields; track field.key) {
     <div class="phorma-privacy__list-row">
-      <dt class="phorma-privacy__term">
+      <dt class="phorma-privacy__term">{{ field.label }}</dt>
+      <dd class="phorma-privacy__def">
         <code class="phorma-privacy__code">{{ field.key }}</code>
-      </dt>
-      <dd class="phorma-privacy__def">{{ field.label }}</dd>
+      </dd>
     </div>
   }
 </dl>

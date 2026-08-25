@@ -32,6 +32,15 @@
   min-width: 0;
 }
 
+/* Label plus its "why" trigger on one baseline. The label keeps its own click
+   target (it is a `for=` label for the switch), so the two must be siblings
+   rather than the icon living inside the label. */
+.phorma-privacy__setting-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .phorma-privacy__setting-label {
   display: block;
   font-size: 0.893rem;
@@ -129,10 +138,16 @@
   margin: 0;
 }
 
+/* Two columns pushed to opposite edges: the descriptor reads down the left, its
+   value down the right. Both used to be `flex: 1 1 auto`, which split the row in
+   half and left each value floating in the middle of its own column with a
+   ragged left edge. `justify-content: space-between` plus a non-growing value
+   column is what makes the right edge line up. */
 .phorma-privacy__list-row {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 16px;
   padding: 5px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--p-text-color) 6%, transparent);
 
@@ -149,14 +164,18 @@
   color: var(--p-text-color);
 }
 
+/* Never grows, so it hugs the right edge; still allowed to shrink and wrap on a
+   narrow dialog rather than pushing the row into a horizontal scroll. */
 .phorma-privacy__def {
   display: flex;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 8px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   margin: 0;
   font-size: 0.857rem;
+  text-align: right;
   color: var(--p-text-muted-color);
 }
 

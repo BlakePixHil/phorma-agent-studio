@@ -32,7 +32,7 @@ import { Popover, PopoverModule } from 'primeng/popover';
       (blur)="scheduleHide()"
       (click)="$event.stopPropagation()"
     >
-      <i class="ti ti-info-circle" aria-hidden="true"></i>
+      <i class="ti {{ icon() }}" aria-hidden="true"></i>
     </button>
 
     <p-popover #pop styleClass="phorma-info-popover" [dismissable]="false" [showTransitionOptions]="'0.12s ease-out'">
@@ -86,6 +86,14 @@ export class InfoPopover {
   readonly label = input.required<string>();
   /** Optional bold heading shown at the top of the popover. */
   readonly heading = input<string>('');
+
+  /**
+   * Trigger glyph, as a Tabler icon name. Defaults to the (i) every settings row
+   * uses; `ti-help-circle` suits "why does this exist" copy better than "what is
+   * this field". Anything else would be a third affordance for one behaviour, so
+   * keep it to those two.
+   */
+  readonly icon = input<string>('ti-info-circle');
 
   private hideTimer: ReturnType<typeof setTimeout> | null = null;
 

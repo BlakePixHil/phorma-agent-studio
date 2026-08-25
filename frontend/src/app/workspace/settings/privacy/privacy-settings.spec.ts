@@ -200,9 +200,11 @@ describe('PrivacySettings rendering', () => {
     const envList = lists()[1];
     expect(envList).toBeTruthy();
 
+    // Both tables put the descriptor in the `dt` and the raw value in the `dd`,
+    // so the key is read from `dd code` here exactly as the family name is above.
     const keys = [...(envList?.querySelectorAll('.phorma-privacy__list-row') ?? [])].map((row) => ({
-      key: text(row.querySelector('dt code')),
-      label: text(row.querySelector('dd')),
+      key: text(row.querySelector('dd code')),
+      label: text(row.querySelector('dt')),
     }));
 
     expect(keys.map((entry) => entry.key)).toEqual([...ENV_KEYS]);

@@ -1,10 +1,12 @@
 /**
  * Rendering examples for the First_Run_Notice (1.2).
  *
- * What 1.2 asks for is three things in one card: the categories of data
- * collected, a control that opens the Privacy_Settings_Section, and a link to the
- * privacy policy. The category count is read off `COUNTER_CATALOG`, so the
- * headline number cannot drift from what the code counts.
+ * What 1.2 asks for is three things in one card: that collection is disclosed, a
+ * control that opens the Privacy_Settings_Section, and a link to the privacy
+ * policy. The card deliberately carries NO numbers - the full accounting is
+ * derived from `COUNTER_CATALOG` on the Privacy page, and a count restated here
+ * would be a second place for one fact to go stale. The spec asserts that
+ * absence, so the copy cannot drift back.
  *
  * The fourth assertion is a negative one the design is explicit about: the notice
  * must NOT carry `role="dialog"`. The app's global key handlers probe for that
@@ -19,7 +21,6 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 
 import { McpOAuthService } from '../../../core/mcp-oauth.service';
-import { COUNTER_CATALOG } from '../../../core/telemetry-catalog';
 import type { TelemetryStorageBackend } from '../../../core/telemetry-storage';
 import { TELEMETRY_TEST_SEAM, TelemetryService } from '../../../core/telemetry.service';
 import { TauriService } from '../../../core/tauri.service';
@@ -94,22 +95,24 @@ describe('TelemetryNotice rendering', () => {
     root = fixture.nativeElement as HTMLElement;
   });
 
-  it('states the categories of data collected, counting them from the catalog', () => {
+  it('discloses anonymous collection, the exclusions, and where to configure it', () => {
     const body = text(root.querySelector('.phorma-tnotice__text'));
 
-    // The headline number is the catalog size, so the disclosure cannot claim to
-    // count fewer things than the code does.
-    expect(body).toContain(`${COUNTER_CATALOG.size} of them`);
+    // What it is, in the words a first-run card can afford.
+    expect(body).toContain('anonymous');
 
-    // The Client_Environment categories, named in plain language.
-    for (const category of ['app version', 'platform', 'locale', 'timezone']) {
-      expect(body).toContain(category);
-    }
-
-    // And the exclusions, which are the half of the disclosure that reassures.
+    // The exclusions, which are the half of the disclosure that reassures.
     for (const excluded of ['prompts', 'workflows', 'data', 'credentials']) {
       expect(body).toContain(excluded);
     }
+
+    // And the signpost. The card does not enumerate; it points at the page that
+    // derives the full list from the catalog.
+    expect(body).toContain('Privacy settings');
+
+    // No numbers. A count here reads as a specification the reader is expected
+    // to audit, and it duplicates a fact that already has one home.
+    expect(body).not.toMatch(/\d/);
 
     expect(text(root.querySelector('.phorma-tnotice__title'))).toContain(
       'Anonymous usage counters are on',
