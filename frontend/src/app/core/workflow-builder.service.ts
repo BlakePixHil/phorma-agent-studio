@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 
 import type { ChatMessage, ModelRequest, ModelUsage, ToolCall } from '@phorma/engine';
 
@@ -253,6 +253,15 @@ export class WorkflowBuilderService {
   }
 
   /**
+   * Whether the studio may build a plan FOR the user. Having the canvas edited
+   * on your behalf is the Phorma Cloud capability, in Plan mode exactly as in
+   * Agent mode; Plan itself stays free, because composing and refining a plan
+   * is the part that has to work for everyone. Without a subscription the plan
+   * is still the deliverable - the user follows its per-step instructions.
+   */
+  readonly canAutoApply = computed(() => this.phormaCloud.subscribed());
+
+  /**
    * Ask mode: streams a markdown answer about the current workflow.
    *
    * Read_Actions are offered as tools (Requirement 5.5) so the assistant can
@@ -290,6 +299,7 @@ export class WorkflowBuilderService {
           ...(tools && tools.length > 0 ? { tools } : {}),
           temperature: 0.4,
           maxTokens: 4096,
+          ...this.settings.providerEndpoints(),
         };
 
         let text = '';
@@ -343,6 +353,7 @@ export class WorkflowBuilderService {
       messages: [...options.history, { role: 'user', content: options.request }],
       temperature: 0.2,
       maxTokens: 8192,
+      ...this.settings.providerEndpoints(),
     };
     let text = '';
     try {
@@ -469,6 +480,7 @@ export class WorkflowBuilderService {
       messages: [{ role: 'user', content: request }],
       temperature: 0.2,
       maxTokens: 8192,
+      ...this.settings.providerEndpoints(),
     };
 
     let text = '';
@@ -651,6 +663,7 @@ export class WorkflowBuilderService {
         tools,
         temperature: 0.2,
         maxTokens: 8192,
+        ...this.settings.providerEndpoints(),
       };
 
       let text = '';

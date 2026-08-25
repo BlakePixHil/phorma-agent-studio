@@ -51,72 +51,192 @@
       ></textarea>
     </section>
 
-    <!-- Schedule trigger -->
+    <!-- Schedule trigger.
+         The user authors a wall-clock time in a zone; the stored cron is always
+         UTC, because that is what both deployed runtimes evaluate. The "next
+         runs" list is computed from the STORED cron, so it doubles as proof the
+         conversion is right rather than a restatement of the summary. -->
     @if (scheduleData(); as data) {
       <section class="phorma-props__section">
-        <label class="phorma-props__label">Cron expression</label>
+        <div class="phorma-props__label-row">
+          <label class="phorma-props__label">Schedule</label>
+          <app-info-popover label="Schedule" icon="ti-help-circle" heading="How schedules run">
+            <p>
+              Schedules only fire on a <strong>deployed</strong> workflow - the desktop app and
+              browser preview do not run them.
+            </p>
+            <p>
+              The time you set is stored as a UTC cron expression, converted from the zone below.
+              @if (scheduleZoneHasDst()) {
+                This zone observes daylight saving, so after a transition the run shifts by an
+                hour until you edit the schedule again.
+              }
+            </p>
+            <p>Pick <strong>Custom</strong> to write the cron expression yourself.</p>
+          </app-info-popover>
+        </div>
 
-        <!-- Preset buttons -->
-        <div class="phorma-props__presets">
-          @for (preset of cronPresets; track preset.label) {
+        <!-- Frequency: a segmented control, not a row of highlighted buttons. -->
+        <div class="phorma-props__segment" role="radiogroup" aria-label="Schedule frequency">
+          @for (freq of scheduleFrequencies; track freq.id) {
             <button
               type="button"
-              pButton
-              severity="secondary"
-              [outlined]="true"
-              size="small"
-              class="phorma-props__preset-btn"
-              [class.phorma-props__preset-btn--active]="selectedPreset() === preset.label"
-              (click)="onCronPreset(preset)"
-              [attr.title]="preset.description"
+              role="radio"
+              class="phorma-props__segment-btn"
+              [class.phorma-props__segment-btn--active]="scheduleFrequency() === freq.id"
+              [attr.aria-checked]="scheduleFrequency() === freq.id"
+              (click)="onScheduleFrequency(freq.id)"
             >
-              {{ preset.label }}
+              {{ freq.label }}
             </button>
           }
         </div>
 
-        <!-- Cron text input -->
-        <input
-          pInputText
-          pSize="small"
-          [id]="id('prop-cron')"
-          type="text"
-          class="phorma-props__input phorma-props__input--mono"
-          [value]="data.cron"
-          (input)="patchData({ cron: inputValue($event) })"
-          placeholder="0 9 * * 1-5"
-        />
+        @if (scheduleFrequency() === 'custom') {
+          <input
+            pInputText
+            pSize="small"
+            [id]="id('prop-cron')"
+            type="text"
+            class="phorma-props__input phorma-props__input--mono"
+            [value]="data.cron"
+            (input)="patchData({ cron: inputValue($event) })"
+            placeholder="0 9 * * 1-5"
+            aria-label="Cron expression (UTC)"
+          />
+          @if (cronHumanReadable(); as desc) {
+            <p class="phorma-props__cron-desc">{{ desc }} (UTC)</p>
+          } @else if (cronInvalid()) {
+            <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid">
+              Invalid cron expression
+            </p>
+          }
+        } @else {
+          <!-- Time. Two clamped numeric fields rather than a code-style box: an
+               hour and a minute have different ranges and both want arrow-key
+               stepping, which per-character inputs cannot give. -->
+          @if (scheduleFrequency() !== 'hourly') {
+            <div class="phorma-props__sched-row">
+              <span class="phorma-props__sched-label">Time</span>
+              <!-- Text, not number: only text can show the leading zero that
+                   makes this read as a time. Arrow-key stepping is restored by
+                   `onScheduleTimeKeydown`. -->
+              <span class="phorma-props__time">
+                <input
+                  class="phorma-props__time-field"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="2"
+                  [value]="padTime(schedulePlan().hour)"
+                  (change)="onScheduleHour(inputValue($event))"
+                  (keydown)="onScheduleTimeKeydown($event, 'hour')"
+                  aria-label="Hour"
+                />
+                <span class="phorma-props__time-sep" aria-hidden="true">:</span>
+                <input
+                  class="phorma-props__time-field"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="2"
+                  [value]="padTime(schedulePlan().minute)"
+                  (change)="onScheduleMinute(inputValue($event))"
+                  (keydown)="onScheduleTimeKeydown($event, 'minute')"
+                  aria-label="Minute"
+                />
+              </span>
+            </div>
+          } @else {
+            <div class="phorma-props__sched-row">
+              <span class="phorma-props__sched-label">At minute</span>
+              <span class="phorma-props__time">
+                <input
+                  class="phorma-props__time-field"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="2"
+                  [value]="padTime(schedulePlan().minute)"
+                  (change)="onScheduleMinute(inputValue($event))"
+                  (keydown)="onScheduleTimeKeydown($event, 'minute')"
+                  aria-label="Minute"
+                />
+              </span>
+            </div>
+          }
 
-        <!-- Human-readable description -->
-        @if (cronHumanReadable(); as desc) {
-          <p class="phorma-props__cron-desc">{{ desc }}</p>
-        } @else if (cronInvalid()) {
-          <p class="phorma-props__cron-desc phorma-props__cron-desc--invalid">Invalid cron expression</p>
-        }
-
-        <!-- Field chips -->
-        <div class="phorma-props__cron-fields">
-          @for (fieldDef of cronFieldDefs; track fieldDef.key) {
-            <div class="phorma-props__field-row">
-              <span class="phorma-props__field-label">{{ fieldDef.label }}</span>
-              <div class="phorma-props__chips">
-                @for (opt of fieldDef.options; track opt.value) {
+          @if (scheduleFrequency() === 'weekly') {
+            <div class="phorma-props__sched-row">
+              <span class="phorma-props__sched-label">Days</span>
+              <div class="phorma-props__days" role="group" aria-label="Days of the week">
+                @for (initial of weekdayInitials; track $index) {
                   <button
                     type="button"
-                    pButton
-                    severity="secondary"
-                    [outlined]="true"
-                    size="small"
-                    class="phorma-props__chip"
-                    [class.phorma-props__chip--active]="isSimpleFieldValue(fieldDef.key, opt.value)"
-                    (click)="onCronFieldChange(fieldDef.key, opt.value)"
+                    class="phorma-props__day"
+                    [class.phorma-props__day--active]="isScheduleWeekday($index)"
+                    [attr.aria-pressed]="isScheduleWeekday($index)"
+                    [attr.aria-label]="weekdayName($index)"
+                    (click)="toggleScheduleWeekday($index)"
                   >
-                    {{ opt.label }}
+                    {{ initial }}
                   </button>
                 }
               </div>
             </div>
           }
+
+          @if (scheduleFrequency() === 'monthly') {
+            <div class="phorma-props__sched-row">
+              <span class="phorma-props__sched-label">Day of month</span>
+              <span class="phorma-props__time">
+                <input
+                  class="phorma-props__time-field"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="2"
+                  [value]="schedulePlan().dayOfMonth"
+                  (change)="onScheduleDayOfMonth(inputValue($event))"
+                  (keydown)="onScheduleTimeKeydown($event, 'day')"
+                  aria-label="Day of month"
+                />
+              </span>
+            </div>
+          }
+
+          @if (scheduleFrequency() !== 'hourly') {
+            <div class="phorma-props__sched-row">
+              <span class="phorma-props__sched-label">Timezone</span>
+              <p-select
+                class="phorma-props__sched-zone"
+                [options]="timeZoneOptions()"
+                optionLabel="label"
+                optionValue="value"
+                [filter]="true"
+                filterBy="label"
+                [ngModel]="scheduleZone()"
+                (ngModelChange)="onScheduleZone($event)"
+                size="small"
+                appendTo="body"
+                ariaLabel="Schedule timezone"
+              />
+            </div>
+          }
+        }
+
+        <!-- What will actually happen: the summary, the UTC cron it compiled to,
+             and real fire times read back out of that cron. -->
+        <div class="phorma-props__sched-summary">
+          <p class="phorma-props__sched-when">{{ scheduleSummary() }}</p>
+          @if (scheduleNextRuns().length > 0) {
+            <p class="phorma-props__sched-next">
+              <span class="phorma-props__sched-next-label">Next</span>
+              @for (run of scheduleNextRuns(); track $index) {
+                <span class="phorma-props__sched-next-item">{{ run }}</span>
+              }
+            </p>
+          }
+          <p class="phorma-props__sched-cron">
+            <span class="phorma-props__sched-next-label">UTC cron</span>
+            <code>{{ data.cron || 'not set' }}</code>
+          </p>
         </div>
       </section>
     }
@@ -3102,3 +3222,4 @@
     </div>
   </div>
 }
+

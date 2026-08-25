@@ -20,6 +20,22 @@ import { SelectModule } from 'primeng/select';
 import { SelectionService } from '../../../core/selection.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import {
+  WEEKDAY_INITIALS,
+  WEEKDAY_LABELS,
+  buildScheduleCron,
+  describePlan,
+  formatInZone,
+  formatZoneOffset,
+  localTimeZone,
+  nextOccurrences,
+  parseSchedule,
+  supportedTimeZones,
+  zoneObservesDst,
+  type ScheduleFrequency,
+  type SchedulePlan,
+} from '../../../core/schedule-cron';
+import { InfoPopover } from '../../../shared/info-popover/info-popover';
+import {
   MCP_LOCAL_ICON,
   MCP_OAUTH_ICON,
   MCP_TRANSPORT_LABEL,
@@ -284,126 +300,24 @@ const PORTAL_FIELD_TYPES: { id: PortalField['type']; label: string }[] = [
   { id: 'boolean', label: 'Yes / no' },
 ];
 
-// ── Cron editor ─────────────────────────────────────────────────────────────
+// ── Schedule editor ─────────────────────────────────────────────────────────
 
-interface CronFields {
-  minute: string;
-  hour: string;
-  dayOfMonth: string;
-  month: string;
-  dayOfWeek: string;
+/** Wraps a stepped value around its range, so 23 + 1 hour lands back on 0. */
+function wrap(value: number, min: number, max: number): number {
+  const span = max - min + 1;
+  return ((((value - min) % span) + span) % span) + min;
 }
 
-function parseCron(cron: string): CronFields {
-  const parts = cron.trim().split(/\s+/);
-  return {
-    minute: parts[0] ?? '*',
-    hour: parts[1] ?? '*',
-    dayOfMonth: parts[2] ?? '*',
-    month: parts[3] ?? '*',
-    dayOfWeek: parts[4] ?? '*',
-  };
-}
-
-function buildCron(fields: CronFields): string {
-  return `${fields.minute} ${fields.hour} ${fields.dayOfMonth} ${fields.month} ${fields.dayOfWeek}`;
-}
-
-interface CronFieldOption {
-  value: string;
-  label: string;
-}
-
-interface CronFieldDef {
-  key: keyof CronFields;
-  label: string;
-  options: CronFieldOption[];
-}
-
-const CRON_FIELD_DEFS: CronFieldDef[] = [
-  {
-    key: 'minute',
-    label: 'Minute',
-    options: [
-      { value: '*', label: 'Every' },
-      { value: '0', label: '0' },
-      { value: '15', label: '15' },
-      { value: '30', label: '30' },
-      { value: '45', label: '45' },
-    ],
-  },
-  {
-    key: 'hour',
-    label: 'Hour',
-    options: [
-      { value: '*', label: 'Every' },
-      { value: '0', label: '12am' },
-      { value: '6', label: '6am' },
-      { value: '9', label: '9am' },
-      { value: '12', label: '12pm' },
-      { value: '15', label: '3pm' },
-      { value: '18', label: '6pm' },
-      { value: '21', label: '9pm' },
-    ],
-  },
-  {
-    key: 'dayOfMonth',
-    label: 'Day',
-    options: [
-      { value: '*', label: 'Every' },
-      { value: '1', label: '1st' },
-      { value: '15', label: '15th' },
-    ],
-  },
-  {
-    key: 'month',
-    label: 'Month',
-    options: [
-      { value: '*', label: 'Every' },
-      { value: '1', label: 'Jan' },
-      { value: '2', label: 'Feb' },
-      { value: '3', label: 'Mar' },
-      { value: '4', label: 'Apr' },
-      { value: '5', label: 'May' },
-      { value: '6', label: 'Jun' },
-      { value: '7', label: 'Jul' },
-      { value: '8', label: 'Aug' },
-      { value: '9', label: 'Sep' },
-      { value: '10', label: 'Oct' },
-      { value: '11', label: 'Nov' },
-      { value: '12', label: 'Dec' },
-    ],
-  },
-  {
-    key: 'dayOfWeek',
-    label: 'Weekday',
-    options: [
-      { value: '*', label: 'Every' },
-      { value: '1-5', label: 'Weekdays' },
-      { value: '0,6', label: 'Weekends' },
-      { value: '0', label: 'Sun' },
-      { value: '1', label: 'Mon' },
-      { value: '2', label: 'Tue' },
-      { value: '3', label: 'Wed' },
-      { value: '4', label: 'Thu' },
-      { value: '5', label: 'Fri' },
-      { value: '6', label: 'Sat' },
-    ],
-  },
+/** The frequency segmented control, in display order. */
+const SCHEDULE_FREQUENCIES: { id: ScheduleFrequency; label: string }[] = [
+  { id: 'hourly', label: 'Hourly' },
+  { id: 'daily', label: 'Daily' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+  { id: 'custom', label: 'Custom' },
 ];
 
-interface CronPreset {
-  label: string;
-  cron: string;
-  description: string;
-}
 
-const CRON_PRESETS: CronPreset[] = [
-  { label: 'Every hour', cron: '0 * * * *', description: 'At minute 0 of every hour' },
-  { label: 'Daily 9am', cron: '0 9 * * *', description: 'At 9:00 AM every day' },
-  { label: 'Weekdays 9am', cron: '0 9 * * 1-5', description: 'At 9:00 AM, Mon-Fri' },
-  { label: 'Monthly 1st', cron: '0 9 1 * *', description: 'At 9:00 AM on the 1st' },
-];
 
 /**
  * The full properties form: generic node configuration - name, description -
@@ -428,6 +342,7 @@ const CRON_PRESETS: CronPreset[] = [
     SelectModule,
     TextareaModule,
     PhormaCloudIcon,
+    InfoPopover,
   ],
   templateUrl: './properties-form.html',
   styleUrl: './properties-form.scss',
@@ -500,16 +415,161 @@ export class PropertiesForm {
     return node ? (findCatalogEntryByKind(node.kind)?.label ?? node.kind) : '';
   });
 
-  // ── Cron editor state ───────────────────────────────────────────────────────
+  // ── Schedule editor state ───────────────────────────────────────────────────
 
-  protected readonly cronFieldDefs = CRON_FIELD_DEFS;
-  protected readonly cronPresets = CRON_PRESETS;
+  protected readonly scheduleFrequencies = SCHEDULE_FREQUENCIES;
+  protected readonly weekdayInitials = WEEKDAY_INITIALS;
 
-  /** Parse the cron string into individual fields (reactive). */
-  protected readonly cronFields = computed<CronFields>(() => {
-    const data = this.scheduleData();
-    return parseCron(data?.cron ?? '* * * * *');
+  /** Zone the schedule is authored in: the node's, else the browser's. */
+  protected readonly scheduleZone = computed(
+    () => this.scheduleData()?.timezone?.trim() || localTimeZone(),
+  );
+
+  /** Zone options for the picker, with the current offset alongside each id. */
+  protected readonly timeZoneOptions = computed(() =>
+    supportedTimeZones().map(zone => ({
+      value: zone,
+      label: `${zone.replace(/_/g, ' ')} · ${formatZoneOffset(zone)}`,
+    })),
+  );
+
+  /**
+   * The stored UTC cron read back as a plan in the authoring zone. `custom`
+   * whenever the expression is richer than the visual controls can express, so a
+   * hand-written cron is never silently rewritten.
+   */
+  protected readonly schedulePlan = computed<SchedulePlan>(() =>
+    parseSchedule(this.scheduleData()?.cron ?? '', this.scheduleZone()),
+  );
+
+  /**
+   * Node the user explicitly switched to Custom on. Needed because the frequency
+   * is otherwise DERIVED from the cron: a cron the visual editor can express
+   * parses back to that shape, so the Custom segment could never stay selected
+   * on, say, `0 * * * *`. Scoped to a node id so selecting a different schedule
+   * starts from what its own expression says.
+   */
+  private readonly customCronNodeId = signal<string | null>(null);
+
+  /** The frequency the editor is SHOWING, honouring an explicit Custom choice. */
+  protected readonly scheduleFrequency = computed<ScheduleFrequency>(() => {
+    const parsed = this.schedulePlan().frequency;
+    if (parsed === 'custom') return 'custom';
+    return this.customCronNodeId() === this.node()?.id ? 'custom' : parsed;
   });
+
+  /** Plain-English summary of the schedule in its own zone. */
+  protected readonly scheduleSummary = computed(() =>
+    describePlan(this.schedulePlan(), this.scheduleZone()),
+  );
+
+  /** True when the chosen zone observes daylight saving, which we cannot track. */
+  protected readonly scheduleZoneHasDst = computed(() => zoneObservesDst(this.scheduleZone()));
+
+  /**
+   * The next few fire times, rendered in the authoring zone. This is the honest
+   * answer to "when will this actually run": it is computed from the STORED UTC
+   * cron, so any conversion mistake shows up here rather than hiding behind a
+   * friendly summary.
+   */
+  protected readonly scheduleNextRuns = computed(() => {
+    const cron = this.scheduleData()?.cron?.trim();
+    if (!cron) return [];
+    const zone = this.scheduleZone();
+    return nextOccurrences(cron, 3).map(at => formatInZone(at, zone));
+  });
+
+  protected onScheduleFrequency(frequency: ScheduleFrequency): void {
+    if (frequency === this.scheduleFrequency()) return;
+    if (frequency === 'custom') {
+      // Switching to Custom reveals the raw expression WITHOUT rewriting it, so
+      // it is safe to use just to look at what a visual schedule compiled to.
+      this.customCronNodeId.set(this.node()?.id ?? null);
+      this.patchData({ timezone: this.scheduleZone() });
+      return;
+    }
+    this.customCronNodeId.set(null);
+    this.commitSchedulePlan({ ...this.schedulePlan(), frequency });
+  }
+
+  protected onScheduleHour(value: number | string): void {
+    this.commitSchedulePlan({ ...this.schedulePlan(), hour: Number(value) });
+  }
+
+  protected onScheduleMinute(value: number | string): void {
+    this.commitSchedulePlan({ ...this.schedulePlan(), minute: Number(value) });
+  }
+
+  protected onScheduleDayOfMonth(value: number | string): void {
+    this.commitSchedulePlan({ ...this.schedulePlan(), dayOfMonth: Number(value) });
+  }
+
+/**
+   * Two-digit display for an hour or minute. `type="number"` cannot show a
+   * leading zero, which rendered 09:00 as "9 : 0" - so the time fields are text
+   * inputs and {@link onScheduleTimeKeydown} restores arrow-key stepping.
+   */
+  protected padTime(value: number): string {
+    return String(value).padStart(2, '0');
+  }
+
+  /**
+   * Up/Down step the field the way a number input would, because that is the
+   * fastest way to nudge a time and users expect it from a spinner-shaped
+   * control. Minutes move in 5s, matching the old `step` attribute.
+   */
+  protected onScheduleTimeKeydown(event: KeyboardEvent, field: 'hour' | 'minute' | 'day'): void {
+    const direction = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+    if (direction === 0) return;
+    event.preventDefault();
+    const plan = this.schedulePlan();
+    if (field === 'hour') {
+      this.onScheduleHour(wrap(plan.hour + direction, 0, 23));
+    } else if (field === 'minute') {
+      this.onScheduleMinute(wrap(plan.minute + direction * 5, 0, 59));
+    } else {
+      this.onScheduleDayOfMonth(wrap(plan.dayOfMonth + direction, 1, 31));
+    }
+  }
+
+  /** Full weekday name for the day toggles' accessible labels ("M" alone is not one). */
+  protected weekdayName(day: number): string {
+    return WEEKDAY_LABELS[day] ?? '';
+  }
+
+  protected isScheduleWeekday(day: number): boolean {
+    return this.schedulePlan().weekdays.includes(day);
+  }
+
+  protected toggleScheduleWeekday(day: number): void {
+    const plan = this.schedulePlan();
+    const weekdays = plan.weekdays.includes(day)
+      ? plan.weekdays.filter(d => d !== day)
+      : [...plan.weekdays, day].sort((a, b) => a - b);
+    // Never commit an empty set: a weekly cron with no day fires never, and the
+    // user is mid-edit rather than asking for that.
+    if (weekdays.length === 0) return;
+    this.commitSchedulePlan({ ...plan, weekdays });
+  }
+
+  protected onScheduleZone(zone: string): void {
+    const plan = this.schedulePlan();
+    if (plan.frequency === 'custom') {
+      // Custom keeps its raw cron; the zone only changes how times are shown.
+      this.patchData({ timezone: zone });
+      return;
+    }
+    // Re-derive the UTC cron so the wall-clock time the user set is preserved in
+    // the NEW zone. Reading the plan in the old zone first is what makes this a
+    // move rather than a reinterpretation.
+    this.patchData({ timezone: zone, cron: buildScheduleCron(plan, zone) });
+  }
+
+  /** Writes a plan back as a UTC cron plus its authoring zone. */
+  private commitSchedulePlan(plan: SchedulePlan): void {
+    const zone = this.scheduleZone();
+    this.patchData({ timezone: zone, cron: buildScheduleCron(plan, zone) });
+  }
 
   /**
    * Bumped once the lazy `cronstrue` chunk lands, so the two computeds below
@@ -543,31 +603,6 @@ export class PropertiesForm {
       return true;
     }
   });
-
-  /** Track which preset is currently selected (by cron string). */
-  protected readonly selectedPreset = computed(() => {
-    const data = this.scheduleData();
-    if (!data) return null;
-    return CRON_PRESETS.find(p => p.cron === data.cron)?.label ?? null;
-  });
-
-  /**
-   * Check if a field's current value is a simple atomic value (not a range,
-   * step, list, or wildcard). Used to decide whether to highlight a chip.
-   */
-  protected isSimpleFieldValue(field: keyof CronFields, value: string): boolean {
-    const fields = this.cronFields();
-    return fields[field] === value;
-  }
-
-  protected onCronFieldChange(field: keyof CronFields, value: string): void {
-    const fields = this.cronFields();
-    this.patchData({ cron: buildCron({ ...fields, [field]: value }) });
-  }
-
-  protected onCronPreset(preset: CronPreset): void {
-    this.patchData({ cron: preset.cron });
-  }
 
   // Narrowed data views for the kind-specific sections.
   protected readonly scheduleData = computed<ScheduleTriggerData | null>(() => {

@@ -291,10 +291,21 @@ export class AssistantChatService {
     }
   }
 
+  /**
+   * Whether this account can have a plan applied for it. The UI hides the Apply
+   * button without it and shows the per-step instructions instead. Proxied off
+   * the builder rather than injecting `PhormaCloudService` here: the builder
+   * already holds it, and this service is deliberately thin on dependencies.
+   */
+  readonly canAutoApply = computed(() => this.builder.canAutoApply());
+
   /** Applies a plan-proposal attachment onto the canvas. */
   async applyProposal(turn: ChatTurn): Promise<void> {
     const attachment = turn.attachment;
     if (!attachment || attachment.kind !== 'plan-proposal') return;
+    // Re-gated here, not only in the template: `applyProposal` is also reachable
+    // from the action registry, so the check has to sit at the capability.
+    if (!this.canAutoApply()) return;
     if (this.busy()) return;
     this.busy.set(true);
     try {
@@ -401,6 +412,10 @@ export class AssistantChatService {
 
   private assistantTurn(mode: AssistantMode, model: ChatModelRef, text: string): ChatTurn {
     const usage = this.builder.lastTurnUsage;
+    // Snapshot the live activity feed onto the turn. Safe because every caller
+    // builds the turn BEFORE the `finally` that clears `activity`; copy the
+    // array rather than aliasing it, or the clear would empty the transcript.
+    const steps = this.activity();
     return {
       id: chatId('turn'),
       role: 'assistant',
@@ -408,6 +423,7 @@ export class AssistantChatService {
       mode,
       modelRef: model,
       usage: usage && usage.costUsd > 0 ? { ...usage } : undefined,
+      activity: steps.length > 0 ? [...steps] : undefined,
       status: 'ok',
       at: Date.now(),
     };

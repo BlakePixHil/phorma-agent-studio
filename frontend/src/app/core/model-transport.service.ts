@@ -17,6 +17,7 @@ import { PhormaCloudService } from './phorma-cloud.service';
 import { SettingsService } from './settings.service';
 import { TauriService } from './tauri.service';
 import { TelemetryService } from './telemetry.service';
+import type { ModelProviderId } from './workflow.model';
 
 /**
  * Chooses the model transport for local runs:
@@ -59,6 +60,52 @@ export class ModelTransportService {
     // it. Wrapping the composite (not each inner client) is what keeps one
     // failed inference call to exactly one counter.
     return new CountedModelClient(composite, this.telemetry);
+  }
+
+  /**
+   * Sends the smallest possible REAL inference call to a provider/model and
+   * reports whether it answered. Deliberately goes through {@link create} so
+   * the probe exercises the exact path a run or an assistant turn takes: same
+   * key resolution, same proxy, same endpoint and region, same wire format. A
+   * probe that reached the provider its own way could pass while inference
+   * still fails - which is the whole reason this exists.
+   *
+   * Listing a model catalog is NOT a substitute: the catalog endpoints answer
+   * per region and say nothing about whether a given model id (or geographic
+   * inference profile) is invocable from the configured region.
+   *
+   * A failure here is a genuine failed inference call, so it counts in
+   * telemetry like any other - `create()` wraps the counted client.
+   */
+  async testModel(model: {
+    provider: ModelProviderId;
+    model: string;
+  }): Promise<{ ok: true; ms: number; reply: string } | { ok: false; message: string }> {
+    if (!model.model.trim()) return { ok: false, message: 'Choose a model first.' };
+
+    // No `temperature`: a reachability probe has no opinion on sampling, and
+    // the newest Claude models reject the field outright. The engine omits it
+    // for those models anyway (`acceptsSamplingParams`), but leaving it off
+    // keeps the probe answering "can I reach this model" and nothing else.
+    const request: ModelRequest = {
+      provider: model.provider,
+      model: model.model.trim(),
+      system: 'Reply with the single word OK. Nothing else.',
+      messages: [{ role: 'user', content: 'ping' }],
+      maxTokens: 16,
+      ...this.settings.providerEndpoints(),
+    };
+
+    const started = Date.now();
+    try {
+      let reply = '';
+      for await (const chunk of this.create().stream(request)) {
+        if (chunk.type === 'text') reply += chunk.text;
+      }
+      return { ok: true, ms: Date.now() - started, reply: reply.trim() };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /**

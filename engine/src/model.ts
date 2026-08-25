@@ -157,6 +157,47 @@ function bedrockRegionOf(request: ModelRequest): string {
   return (request.bedrockRegion ?? DEFAULT_BEDROCK_REGION).trim() || DEFAULT_BEDROCK_REGION;
 }
 
+/**
+ * Model families that REJECT non-default sampling parameters outright: sending
+ * `temperature` (or `top_p` / `top_k`) is a hard 400, not a warning. Anthropic
+ * retired the knobs from Claude Opus 4.7 onward, so Sonnet 5, Opus 4.7, Opus
+ * 4.8, Opus 5 and Fable 5 all fail with "`temperature` is deprecated for this
+ * model" - and it fails identically on the direct Anthropic API, on Bedrock
+ * Converse, and on any OpenAI-compatible endpoint that forwards the field.
+ *
+ * The match is on the model id rather than the provider because the SAME model
+ * arrives under four spellings: `claude-sonnet-5` (Anthropic),
+ * `anthropic/claude-sonnet-5` (OpenRouter, Phorma Cloud),
+ * `au.anthropic.claude-sonnet-5` (a Bedrock geographic inference profile) and
+ * `anthropic.claude-sonnet-5-20260115-v1:0` (a versioned Bedrock model id).
+ *
+ * A version-number pattern beats an exhaustive id list here: every id for a
+ * retired-knob model carries its family and version, so new point releases and
+ * new regional profiles are covered without an edit. Deliberately does NOT
+ * match `claude-sonnet-4-5` and friends, which still accept a temperature (they
+ * only reject `temperature` and `top_p` TOGETHER, and the engine never sends
+ * `top_p`).
+ */
+const NO_SAMPLING_PARAMS = /claude-(?:sonnet|opus|fable|haiku)-(?:5|4[-.]7|4[-.]8)\b/i;
+
+/**
+ * Whether a model accepts `temperature`. When false the field must be OMITTED
+ * from the wire body - sending the provider's own default value is still a 400,
+ * so there is no safe value to fall back to.
+ */
+export function acceptsSamplingParams(model: string): boolean {
+  return !NO_SAMPLING_PARAMS.test(model);
+}
+
+/**
+ * The temperature to put on the wire, or `undefined` to omit the field.
+ * `JSON.stringify` drops an `undefined` property, which is exactly what these
+ * models require.
+ */
+function wireTemperature(request: ModelRequest): number | undefined {
+  return acceptsSamplingParams(request.model) ? request.temperature : undefined;
+}
+
 // ── Amazon Bedrock (Converse API) ────────────────────────────────────────────
 //
 // Bedrock is invoked through the unified `Converse` API on the bedrock-runtime
@@ -200,7 +241,8 @@ function converseBody(request: ModelRequest): string {
   const inferenceConfig: Record<string, unknown> = {
     maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
-  if (request.temperature !== undefined) inferenceConfig['temperature'] = request.temperature;
+  const temperature = wireTemperature(request);
+  if (temperature !== undefined) inferenceConfig['temperature'] = temperature;
 
   const body: Record<string, unknown> = {
     messages: converseMessages(request),
@@ -337,7 +379,7 @@ function openAiBody(request: ModelRequest): string {
   return JSON.stringify({
     model: request.model,
     stream: true,
-    temperature: request.temperature,
+    temperature: wireTemperature(request),
     max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
     messages: openAiMessages(request),
     stream_options: wantsUsage ? { include_usage: true } : undefined,
@@ -605,7 +647,7 @@ function anthropicBody(request: ModelRequest): string {
   return JSON.stringify({
     model: request.model,
     stream: true,
-    temperature: request.temperature,
+    temperature: wireTemperature(request),
     max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
     system: request.system,
     messages: anthropicMessages(request),

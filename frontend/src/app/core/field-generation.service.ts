@@ -3,6 +3,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import type { ModelRequest } from '@phorma/engine';
 
 import { ModelTransportService } from './model-transport.service';
+import { SettingsService } from './settings.service';
 import { WorkflowBuilderService } from './workflow-builder.service';
 import { WorkflowService } from './workflow.service';
 import { summarizeGraph } from './workflow-builder-prompt';
@@ -20,6 +21,7 @@ export class FieldGenerationService {
   private readonly transport = inject(ModelTransportService);
   private readonly builder = inject(WorkflowBuilderService);
   private readonly workflow = inject(WorkflowService);
+  private readonly settings = inject(SettingsService);
 
   /** Node id currently being generated for (drives per-field spinners). */
   readonly generatingFor = signal<string | null>(null);
@@ -72,6 +74,7 @@ ${summarizeGraph(graph)}`,
         ],
         temperature: 0.5,
         maxTokens: 1024,
+        ...this.settings.providerEndpoints(),
       };
 
       let text = '';
@@ -117,6 +120,7 @@ ${summarizeGraph(graph)}`,
         ],
         temperature: 0.5,
         maxTokens: 1024,
+        ...this.settings.providerEndpoints(),
       };
 
       let text = '';

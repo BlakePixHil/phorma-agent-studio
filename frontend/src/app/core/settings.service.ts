@@ -74,6 +74,29 @@ export class SettingsService {
     model: this.defaultModel(),
   }));
 
+  /**
+   * Provider endpoint fields that EVERY `ModelRequest` needs, whatever built
+   * it. Without these the engine falls back to its own defaults
+   * (`localhost:11434`, `localhost:1234`, `us-east-1`), which silently
+   * misroutes a request: a Bedrock geographic inference profile (`au.`, `eu.`,
+   * `apac.`) invoked against `us-east-1` fails with "The provided model
+   * identifier is invalid", and a remote Ollama or LM Studio server is not
+   * reached at all.
+   *
+   * Spread this into every `ModelRequest` built outside the run engine
+   * (assistant turns, field generation, connectivity tests). `RunOptions`
+   * carries the same three values for engine-built requests.
+   */
+  readonly providerEndpoints = computed<{
+    ollamaBaseUrl: string;
+    lmstudioBaseUrl: string;
+    bedrockRegion: string;
+  }>(() => ({
+    ollamaBaseUrl: this.ollamaBaseUrl(),
+    lmstudioBaseUrl: this.lmstudioBaseUrl(),
+    bedrockRegion: this.bedrockRegion(),
+  }));
+
   // ── Execution ───────────────────────────────────────────────────────────
 
   /** Open the console dock automatically when a run starts. */

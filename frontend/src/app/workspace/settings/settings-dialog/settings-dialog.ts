@@ -70,6 +70,7 @@ import {
   type ModelProviderId,
 } from '../../../core/workflow.model';
 import {
+  acceptsSamplingParams,
   deriveEgressAllowList,
   type ConnectionSummary,
   type EgressAllowList,
@@ -397,6 +398,118 @@ export class SettingsDialog {
     const entry = MODEL_PROVIDERS.find(p => p.id === provider);
     return entry?.label ?? provider;
   });
+
+  /**
+   * Whether the chosen default model accepts a `temperature`, which decides if
+   * the slider is offered at all. Reads the STORED model rather than
+   * {@link modelDisplayValue} (blank while a key is missing) so the answer
+   * matches what a run would actually send.
+   *
+   * The engine is the authority here - `acceptsSamplingParams` is the same
+   * function `buildWireRequest` gates on - so the control and the wire body can
+   * never disagree about whether the knob does anything.
+   */
+  protected readonly defaultModelTakesTemperature = computed(() =>
+    acceptsSamplingParams(this.settings.defaultModel()),
+  );
+
+  /** True while the default-model connectivity probe is in flight. */
+  protected readonly testingModel = signal(false);
+  /** Result of the last connectivity probe (null before the first run). */
+  protected readonly modelTestResult = signal<{ ok: boolean; text: string } | null>(null);
+
+  /**
+   * Whether the Test button is actionable: a model id is chosen and, for
+   * providers that need one, a key is configured. Phorma Cloud without a
+   * subscription shows the subscribe CTA instead.
+   */
+  protected readonly canTestModel = computed(() => {
+    const provider = this.settings.defaultProvider();
+    if (this.needsPhormaCloudSubscription()) return false;
+    if (!this.modelDisplayValue().trim()) return false;
+    if (provider === 'ollama' || provider === 'lmstudio' || provider === 'phorma-cloud') return true;
+    return !!this.settings.keyConfigured()[provider];
+  });
+
+  /**
+   * Sends a one-token call to the configured provider/model and reports the
+   * outcome inline. This is the only check that proves the whole chain works:
+   * a stored key can be expired or scoped to the wrong account, and a Bedrock
+   * geographic inference profile is only invocable from a region inside its
+   * geography - both of which a model-catalog fetch happily reports as fine.
+   */
+  protected async testDefaultModel(): Promise<void> {
+    if (this.testingModel() || !this.canTestModel()) return;
+    this.testingModel.set(true);
+    this.modelTestResult.set(null);
+    this.copiedModelTestResult.set(false);
+    try {
+      const result = await this.transport.testModel({
+        provider: this.settings.defaultProvider(),
+        model: this.modelDisplayValue(),
+      });
+      if (result.ok) {
+        this.modelTestResult.set({
+          ok: true,
+          text: `Model answered in ${result.ms} ms${result.reply ? ` ("${result.reply.slice(0, 40)}")` : ''}.`,
+        });
+      } else {
+        this.modelTestResult.set({ ok: false, text: this.testFailureText(result.message) });
+      }
+    } finally {
+      this.testingModel.set(false);
+    }
+  }
+
+  /** True for a moment after the test message is copied (tick feedback). */
+  protected readonly copiedModelTestResult = signal(false);
+  private copyResultTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Copies the test message. Provider errors are the text most likely to be
+   * pasted into a support thread or a search box, and they are long enough that
+   * selecting them by hand inside a dialog is awkward.
+   */
+  protected async copyModelTestResult(): Promise<void> {
+    const text = this.modelTestResult()?.text;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for insecure contexts where the async clipboard is blocked.
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+    this.copiedModelTestResult.set(true);
+    clearTimeout(this.copyResultTimer);
+    this.copyResultTimer = setTimeout(() => this.copiedModelTestResult.set(false), 1500);
+  }
+
+  /**
+   * Turns a raw provider error into something actionable. Bedrock's
+   * "model identifier is invalid" is overwhelmingly a region mismatch rather
+   * than a typo: a `us.` / `eu.` / `apac.` / `au.` prefixed inference profile
+   * only resolves in a region inside that geography, so the same id that works
+   * in `ap-southeast-2` is invalid in `us-east-1`.
+   */
+  private testFailureText(message: string): string {
+    if (this.settings.defaultProvider() !== 'bedrock') return message;
+    const model = this.modelDisplayValue().trim();
+    const geo = /^([a-z]{2,4})\./.exec(model)?.[1];
+    if (geo && /model identifier is invalid|ValidationException/i.test(message)) {
+      return `${message} - "${geo}." is a geographic inference profile, so it must be invoked from a region inside that geography. Current region: ${this.settings.bedrockRegion()}.`;
+    }
+    return message;
+  }
 
   /** Deep-links to the API Keys settings page and focuses the input for the
    * currently-selected provider (so the user can paste their key immediately). */
@@ -1109,6 +1222,17 @@ export class SettingsDialog {
       if (!region || this.lastBedrockFetch === region) return;
       this.lastBedrockFetch = region;
       untracked(() => void this.loadBedrockModels(region));
+    });
+
+    // A connectivity result only describes the exact provider/model/region it
+    // ran against, so any change to those three invalidates it. Region is why
+    // this is an effect rather than a reset inside the change handlers: it is
+    // written by the generic registry descriptor, which has no hook here.
+    effect(() => {
+      this.settings.defaultProvider();
+      this.settings.defaultModel();
+      this.settings.bedrockRegion();
+      untracked(() => this.modelTestResult.set(null));
     });
 
     // Auto-fetch the live model list for BYO providers (anthropic/openai/

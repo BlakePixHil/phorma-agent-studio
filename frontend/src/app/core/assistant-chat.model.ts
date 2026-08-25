@@ -44,6 +44,16 @@ export interface PlanOp {
   // action - a Studio_Action id and its arguments
   action?: string;
   args?: Record<string, unknown>;
+  /**
+   * How to carry this step out BY HAND in the studio, as markdown. Plan mode is
+   * a proposal the user can either have applied for them (Phorma Cloud) or work
+   * through themselves, so every op has to stand on its own as an instruction -
+   * which panel, which control, what value. Also read by subscribers who expand
+   * a step to see what an op will actually do before applying it.
+   *
+   * Optional because threads persisted before this existed replay without it.
+   */
+  detail?: string;
 }
 
 /** A complete Plan-mode edit plan (summary + ordered ops). */
@@ -100,6 +110,14 @@ export interface ChatTurn {
   modelRef?: ChatModelRef;
   /** Structured payload rendered as a card (assistant turns only). */
   attachment?: ChatAttachment;
+  /**
+   * What the assistant DID this turn, one entry per studio action or tool call,
+   * in order. Captured from the live activity feed when the turn completes so
+   * the step rows survive in the transcript instead of vanishing with the
+   * spinner - scrolling back through a conversation is how a user audits what
+   * an Agent-mode turn changed. Absent on turns that took no actions.
+   */
+  activity?: string[];
   /** Cost of this turn's model calls (assistant turns, when known). */
   usage?: ChatTurnUsage;
   /** Terminal state for assistant turns. */

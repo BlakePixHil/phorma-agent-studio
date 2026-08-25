@@ -373,8 +373,62 @@
                             aria-label="Default model id"
                           />
                         }
+                        <p-button
+                          styleClass="phorma-settings__btn"
+                          size="small"
+                          severity="secondary"
+                          [outlined]="true"
+                          [disabled]="!canTestModel() || testingModel()"
+                          (onClick)="testDefaultModel()"
+                          pTooltip="Send a one-token call to check the model is reachable"
+                          tooltipPosition="top"
+                          ariaLabel="Test the default model connection"
+                        >
+                          @if (testingModel()) {
+                            <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                            <span>Testing</span>
+                          } @else {
+                            <i class="ti ti-plug-connected" aria-hidden="true"></i>
+                            <span>Test</span>
+                          }
+                        </p-button>
                       }
                     </div>
+                    @if (modelTestResult(); as result) {
+                      <!-- No `--indented`: a verbatim provider error needs the
+                           label column's width, and the message describes the
+                           whole row rather than one control in it. The section
+                           is a `gap: 10px` flex column, so spacing is free. -->
+                      <div
+                        class="phorma-settings__note"
+                        [class.phorma-settings__note--warn]="!result.ok"
+                        [class.phorma-settings__note--ok]="result.ok"
+                        role="status"
+                      >
+                        <i
+                          class="ti"
+                          [class.ti-circle-check]="result.ok"
+                          [class.ti-alert-triangle]="!result.ok"
+                          aria-hidden="true"
+                        ></i>
+                        <span class="phorma-settings__inline-warning-text">{{ result.text }}</span>
+                        <!-- Same affordance as "Add API key" in the sibling
+                             note: a trailing text link, not an icon button. -->
+                        <button
+                          type="button"
+                          class="phorma-settings__link phorma-settings__note-copy"
+                          (click)="copyModelTestResult()"
+                        >
+                          @if (copiedModelTestResult()) {
+                            <i class="ti ti-check" aria-hidden="true"></i>
+                            Copied
+                          } @else {
+                            <i class="ti ti-copy" aria-hidden="true"></i>
+                            Copy
+                          }
+                        </button>
+                      </div>
+                    }
                     @if (missingKeyWarning(); as providerLabel) {
                       <div
                         class="phorma-settings__note phorma-settings__note--warn phorma-settings__note--indented"
@@ -464,31 +518,39 @@
                         Usage counts against your monthly credits.
                       </p>
                     }
-                    <div class="phorma-settings__setting">
-                      <div class="phorma-settings__setting-text">
-                        <label class="phorma-settings__setting-label" for="default-temperature">
-                          Default temperature
-                        </label>
-                        <p class="phorma-settings__setting-desc">
-                          Sampling temperature for agents that inherit the default model.
-                        </p>
-                      </div>
-                      <div class="phorma-settings__setting-control">
-                        <span class="phorma-settings__slider">
-                          <p-slider
-                            [ngModel]="settings.defaultTemperature()"
-                            (ngModelChange)="settings.defaultTemperature.set($event)"
-                            [min]="0"
-                            [max]="2"
-                            [step]="0.1"
-                            ariaLabel="Default temperature"
-                          />
-                          <span class="phorma-settings__slider-value">
-                            {{ settings.defaultTemperature().toFixed(1) }}
+                    <!-- Dropped entirely for models that reject a temperature
+                         (Claude Opus 4.7 onward): the knob would do nothing, and
+                         the engine omits the field. The stored value survives and
+                         applies again on a model that accepts one. -->
+                    @if (defaultModelTakesTemperature()) {
+                      <div class="phorma-settings__setting">
+                        <!-- A span, not a `<label for>`: `p-slider` renders no
+                             labelable element, so the old `for="default-temperature"`
+                             referenced an id nothing carried. The slider's own
+                             `ariaLabel` supplies its accessible name. -->
+                        <div class="phorma-settings__setting-text">
+                          <span class="phorma-settings__setting-label">Default temperature</span>
+                          <p class="phorma-settings__setting-desc">
+                            Sampling temperature for agents that inherit the default model.
+                          </p>
+                        </div>
+                        <div class="phorma-settings__setting-control">
+                          <span class="phorma-settings__slider">
+                            <p-slider
+                              [ngModel]="settings.defaultTemperature()"
+                              (ngModelChange)="settings.defaultTemperature.set($event)"
+                              [min]="0"
+                              [max]="2"
+                              [step]="0.1"
+                              ariaLabel="Default temperature"
+                            />
+                            <span class="phorma-settings__slider-value">
+                              {{ settings.defaultTemperature().toFixed(1) }}
+                            </span>
                           </span>
-                        </span>
+                        </div>
                       </div>
-                    </div>
+                    }
                   }
 
                   @case ('integrations') {

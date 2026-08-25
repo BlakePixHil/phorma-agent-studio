@@ -20,7 +20,9 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  /* Wider than a bubble list needs: with the assistant answer sitting bare on
+     the surface, the gap between turns is the only thing separating them. */
+  gap: 0.95rem;
   padding: 0.65rem 0.75rem;
 }
 
@@ -67,74 +69,77 @@
     align-items: flex-end;
   }
 
+  /* Full width, not `max-content`: the answer is prose and must use the pane. */
   &--assistant {
-    align-items: flex-start;
+    align-items: stretch;
   }
 }
 
+/* The USER turn is the only thing in a bubble, and it is deliberately quiet: a
+   neutral wash derived from the text colour, so it lands just off the surface in
+   every theme (darker on light, lighter on dark) without picking up the accent.
+   The accent tint it used to carry made the user's own words the loudest thing
+   in the transcript, which is backwards - the answer is the content.
+
+   The ASSISTANT has no bubble at all. Its markdown sits directly on the surface
+   like a document; actions and tool calls get their own rows below. */
 .phorma-chat__bubble {
   max-width: 92%;
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.65rem;
-  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.6rem;
+  /* 12px. Root is 14px, so 0.857rem - never rem-maths against 16 here. */
+  font-size: 0.857rem;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 
   &--user {
     position: relative;
-    background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
-    border: 1px solid color-mix(in srgb, var(--p-primary-color) 26%, transparent);
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    border: 1px solid var(--phorma-card-border);
     color: var(--p-text-color);
-    border-bottom-right-radius: 0.25rem;
     padding-right: 1.9rem;
 
     &:hover .phorma-chat__bubble-action { opacity: 1; }
   }
-
-  &--assistant {
-    position: relative;
-    background: color-mix(in srgb, var(--p-content-background) 70%, transparent);
-    border: 1px solid var(--phorma-card-border);
-    color: var(--p-text-color);
-    border-bottom-left-radius: 0.25rem;
-    white-space: normal;
-    /* Room for the floating copy button. */
-    padding-right: 1.9rem;
-
-    &:hover .phorma-chat__copy { opacity: 1; }
-  }
-
-  &--error {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-    background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--phorma-accent-red, #ef4444) 30%, transparent);
-    color: var(--phorma-accent-red, #ef4444);
-    white-space: normal;
-    padding-right: 1.9rem;
-
-    &:hover .phorma-chat__copy { opacity: 1; }
-  }
 }
 
-/* ── Copy button (responses + errors) ─────────────────────────────── */
-.phorma-chat__copy {
-  position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
+/* ── Error row ─────────────────────────────────────────────────────── */
+.phorma-chat__error {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-red, #ef4444) 26%, transparent);
+  color: var(--phorma-accent-red, #ef4444);
+  font-size: 0.857rem;
+  line-height: 1.5;
+
+  &:hover .phorma-chat__icon-btn { opacity: 1; }
+}
+
+.phorma-chat__error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── Small icon action (copy, on responses and errors) ─────────────── */
+.phorma-chat__icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 1.35rem;
   height: 1.35rem;
   border: none;
   border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--p-content-background) 80%, transparent);
-  color: var(--p-text-muted-color);
+  background: transparent;
+  color: inherit;
   font-size: 0.72rem;
   cursor: pointer;
   opacity: 0;
@@ -151,8 +156,8 @@
 /* ── Bubble action button (copy on user bubbles) ──────────────────── */
 .phorma-chat__bubble-action {
   position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
+  top: 0.3rem;
+  right: 0.3rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -160,19 +165,59 @@
   height: 1.35rem;
   border: none;
   border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--p-primary-color) 20%, transparent);
-  color: var(--p-primary-color);
+  background: transparent;
+  color: var(--p-text-muted-color);
   font-size: 0.72rem;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: color-mix(in srgb, var(--p-primary-color) 35%, transparent);
-    color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+    color: var(--p-text-color);
   }
 
   .ti-check { color: var(--phorma-accent-green, #22c55e); }
+}
+
+/* ── Action / tool-call rows ────────────────────────────────────────────
+   One row per thing the turn did, the Copilot-style transcript. Rows are
+   siblings of the answer rather than a container card: a dashed box around
+   them read as a separate widget, and it disappeared when the turn finished. */
+.phorma-chat__steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.phorma-chat__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.22rem 0.1rem;
+  font-size: 0.857rem;
+  line-height: 1.45;
+  color: var(--p-text-muted-color);
+
+  /* Hairline between rows only, so a single action carries no chrome at all. */
+  & + & {
+    border-top: 1px solid color-mix(in srgb, var(--p-text-color) 5%, transparent);
+  }
+}
+
+.phorma-chat__step-icon {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--phorma-accent-green, #22c55e) 80%, var(--p-text-muted-color));
+}
+
+.phorma-chat__step-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ── Re-run button (user turns) ──────────────────────────────────── */
@@ -199,42 +244,139 @@
   > i { font-size: 0.72rem; }
 }
 
-/* Rendered markdown inside assistant bubbles */
-.phorma-chat__md {
-  :first-child { margin-top: 0; }
-  :last-child { margin-bottom: 0; }
+/* ── Rendered markdown (the assistant's answer) ─────────────────────────
+   Prose, not a chat line: a comfortable measure, real paragraph rhythm, and a
+   heading scale that still reads as a hierarchy at 0.8rem. Full width - with no
+   bubble there is nothing to inset it from.
 
-  p, ul, ol { margin: 0.35rem 0; }
-  ul, ol { padding-left: 1.1rem; }
-  li { margin: 0.15rem 0; }
-  h1, h2, h3, h4 {
-    margin: 0.55rem 0 0.25rem;
-    font-size: 0.84rem;
-    font-weight: 700;
+   `:host ::ng-deep` is LOAD-BEARING. `[innerHTML]` content is inserted by the
+   browser, not compiled from the template, so it never receives the component's
+   `_ngcontent` attribute: an encapsulated `.phorma-chat__md p` rule compiles to
+   `p[_ngcontent-x]` and silently matches NOTHING. Every descendant rule here was
+   dead for that reason, which is why answers rendered with no spacing at all.
+   Verified by reading `marginBottom` off a rendered `<p>`, not by eye.
+
+   `:first-child` / `:last-child` are scoped to DIRECT children: the bare
+   selectors also matched the first `<li>` of every list and the first cell of
+   every row, so nested content lost the spacing this block sets up. */
+:host ::ng-deep .phorma-chat__md {
+  width: 100%;
+  /* 12px against the 14px root. */
+  font-size: 0.857rem;
+  line-height: 1.65;
+  color: var(--p-text-color);
+  overflow-wrap: anywhere;
+
+  > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
+
+  p { margin: 0 0 0.7rem; }
+
+  ul, ol {
+    margin: 0 0 0.7rem;
+    padding-left: 1.25rem;
   }
+  li { margin: 0.2rem 0; }
+  /* A nested list belongs to its parent item, so it loses the block gap. */
+  li > ul,
+  li > ol { margin: 0.2rem 0 0; }
+  li::marker { color: var(--p-text-muted-color); }
+
+  /* Headings need MORE space above than below, so each one groups with the
+     prose it introduces instead of floating between two blocks. */
+  h1, h2, h3, h4, h5, h6 {
+    margin: 1.1rem 0 0.4rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--p-text-color);
+  }
+  h1 { font-size: 1.05rem; }
+  h2 { font-size: 0.95rem; }
+  h3 { font-size: 0.88rem; }
+  h4, h5, h6 { font-size: 0.82rem; }
+
+  strong { font-weight: 700; }
+
+  a {
+    color: var(--p-primary-color);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
   code {
     padding: 0.05rem 0.3rem;
     border-radius: 0.3rem;
     background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
-    font-size: 0.928rem;
+    font-size: 0.92em;
+    /* `em`, not `rem`: inline code inside a heading has to track the heading. */
+    overflow-wrap: break-word;
   }
-  pre {
-    padding: 0.5rem;
-    border-radius: 0.45rem;
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    overflow-x: auto;
 
-    code { background: none; padding: 0; }
+  pre {
+    margin: 0 0 0.7rem;
+    padding: 0.6rem 0.7rem;
+    border-radius: 0.45rem;
+    border: 1px solid var(--phorma-card-border);
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+    /* A long line scrolls; it must not stretch the sidebar or wrap mid-token. */
+    overflow-x: auto;
+    white-space: pre;
+
+    code {
+      background: none;
+      padding: 0;
+      font-size: 0.92em;
+      overflow-wrap: normal;
+    }
   }
+
+  blockquote {
+    margin: 0 0 0.7rem;
+    padding: 0.1rem 0 0.1rem 0.7rem;
+    border-left: 2px solid color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+    color: var(--p-text-muted-color);
+  }
+
+  hr {
+    margin: 0.9rem 0;
+    border: 0;
+    border-top: 1px solid var(--phorma-card-border);
+  }
+
+  table {
+    display: block;
+    width: 100%;
+    margin: 0 0 0.7rem;
+    border-collapse: collapse;
+    overflow-x: auto;
+    font-size: 0.95em;
+  }
+  th, td {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--phorma-card-border);
+    text-align: left;
+  }
+  th {
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+    font-weight: 700;
+  }
+
+  img { max-width: 100%; }
 }
 
+/* Footer strip under a response: copy action, cost, model. Replaces the copy
+   button that used to float inside the bubble - with no bubble there is no
+   corner to pin it to, and a control overlapping prose was always a compromise.
+   Reserves its own height so revealing it on hover cannot reflow the answer. */
 .phorma-chat__meta {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.928rem;
+  gap: 0.3rem;
+  min-height: 1.35rem;
+  /* 11px: metadata reads BELOW the 12px body. It used to be 13px, which made
+     the cost figure the largest text in the turn. */
+  font-size: 0.786rem;
   color: var(--p-text-muted-color);
-  padding-left: 0.2rem;
 }
 
 /* Cost is ALWAYS visible. */
@@ -242,30 +384,33 @@
   font-weight: 600;
 }
 
-/* The model fades in on the same line when the turn is hovered. */
+/* Copy and the model name fade in with the turn. */
 .phorma-chat__model-tag,
-.phorma-chat__dot {
+.phorma-chat__dot,
+.phorma-chat__meta-action {
   opacity: 0;
   transition: opacity 0.25s ease;
 }
 
 .phorma-chat__turn:hover .phorma-chat__model-tag,
-.phorma-chat__turn:hover .phorma-chat__dot {
+.phorma-chat__turn:hover .phorma-chat__dot,
+.phorma-chat__turn:hover .phorma-chat__meta-action,
+.phorma-chat__meta-action:focus-visible {
   opacity: 1;
 }
 
-/* No cost known → the model tag is the only meta; keep it hover-revealed. */
-
-/* ── Plan proposal card ────────────────────────────────────────────────── */
+/* ── Plan proposal card ──────────────────────────────────────────────────
+   Full width, not 92%: the steps carry instructions now, so the card is the
+   working surface of Plan mode rather than a summary chip. */
 .phorma-chat__proposal {
-  width: 92%;
-  padding: 0.55rem 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
   border-radius: 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--p-primary-color) 32%, transparent);
-  background: color-mix(in srgb, var(--p-primary-color) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--p-primary-color) 28%, transparent);
+  background: color-mix(in srgb, var(--p-primary-color) 6%, transparent);
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
 .phorma-chat__proposal-title {
@@ -273,29 +418,133 @@
   align-items: center;
   gap: 0.35rem;
   margin: 0;
-  font-size: 0.928rem;
+  font-size: 0.857rem;
   font-weight: 700;
   color: var(--p-text-color);
 }
 
-.phorma-chat__proposal-ops {
-  margin: 0;
-  padding-left: 1.1rem;
-  font-size: 0.928rem;
-  color: var(--p-text-muted-color);
+.phorma-chat__proposal-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Expand/collapse all, and the subscribe link in the footer: plain text
+   affordances, so neither competes with the Apply action. */
+.phorma-chat__proposal-toggle,
+.phorma-chat__proposal-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--p-primary-color);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.786rem;
+  cursor: pointer;
+
+  &:hover { text-decoration: underline; }
+}
+
+.phorma-chat__proposal-link {
+  font-size: inherit;
+}
+
+/* ── Plan steps (disclosures) ───────────────────────────────────────────── */
+.phorma-chat__ops {
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.12rem;
+  margin: 0;
+  padding: 0;
+}
+
+.phorma-chat__op + .phorma-chat__op {
+  border-top: 1px solid color-mix(in srgb, var(--p-primary-color) 14%, transparent);
+}
+
+/* The whole row is the hit target, so a step opens without hunting the chevron.
+   `--plain` is the same layout with no button affordance, for a legacy step that
+   carries no instructions to reveal. */
+.phorma-chat__op-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.28rem 0.15rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.857rem;
+  line-height: 1.45;
+  color: var(--p-text-color);
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0.3rem;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+  }
+
+  &--plain {
+    cursor: default;
+    &:hover { background: none; }
+  }
+}
+
+.phorma-chat__op-chevron {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--p-text-muted-color);
+
+  &--hidden { visibility: hidden; }
+}
+
+/* Tabular so the numbers line up as the list passes 9 steps. */
+.phorma-chat__op-num {
+  flex-shrink: 0;
+  min-width: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-chat__op-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Indented under its step title and rendered as markdown, so the model can use
+   bullets and inline code for exact values. */
+.phorma-chat__op-detail {
+  padding: 0.1rem 0.15rem 0.45rem 1.8rem;
+}
+
+.phorma-chat__proposal-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-top: 0.15rem;
 }
 
 .phorma-chat__proposal-applied {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   margin: 0;
-  font-size: 0.928rem;
+  font-size: 0.786rem;
   font-weight: 600;
   color: var(--phorma-accent-green, #22c55e);
+}
+
+/* Replaces the Apply button when the account cannot have plans applied. */
+.phorma-chat__proposal-manual {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.786rem;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
 }
 
 /* ── Streaming / activity ──────────────────────────────────────────────── */
@@ -334,24 +583,6 @@
 
 @keyframes phorma-chat-spin {
   to { transform: rotate(360deg); }
-}
-
-.phorma-chat__activity {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.4rem 0.55rem;
-  border-radius: 0.55rem;
-  border: 1px dashed var(--phorma-card-border);
-}
-
-.phorma-chat__activity-line {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0;
-  font-size: 0.928rem;
-  color: var(--p-text-muted-color);
 }
 
 /* ── Composer ──────────────────────────────────────────────────────────── */

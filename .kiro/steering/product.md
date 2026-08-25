@@ -45,9 +45,15 @@ These are enforced across the codebase - breaking one is a regression, not a sty
 
 ## Feature gating (current)
 
-- Ask and Plan assistant modes work without a subscription, on the default model.
+- Ask and Plan assistant modes work without a subscription, on the default model. Composing and
+  refining a plan is free; having the studio BUILD it for you is the paid capability.
 - Agent mode and the Ctrl+P AI builder are Phorma Cloud exclusive, gated in the UI by
   `phormaCloud.subscribed()` and re-gated server-side by `/api/infer`.
+- Applying a chat plan is gated the same way, through `WorkflowBuilderService.canAutoApply`
+  (proxied as `AssistantChatService.canAutoApply`). Without a subscription the Apply button is
+  absent and the plan is the deliverable: every `PlanOp` carries a `detail` with manual
+  instructions, rendered as a per-step expander. Subscribers get both - the button, and the same
+  expanders to check a step before applying it.
 - Plan in chat is proposal-only (Apply button). Plan in the Ctrl+P palette auto-applies. That
   asymmetry is deliberate - speed is the palette's whole point.
 

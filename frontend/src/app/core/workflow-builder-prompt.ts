@@ -203,12 +203,12 @@ Respond with ONLY a JSON object — no markdown fences, no prose before or after
 {
   "summary": "One sentence describing what you built.",
   "ops": [
-    { "op": "add", "ref": "a1", "type": "<catalog type id>", "name": "<display name>", "prompt": "<markdown system prompt, agents only>" },
-    { "op": "connect", "from": "<ref or existing node id>", "to": "<ref or existing node id>", "fromPort": "<optional source port name>", "toPort": "<optional target port name>" },
-    { "op": "update", "node": "<existing node id>", "name": "<optional>", "prompt": "<optional>" },
-    { "op": "remove", "node": "<existing node id>" },
-    { "op": "disconnect", "connection": "<existing connection id>" },
-    { "op": "action", "action": "<studio action id>", "args": { } }
+    { "op": "add", "ref": "a1", "type": "<catalog type id>", "name": "<display name>", "prompt": "<markdown system prompt, agents only>", "detail": "<how to do this by hand>" },
+    { "op": "connect", "from": "<ref or existing node id>", "to": "<ref or existing node id>", "fromPort": "<optional source port name>", "toPort": "<optional target port name>", "detail": "<how to do this by hand>" },
+    { "op": "update", "node": "<existing node id>", "name": "<optional>", "prompt": "<optional>", "detail": "<how to do this by hand>" },
+    { "op": "remove", "node": "<existing node id>", "detail": "<how to do this by hand>" },
+    { "op": "disconnect", "connection": "<existing connection id>", "detail": "<how to do this by hand>" },
+    { "op": "action", "action": "<studio action id>", "args": { }, "detail": "<how to do this by hand>" }
   ]
 }
 
@@ -217,7 +217,24 @@ Respond with ONLY a JSON object — no markdown fences, no prose before or after
 - "ref" is a temporary handle you invent for nodes added in this plan, used by later connect ops. A ref is also substituted into "action" args, so a later step can target a node this plan just added.
 - "connect" port names are only needed for multi-port flow nodes: Router routes and Parallel branches use "fromPort", Aggregator inputs use "toPort". Naming a port that doesn't exist on a router/parallel/aggregator CREATES it (e.g. fromPort "Database" adds a Database route) — prefer descriptive route names over the default "Route A"/"Route B". Omit port names everywhere else and the studio picks the right ports.
 - Handoff vs tool connections are derived automatically from the node kinds — never specify the connection kind.
-- Keep plans minimal: only the ops needed to satisfy the request.`;
+- Keep plans minimal: only the ops needed to satisfy the request.
+
+## "detail" is required on every op
+
+A plan is a proposal. Some users have it applied for them; the rest work through
+it by hand, and everyone can expand a step to see what it really does. So every
+op MUST carry a "detail": short markdown instructions for a person performing
+that one step in the studio.
+
+- Name the surface and the control: which panel, which field, which button.
+- Give the exact values to type, including the full prompt text for an agent and
+  the precise port names for a connection.
+- 1 to 4 sentences, or a short bullet list. No preamble, no restating the op
+  title, no "as mentioned above" — each step is read on its own.
+- Write for a non-engineer operator. Say "drag the Agent card from the palette
+  onto the canvas", not "instantiate an agent node".
+- Anything the user must supply themselves (an API key, a connection, a board
+  id) belongs here as an explicit call-out.`;
 }
 
 /** System prompt for Ask mode: answer questions, never edit. */

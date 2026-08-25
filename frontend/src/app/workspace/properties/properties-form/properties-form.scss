@@ -1,3 +1,5 @@
+@use '../../../shared/field' as field;
+
 :host {
   display: block;
   height: 100%;
@@ -441,26 +443,11 @@
   opacity: 0.8;
 }
 
-/* ── Cron editor: presets, description, field chips ─────────────────────── */
-
-.phorma-props__presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-bottom: 0.15rem;
-}
-
-.phorma-props__preset-btn.p-button {
-  padding: 0.22rem 0.55rem;
-  font-size: 0.928rem;
-  font-weight: 600;
-
-  &.phorma-props__preset-btn--active {
-    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 14%, transparent);
-    border-color: var(--p-primary-color, #818cf8);
-    color: var(--p-primary-color, #818cf8);
-  }
-}
+/* ── Schedule editor ─────────────────────────────────────────────────────
+   Replaces a wall of outlined preset buttons and 40-odd cron field chips. That
+   layout had every option shouting at the same volume, and it still could not
+   express "10am Sydney". This is one segmented control plus the two or three
+   fields the chosen frequency actually needs. */
 
 .phorma-props__cron-desc {
   margin: 0;
@@ -474,48 +461,197 @@
   }
 }
 
-.phorma-props__cron-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-top: 0.25rem;
-}
-
-.phorma-props__field-row {
+/* Label with a trailing help affordance. */
+.phorma-props__label-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 
-.phorma-props__field-label {
+/* Segmented control. Uses the SAME two tokens as `p-selectbutton` does through
+   `core/theme-preset.ts` (`togglebutton`), so this bespoke control is
+   indistinguishable from the usage panel's period strip in every theme:
+   `--phorma-segment-bg` is the recessed track, `--phorma-segment-selected` the
+   active fill. No border and no shadow - both were what made it read as heavy,
+   and the selectbutton it has to match carries neither. */
+.phorma-props__segment {
+  display: flex;
+  padding: 0.14rem;
+  border-radius: 0.5rem;
+  background: var(--phorma-segment-bg);
+}
+
+.phorma-props__segment-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.26rem 0.2rem;
+  border: 0;
+  border-radius: 0.38rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font: inherit;
+  font-size: 0.857rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(&--active) {
+    color: var(--p-text-color);
+  }
+
+  &--active {
+    background: var(--phorma-segment-selected);
+    color: var(--p-text-color);
+  }
+}
+
+/* One labelled control per row. The row gap is set here rather than left to the
+   section's, because these rows are a group of related fields and were reading
+   as one cramped block. */
+.phorma-props__sched-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+
+  & + & {
+    margin-top: 0.45rem;
+  }
+}
+
+/* Same breathing room between the segmented control and the first field row. */
+.phorma-props__segment + .phorma-props__sched-row {
+  margin-top: 0.55rem;
+}
+
+.phorma-props__sched-label {
   flex-shrink: 0;
-  width: 4.2rem;
-  font-size: 0.928rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  width: 5.4rem;
+  font-size: 0.857rem;
   color: var(--p-text-muted-color);
 }
 
-.phorma-props__chips {
+/* HH : MM reads as ONE control: the field chrome sits on the wrapper, and the
+   inputs inside are bare. Two separate bordered boxes with a colon between them
+   looked like two unrelated settings. */
+.phorma-props__time {
+  @include field.chrome(0.45rem);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.16rem 0.35rem;
+}
+
+.phorma-props__time-field {
+  width: 2.1rem;
+  border: 0;
+  background: none;
+  color: var(--p-text-color);
+  font: inherit;
+  font-size: 0.857rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+
+  &:focus { outline: none; }
+}
+
+.phorma-props__time-sep {
+  color: var(--p-text-muted-color);
+}
+
+.phorma-props__sched-zone {
+  flex: 1 1 auto;
+  min-width: 0;
+
+  ::ng-deep .p-select {
+    width: 100%;
+    font-size: 0.857rem;
+  }
+}
+
+/* Seven equal toggles, so the row reads as a week rather than a button group. */
+.phorma-props__days {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.2rem;
 }
 
-.phorma-props__chip.p-button {
-  min-width: 2.2rem;
-  height: 1.55rem;
-  padding: 0 0.3rem;
-  font-size: 0.928rem;
-  font-weight: 600;
+.phorma-props__day {
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font: inherit;
+  font-size: 0.786rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
-  &.phorma-props__chip--active {
-    background: color-mix(in srgb, var(--p-primary-color, #818cf8) 16%, transparent);
-    border-color: var(--p-primary-color, #818cf8);
-    color: var(--p-primary-color, #818cf8);
-    font-weight: 700;
+  &:hover:not(&--active) {
+    color: var(--p-text-color);
   }
+
+  &--active {
+    background: color-mix(in srgb, var(--p-primary-color) 18%, transparent);
+    border-color: color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+/* The outcome block. Ordered by how much the user cares: what it does, when it
+   next fires, then the compiled expression for anyone who wants to check it. */
+.phorma-props__sched-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.65rem;
+  padding: 0.5rem 0.55rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+}
+
+.phorma-props__sched-when {
+  margin: 0;
+  font-size: 0.857rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+
+.phorma-props__sched-next,
+.phorma-props__sched-cron {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.786rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-props__sched-next-label {
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.714rem;
+  opacity: 0.8;
+}
+
+/* Separated by a middot rather than commas: the times themselves contain commas. */
+.phorma-props__sched-next-item {
+  font-variant-numeric: tabular-nums;
+
+  & + &::before {
+    content: '·';
+    margin-right: 0.3rem;
+    opacity: 0.6;
+  }
+}
+
+.phorma-props__sched-cron code {
+  padding: 0.02rem 0.25rem;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
+  font-size: 0.786rem;
 }
 
 /* ── OAuth: locked preset URL + one-time setup ──────────────────────────── */

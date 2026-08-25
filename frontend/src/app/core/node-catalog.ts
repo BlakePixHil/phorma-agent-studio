@@ -25,6 +25,9 @@ import type {
   WorkflowPort,
 } from './workflow.model';
 import { CONNECTOR_STEP_PREFIX } from './connectors.model';
+// Pure leaf module (no Angular, no service deps), so importing it here cannot
+// introduce a DI edge into the catalog.
+import { buildScheduleCron, localTimeZone } from './schedule-cron';
 
 /** MIME type used for palette → canvas drag-and-drop payloads. */
 export const PHORMA_NODE_MIME = 'application/x-phorma-node';
@@ -204,7 +207,19 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     keywords: ['cron', 'timer', 'recurring'],
     defaultName: 'Schedule',
     ports: [{ name: 'Tick', role: 'message-out' }],
-    defaultData: () => ({ cron: '0 9 * * 1-5' }),
+    // 09:00 weekdays in the USER's zone, compiled to the UTC cron the runtime
+    // executes. A hardcoded `0 9 * * 1-5` was 9am UTC, which the editor now
+    // correctly shows as some unrelated local hour - a default nobody asked for.
+    defaultData: () => {
+      const timezone = localTimeZone();
+      return {
+        timezone,
+        cron: buildScheduleCron(
+          { frequency: 'weekly', hour: 9, minute: 0, weekdays: [1, 2, 3, 4, 5], dayOfMonth: 1 },
+          timezone,
+        ),
+      };
+    },
   },
   {
     id: 'trigger-webhook',

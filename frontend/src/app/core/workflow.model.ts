@@ -338,8 +338,20 @@ export interface AgentNodeData {
 }
 
 export interface ScheduleTriggerData {
-  /** Cron expression evaluated by the deployed cloud runtime. */
+  /**
+   * Cron expression evaluated by the deployed cloud runtime, always in UTC -
+   * both hosts evaluate it that way (Cloudflare's agents SDK `schedule()`, and
+   * EventBridge Scheduler pinned to `ScheduleExpressionTimezone: 'UTC'`). This
+   * is the executable truth; the editor converts to and from {@link timezone}.
+   */
   cron: string;
+  /**
+   * IANA zone the schedule was authored in (e.g. `Australia/Sydney`). Editor
+   * state, not runtime input: it is what lets the panel show and edit the
+   * schedule in the user's own time instead of raw UTC. Absent on nodes created
+   * before the visual editor, which fall back to the browser's zone.
+   */
+  timezone?: string;
 }
 
 export interface WebhookTriggerData {

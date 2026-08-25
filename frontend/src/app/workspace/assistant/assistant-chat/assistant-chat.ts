@@ -14,9 +14,8 @@ import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
 
+import { renderMarkdown } from '../../../shared/markdown/render-markdown';
 import { AssistantChatService } from '../../../core/assistant-chat.service';
 import type { AssistantMode, ChatTurn } from '../../../core/assistant-chat.model';
 import { MigrationImportService } from '../../../core/migration/migration-import.service';
@@ -213,10 +212,68 @@ export class AssistantChat {
       .catch(() => undefined);
   }
 
-  /** Sanitized markdown for an assistant turn. */
+  /**
+   * Sanitized markdown for an assistant turn. Goes through the shared
+   * `renderMarkdown` rail (marked + DOMPurify) rather than calling `marked`
+   * here, so the chat cannot drift from every other markdown surface in the
+   * studio - this component had its own copy of the same two lines.
+   */
   protected renderMarkdown(text: string): SafeHtml {
-    const raw = marked.parse(text, { async: false });
-    return this.sanitizer.bypassSecurityTrustHtml(DOMPurify.sanitize(raw));
+    return this.sanitizer.bypassSecurityTrustHtml(renderMarkdown(text));
+  }
+
+  /**
+   * The proposal's steps: a one-line title plus the model's manual instructions.
+   * A step without `detail` (a thread persisted before plans carried it) renders
+   * as a plain row rather than an expander that opens onto nothing.
+   */
+  protected planSteps(turn: ChatTurn): { label: string; detail: string }[] {
+    if (turn.attachment?.kind !== 'plan-proposal') return [];
+    const labels = this.planOpSummary(turn);
+    return turn.attachment.plan.ops.map((op, index) => ({
+      label: labels[index] ?? String(op.op),
+      detail: op.detail?.trim() ?? '',
+    }));
+  }
+
+  /**
+   * Expanded step keys, `turnId:index`. Component-local on purpose: the panel
+   * and the expanded dialog are separate instances, and which step you opened
+   * while reading is view state, not conversation state worth persisting.
+   */
+  private readonly openSteps = signal<ReadonlySet<string>>(new Set());
+
+  protected isStepOpen(turn: ChatTurn, index: number): boolean {
+    return this.openSteps().has(`${turn.id}:${index}`);
+  }
+
+  protected toggleStep(turn: ChatTurn, index: number): void {
+    const key = `${turn.id}:${index}`;
+    this.openSteps.update(open => {
+      const next = new Set(open);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
+
+  /** Opens or closes every step of a proposal at once. */
+  protected toggleAllSteps(turn: ChatTurn): void {
+    const steps = this.planSteps(turn);
+    const allOpen = steps.every((step, index) => !step.detail || this.isStepOpen(turn, index));
+    this.openSteps.update(open => {
+      const next = new Set(open);
+      steps.forEach((step, index) => {
+        if (!step.detail) return;
+        if (allOpen) next.delete(`${turn.id}:${index}`);
+        else next.add(`${turn.id}:${index}`);
+      });
+      return next;
+    });
+  }
+
+  /** True when at least one step of this proposal is expanded. */
+  protected anyStepOpen(turn: ChatTurn): boolean {
+    return this.planSteps(turn).some((_, index) => this.isStepOpen(turn, index));
   }
 
   protected planOpSummary(turn: ChatTurn): string[] {

@@ -239,9 +239,11 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   //
   // `--info`: what the next action will do. `--warn`: a capability that is not
   // available yet. `--danger`: something the user must fix before proceeding.
+  // `--ok`: a check the user just ran came back clean.
   &--info,
   &--warn,
-  &--danger {
+  &--danger,
+  &--ok {
     border-color: color-mix(in srgb, var(--phorma-note-accent) 32%, transparent);
     background: color-mix(in srgb, var(--phorma-note-accent) 9%, transparent);
     color: var(--p-text-color);
@@ -264,6 +266,10 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
 
   &--danger {
     --phorma-note-accent: var(--phorma-accent-red, #ef4444);
+  }
+
+  &--ok {
+    --phorma-note-accent: var(--phorma-accent-green, #22c55e);
   }
 }
 
@@ -435,18 +441,21 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   width: 190px;
 }
 
-/* Model picker fills the rest of the row width. */
-.phorma-settings__model-select {
+// Both fill the rest of their flex row: the model picker takes the width the
+// provider select leaves, and the note text takes the width its icon and copy
+// button leave. `min-width: 0` is what actually lets them shrink - a flex item
+// floors at its content width without it, which is how a long unbroken provider
+// error used to push the copy button out of the note.
+.phorma-settings__model-select,
+.phorma-settings__inline-warning-text {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-/* The model-row warnings used to carry their own box (`__inline-warning`), which
-   was `__note--warn` with different padding. They now use the note itself plus
-   `__note--indented`; only the parts a note has no opinion about live here. */
+// The model-row warnings used to carry their own box (`__inline-warning`), which
+// was `__note--warn` with different padding. They now use the note itself plus
+// `__note--indented`; only the parts a note has no opinion about live here.
 .phorma-settings__inline-warning-text {
-  flex: 1 1 auto;
-  min-width: 0;
   word-break: break-word;
 }
 
@@ -456,8 +465,6 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
   color: var(--p-text-muted-color);
   font-size: 12px;
 }
-
-
 
 /* Underlined text link for deep-links within the settings dialog
    (e.g. "Add API key" in the missing-key warning). Mirrors the
