@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { acceptsSamplingParams, buildWireRequest } from './model.js';
-import type { ModelProviderId, ModelRequest } from './types.js';
+import { acceptsSamplingParams, buildWireRequest, type ModelRequest } from './model.js';
+import type { ModelProviderId } from './types.js';
 
 /**
  * Anthropic retired the sampling knobs from Claude Opus 4.7 onward: sending
