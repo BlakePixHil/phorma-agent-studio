@@ -70,6 +70,8 @@ import { VIEW_FAILURE_FALLBACK } from '../core/view-state';
 import { Environment, ENVIRONMENT_SECTIONS } from './environment/environment';
 import { Features } from './features/features';
 import { Geography } from './geography/geography';
+import { paintShapes, unmappedInstalls } from './geography/world-map';
+import type { WorldShape } from './geography/world-map.data';
 import { Overview } from './overview/overview';
 import { Trend } from './trend/trend';
 
@@ -555,6 +557,86 @@ describe('Property: every group label in a generated response reaches the DOM', 
   );
 });
 
+describe('Property: world map shading is bounded, monotonic and honest about the unpaintable', () => {
+  // A small fixed geometry rather than the real 173-country data: the claim is
+  // about the shading maths in `paintShapes`, not about Natural Earth geometry.
+  const FIXTURE_SHAPES: readonly WorldShape[] = [
+    { code: 'US', name: 'United States', d: '' },
+    { code: 'DE', name: 'Germany', d: '' },
+    { code: 'JP', name: 'Japan', d: '' },
+  ];
+  const FIXTURE_CODES = new Set(FIXTURE_SHAPES.map((shape) => shape.code));
+
+  /** A mix of codes the fixture can paint, codes it cannot (including the k-anonymity fold), and noise. */
+  const mapLabelArb: fc.Arbitrary<string> = fc.oneof(
+    { weight: 3, arbitrary: fc.constantFrom('US', 'DE', 'JP', OTHER_GROUP_LABEL, 'XX', 'ZZ') },
+    { weight: 1, arbitrary: fc.stringMatching(/^[A-Za-z]{2,6}$/) },
+  );
+
+  const mapRowsArb: fc.Arbitrary<GroupRow[]> = fc
+    .uniqueArray(fc.tuple(mapLabelArb, fc.nat({ max: 1_000_000 })), {
+      minLength: 0,
+      maxLength: 8,
+      selector: ([label]) => label,
+    })
+    .map((entries) => entries.map(([label, installs]) => ({ label, installs }) satisfies GroupRow));
+
+  it('paints one shape per known country, never above full opacity, monotonic in installs', () => {
+    let iterations = 0;
+    fc.assert(
+      fc.property(mapRowsArb, (rows) => {
+        iterations += 1;
+        const painted = paintShapes(rows, FIXTURE_SHAPES);
+        assert(
+          painted.length === FIXTURE_SHAPES.length,
+          `expected ${FIXTURE_SHAPES.length} painted shapes, got ${painted.length}`,
+        );
+
+        let maxInstalls = 0;
+        for (const shape of painted) {
+          assert(
+            shape.opacity >= 0 && shape.opacity <= 1,
+            `${shape.code}: opacity ${shape.opacity} out of range`,
+          );
+          assert(
+            shape.installs === 0 ? shape.opacity === 0 : shape.opacity > 0,
+            `${shape.code}: ${shape.installs} installs produced opacity ${shape.opacity}`,
+          );
+          maxInstalls = Math.max(maxInstalls, shape.installs);
+        }
+        if (maxInstalls > 0) {
+          assert(
+            painted
+              .filter((shape) => shape.installs === maxInstalls)
+              .every((shape) => shape.opacity === 1),
+            'the busiest painted country did not reach full opacity',
+          );
+        }
+        // More installs never paints a lower opacity than fewer installs.
+        const byInstalls = [...painted].sort((a, b) => a.installs - b.installs);
+        for (let i = 1; i < byInstalls.length; i += 1) {
+          assert(
+            byInstalls[i].opacity >= byInstalls[i - 1].opacity,
+            `opacity fell from ${byInstalls[i - 1].installs} installs to ${byInstalls[i].installs}`,
+          );
+        }
+
+        const expectedUnmapped = rows
+          .filter((row) => !FIXTURE_CODES.has(row.label))
+          .reduce((sum, row) => sum + row.installs, 0);
+        const actualUnmapped = unmappedInstalls(rows, FIXTURE_SHAPES);
+        assert(
+          actualUnmapped === expectedUnmapped,
+          `unmapped installs: got ${actualUnmapped}, expected ${expectedUnmapped}`,
+        );
+        return true;
+      }),
+      { numRuns: RUNS },
+    );
+    expect(iterations).toBe(RUNS);
+  });
+});
+
 // --- Examples: one rendering per view --------------------------------------
 
 describe('Overview view (10.5)', () => {
@@ -667,6 +749,38 @@ describe('Geography view (10.6)', () => {
     const regions = table(mounted.host, 'By region');
     expect(regions.labelHeading).toBe('Region');
     expect(regions.labels).toEqual(['north-america', 'europe']);
+    finish(mounted);
+  });
+
+  it('paints the world map from the country grouping and shows a tooltip on hover', async () => {
+    const mounted = mount(Geography);
+    await answer(mounted, 'geography', GEOGRAPHY);
+    // Let the map's own `@defer (on immediate)` block resolve, the same wait
+    // the trend view's chart example uses.
+    await mounted.fixture.whenStable();
+    mounted.fixture.detectChanges();
+
+    const paths = mounted.host.querySelectorAll('admin-world-map path');
+    expect(paths.length).toBeGreaterThan(0);
+
+    const firstPath = paths[0] as SVGPathElement;
+    firstPath.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+    mounted.fixture.detectChanges();
+    expect(mounted.host.querySelector('.admin-map__tooltip')).not.toBeNull();
+
+    // The k-anonymity fold cannot be painted; it is called out, not dropped.
+    const footnote = text(mounted.host.querySelector('[data-geography-unmapped]'));
+    expect(footnote).toContain('7');
+
+    // The bar list beside the map names the busiest real countries, `other` excluded.
+    const bars = Array.from(mounted.host.querySelectorAll('.admin-map-bar')).map((bar) => ({
+      name: text(bar.querySelector('.admin-map-bar__name')),
+      count: text(bar.querySelector('.admin-map-bar__count')),
+    }));
+    expect(bars).toEqual([
+      { name: 'United States of America', count: '41' },
+      { name: 'Germany', count: '12' },
+    ]);
     finish(mounted);
   });
 

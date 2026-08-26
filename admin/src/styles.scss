@@ -27,6 +27,14 @@
   --admin-panel-bg: rgba(255, 255, 255, 0.72);
   --admin-border: rgba(0, 0, 0, 0.08);
   --admin-text-muted: rgba(60, 64, 76, 0.72);
+
+  /* World map ink: a single hue whose OPACITY carries the signal (Requirement:
+     GA-style choropleth). Space-separated so templates can write
+     `rgb(var(--admin-map-ink) / <opacity>)`. Dark ink in light mode, flipped to
+     white in dark mode below - never white-on-white. */
+  --admin-map-ink: 38 34 75;
+  --admin-map-base: rgba(15, 15, 20, 0.06);
+  --admin-map-stroke: rgba(0, 0, 0, 0.1);
 }
 
 :root.app-dark {
@@ -34,6 +42,10 @@
   --admin-panel-bg: rgba(19, 15, 25, 0.88);
   --admin-border: rgba(255, 255, 255, 0.08);
   --admin-text-muted: rgba(226, 224, 235, 0.62);
+
+  --admin-map-ink: 255 255 255;
+  --admin-map-base: rgba(255, 255, 255, 0.06);
+  --admin-map-stroke: rgba(255, 255, 255, 0.1);
 }
 
 html,
@@ -257,6 +269,134 @@ body {
 .admin-chart {
   /* Fixed height: chart.js needs a bounded box with maintainAspectRatio off. */
   height: 18.571rem; /* 260px */
+}
+
+/* The GA-style country choropleth (views/geography/world-map.ts). */
+.admin-map {
+  position: relative;
+  width: 100%;
+
+  &__svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  &__country {
+    stroke: var(--admin-map-stroke);
+    stroke-width: 0.5;
+    transition: fill 0.15s ease;
+
+    &:hover {
+      stroke-width: 1;
+    }
+  }
+
+  &__tooltip {
+    position: absolute;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.143rem; /* 2px */
+    min-width: 9rem;
+    padding: 0.5rem 0.643rem;
+    border: 1px solid var(--admin-border);
+    border-radius: var(--p-border-radius-md, 0.429rem);
+    background: var(--admin-panel-bg);
+    box-shadow: 0 0.286rem 0.857rem rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+    transform: translate(0.857rem, -50%);
+
+    &--flip {
+      transform: translate(calc(-100% - 0.857rem), -50%);
+    }
+  }
+
+  &__tooltip-name {
+    margin: 0;
+    font-size: 0.857rem;
+    font-weight: 600;
+  }
+
+  &__tooltip-row {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.786rem;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Map plus its side-by-side "top countries" bar list (views/geography/geography.ts). */
+.admin-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(9rem, 1fr);
+  gap: 1.143rem; /* 16px */
+
+  &__map {
+    /* 4fr of 5fr total = ~80% of the row, freeing the rest for the bar list. */
+    min-width: 0;
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.643rem; /* 9px */
+  }
+
+  &__list-title {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.786rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  &__list-empty {
+    margin: 0;
+    color: var(--admin-text-muted);
+    font-size: 0.786rem;
+  }
+}
+
+.admin-map-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.214rem; /* 3px */
+
+  &__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.786rem;
+  }
+
+  &__name {
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__count {
+    flex-shrink: 0;
+    color: var(--admin-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__track {
+    height: 0.286rem; /* 4px */
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--admin-border);
+  }
+
+  &__fill {
+    height: 100%;
+    border-radius: inherit;
+    background: rgb(var(--admin-map-ink) / 0.85);
+  }
 }
 
 .admin-footnote {

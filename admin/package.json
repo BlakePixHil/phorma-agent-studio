@@ -9,7 +9,8 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "generate:world-map": "node scripts/generate-world-map.mjs"
   },
   "prettier": {
     "printWidth": 100,
@@ -48,7 +49,9 @@
     "@angular/compiler-cli": "^20.3.0",
     "@tailwindcss/postcss": "^4.3.1",
     "@types/jasmine": "~5.1.0",
+    "d3-geo": "^3.1.1",
     "fast-check": "4.9.0",
+    "i18n-iso-countries": "^7.14.0",
     "jasmine-core": "~5.9.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
@@ -56,7 +59,9 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "tailwindcss": "^4.3.1",
+    "topojson-client": "^3.1.0",
     "typescript": "~5.9.2",
+    "world-atlas": "^2.0.2",
     "wrangler": "^4.0.0"
   }
 }

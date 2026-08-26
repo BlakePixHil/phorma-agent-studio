@@ -50,6 +50,15 @@ export interface GroupRow {
  */
 export const OTHER_GROUP_LABEL = 'other';
 
+/**
+ * Minimum distinct installs a group needs before it is reported under its own
+ * label (9.15); below it, a group folds into `OTHER_GROUP_LABEL`. Twin of
+ * `K_ANONYMITY_FLOOR` (cloud/src/telemetry-admin.ts) - a view states this
+ * number so a single-digit install count folding into `other` reads as the
+ * privacy floor working, not as a bug.
+ */
+export const K_ANONYMITY_FLOOR = 5;
+
 // --- The five aggregate bodies ---------------------------------------------
 
 /** `GET summary` - global numbers, no group labels (Requirement 10.5). */

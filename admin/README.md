@@ -24,9 +24,22 @@ npm start                        # dev server on http://localhost:7323
 npm run build                    # production build to dist/admin/browser
 npx ng test --watch=false --browsers=ChromeHeadless
 npx wrangler deploy              # publishes the static asset worker
+npm run generate:world-map       # regenerates the geography world map paths
 ```
 
 **Port 7323.** 7322 is the studio and 7321 is Phorma Code, so neither can be used here.
+
+## Geography world map
+
+The choropleth on the Geography view (`src/app/views/geography/world-map.ts`) paints from
+`world-map.data.ts`, a generated file - do not edit it by hand. It is produced by
+`scripts/generate-world-map.mjs` from Natural Earth's 1:110m admin-0 countries dataset (public
+domain, https://www.naturalearthdata.com), shipped as topology by the `world-atlas` package,
+projected with `d3-geo` and matched to ISO 3166-1 alpha-2 codes with `i18n-iso-countries`. Those
+three packages plus `topojson-client` are dev-only: nothing about them ships to the browser besides
+the generated paths. Run `npm run generate:world-map` after upgrading any of the four to pick up
+projection or naming changes; the script is deterministic; re-running it without a version change is
+a no-op.
 
 ## Configuration
 

@@ -371,6 +371,19 @@ const mfB = harnessWorker(
  */
 const mfOpen = harnessWorker({ TELEMETRY_ADMIN_USER_IDS: OWNER_OPEN }, 'phorma-telemetry-admin-open');
 
+/** Same allowlist as `mfA`, but with the beta k-anonymity override on (9.15). */
+const mfNoFold = harnessWorker(
+  {
+    PHORMA_MODE: 'hosted',
+    ALLOWED_ORIGINS: 'https://admin.example.com',
+    CLERK_SECRET_KEY: 'sk_test_admin_suite',
+    CLERK_JWT_KEY,
+    TELEMETRY_ADMIN_USER_IDS: OWNER_A,
+    TELEMETRY_K_ANONYMITY_DISABLED: 'true',
+  },
+  'phorma-telemetry-admin-nofold',
+);
+
 const WORKERS = [
   { label: 'hosted, single-entry allowlist', mf: mfA, owner: OWNER_A, allowlist: [OWNER_A] },
   { label: 'hosted, padded two-entry allowlist', mf: mfB, owner: OWNER_B, allowlist: [OWNER_B, EXTRA_B] },
@@ -1157,6 +1170,66 @@ try {
         !folded.json.days.some((row) => row.label === dayAt(5)),
       folded.text,
     );
+
+    // The exact scenario above, replayed on a worker with the beta override on:
+    // the single-install day keeps its OWN label instead of joining `other`,
+    // and foldedDays reads zero.
+    await warmSchema(mfNoFold);
+    await seed(mfNoFold, [
+      ...rows,
+      ...materialize([
+        {
+          install: 0,
+          day: 5,
+          country_code: 'US',
+          region: 'americas',
+          locale: 'en-US',
+          platform: 'windows',
+          app_version: '0.2.0-beta.10',
+          runtime_mode: 'desktop',
+          counters: { 'session.started': 7, 'run.started': 11 },
+        },
+      ]),
+    ]);
+    const unfolded = await aggregate(mfNoFold, 'trend', { token: TOKENS.ownerA, query: range });
+    const ownDay = unfolded.json.days.find((row) => row.label === dayAt(5));
+    check(
+      'TELEMETRY_K_ANONYMITY_DISABLED reports the single-install day under its own label, not `other`',
+      unfolded.json.foldedDays === 0 &&
+        ownDay !== undefined &&
+        ownDay.installs === 1 &&
+        ownDay.sessions === 7 &&
+        ownDay.runs === 11 &&
+        !unfolded.json.days.some((row) => row.label === OTHER),
+      unfolded.text,
+    );
+
+    // Geography folds by country across the WHOLE range, not by day, so the
+    // trend fixture above (all `US`, well above the floor) proves nothing
+    // about it - a fresh, isolated single-install country is seeded instead.
+    await seed(
+      mfNoFold,
+      materialize([
+        {
+          install: 0,
+          day: 0,
+          country_code: 'DE',
+          region: 'europe',
+          locale: 'de-DE',
+          platform: 'linux',
+          app_version: '0.2.0-beta.10',
+          runtime_mode: 'desktop',
+          counters: {},
+        },
+      ]),
+    );
+    const geo = await aggregate(mfNoFold, 'geography', { token: TOKENS.ownerA, query: range });
+    check(
+      'and the same override reports a single-install country on its own label in geography',
+      geo.json.countries.some((row) => row.label === 'DE' && row.installs === 1) &&
+        !geo.json.countries.some((row) => row.label === OTHER),
+      geo.text,
+    );
   }
 
   // ── The default range (9.12) ─────────────────────────────────────────────
@@ -1543,6 +1616,7 @@ try {
   await mfA.dispose();
   await mfB.dispose();
   await mfOpen.dispose();
+  await mfNoFold.dispose();
 }
 
 if (loopbackRetries() > 0) {

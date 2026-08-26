@@ -32,6 +32,16 @@ export type TelemetryAdminEnv = AuthEnv &
   TelemetryEnv & {
     /** Comma-separated Clerk user ids (the Owner_Allowlist). Worker secret. */
     TELEMETRY_ADMIN_USER_IDS?: string;
+    /**
+     * Beta-only override: `"true"` turns the k-anonymity floor (9.15) off
+     * everywhere, so every aggregate reports exact rows instead of folding
+     * low-volume groups into `other`. Set as a `vars` entry per environment in
+     * `wrangler.jsonc`, NOT a source change, so re-enabling for general
+     * availability is a config flip and a redeploy, nothing else. Absent or
+     * any other value means the floor is on, which is the default and the
+     * only behaviour the existing test suites exercise.
+     */
+    TELEMETRY_K_ANONYMITY_DISABLED?: string;
   };
 
 /**
@@ -137,7 +147,12 @@ export function parseDateRange(params: URLSearchParams, today: string): RangeRes
 
 /**
  * Minimum number of distinct installs a group needs before it may be reported
- * under its own label (9.15). Groups below it are folded into `other`.
+ * under its own label (9.15). Groups below it are folded into `other` - unless
+ * `TELEMETRY_K_ANONYMITY_DISABLED` turns the floor off for the deployment, in
+ * which case every aggregate function is called with a floor of `0` instead of
+ * this value (see `handleTelemetryAdminRequest`). `applyKAnonymity` itself
+ * always defaults to the real floor, so its own tests exercise 9.15 unchanged
+ * regardless of that switch.
  */
 export const K_ANONYMITY_FLOOR = 5;
 
@@ -426,8 +441,9 @@ export async function handleTelemetryAdminRequest(
   const parsed = parseDateRange(url.searchParams, metricDayUtc(Date.now()));
   if (!parsed.ok) return reply({ error: parsed.error }, 400);
 
+  const floor = env.TELEMETRY_K_ANONYMITY_DISABLED === 'true' ? 0 : K_ANONYMITY_FLOOR;
   try {
-    return reply(await aggregateTelemetry(route, parsed.range, env.DB));
+    return reply(await aggregateTelemetry(route, parsed.range, env.DB, floor));
   } catch {
     // Fixed string, no query, no exception message, no binding name.
     console.error('telemetry admin aggregate failed');
@@ -462,6 +478,7 @@ export async function aggregateTelemetry(
   route: TelemetryAdminRoute,
   range: DateRange,
   db: D1Database | undefined,
+  floor: number = K_ANONYMITY_FLOOR,
 ): Promise<AggregateResponse> {
   if (!db) return emptyAggregate(route, range);
 
@@ -473,13 +490,13 @@ export async function aggregateTelemetry(
     case 'summary':
       return summaryAggregate(db, range);
     case 'geography':
-      return geographyAggregate(db, range);
+      return geographyAggregate(db, range, floor);
     case 'environment':
-      return environmentAggregate(db, range);
+      return environmentAggregate(db, range, floor);
     case 'features':
-      return featuresAggregate(db, range);
+      return featuresAggregate(db, range, floor);
     case 'trend':
-      return trendAggregate(db, range);
+      return trendAggregate(db, range, floor);
   }
 }
 
@@ -525,7 +542,11 @@ async function summaryAggregate(db: D1Database, range: DateRange): Promise<Summa
 }
 
 /** Installs and runs by country and by region, both folded (9.8, 9.15). */
-async function geographyAggregate(db: D1Database, range: DateRange): Promise<GeographyResponse> {
+async function geographyAggregate(
+  db: D1Database,
+  range: DateRange,
+  floor: number,
+): Promise<GeographyResponse> {
   const [countries, regions] = await db.batch<AggregateRow>([
     db.prepare(installsAndRunsSql('country_code')).bind(range.from, range.to),
     db.prepare(installsAndRunsSql('region')).bind(range.from, range.to),
@@ -533,13 +554,17 @@ async function geographyAggregate(db: D1Database, range: DateRange): Promise<Geo
 
   return {
     range,
-    countries: foldInstallsAndRuns(countries),
-    regions: foldInstallsAndRuns(regions),
+    countries: foldInstallsAndRuns(countries, floor),
+    regions: foldInstallsAndRuns(regions, floor),
   };
 }
 
 /** Installs by app version, platform, runtime mode and locale, all folded (9.9). */
-async function environmentAggregate(db: D1Database, range: DateRange): Promise<EnvironmentResponse> {
+async function environmentAggregate(
+  db: D1Database,
+  range: DateRange,
+  floor: number,
+): Promise<EnvironmentResponse> {
   const [appVersion, platform, runtimeMode, locale] = await db.batch<AggregateRow>([
     db.prepare(installsSql('app_version')).bind(range.from, range.to),
     db.prepare(installsSql('platform')).bind(range.from, range.to),
@@ -549,10 +574,10 @@ async function environmentAggregate(db: D1Database, range: DateRange): Promise<E
 
   return {
     range,
-    appVersion: foldInstalls(appVersion),
-    platform: foldInstalls(platform),
-    runtimeMode: foldInstalls(runtimeMode),
-    locale: foldInstalls(locale),
+    appVersion: foldInstalls(appVersion, floor),
+    platform: foldInstalls(platform, floor),
+    runtimeMode: foldInstalls(runtimeMode, floor),
+    locale: foldInstalls(locale, floor),
   };
 }
 
@@ -564,7 +589,11 @@ async function environmentAggregate(db: D1Database, range: DateRange): Promise<E
  * or inside `other`. Ingest already enforces the catalog at write time, so this
  * is belt and braces for rows written by an older Worker.
  */
-async function featuresAggregate(db: D1Database, range: DateRange): Promise<FeaturesResponse> {
+async function featuresAggregate(
+  db: D1Database,
+  range: DateRange,
+  floor: number,
+): Promise<FeaturesResponse> {
   const rows = await db
     .prepare(TELEMETRY_FEATURES_SQL)
     .bind(range.from, range.to)
@@ -580,7 +609,7 @@ async function featuresAggregate(db: D1Database, range: DateRange): Promise<Feat
       }),
     );
 
-  const counters = applyKAnonymity(known).map(
+  const counters = applyKAnonymity(known, floor).map(
     (row): FeatureRow => ({
       label: label(row.label),
       total: metric(row['total']),
@@ -598,7 +627,11 @@ async function featuresAggregate(db: D1Database, range: DateRange): Promise<Feat
  * that way so the dashboard can render "N days below the reporting threshold"
  * as a footnote and keep the plot a time series (9.15).
  */
-async function trendAggregate(db: D1Database, range: DateRange): Promise<TrendResponse> {
+async function trendAggregate(
+  db: D1Database,
+  range: DateRange,
+  floor: number,
+): Promise<TrendResponse> {
   const rows = await db.prepare(TELEMETRY_TREND_SQL).bind(range.from, range.to).all<AggregateRow>();
 
   const series = resultRows(rows).map(
@@ -610,8 +643,8 @@ async function trendAggregate(db: D1Database, range: DateRange): Promise<TrendRe
     }),
   );
 
-  const foldedDays = series.filter((row) => metric(row.installs) < K_ANONYMITY_FLOOR).length;
-  const days = applyKAnonymity(series).map(
+  const foldedDays = series.filter((row) => metric(row.installs) < floor).length;
+  const days = applyKAnonymity(series, floor).map(
     (row): TrendDay => ({
       label: label(row.label),
       installs: metric(row.installs),
@@ -653,7 +686,7 @@ type AggregateRow = Record<string, unknown>;
  * `{ label, installs, runs }` rows through the floor, rebuilt afterwards so the
  * serialized key set is exactly the declared shape.
  */
-function foldInstallsAndRuns(result: D1Result<AggregateRow>): GroupRow[] {
+function foldInstallsAndRuns(result: D1Result<AggregateRow>, floor: number): GroupRow[] {
   const rows = resultRows(result).map(
     (row): GroupRow => ({
       label: label(row['label']),
@@ -661,7 +694,7 @@ function foldInstallsAndRuns(result: D1Result<AggregateRow>): GroupRow[] {
       runs: metric(row['runs']),
     }),
   );
-  return applyKAnonymity(rows).map((row) => ({
+  return applyKAnonymity(rows, floor).map((row) => ({
     label: label(row.label),
     installs: metric(row.installs),
     runs: metric(row['runs']),
@@ -669,11 +702,11 @@ function foldInstallsAndRuns(result: D1Result<AggregateRow>): GroupRow[] {
 }
 
 /** `{ label, installs }` rows through the floor, same rebuild. */
-function foldInstalls(result: D1Result<AggregateRow>): GroupRow[] {
+function foldInstalls(result: D1Result<AggregateRow>, floor: number): GroupRow[] {
   const rows = resultRows(result).map(
     (row): GroupRow => ({ label: label(row['label']), installs: metric(row['installs']) }),
   );
-  return applyKAnonymity(rows).map((row) => ({
+  return applyKAnonymity(rows, floor).map((row) => ({
     label: label(row.label),
     installs: metric(row.installs),
   }));
