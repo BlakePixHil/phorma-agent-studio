@@ -416,7 +416,7 @@ describe('telemetry consent and reset transitions', () => {
             expect(next.accumulator.metricDay).toBe(currentDay);
             expect(next.accumulator.lastSealAt).toBe(now);
             expect(next.upload).toEqual({
-              nextAttemptAt: now + UPLOAD_INTERVAL_MS,
+              nextAttemptAt: now,
               failureCount: 0,
               rejectedCount: 0,
             });

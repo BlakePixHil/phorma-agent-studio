@@ -872,6 +872,63 @@ describe('TelemetryService', () => {
     });
   });
 
+  describe('short sessions', () => {
+    /**
+     * Regression: an install used in bursts shorter than the upload interval
+     * uploaded literally never. `defaultUploadState` armed the gate at
+     * `now + 15min`, and `upload` is persisted only once an attempt has produced
+     * an outcome, so every restart pushed the first attempt another interval out
+     * while the queue sat there. Found on a real install carrying a day-old
+     * Rollup and no `phorma.telemetry.upload` key at all.
+     */
+    it('uploads a queued Rollup on the first tick of a restart, not one interval later', async () => {
+      const installId = '00000000-0000-4000-8000-0000000000ff';
+      const storage = new FakeStorage();
+      storage.seed('consent', {
+        enabled: true,
+        disclosureVersion: CURRENT_DISCLOSURE_VERSION,
+        decidedAt: new Date(START_MS - DAY_MS).toISOString(),
+      });
+      storage.seed('installId', installId);
+      storage.seed('queue', [
+        {
+          sealedAt: START_MS - HOUR_MS,
+          rollup: {
+            installId,
+            metricDay: '2026-05-11',
+            env: {
+              locale: 'en-GB',
+              timezone: 'Australia/Sydney',
+              platform: 'windows',
+              osVersion: 'Windows 11 Pro',
+              appVersion: '0.2.0-beta.12',
+              runtimeMode: 'desktop',
+            },
+            counters: { 'session.started': 3 },
+            schemaVersion: 1,
+          },
+        },
+      ]);
+      // No `upload` key: this install has never completed an attempt, so there
+      // is no earlier request for the interval to space this one away from.
+
+      const rig = createRig({ storage, start: START_MS });
+      await rig.harness.initialize();
+      expect(rig.harness.state().queue.length).toBe(1);
+
+      rig.advance(TELEMETRY_TICK_INTERVAL_MS);
+      await rig.harness.tick();
+
+      expect(rig.requests.length).toBe(1);
+      expect((JSON.parse(rig.requests[0].init.body) as Rollup).metricDay).toBe('2026-05-11');
+      expect(rig.harness.state().queue.length).toBe(0);
+      // Requirement 4.3 still holds from the first request onward: the attempt
+      // armed the gate and persisted it, so a restart cannot reset it either.
+      expect(storage.read('upload')).not.toBeNull();
+      expect(rig.harness.state().upload.nextAttemptAt).toBe(rig.now() + backoffMs(0));
+    });
+  });
+
   describe('osVersion branch', () => {
     it('reads the native version through TauriService on desktop', async () => {
       tauriStub.isDesktopValue = true;

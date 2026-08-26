@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -140,6 +140,9 @@ export class PrivacySettings {
     label: ENV_FIELD_LABELS[key],
   }));
 
+  /** Whether the Pending upload disclosure is open. Closed on every open. */
+  protected readonly pendingOpen = signal(false);
+
   /**
    * The pending Rollup, pretty-printed. Empty while nothing is pending, which
    * is either disabled consent or an initialization that has not resolved yet
@@ -154,6 +157,10 @@ export class PrivacySettings {
       return '';
     }
   });
+
+  protected togglePending(): void {
+    this.pendingOpen.update((open) => !open);
+  }
 
   /** The one control over Consent_State (1.4, 1.5, 1.7). */
   protected onEnabledChange(next: boolean): void {

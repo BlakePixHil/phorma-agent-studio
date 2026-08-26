@@ -226,9 +226,20 @@ export function emptyAccumulator(metricDay: string, now: number): Accumulator {
   };
 }
 
-/** The upload record for a fresh start: first attempt one interval out. */
+/**
+ * The upload record for a start with no persisted attempt history.
+ *
+ * `nextAttemptAt` is `now`, NOT `now + UPLOAD_INTERVAL_MS`. The interval is the
+ * minimum spacing between REQUESTS, and this record describes a client that has
+ * made none, so there is nothing to space from. Arming it one interval out
+ * instead made the gate a cold-start delay, and because `upload` is only
+ * persisted once an attempt has produced an outcome, every restart re-armed it:
+ * an install used in sessions shorter than 15 minutes uploaded literally never,
+ * however long its queue sat there. The gate is re-armed after every attempt, so
+ * Requirements 4.3 and 5.4 still hold from the first request onward.
+ */
 export function defaultUploadState(now: number): UploadState {
-  return { nextAttemptAt: safeTime(now) + UPLOAD_INTERVAL_MS, failureCount: 0, rejectedCount: 0 };
+  return { nextAttemptAt: safeTime(now), failureCount: 0, rejectedCount: 0 };
 }
 
 /**

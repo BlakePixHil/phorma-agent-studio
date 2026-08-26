@@ -330,6 +330,12 @@ every attempt, and `backoffMs(0)` is 15 minutes, so "at most one request per 15 
 (4.3) and "wait `min(15min * 2^(failures-1), 24h)`" (5.4) are the same mechanism rather than two
 competing timers.
 
+A start with no persisted `upload` record arms the gate at `now`, not `now + 15min`. The interval
+spaces REQUESTS apart, and such a client has made none. Arming it one interval out turned the gate
+into a cold-start delay that every restart re-armed - and because `upload` is written only once an
+attempt has produced an outcome, an install used in sessions shorter than 15 minutes never uploaded
+at all.
+
 ```ts
 export const UPLOAD_INTERVAL_MS = 15 * 60_000;
 export const MAX_BACKOFF_MS = 24 * 60 * 60_000;

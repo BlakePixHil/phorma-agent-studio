@@ -142,33 +142,62 @@
   and your network address.
 </p>
 
-<!-- 4. Exactly what would be uploaded next. -->
-<h4 class="phorma-privacy__heading">Pending upload</h4>
-<p class="phorma-privacy__desc">
-  The exact object the uploader would send next. Nothing outside it leaves this machine.
-</p>
-<p class="phorma-privacy__meta">
-  <span>
-    <i class="ti ti-stack-2" aria-hidden="true"></i>
-    {{ telemetry.queueLength() }} waiting to upload
+<!--
+  4. Exactly what would be uploaded next. Collapsed by default: it is a
+  reassurance surface, not something a reader needs on the way past, and open by
+  default it pushed the policy link a screenful down.
+-->
+<button
+  type="button"
+  pButton
+  severity="secondary"
+  size="small"
+  class="phorma-privacy__disclosure"
+  [text]="true"
+  [attr.aria-expanded]="pendingOpen()"
+  aria-controls="privacy-pending-upload"
+  (click)="togglePending()"
+>
+  <i
+    class="ti"
+    [class.ti-chevron-right]="!pendingOpen()"
+    [class.ti-chevron-down]="pendingOpen()"
+    aria-hidden="true"
+  ></i>
+  <span>Pending upload</span>
+  <span class="phorma-privacy__disclosure-count">
+    {{ telemetry.queueLength() }} waiting
   </span>
-  <span>
-    <i class="ti ti-file-x" aria-hidden="true"></i>
-    {{ telemetry.rejectedCount() }} rejected and dropped
-  </span>
-</p>
-@if (preview(); as json) {
-  <pre class="phorma-privacy__preview">{{ json }}</pre>
-} @else if (!telemetry.enabled()) {
-  <p class="phorma-privacy__note">
-    <i class="ti ti-cloud-off" aria-hidden="true"></i>
-    Nothing is pending. Collection is off, so no counters are being kept.
-  </p>
-} @else {
-  <p class="phorma-privacy__note">
-    <i class="ti ti-loader-2" aria-hidden="true"></i>
-    Nothing is pending yet. Collection starts shortly after the studio finishes loading.
-  </p>
+</button>
+@if (pendingOpen()) {
+  <div class="phorma-privacy__disclosure-body" id="privacy-pending-upload">
+    <p class="phorma-privacy__desc">
+      The exact object the uploader would send next. Nothing outside it leaves this machine.
+    </p>
+    <p class="phorma-privacy__meta">
+      <span>
+        <i class="ti ti-stack-2" aria-hidden="true"></i>
+        {{ telemetry.queueLength() }} waiting to upload
+      </span>
+      <span>
+        <i class="ti ti-file-x" aria-hidden="true"></i>
+        {{ telemetry.rejectedCount() }} rejected and dropped
+      </span>
+    </p>
+    @if (preview(); as json) {
+      <pre class="phorma-privacy__preview">{{ json }}</pre>
+    } @else if (!telemetry.enabled()) {
+      <p class="phorma-privacy__note">
+        <i class="ti ti-cloud-off" aria-hidden="true"></i>
+        Nothing is pending. Collection is off, so no counters are being kept.
+      </p>
+    } @else {
+      <p class="phorma-privacy__note">
+        <i class="ti ti-loader-2" aria-hidden="true"></i>
+        Nothing is pending yet. Collection starts shortly after the studio finishes loading.
+      </p>
+    }
+  </div>
 }
 
 <!-- 5. Policy. -->

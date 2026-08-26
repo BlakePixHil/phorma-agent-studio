@@ -19,11 +19,11 @@
  *      under `env.hosted` in `cloud/wrangler.jsonc` precisely so this works.
  *      A local `wrangler dev` of `cloud/` (http://localhost:8787) is NOT a
  *      usable target for this dashboard unless you first write a `.dev.vars`
- *      with `PHORMA_MODE=hosted`, `CLERK_SECRET_KEY` and
- *      `TELEMETRY_ADMIN_USER_IDS`, and populate a local D1: the default BYO
- *      dev worker has no Clerk key (every request reads 401), no owner
- *      allowlist (403) and no `DB` binding, so every view errors. With no
- *      worker running at all the failure surfaces as "Could not reach the
+ *      with `PHORMA_MODE=hosted` plus the Clerk secret key and the owner
+ *      allowlist (both named in `admin/README.md`), and populate a local D1:
+ *      the default BYO dev worker has no Clerk key (every request reads 401),
+ *      no owner allowlist (403) and no `DB` binding, so every view errors. With
+ *      no worker running at all the failure surfaces as "Could not reach the
  *      telemetry API."
  *   3. `npm start` serves on http://localhost:7323.
  *

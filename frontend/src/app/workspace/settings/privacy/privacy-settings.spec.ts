@@ -135,6 +135,14 @@ describe('PrivacySettings rendering', () => {
   const paragraphs = (): string[] =>
     [...root.querySelectorAll('.phorma-privacy__desc')].map((p) => text(p));
 
+  /** Opens the Pending upload disclosure, which every load starts closed. */
+  async function expandPending(): Promise<void> {
+    const toggle = root.querySelector<HTMLButtonElement>('.phorma-privacy__disclosure');
+    expect(toggle).toBeTruthy();
+    toggle?.click();
+    await settle();
+  }
+
   it('renders the single consent toggle, bound to Consent_State', () => {
     const switches = root.querySelectorAll('p-toggleswitch');
     expect(switches.length).toBe(1);
@@ -217,7 +225,23 @@ describe('PrivacySettings rendering', () => {
     expect(copy).toContain(String(ENV_KEYS.length));
   });
 
-  it('previews exactly the object the uploader would send, with the queue and rejection counts', () => {
+  it('keeps the pending upload disclosure closed until it is asked for', async () => {
+    const toggle = root.querySelector<HTMLButtonElement>('.phorma-privacy__disclosure');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelector('#privacy-pending-upload')).toBeNull();
+    expect(root.querySelector('pre.phorma-privacy__preview')).toBeNull();
+    // The queue depth is the one fact worth reading without opening anything.
+    expect(text(toggle)).toContain(`${telemetry.queueLength()} waiting`);
+
+    await expandPending();
+    expect(
+      root.querySelector('.phorma-privacy__disclosure')?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    expect(root.querySelector('#privacy-pending-upload')).toBeTruthy();
+  });
+
+  it('previews exactly the object the uploader would send, with the queue and rejection counts', async () => {
+    await expandPending();
     const preview = root.querySelector('pre.phorma-privacy__preview');
     expect(preview).toBeTruthy();
 
@@ -238,6 +262,7 @@ describe('PrivacySettings rendering', () => {
   });
 
   it('replaces the preview with an explanation once collection is off', async () => {
+    await expandPending();
     telemetry.setEnabled(false);
     await settle();
 

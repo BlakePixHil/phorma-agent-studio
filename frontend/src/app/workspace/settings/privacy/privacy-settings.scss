@@ -193,6 +193,47 @@
 }
 
 /* ── Pending upload ──────────────────────────────────────────────────────── */
+
+/* Reads as a `__heading` that happens to be clickable, so the collapsed page
+   keeps the same section rhythm as the headings above it. The chevron hangs in
+   the dialog's own 22px gutter and the icon box is a fixed width, so the label
+   lands on the same left edge as every other heading rather than 21px in. The
+   row stretches the full width for the same reason: a hover pill that started
+   21px left of the content column read as a misalignment rather than a gutter. */
+.phorma-privacy__disclosure.p-button {
+  justify-content: flex-start;
+  gap: 0;
+  margin: 10px 0 0 -21px;
+  padding: 2px 6px;
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--p-text-muted-color);
+
+  i {
+    width: 14px;
+    font-size: 0.786rem;
+    text-align: center;
+  }
+}
+
+.phorma-privacy__disclosure-count {
+  margin-left: 8px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.phorma-privacy__disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
 .phorma-privacy__meta {
   display: flex;
   align-items: center;
