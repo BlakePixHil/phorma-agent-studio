@@ -40,6 +40,7 @@ import { TestBed } from '@angular/core/testing';
 import fc from 'fast-check';
 
 import { TELEMETRY_ROUTES, type DateRange, type TelemetryRoute } from './models';
+import { environment } from '../../environments/environment';
 import {
   FORBIDDEN,
   NO_SESSION,
@@ -389,9 +390,13 @@ describe('TelemetryApiService outcomes', () => {
   }
 
   it('builds the route URL under the admin prefix', async () => {
+    // Against the CONFIGURED base, not a literal: the claim is the shape of the
+    // URL, and duplicating `apiBaseUrl` here only made the spec fail when the
+    // environment moved off the local worker.
+    const base = environment.apiBaseUrl.replace(/\/+$/, '');
     await withService(resolverFor(TOKEN), async (service) => {
-      expect(service.url('summary')).toBe(`http://localhost:8787${TELEMETRY_ADMIN_PREFIX}summary`);
-      expect(service.url('trend')).toBe(`http://localhost:8787${TELEMETRY_ADMIN_PREFIX}trend`);
+      expect(service.url('summary')).toBe(`${base}${TELEMETRY_ADMIN_PREFIX}summary`);
+      expect(service.url('trend')).toBe(`${base}${TELEMETRY_ADMIN_PREFIX}trend`);
     });
   });
 
