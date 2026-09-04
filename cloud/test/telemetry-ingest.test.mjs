@@ -185,6 +185,15 @@ async function handleTestRoute(url, request, env) {
     const body = await request.json();
     if (body.logs !== false) logs.length = 0;
     if (body.binds !== false) binds = [];
+    // A reset ALWAYS clears failure injection, and that is load-bearing rather
+    // than tidiness. failSql is module state in this worker, the ingest handler
+    // CATCHES a rejected batch and answers 200 {} exactly as it does on a healthy
+    // no-op, and nothing else in the suite writes it - so an injection left armed
+    // by a throw between set and clear poisons every later iteration and every
+    // later property, silently, as "0 stored rows". Observed: Property 23 failed
+    // at test 67 and then shrank to the minimal input, because by then EVERY
+    // input failed and the counterexample described nothing.
+    failSql = null;
     if (body.tables === true && db) {
       await runStatements(db, [
         { sql: 'DELETE FROM telemetry_rollups' },
@@ -975,8 +984,16 @@ try {
           //    catches everything and answers 200 {}, so the message has to die
           //    inside - not in the body, and not in the log line.
           await injectFailure(mf, { sql: 'INSERT INTO telemetry_rollups', message: thrown });
-          const faulted = await ingest(mf, { ...body, installId: throwInstallId }, { headers, cf });
-          await injectFailure(mf, { sql: null });
+          // try/finally, because an `ingest` that REJECTS (a loopback connect
+          // failure, say) would otherwise leave the injection armed and turn one
+          // transient error into a run of meaningless failures. The `reset` route
+          // clears it too; both, so the intent is visible where it matters.
+          let faulted;
+          try {
+            faulted = await ingest(mf, { ...body, installId: throwInstallId }, { headers, cf });
+          } finally {
+            await injectFailure(mf, { sql: null });
+          }
           if (faulted.status !== 200 || faulted.text !== '{}') {
             throw new Error(`the faulted path answered ${faulted.status} ${faulted.text}`);
           }
@@ -1176,12 +1193,18 @@ try {
             await reset(mf);
             await sql(mf, seed());
             await injectFailure(mf, { sql: targetSql, message: 'injected retention failure' });
-            const pass = await mf.dispatchFetch('http://localhost/__t/retention', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-test-now-ms': String(T0) },
-              body: '{}',
-            });
-            await injectFailure(mf, { sql: null });
+            let pass;
+            try {
+              pass = await mf.dispatchFetch('http://localhost/__t/retention', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-test-now-ms': String(T0) },
+                body: '{}',
+              });
+            } finally {
+              // Same hazard as Property 23's faulted path: a rejected dispatch
+              // must not leave the injection armed for the next iteration.
+              await injectFailure(mf, { sql: null });
+            }
 
             const passBody = await pass.json();
             if (passBody.rejected !== 0) throw new Error('the failure escaped scheduled()');

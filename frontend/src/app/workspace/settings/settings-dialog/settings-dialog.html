@@ -453,7 +453,13 @@
                         </button>
                       </div>
                     }
-                    @if (needsPhormaCloudSubscription()) {
+                    <!-- A past_due tenant already has a plan (requirement 18), so
+                         this is an update-card action and never a Subscribe CTA
+                         (requirement 17). Its own component, so this sheet gains
+                         no bytes against the 22kB anyComponentStyle budget. -->
+                    @if (needsPhormaCloudSubscription() && phormaCloud.pastDue()) {
+                      <app-past-due-notice />
+                    } @else if (needsPhormaCloudSubscription()) {
                       <div class="phorma-settings__subscribe">
                         <p class="phorma-settings__subscribe-title">
                           <i class="ti ti-cloud" aria-hidden="true"></i>
@@ -463,12 +469,24 @@
                           Run agents on Phorma Cloud credits - no API keys, no setup. Subscribe to
                           pick from curated top models and have runs billed to your plan.
                         </p>
-                        <p-button
-                          styleClass="phorma-settings__btn"
-                          size="small"
-                          label="Subscribe"
-                          (onClick)="openSubscribe()"
-                        />
+                        <div class="phorma-settings__row">
+                          <p-button
+                            styleClass="phorma-settings__btn"
+                            size="small"
+                            label="Subscribe - Starter"
+                            [loading]="billing.busy()"
+                            [disabled]="billing.busy()"
+                            (onClick)="subscribe()"
+                          />
+                          <button
+                            type="button"
+                            class="phorma-settings__link"
+                            (click)="openCloudPlans()"
+                          >
+                            See all plans
+                          </button>
+                        </div>
+                        <app-checkout-fallback [attempted]="checkoutAttempted()" />
                       </div>
                     }
                     @if (loadingBedrockModels()) {
@@ -876,10 +894,18 @@
                                       <span class="phorma-settings__tier">{{ tierLabel(profile.tier) }}</span>
                                       plan · active
                                     </p>
+                                  } @else if (profile.provisioned && profile.status === 'past_due') {
+                                    <!-- Requirement 18: the tier survives a failed
+                                         payment, so it stays on screen. The banner
+                                         below carries the remedy. -->
+                                    <p>
+                                      <span class="phorma-settings__tier">{{ tierLabel(profile.tier) }}</span>
+                                      plan · payment failed
+                                    </p>
                                   } @else if (profile.provisioned) {
                                     <p>Subscription {{ profile.status }} - runs are paused.</p>
                                   } @else {
-                                    <p>No subscription yet - contact Phorma Labs to activate.</p>
+                                    <p>No plan yet - pick one below to start running.</p>
                                   }
                                 } @else if (phormaCloud.loading()) {
                                   <p>Checking your account…</p>
@@ -943,6 +969,17 @@
                               </div>
                             }
                           </div>
+                          <!-- Dunning banner. Stripe emails too, but the studio is
+                               where the user notices runs stopped, so the remedy
+                               belongs here (requirement 17). -->
+                          @if (phormaCloud.pastDue()) {
+                            <app-past-due-notice />
+                          }
+                          <!-- Plan selection lives here rather than in a modal: a
+                               required dialog before a user can pay works against
+                               "defaults must be runnable". Own component, own
+                               stylesheet - this sheet has no budget left. -->
+                          <app-plan-cards />
                         } @else {
                           <p class="phorma-settings__note">
                             <i class="ti ti-cloud-lock" aria-hidden="true"></i>

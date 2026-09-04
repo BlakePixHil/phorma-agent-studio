@@ -19,7 +19,10 @@ import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { SettingsDialogService } from '../settings-dialog.service';
+import { BillingRefreshService } from '../../../core/billing-refresh.service';
+import { BillingService, subscriptionLookupKey } from '../../../core/billing.service';
 import { CloudService } from '../../../core/cloud.service';
+import { ENTRY_PLAN_TIER } from '../../../core/plan-catalog';
 import { PHORMA_CLOUD_DEFAULT_URL } from '../../../core/phorma-cloud-url';
 import { DeployConfigService } from '../../../core/deploy-config.service';
 import {
@@ -62,7 +65,10 @@ import {
 } from '../../../core/node-catalog';
 import { ToastService } from '../../../shared/toast/toast.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
+import { CheckoutFallback } from '../../../shared/billing/checkout-fallback';
+import { PastDueNotice } from '../../../shared/billing/past-due-notice';
 import { InfoPopover } from '../../../shared/info-popover/info-popover';
+import { PlanCards } from '../../cloud/plan-cards/plan-cards';
 import { PrivacySettings } from '../privacy/privacy-settings';
 import {
   MODEL_PROVIDERS,
@@ -98,7 +104,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, InfoPopover, PrivacySettings],
+  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, CheckoutFallback, PastDueNotice, InfoPopover, PlanCards, PrivacySettings],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })
@@ -109,6 +115,8 @@ export class SettingsDialog {
   protected readonly theme = inject(ThemeService);
   protected readonly canvas = inject(CanvasStateService);
   protected readonly creditsDialog = inject(CreditsDialogService);
+  protected readonly billing = inject(BillingService);
+  private readonly billingRefresh = inject(BillingRefreshService);
   protected readonly usageAnalytics = inject(UsageAnalyticsService);
   private readonly tauri = inject(TauriService);
   private readonly toast = inject(ToastService);
@@ -533,14 +541,35 @@ export class SettingsDialog {
   }
 
   /**
-   * Deep-links to the Cloud settings page to subscribe to Phorma Cloud.
-   * Stripe checkout is not wired up yet (placeholder) — see agent-memory.
+   * True once a checkout has been started from THIS page, which arms the
+   * "Didn't open?" affordance. See {@link CheckoutFallback}.
    */
-  protected openSubscribe(): void {
+  protected readonly checkoutAttempted = signal(false);
+
+  /**
+   * Starts a real Stripe Checkout Session for the entry plan (requirement 27).
+   *
+   * This CTA lives in the Models page beside the default-model picker, where
+   * there is no room to compare plans, so it buys {@link ENTRY_PLAN_TIER} and
+   * pairs with a "See all plans" link to the plan cards on the Cloud page. The
+   * hosted Stripe page names the plan and the price before anything is charged,
+   * so the fast path hides nothing.
+   */
+  protected async subscribe(): Promise<void> {
+    const lookupKey = subscriptionLookupKey(ENTRY_PLAN_TIER);
+    if (!lookupKey) return;
+    this.checkoutAttempted.set(true);
+    // Only a real hand-off opens the bounded `/api/me` window (requirements 29,
+    // 30); a refused or abandoned checkout leaves no timer running.
+    if (await this.billing.startCheckout(lookupKey)) this.billingRefresh.watch();
+  }
+
+  /** Deep-links to the Cloud settings page, where the plan cards live. */
+  protected openCloudPlans(): void {
     this.dialog.activePageId.set('cloud');
   }
 
-  /** Opens the Buy Credits pack picker (placeholder — payments not wired up yet). */
+  /** Opens the Buy Credits pack picker. */
   protected openBuyCredits(): void {
     this.creditsDialog.open();
   }

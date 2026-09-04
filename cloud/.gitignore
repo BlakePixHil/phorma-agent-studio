@@ -1,13 +1,27 @@
 node_modules/
 dist/
 .wrangler/
-.dev.vars
+
+# Local `wrangler dev` secrets. The glob matters: with `--env hosted` wrangler
+# loads `.dev.vars.hosted` INSTEAD of `.dev.vars`, so a bare `.dev.vars` pattern
+# leaves the environment-specific variant committable. `.dev.vars.example` is the
+# tracked template and the only exception.
+.dev.vars*
+!.dev.vars.example
 
 # Per-user wrangler override written by the studio (Settings → Cloud). Holds
 # your Cloudflare account id, worker name and portal domain so wrangler.jsonc
 # stays pristine and `git pull` never conflicts.
 wrangler.byo.jsonc
 
-# Clerk secrets (never commit)
-.env
-.env.local
+# Clerk secrets (never commit). Wrangler also reads `.env`, `.env.local` and
+# `.env.<environment>` as local secret sources, so this is a glob for the same
+# reason `.dev.vars*` is.
+.env*
+
+# `--out` reports from `scripts/migrate-openrouter-workspace.mjs`. A plan run
+# against the hosted database inventories LIVE tenants, so these carry Clerk user
+# ids and OpenRouter key hashes and must never be committed. `check-deploy-bundle`
+# skips the same names so the documented procedure cannot fail the guard.
+report.json
+*-report.json

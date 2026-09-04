@@ -53,7 +53,7 @@ cd frontend; npm run build                       # production build: the ONLY th
 cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1003 specs, ~11s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
 cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
-cd cloud;    npm run test:unit                   # 15 worker suites (`test` is the same; the portal e2e is manual)
+cd cloud;    npm run test:unit                   # 22 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
 cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)
@@ -82,7 +82,7 @@ manually started `wrangler dev` and a local model.
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
-  warning / 26kB error. `initial` currently sits at 2.66MB, so the warning is expected and only the
+  warning / 26kB error. `initial` currently sits at 2.70MB, so the warning is expected and only the
   3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
   786kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
   (chart.js) behind `@defer (on immediate)`.

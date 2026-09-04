@@ -12,11 +12,12 @@ import {
   type EditPlan,
   type PlanProposalAttachment,
 } from './assistant-chat.model';
+import { remedyForModelError, type BillingRemedy } from './billing-refusal';
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import { counterName } from './telemetry-catalog';
 import { TelemetryService } from './telemetry.service';
-import { WorkflowBuilderService, isCreditsError } from './workflow-builder.service';
+import { WorkflowBuilderService } from './workflow-builder.service';
 import { WorkflowService } from './workflow.service';
 
 /** How many prior turns ride along as conversation history per request. */
@@ -52,8 +53,12 @@ export class AssistantChatService {
   readonly activity = signal<string[]>([]);
   /** Explicit model override from the picker (null = automatic). */
   readonly modelOverride = signal<ChatModelRef | null>(null);
-  /** True when the last failure was a credits/subscription 402. */
-  readonly creditsExhausted = signal(false);
+  /**
+   * What to offer after a hosted refusal on the last turn, `'none'` otherwise.
+   * Mirrors `WorkflowBuilderService.billingRemedy` and for the same reason: a
+   * boolean could only ever offer Buy credits (requirement 19).
+   */
+  readonly billingRemedy = signal<BillingRemedy>('none');
   /** Selected assistant mode, persisted across sessions. */
   readonly mode = signal<AssistantMode>(loadLayout<AssistantMode>('assistantMode', 'ask'));
 
@@ -148,7 +153,7 @@ export class AssistantChatService {
     this.busy.set(true);
     this.streamingText.set('');
     this.activity.set([]);
-    this.creditsExhausted.set(false);
+    this.billingRemedy.set('none');
 
     this.appendTurn({
       id: chatId('turn'),
@@ -206,7 +211,7 @@ export class AssistantChatService {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.creditsExhausted.set(isCreditsError(message));
+      this.billingRemedy.set(remedyForModelError(err));
       this.appendTurn({
         ...this.assistantTurn(mode, model, ''),
         status: 'error',
@@ -240,7 +245,7 @@ export class AssistantChatService {
 
     this.busy.set(true);
     this.streamingText.set('');
-    this.creditsExhausted.set(false);
+    this.billingRemedy.set('none');
 
     this.appendTurn({
       id: chatId('turn'),
@@ -278,7 +283,7 @@ export class AssistantChatService {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.creditsExhausted.set(isCreditsError(message));
+      this.billingRemedy.set(remedyForModelError(err));
       this.appendTurn({
         ...this.assistantTurn(options.mode, model, ''),
         status: 'error',

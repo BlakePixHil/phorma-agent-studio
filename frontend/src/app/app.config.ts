@@ -82,7 +82,7 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes),
     // Initialise Clerk (ngx-clerk v0.2.0 exposes ClerkService.__init rather
     // than a provideClerk helper). The publishable key is a public value
-    // sourced from src/environments/clerk.ts — Angular's esbuild builder
+    // sourced from src/environments/clerk.ts - Angular's esbuild builder
     // doesn't load Vite's import.meta.env, so we use the environments pattern.
     provideAppInitializer(() => {
       const clerk = inject(ClerkService);

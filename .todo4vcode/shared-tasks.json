@@ -44,27 +44,6 @@
       }
     },
     {
-      "id": "scan-1i9n0dj",
-      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
-      "description": "[NOTE] cloud/wrangler.jsonc:87",
-      "tags": [
-        "note",
-        "cloud/wrangler.jsonc",
-        "cloud/wrangler.jsonc:87"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1786340491185,
-      "order": 4000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/wrangler.jsonc",
-        "line": 87,
-        "marker": "NOTE"
-      }
-    },
-    {
       "id": "scan-leqhut",
       "text": "on \"prefix of the submitted value\": the implementation trims before it",
       "description": "[NOTE] cloud/test/telemetry.test.mjs:600",
@@ -82,6 +61,279 @@
         "type": "comment-scan",
         "file": "cloud/test/telemetry.test.mjs",
         "line": 600,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-algkzh",
+      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
+      "description": "[NOTE] cloud/wrangler.jsonc:100",
+      "tags": [
+        "note",
+        "cloud/wrangler.jsonc",
+        "cloud/wrangler.jsonc:100"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788323860000,
+      "order": 7000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/wrangler.jsonc",
+        "line": 100,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-11h2ve9",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:761",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:761"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788393742993,
+      "order": 8000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 761,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-31wqok",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:764",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:764"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788397928367,
+      "order": 9000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 764,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1knnan9",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:765",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:765"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788398095424,
+      "order": 10000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 765,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-17abnuo",
+      "text": "on \"prefix of the submitted value\": the implementation trims before it",
+      "description": "[NOTE] cloud/test/telemetry.test.mjs:605",
+      "tags": [
+        "note",
+        "cloud/test/telemetry.test.mjs",
+        "cloud/test/telemetry.test.mjs:605"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788402612312,
+      "order": 11000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/telemetry.test.mjs",
+        "line": 605,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-zn2188",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:768",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:768"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788410912610,
+      "order": 12000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 768,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-n76jnt",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:769",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:769"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788410919264,
+      "order": 13000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 769,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-4te365",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:857",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:857"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788410952430,
+      "order": 14000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 857,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1j22j68",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:863",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:863"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788411046897,
+      "order": 15000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 863,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1rz396m",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:865",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:865"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788412124107,
+      "order": 16000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 865,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1h8qy7p",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:866",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:866"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788417266846,
+      "order": 17000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 866,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1mvb582",
+      "text": "the prose: it contains \"subscription\", \"payment failed\" and a 402,",
+      "description": "[NOTE] frontend/src/app/core/run-controller.service.billing.spec.ts:74",
+      "tags": [
+        "note",
+        "frontend/src/app/core/run-controller.service.billing.spec.ts",
+        "frontend/src/app/core/run-controller.service.billing.spec.ts:74"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788481860648,
+      "order": 18000,
+      "source": {
+        "type": "comment-scan",
+        "file": "frontend/src/app/core/run-controller.service.billing.spec.ts",
+        "line": 74,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1npmwro",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1066",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:1066"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1788494212060,
+      "order": 19000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 1066,
         "marker": "NOTE"
       }
     }

@@ -1,0 +1,21 @@
+@if (message(); as text) {
+  <p class="phorma-checkout-fallback__error" role="alert">
+    <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+    <span>{{ text }}</span>
+  </p>
+}
+@if (reopenUrl()) {
+  <p class="phorma-checkout-fallback__retry">
+    <span>Didn't open?</span>
+    <button
+      type="button"
+      pButton
+      [text]="true"
+      size="small"
+      class="phorma-checkout-fallback__link"
+      (click)="reopen()"
+    >
+      <span>{{ openLabel() }}</span>
+    </button>
+  </p>
+}

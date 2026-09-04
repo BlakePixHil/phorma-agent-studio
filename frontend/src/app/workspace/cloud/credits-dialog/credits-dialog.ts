@@ -1,33 +1,76 @@
-import { ChangeDetectionStrategy, Component, HostListener, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, computed, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
-import { CREDIT_PACKS } from '../../../core/credit-packs';
+import { BillingRefreshService } from '../../../core/billing-refresh.service';
+import { BillingService, topupLookupKey } from '../../../core/billing.service';
+import { CREDIT_PACKS, type CreditPack } from '../../../core/credit-packs';
 import { CreditsDialogService } from '../credits-dialog.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { SettingsDialogService } from '../../settings/settings-dialog.service';
+import { CheckoutFallback } from '../../../shared/billing/checkout-fallback';
+import { PastDueNotice } from '../../../shared/billing/past-due-notice';
 
 /**
- * Buy Credits — a placeholder pack picker shown when a Phorma Cloud tenant
- * wants to top up mid-month (Settings → Cloud quota panel, or the "Buy
- * credits" CTA on a credits-exhausted run failure toast).
+ * Buy Credits - the top-up pack picker, shown when a Phorma Cloud tenant wants
+ * more credits mid-month (the Settings > Cloud quota panel, or the "Buy credits"
+ * CTA on a credits-exhausted run failure).
  *
- * Payments are not wired up yet (no Stripe/checkout integration in this
- * pass) — every pack's purchase button is disabled with a "Coming soon"
- * label. This establishes the UI shape and pack pricing ahead of that work.
- * Styled to match `CloudDialog` / `ConfirmDialog` (same overlay + card).
+ * Each pack starts a real Stripe Checkout Session in payment mode; the webhook
+ * writes the credit grant when the payment completes, so nothing here has to
+ * guess whether the money arrived.
+ *
+ * ## Why the packs are gated on an active subscription (requirement 26)
+ *
+ * The pricing page says top-ups are for subscribers, and the worker enforces it,
+ * but the reason is not policy for its own sake: a grant RAISES the monthly
+ * ceiling rather than standing alone, so credits bought without a plan would sit
+ * on an account that cannot run anything and would read as money taken for
+ * nothing. An unsubscribed visitor therefore gets a note and a route to the plan
+ * cards instead of a disabled grid with no explanation.
  */
 @Component({
   selector: 'app-credits-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, ButtonModule, TooltipModule],
+  imports: [DecimalPipe, ButtonModule, TooltipModule, CheckoutFallback, PastDueNotice],
   templateUrl: './credits-dialog.html',
   styleUrl: './credits-dialog.scss',
 })
 export class CreditsDialog {
   protected readonly dialog = inject(CreditsDialogService);
   protected readonly phormaCloud = inject(PhormaCloudService);
+  protected readonly billing = inject(BillingService);
+  private readonly settingsDialog = inject(SettingsDialogService);
+  private readonly refresh = inject(BillingRefreshService);
+
   protected readonly packs = CREDIT_PACKS;
+
+  /** Top-ups are subscriber-only. */
+  protected readonly canBuy = computed(() => this.phormaCloud.subscribed());
+
+  /** True once a checkout was started from here (arms the reopen affordance). */
+  protected readonly checkoutAttempted = signal(false);
+
+  /** True while THIS pack's Checkout Session is being created. */
+  protected isBuying(pack: CreditPack): boolean {
+    return this.billing.checkoutPending() === topupLookupKey(pack.id);
+  }
+
+  protected async buy(pack: CreditPack): Promise<void> {
+    if (!this.canBuy()) return;
+    this.checkoutAttempted.set(true);
+    // A grant lands through the webhook like any other purchase, so the same
+    // bounded `/api/me` window applies (requirements 29, 30). It runs the bound
+    // out rather than stopping early - see `billingFingerprint`.
+    if (await this.billing.startCheckout(topupLookupKey(pack.id))) this.refresh.watch();
+  }
+
+  /** Sends an unsubscribed visitor to the plan cards on Settings > Cloud. */
+  protected openPlans(): void {
+    this.dialog.close();
+    this.settingsDialog.open('cloud');
+  }
 
   @HostListener('document:keydown.escape')
   protected onEscape(): void {

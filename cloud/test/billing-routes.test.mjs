@@ -1,0 +1,546 @@
+/**
+ * The billing routes - `POST /api/checkout`, `POST /api/billing-portal` and
+ * `GET /billing/return` (task group 4, requirements 2, 4, 5, 6, 27, 28, 32, 46,
+ * 47, 48).
+ *
+ * What is actually at stake here is the REQUEST WE BUILD, not what Stripe says
+ * back. Four of these parameters are the difference between a working
+ * integration and a broken one, and none of them is a type error when it is
+ * wrong:
+ *
+ *  - `client_reference_id` and `metadata.clerk_user_id` are the two independent
+ *    paths a webhook has back to the tenant (requirement 2). Omit both and a
+ *    completed payment cannot find the account that made it - money taken for
+ *    nothing.
+ *  - `automatic_tax`, `billing_address_collection` and `customer_update.address`
+ *    are what make an INCLUSIVE price computable (requirements 46-48). Every
+ *    price in the catalogue is tax-inclusive, so without a jurisdiction Stripe
+ *    cannot split the published number into net and tax - and with an existing
+ *    customer Stripe rejects the session outright unless `customer_update` says
+ *    which address to trust.
+ *  - the CUSTOMER is reused rather than recreated (requirement 4), from the
+ *    stored mapping first and the metadata search second, with an idempotency key
+ *    on the create so a double-clicked button cannot leave two customers behind.
+ *  - the routes sit after the hosted-bindings gate and outside the admin branch
+ *    (requirement 32), so a BYO worker and a non-admin caller both behave.
+ *
+ * Harness. The routes are imported and called DIRECTLY over a REAL local D1
+ * (Miniflare's SQLite binding reached from Node, with the real migrations
+ * applied), the same shape `tenant-billing.test.mjs` uses - so no
+ * `dispatchFetch`, no loopback socket per request, and the SQL under test is the
+ * SQL that ships.
+ *
+ * Authorization is NOT stubbed. An RSA keypair is generated here, the public half
+ * is handed to the worker as `CLERK_JWT_KEY`, and each case signs its own RS256
+ * session JWT with the private half, so `@clerk/backend` verifies for real on its
+ * offline path. That is what makes the authenticated 200 reachable at all rather
+ * than asserted around.
+ *
+ * The ONE thing replaced is Stripe: `globalThis.fetch` is stubbed per case and
+ * every call is captured with its decoded form body, so each assertion below is
+ * about a parameter this worker chose to send.
+ *
+ * Run: npx tsx cloud/test/billing-routes.test.mjs
+ */
+
+import { createSign, generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { dirname, join } from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+import { Miniflare } from 'miniflare';
+import { withLoopbackRetryD1 } from './miniflare-loopback.mjs';
+
+// `api.ts` reaches the credential vault, which extends `cloudflare:workers`'
+// `DurableObject`. Node cannot resolve that built-in, so it is redirected to the
+// same stub `status.test.mjs` uses, before the module graph loads.
+const workersShim = new URL('./stubs/cloudflare-workers.mjs', import.meta.url).href;
+registerHooks({
+  resolve(specifier, context, next) {
+    if (specifier === 'cloudflare:workers') {
+      return { url: workersShim, format: 'module', shortCircuit: true };
+    }
+    return next(specifier, context);
+  },
+});
+
+const { handleApiRequest, handleBillingReturnRequest } = await import('../src/api.ts');
+const { TenantStore } = await import('../src/tenants.ts');
+
+const here = dirname(fileURLToPath(import.meta.url));
+const migrations = join(here, '..', 'migrations');
+
+let failures = 0;
+function check(name, condition, detail) {
+  if (condition) {
+    console.log(`  PASS  ${name}`);
+  } else {
+    failures += 1;
+    console.error(`  FAIL  ${name}${detail ? ` - ${detail}` : ''}`);
+  }
+}
+
+// --- Local D1 with the real migrations -------------------------------------
+
+const mf = new Miniflare({
+  modules: true,
+  // Only the binding is used; nothing here goes through a worker route.
+  script: 'export default { fetch: () => new Response("ok") };',
+  compatibilityDate: '2025-05-01',
+  d1Databases: { DB: 'phorma-cloud-billing-routes' },
+});
+const DB = withLoopbackRetryD1(await mf.getD1Database('DB'));
+
+/** Splits a migration into statements (the files carry no string literals). */
+function statementsOf(file) {
+  return readFileSync(join(migrations, file), 'utf8')
+    .split('\n')
+    .map((line) => line.replace(/--.*$/, ''))
+    .join('\n')
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+}
+for (const file of ['0001_init.sql', '0003_billing.sql', '0004_billing_ordering.sql']) {
+  for (const statement of statementsOf(file)) await DB.prepare(statement).run();
+}
+const store = new TenantStore({ DB });
+
+// --- A real session token --------------------------------------------------
+
+const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+function mintToken(sub) {
+  const seconds = Math.floor(Date.now() / 1000);
+  const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-billing-test' })}.${base64url(
+    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600 },
+  )}`;
+  const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
+  return `${signing}.${signature}`;
+}
+
+// --- Environment shapes ----------------------------------------------------
+
+const SECRET_KEY = 'sk_test_billing_do_not_leak';
+const ADMIN_TOKEN = 'admin-token-not-a-billing-credential';
+const CORS = { 'Access-Control-Allow-Origin': 'http://localhost:7322' };
+const CTX = { waitUntil: () => undefined, passThroughOnException: () => undefined };
+const ORIGIN = 'https://cloud.example.com';
+const RETURN_URL = `${ORIGIN}/billing/return`;
+
+/** A hosted worker with D1, Clerk and (optionally) Stripe configured. */
+function hostedEnv(extra = {}) {
+  return {
+    PHORMA_MODE: 'hosted',
+    CLERK_SECRET_KEY: 'sk_test_clerk_not_used_offline',
+    CLERK_JWT_KEY,
+    PHORMA_ADMIN_TOKEN: ADMIN_TOKEN,
+    STRIPE_SECRET_KEY: SECRET_KEY,
+    DB,
+    ...extra,
+  };
+}
+
+// --- The Stripe stub -------------------------------------------------------
+
+const realFetch = globalThis.fetch;
+const realConsoleError = console.error;
+const realConsoleWarn = console.warn;
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/** The catalogue prices the stub serves, by lookup key. */
+const PRICES = {
+  phorma_starter_monthly: {
+    id: 'price_starter_monthly',
+    active: true,
+    type: 'recurring',
+    lookup_key: 'phorma_starter_monthly',
+    currency: 'usd',
+    unit_amount: 2000,
+    tax_behavior: 'inclusive',
+    recurring: { interval: 'month' },
+    metadata: { tier: 'starter' },
+  },
+  phorma_topup_small: {
+    id: 'price_topup_small',
+    active: true,
+    type: 'one_time',
+    lookup_key: 'phorma_topup_small',
+    currency: 'usd',
+    unit_amount: 1000,
+    tax_behavior: 'inclusive',
+    metadata: { credits: '500' },
+  },
+};
+
+/**
+ * Installs the Stripe stub and captures every call plus every log line.
+ *
+ * `overrides` replaces the response for one Stripe path, so a case can inject a
+ * search hit or a malformed session without restating the rest of the catalogue.
+ */
+function stripeStub(overrides = {}) {
+  const calls = [];
+  const logs = [];
+  const capture = (...args) => {
+    logs.push(args.map((part) => (part instanceof Error ? part.message : String(part))).join(' '));
+  };
+  console.error = capture;
+  console.warn = capture;
+
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const body = typeof init.body === 'string' ? init.body : '';
+    const call = {
+      path: url.pathname,
+      method: init.method ?? 'GET',
+      query: Object.fromEntries(url.searchParams),
+      params: Object.fromEntries(new URLSearchParams(body)),
+      headers: init.headers ?? {},
+    };
+    calls.push(call);
+
+    const override = overrides[url.pathname];
+    if (override) return override(call);
+
+    switch (url.pathname) {
+      case '/v1/prices': {
+        const key = url.searchParams.get('lookup_keys[0]');
+        const price = PRICES[key];
+        return jsonResponse({ data: price ? [price] : [] });
+      }
+      case '/v1/customers/search':
+        return jsonResponse({ data: [] });
+      case '/v1/customers':
+        return jsonResponse({ id: 'cus_created', metadata: call.params });
+      case '/v1/checkout/sessions':
+        return jsonResponse({ id: 'cs_test_1', url: 'https://checkout.stripe.com/c/pay/cs_test_1' });
+      case '/v1/billing_portal/sessions':
+        return jsonResponse({ id: 'bps_1', url: 'https://billing.stripe.com/p/session/bps_1' });
+      default:
+        throw new Error(`unexpected Stripe path ${url.pathname}`);
+    }
+  };
+
+  return {
+    calls,
+    logs,
+    callsTo: (path) => calls.filter((call) => call.path === path),
+    restore: () => {
+      globalThis.fetch = realFetch;
+      console.error = realConsoleError;
+      console.warn = realConsoleWarn;
+    },
+  };
+}
+
+/** One `/api/*` request through the real router. */
+async function api(env, path, { method = 'POST', body, token, bearer } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  const authorization = bearer ?? (token ? `Bearer ${mintToken(token)}` : null);
+  if (authorization) headers.Authorization = authorization;
+  const request = new Request(`${ORIGIN}${path}`, {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const response = await handleApiRequest(request, env, CORS, CTX);
+  return {
+    status: response?.status ?? 0,
+    body: response ? await response.json().catch(() => null) : null,
+  };
+}
+
+// ══ 1. GET /billing/return (task 4.3, requirement 27) ═══════════════════════
+
+console.log('\nGET /billing/return - the page a browser lands on');
+{
+  const page = handleBillingReturnRequest(new Request(`${RETURN_URL}?status=complete`));
+  const html = await page.text();
+
+  check('answers 200 with HTML', page.status === 200 && /text\/html/.test(page.headers.get('Content-Type')), `${page.status} ${page.headers.get('Content-Type')}`);
+  // A top-level navigation, not an XHR. Widening the authenticated surface for it
+  // would be the wrong fix for a problem it does not have.
+  check('carries NO CORS header', page.headers.get('Access-Control-Allow-Origin') === null, String(page.headers.get('Access-Control-Allow-Origin')));
+  check('declares a no-load CSP', /default-src 'none'/.test(page.headers.get('Content-Security-Policy') ?? ''), String(page.headers.get('Content-Security-Policy')));
+  check('is not cached', page.headers.get('Cache-Control') === 'no-store', String(page.headers.get('Cache-Control')));
+  // Self-contained: no script, and nothing fetched from anywhere.
+  check('carries no script', !/<script/i.test(html), html.slice(0, 120));
+  check('references no external asset', !/(src|href)\s*=/i.test(html), html.slice(0, 200));
+  check('tells the user to close the tab', /close this tab/i.test(html), html);
+  // Requirement 10: the webhook is the only writer of subscription state, so this
+  // page must not claim a tier or a status it cannot know yet.
+  check('claims no billing state', !/\b(starter|pro|team|active|credits)\b/i.test(html), html);
+
+  const cancelled = await handleBillingReturnRequest(
+    new Request(`${RETURN_URL}?status=cancelled`),
+  ).text();
+  check('a cancelled return says nothing was charged', /nothing was charged/i.test(cancelled), cancelled);
+
+  // The one query value it reads is compared against a literal, never rendered.
+  const injected = await handleBillingReturnRequest(
+    new Request(`${RETURN_URL}?status=${encodeURIComponent('<script>alert(1)</script>')}`),
+  ).text();
+  check('reflects nothing from the query string', !/alert\(1\)/.test(injected) && !/<script/i.test(injected), injected.slice(0, 200));
+
+  const posted = handleBillingReturnRequest(new Request(RETURN_URL, { method: 'POST' }));
+  check('a POST is 405 rather than a confusing 404', posted.status === 405 && posted.headers.get('Allow') === 'GET, HEAD', `${posted.status} ${posted.headers.get('Allow')}`);
+  check('another path is not this route', handleBillingReturnRequest(new Request(`${ORIGIN}/billing`)) === null);
+  check('the page is not an /api/ route', (await handleApiRequest(new Request(RETURN_URL), hostedEnv(), CORS, CTX)) === null);
+}
+
+// ══ 2. Placement: the gates (task 4.4, requirement 32) ══════════════════════
+
+console.log('\nBoth routes sit after the hosted gate and outside the admin branch (requirement 32)');
+{
+  const stub = stripeStub();
+  try {
+    // A BYO worker binds no D1. Billing must be ABSENT, not attempted: the same
+    // 501 every other tenant route gives, and not one Stripe call.
+    const byo = { PHORMA_TOKEN: 'byo-token', STRIPE_SECRET_KEY: SECRET_KEY };
+    for (const path of ['/api/checkout', '/api/billing-portal']) {
+      const answer = await api(byo, path, { body: { lookupKey: 'phorma_starter_monthly' }, bearer: 'Bearer byo-token' });
+      check(`${path} on a BYO worker is 501 about hosted bindings`, answer.status === 501 && /hosted bindings/i.test(answer.body?.error ?? ''), `${answer.status} ${JSON.stringify(answer.body)}`);
+    }
+    check('a BYO worker made no Stripe call at all', stub.calls.length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+
+    // The admin token is not a billing credential: these routes take a Clerk JWT
+    // and nothing else, so an operator bearer reads 401 like any other stranger.
+    for (const path of ['/api/checkout', '/api/billing-portal']) {
+      const asAdmin = await api(hostedEnv(), path, { body: { lookupKey: 'phorma_starter_monthly' }, bearer: `Bearer ${ADMIN_TOKEN}` });
+      check(`${path} rejects the admin token (401)`, asAdmin.status === 401, `${asAdmin.status} ${JSON.stringify(asAdmin.body)}`);
+      const anonymous = await api(hostedEnv(), path, { body: { lookupKey: 'phorma_starter_monthly' } });
+      check(`${path} rejects an unauthenticated caller (401)`, anonymous.status === 401, `${anonymous.status} ${JSON.stringify(anonymous.body)}`);
+    }
+    check('no unauthorized request reached Stripe', stub.calls.length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+
+    // Requirement 34: unconfigured is 501 NAMING the secret, never an opaque 500.
+    const noStripe = hostedEnv({ STRIPE_SECRET_KEY: undefined });
+    const checkout = await api(noStripe, '/api/checkout', { body: { lookupKey: 'phorma_starter_monthly' }, token: 'user_no_stripe' });
+    check('checkout without STRIPE_SECRET_KEY is 501 naming it', checkout.status === 501 && /STRIPE_SECRET_KEY/.test(checkout.body?.error ?? ''), `${checkout.status} ${JSON.stringify(checkout.body)}`);
+    const portal = await api(noStripe, '/api/billing-portal', { token: 'user_no_stripe' });
+    check('the portal without STRIPE_SECRET_KEY is 501 naming it', portal.status === 501 && /STRIPE_SECRET_KEY/.test(portal.body?.error ?? ''), `${portal.status} ${JSON.stringify(portal.body)}`);
+
+    // Method-gated, so a GET falls through to the router's own 404.
+    const wrongMethod = await api(hostedEnv(), '/api/checkout', { method: 'GET', token: 'user_no_stripe' });
+    check('GET /api/checkout is not a route', wrongMethod.status === 404, `${wrongMethod.status} ${JSON.stringify(wrongMethod.body)}`);
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ 3. The allowlist (task 4.1, requirements 5, 6) ══════════════════════════
+
+console.log('\nOnly an allowlisted lookup key can be checked out (requirements 5, 6)');
+{
+  const stub = stripeStub();
+  try {
+    for (const [label, body] of [
+      ['an unknown key', { lookupKey: 'phorma_free_forever' }],
+      ['a price id instead of a key', { lookupKey: 'price_starter_monthly' }],
+      ['no key at all', {}],
+      ['a non-string key', { lookupKey: { toString: 'pro' } }],
+    ]) {
+      const answer = await api(hostedEnv(), '/api/checkout', { body, token: 'user_allowlist' });
+      check(`${label} is refused (400 Unknown product)`, answer.status === 400 && answer.body?.error === 'Unknown product.', `${answer.status} ${JSON.stringify(answer.body)}`);
+    }
+    const missingBody = await api(hostedEnv(), '/api/checkout', { token: 'user_allowlist' });
+    check('a missing body is refused too', missingBody.status === 400, `${missingBody.status} ${JSON.stringify(missingBody.body)}`);
+    check('nothing off the allowlist reached Stripe', stub.calls.length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ 4. Checkout for a first-time buyer (requirements 2, 4, 46, 47, 48) ══════
+
+console.log('\nA first-time buyer: customer created, session built (requirements 2, 4, 46-48)');
+{
+  const stub = stripeStub();
+  const userId = 'user_first_time';
+  try {
+    const answer = await api(hostedEnv(), '/api/checkout', { body: { lookupKey: 'phorma_starter_monthly' }, token: userId });
+    check('answers 200 with the hosted Checkout URL', answer.status === 200 && answer.body?.url === 'https://checkout.stripe.com/c/pay/cs_test_1', `${answer.status} ${JSON.stringify(answer.body)}`);
+
+    // The price was resolved by LOOKUP KEY against active prices, not by id.
+    const priced = stub.callsTo('/v1/prices')[0];
+    check('the price was looked up by lookup key', priced?.query['lookup_keys[0]'] === 'phorma_starter_monthly', JSON.stringify(priced?.query));
+    check('only ACTIVE prices were considered', priced?.query['active'] === 'true', JSON.stringify(priced?.query));
+
+    // Requirement 4's protection against a double-clicked button.
+    const created = stub.callsTo('/v1/customers')[0];
+    check('a customer was created', created?.method === 'POST', JSON.stringify(created));
+    check('the customer carries metadata.clerk_user_id (requirement 2)', created?.params['metadata[clerk_user_id]'] === userId, JSON.stringify(created?.params));
+    check('the create is idempotency-keyed (requirement 4)', typeof created?.headers['Idempotency-Key'] === 'string' && created.headers['Idempotency-Key'].includes(userId), JSON.stringify(created?.headers['Idempotency-Key']));
+
+    const session = stub.callsTo('/v1/checkout/sessions')[0];
+    const params = session?.params ?? {};
+    check('mode comes from the price type', params['mode'] === 'subscription', params['mode']);
+    check('the session reuses the resolved customer', params['customer'] === 'cus_created', params['customer']);
+    check('client_reference_id is the verified user id (requirement 2)', params['client_reference_id'] === userId, params['client_reference_id']);
+    check('session metadata carries the user id too', params['metadata[clerk_user_id]'] === userId, params['metadata[clerk_user_id]']);
+    check('the line item is the resolved price id', params['line_items[0][price]'] === 'price_starter_monthly' && params['line_items[0][quantity]'] === '1', JSON.stringify(params));
+    check('both return URLs point at this worker (requirement 27)', params['success_url'] === `${RETURN_URL}?status=complete` && params['cancel_url'] === `${RETURN_URL}?status=cancelled`, `${params['success_url']} | ${params['cancel_url']}`);
+
+    // Task 4.1a. An inclusive price cannot be split without a jurisdiction, so
+    // these four are what make the published number the number charged.
+    check('automatic tax is on (requirement 47)', params['automatic_tax[enabled]'] === 'true', JSON.stringify(params));
+    check('a billing address is collected (requirement 47)', params['billing_address_collection'] === 'required', params['billing_address_collection']);
+    check('tax id collection is on (requirement 48)', params['tax_id_collection[enabled]'] === 'true', params['tax_id_collection[enabled]']);
+    check('customer_update[address]=auto, which Stripe requires here', params['customer_update[address]'] === 'auto', params['customer_update[address]']);
+    check('customer_update[name]=auto, so the invoice carries the legal name', params['customer_update[name]'] === 'auto', params['customer_update[name]']);
+    // Subscription mode invoices on its own; asking again would be noise.
+    check('no invoice_creation on a subscription', params['invoice_creation[enabled]'] === undefined, JSON.stringify(params));
+
+    // Requirement 10: only the webhook writes subscription state. Clicking
+    // Subscribe must not fabricate a tenant row, or `/api/me` would report a plan
+    // nobody paid for.
+    check('no tenant row was invented', (await store.getTenant(userId)) === null, JSON.stringify(await store.getTenant(userId)));
+    // Requirement 33: the API key never leaves the worker.
+    check('the secret key is in no log line', !stub.logs.join('\n').includes(SECRET_KEY), stub.logs.join(' | '));
+    check('the secret key is in no response body', !JSON.stringify(answer.body).includes(SECRET_KEY));
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ 5. Customer reuse (requirement 4) ══════════════════════════════════════
+
+console.log('\nA returning buyer reuses their Stripe customer (requirement 4)');
+{
+  const stub = stripeStub();
+  try {
+    await store.upsertTenant({ id: 'user_mapped', email: 'mapped@example.com', tier: 'starter', status: 'active', stripeCustomerId: 'cus_mapped' });
+    const answer = await api(hostedEnv(), '/api/checkout', { body: { lookupKey: 'phorma_starter_monthly' }, token: 'user_mapped' });
+
+    check('checkout succeeds', answer.status === 200, `${answer.status} ${JSON.stringify(answer.body)}`);
+    check('the stored mapping is used', stub.callsTo('/v1/checkout/sessions')[0]?.params['customer'] === 'cus_mapped', JSON.stringify(stub.callsTo('/v1/checkout/sessions')[0]?.params));
+    // The stored column is the PRIMARY source, so neither a duplicate create nor
+    // a search against Stripe's lagging index should happen at all.
+    check('no second customer is created', stub.callsTo('/v1/customers').length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+    check('no customer search is needed', stub.callsTo('/v1/customers/search').length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+  } finally {
+    stub.restore();
+  }
+}
+
+console.log('\nAn unmapped tenant is found by metadata search, then mapped (requirement 4)');
+{
+  const stub = stripeStub({
+    '/v1/customers/search': () => jsonResponse({ data: [{ id: 'cus_abandoned', metadata: { clerk_user_id: 'user_abandoned' } }] }),
+  });
+  try {
+    await store.upsertTenant({ id: 'user_abandoned', email: 'abandoned@example.com', tier: 'starter', status: 'active' });
+    const answer = await api(hostedEnv(), '/api/checkout', { body: { lookupKey: 'phorma_starter_monthly' }, token: 'user_abandoned' });
+
+    check('checkout succeeds', answer.status === 200, `${answer.status} ${JSON.stringify(answer.body)}`);
+    const search = stub.callsTo('/v1/customers/search')[0];
+    check('the search is by metadata.clerk_user_id', search?.query['query'] === "metadata['clerk_user_id']:'user_abandoned'", JSON.stringify(search?.query));
+    check('the found customer is used, not a new one', stub.callsTo('/v1/customers').length === 0 && stub.callsTo('/v1/checkout/sessions')[0]?.params['customer'] === 'cus_abandoned', JSON.stringify(stub.calls.map((c) => c.path)));
+    // Persisted, so the next checkout skips the lagging search index entirely.
+    const tenant = await store.getTenant('user_abandoned');
+    check('the mapping is stored on the tenant', tenant?.stripeCustomerId === 'cus_abandoned', JSON.stringify(tenant));
+    check('the mapping write changed nothing else', tenant?.tier === 'starter' && tenant?.status === 'active' && tenant?.email === 'abandoned@example.com', JSON.stringify(tenant));
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ 6. A credit pack is a one-time payment ═════════════════════════════════
+
+console.log('\nA credit pack checks out in payment mode (requirement 48)');
+{
+  const stub = stripeStub();
+  try {
+    const answer = await api(hostedEnv(), '/api/checkout', { body: { lookupKey: 'phorma_topup_small' }, token: 'user_topup' });
+    const params = stub.callsTo('/v1/checkout/sessions')[0]?.params ?? {};
+
+    check('checkout succeeds', answer.status === 200, `${answer.status} ${JSON.stringify(answer.body)}`);
+    check('mode is payment, from the one_time price', params['mode'] === 'payment', params['mode']);
+    // A one-time payment produces only a receipt unless asked, and a buyer who
+    // supplied a tax id needs the invoice requirement 48 promises them.
+    check('invoice creation is enabled for the one-time payment', params['invoice_creation[enabled]'] === 'true', JSON.stringify(params));
+    check('tax handling is identical to a subscription', params['automatic_tax[enabled]'] === 'true' && params['tax_id_collection[enabled]'] === 'true' && params['billing_address_collection'] === 'required', JSON.stringify(params));
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ 7. What Stripe says back is not trusted blindly ════════════════════════
+
+console.log('\nAn unusable Stripe answer is a 502, not a URL handed to the OS');
+{
+  for (const [label, url] of [
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['an http: URL', 'http://checkout.stripe.com/c/pay/cs_1'],
+    ['no URL at all', undefined],
+  ]) {
+    const stub = stripeStub({
+      '/v1/checkout/sessions': () => jsonResponse({ id: 'cs_bad', url }),
+    });
+    try {
+      const answer = await api(hostedEnv(), '/api/checkout', { body: { lookupKey: 'phorma_starter_monthly' }, token: 'user_bad_url' });
+      check(`${label} is refused (502)`, answer.status === 502, `${answer.status} ${JSON.stringify(answer.body)}`);
+      check(`${label} is not echoed back`, !JSON.stringify(answer.body).includes('alert(1)') && answer.body?.url === undefined, JSON.stringify(answer.body));
+    } finally {
+      stub.restore();
+    }
+  }
+
+  const upstream = stripeStub({
+    '/v1/checkout/sessions': () => jsonResponse({ error: { code: 'parameter_invalid_empty', message: `Bad key ${SECRET_KEY}` } }, 400),
+  });
+  try {
+    const answer = await api(hostedEnv(), '/api/checkout', { body: { lookupKey: 'phorma_starter_monthly' }, token: 'user_upstream' });
+    // Stripe's status is never mirrored: a Stripe 400 about OUR parameters is not
+    // the caller's fault, and a Stripe 401 would send them to a sign-in screen.
+    check('a Stripe rejection becomes a 502', answer.status === 502, `${answer.status} ${JSON.stringify(answer.body)}`);
+    check('vendor prose stays out of the response', !/Bad key/.test(JSON.stringify(answer.body)), JSON.stringify(answer.body));
+    check('the secret key stays out of the log', !upstream.logs.join('\n').includes(SECRET_KEY), upstream.logs.join(' | '));
+  } finally {
+    upstream.restore();
+  }
+}
+
+// ══ 8. POST /api/billing-portal (task 4.2, requirement 28) ═════════════════
+
+console.log('\nPOST /api/billing-portal (requirement 28)');
+{
+  const stub = stripeStub();
+  try {
+    // Nothing to manage yet: no stored mapping and no customer in Stripe.
+    const fresh = await api(hostedEnv(), '/api/billing-portal', { token: 'user_no_billing' });
+    check('a tenant with no billing account gets a 404 that says so', fresh.status === 404 && /no billing account/i.test(fresh.body?.error ?? ''), `${fresh.status} ${JSON.stringify(fresh.body)}`);
+    check('no portal session is created for one', stub.callsTo('/v1/billing_portal/sessions').length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+
+    const answer = await api(hostedEnv(), '/api/billing-portal', { token: 'user_mapped' });
+    const session = stub.callsTo('/v1/billing_portal/sessions')[0];
+    check('a mapped tenant gets a portal URL', answer.status === 200 && answer.body?.url === 'https://billing.stripe.com/p/session/bps_1', `${answer.status} ${JSON.stringify(answer.body)}`);
+    check('the session is for their own customer', session?.params['customer'] === 'cus_mapped', JSON.stringify(session?.params));
+    check('the portal returns to this worker', session?.params['return_url'] === RETURN_URL, session?.params['return_url']);
+    // Requirement 28 is "let Stripe own cancel, plan change, card and invoices",
+    // so this route builds nothing beyond the session.
+    check('no other Stripe call is made for a mapped tenant', stub.callsTo('/v1/customers').length === 0 && stub.callsTo('/v1/prices').length === 0, JSON.stringify(stub.calls.map((c) => c.path)));
+
+    const wrongMethod = await api(hostedEnv(), '/api/billing-portal', { method: 'GET', token: 'user_mapped' });
+    check('GET /api/billing-portal is not a route', wrongMethod.status === 404, `${wrongMethod.status} ${JSON.stringify(wrongMethod.body)}`);
+  } finally {
+    stub.restore();
+  }
+}
+
+await mf.dispose();
+console.log(failures === 0 ? '\nAll billing route checks passed.\n' : `\n${failures} check(s) failed.\n`);
+process.exit(failures === 0 ? 0 : 1);

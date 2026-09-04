@@ -22,6 +22,36 @@ export interface RunScope {
   depth: number;
 }
 
+/**
+ * Stable machine token explaining WHY a failure event fired, when the failure
+ * came from somewhere that issues tokens (stripe-billing requirement 19). The
+ * only issuer today is the hosted entitlement gate, whose five
+ * `HostedInferenceRefusalCode` values (`no_subscription`,
+ * `subscription_past_due`, `runs_exhausted`, `credits_exhausted`,
+ * `no_runtime_key`) are an append-only wire contract in `cloud/src/tenants.ts`.
+ * Undefined on every other failure, and undefined for a hosted refusal relayed
+ * by a worker that predates the field - which is exactly why consumers keep
+ * their prose regex as a fallback (requirement 20).
+ *
+ * DELIBERATELY `string` AND NOT THAT UNION, for three reasons:
+ *
+ *  - The engine has zero dependencies on `cloud/` or the studio, so it cannot
+ *    import the union, and RESTATING it here would create a third copy of a
+ *    contract that only means anything server-side. `TIERS` is the authority for
+ *    tiers for the same reason the gate is the authority for its own codes.
+ *  - This is a FORWARD-COMPATIBLE wire field. A deployed worker is routinely a
+ *    different version than the studio reading it, and the token set is
+ *    append-only, so a studio built today must be able to CARRY a token added to
+ *    the worker tomorrow. A closed union would make that value unrepresentable
+ *    and the only way to move it would be a studio release - the opposite of
+ *    what an append-only contract is for.
+ *  - Nothing in the engine reads it. It is transported, never interpreted, and a
+ *    union buys no safety at a layer that only forwards. Narrowing belongs where
+ *    the branch is, in the studio consumers, which must handle an unrecognised
+ *    token anyway - the fallback path they already have.
+ */
+export type RunFailureCode = string;
+
 export type RunNodeState =
   | 'idle'
   | 'queued'
@@ -39,7 +69,9 @@ type RunEventPayload =
   | { type: 'node-thinking'; runId: string; nodeId: string; token: string }
   | { type: 'node-usage'; runId: string; nodeId: string; provider: string; model: string; usage: ModelUsage; at: number }
   | { type: 'node-completed'; runId: string; nodeId: string; nodeName: string; output: string; at: number }
-  | { type: 'node-failed'; runId: string; nodeId: string; nodeName: string; error: string; at: number }
+  | { type: 'node-failed'; runId: string; nodeId: string; nodeName: string; error: string;
+      /** See {@link RunFailureCode}. */
+      code?: RunFailureCode; at: number }
   // Robustness primitives (EPIC 3): retry attempts, model fallback switches,
   // error-branch routing, and context compression are all first-class trace
   // moments so the canvas/trace explain exactly how a run recovered.
@@ -116,7 +148,9 @@ type RunEventPayload =
   | { type: 'run-paused'; runId: string; nodeId?: string; at: number }
   | { type: 'run-resumed'; runId: string; at: number }
   | { type: 'run-completed'; runId: string; output: string; at: number }
-  | { type: 'run-failed'; runId: string; error: string; at: number }
+  | { type: 'run-failed'; runId: string; error: string;
+      /** See {@link RunFailureCode}. */
+      code?: RunFailureCode; at: number }
   | { type: 'run-stopped'; runId: string; at: number };
 
 /**

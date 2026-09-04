@@ -97,9 +97,9 @@
             <div class="phorma-cmdk__status phorma-cmdk__status--error">
               <i class="ti ti-alert-triangle" aria-hidden="true"></i>
               <span class="phorma-cmdk__error-text">{{ builder.error() }}</span>
-              @if (builder.creditsExhausted()) {
-                <button type="button" class="phorma-cmdk__cta" (click)="openCredits()">
-                  Buy credits
+              @if (billingCtaLabel(); as ctaLabel) {
+                <button type="button" class="phorma-cmdk__cta" (click)="runBillingCta()">
+                  {{ ctaLabel }}
                 </button>
               } @else {
                 <button type="button" class="phorma-cmdk__cta" (click)="retry()">Retry</button>
@@ -117,27 +117,49 @@
         <div class="phorma-cmdk__box phorma-cmdk__box--locked">
           <div class="phorma-cmdk__locked">
             <p class="phorma-cmdk__locked-title">Build workflows with AI</p>
-            <p class="phorma-cmdk__locked-copy">
-              Describe what you want and the AI assembles it on your canvas. Requires an active
-              Phorma Cloud subscription.
-            </p>
-            <div class="phorma-cmdk__locked-actions">
-              @if (phormaCloud.signedIn()) {
-                <p-button
-                  styleClass="phorma-cmdk__primary-btn"
-                  size="small"
-                  label="Subscribe to Phorma Cloud"
-                  (onClick)="openSubscribe()"
-                />
-              } @else {
-                <p-button
-                  styleClass="phorma-cmdk__primary-btn"
-                  size="small"
-                  label="Sign in to Phorma Cloud"
-                  (onClick)="signIn()"
-                />
+            @if (phormaCloud.pastDue()) {
+              <!-- A failed payment, not a missing plan. The remedy is the portal
+                   and never a second subscription (requirement 17), and the copy
+                   has to say the plan itself survived (requirement 18). -->
+              <app-past-due-notice />
+            } @else {
+              <p class="phorma-cmdk__locked-copy">
+                Describe what you want and the AI assembles it on your canvas. Requires an
+                active Phorma Cloud subscription.
+              </p>
+              <div class="phorma-cmdk__locked-actions">
+                @if (phormaCloud.signedIn()) {
+                  <p-button
+                    styleClass="phorma-cmdk__primary-btn"
+                    size="small"
+                    label="Subscribe - Starter"
+                    [loading]="billing.busy()"
+                    [disabled]="billing.busy()"
+                    (onClick)="subscribe()"
+                  />
+                  <p-button
+                    styleClass="phorma-cmdk__primary-btn"
+                    [text]="true"
+                    severity="secondary"
+                    size="small"
+                    label="See all plans"
+                    (onClick)="openCloudPlans()"
+                  />
+                } @else {
+                  <p-button
+                    styleClass="phorma-cmdk__primary-btn"
+                    size="small"
+                    label="Sign in to Phorma Cloud"
+                    (onClick)="signIn()"
+                  />
+                }
+              </div>
+              @if (checkoutAttempted()) {
+                <div class="phorma-cmdk__locked-recovery">
+                  <app-checkout-fallback [attempted]="true" />
+                </div>
               }
-            </div>
+            }
           </div>
         </div>
       }

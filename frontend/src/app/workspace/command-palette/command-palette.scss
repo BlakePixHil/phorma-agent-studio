@@ -348,7 +348,21 @@
 }
 
 .phorma-cmdk__locked-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-top: 12px;
+}
+
+// Holds the checkout recovery affordance. Rendered only once a checkout has been
+// started, because the box carries its own margin and an always-present empty
+// wrapper would leave 8px of dead space under the buttons.
+.phorma-cmdk__locked-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 /* ── Accessibility fallbacks ─────────────────────────────────────────────── */

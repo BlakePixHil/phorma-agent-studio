@@ -52,6 +52,63 @@ node scripts/publish-r2.mjs vX.Y.Z release-assets-fix   # needs cloud/node_modul
 Verify with the worker updater endpoint for an older version (expect 200 plus JSON) and
 `/releases.json`.
 
+## Clerk keys: a development build and a production build ship different keys
+
+Clerk rejects a production publishable key on localhost, so one file cannot serve both targets.
+
+| Package | Development file (`pk_test_`) | Production file (`pk_live_`) |
+|---|---|---|
+| `frontend` | `src/environments/clerk.ts` | `src/environments/clerk.prod.ts` |
+| `admin` | `src/environments/environment.ts` | `src/environments/environment.prod.ts` |
+
+Each `angular.json` swaps them with a `fileReplacements` entry under the `build` target's
+`production` configuration ONLY, and that is enough: `serve:production` and the Tauri installer both
+route through `build:production`, while `serve:development` and the karma `test` target have no
+replacement and correctly keep the `pk_test_` key. Keep every environment file's doc comment matching
+the key it actually holds - a comment asserting the opposite is what let an inverted `admin` pair
+survive review.
+
+To PROVE a swap took effect, grep the emitted bundle for the base64 key BODY, never the `pk_live_` /
+`pk_test_` prefix: both prefixes already appear inside the Clerk SDK as prefix-check literals, so a
+prefix grep passes happily on a bundle that was never replaced.
+
+The worker side pairs with it. One worker holds ONE `CLERK_SECRET_KEY`, so a local `wrangler dev`
+takes the DEVELOPMENT key from `cloud/.dev.vars` (names documented in the tracked
+`cloud/.dev.vars.example`; `cloud/.gitignore` globs `.dev.vars*` and `.env*` with `!.dev.vars.example`
+as the single exception) while the deployed hosted worker holds the production one. `/status.json`
+cannot confirm that rotation - its Clerk probe returns 200 for any valid key regardless of instance.
+`/api/me` with a production session token returning 200 rather than 401 is the only real check.
+
+## Phorma Cloud go-live checklist (billing)
+
+The billing code shipped (`.kiro/specs/stripe-billing/`). Everything below is operator work against
+live accounts and NONE of it has been done yet, so treat it as a checklist and verify each step rather
+than assuming a previous release covered it.
+
+1. `npx wrangler secret put CLERK_SECRET_KEY --env hosted` with the `sk_live_` key.
+2. `npx wrangler secret put CLERK_JWT_KEY --env hosted` with the production PEM. Rotate both in one
+   step: with a PEM set, `@clerk/backend` never uses the secret key to verify, so a stale
+   `CLERK_JWT_KEY` 401s every production token with a failure that reads exactly like a wrong secret
+   key.
+3. `npx wrangler secret put STRIPE_SECRET_KEY --env hosted` and
+   `npx wrangler secret put STRIPE_WEBHOOK_SECRET --env hosted`, both live-mode values. The webhook
+   secret is per ENDPOINT, so take it from the live Dashboard endpoint and never from
+   `stripe listen`.
+4. `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote` - `0003_billing.sql` and
+   `0004_billing_ordering.sql` are not applied remotely yet.
+5. `npx wrangler deploy --env hosted`. A `var` edit (`CLERK_AUTHORIZED_PARTIES`,
+   `OPENROUTER_WORKSPACE_ID`) takes effect ONLY here; a `wrangler secret put` publishes no config
+   change of its own.
+6. Mirror the Stripe catalogue into LIVE mode BY LOOKUP KEY, with `tax_behavior: 'inclusive'` on every
+   price, and enable Stripe Tax plus the AU GST obligation in the Dashboard for both sandbox and live.
+   `tax_behavior` is permanent once set, so creation is the only chance to get it right.
+7. Re-provision the owner tenant under the PRODUCTION Clerk user id and rotate
+   `TELEMETRY_ADMIN_USER_IDS`. Clerk cannot migrate users from a development instance to a production
+   one, so a dev-keyed `tenants` row is unrecoverable rather than portable.
+
+Before step 5, check for var drift with `npx wrangler versions view <id> --env hosted`, which lists every var by
+name without needing the Dashboard.
+
 ## Updater behaviour
 
 `UpdateService`: `check()` then a background `download()` (never `downloadAndInstall()`, which runs

@@ -45,6 +45,7 @@ function check(name, condition, detail) {
 
 const CLERK_SECRET = 'sk_test_do_not_leak_me';
 const OPENROUTER_KEY = 'sk-or-v1-do-not-leak-me';
+const STRIPE_SECRET = 'sk_test_stripe_do_not_leak_me';
 
 /** A binding set where everything works. Override per test. */
 function healthyEnv(overrides = {}) {
@@ -52,6 +53,7 @@ function healthyEnv(overrides = {}) {
     PHORMA_MODE: 'hosted',
     CLERK_SECRET_KEY: CLERK_SECRET,
     OPENROUTER_PROVISIONING_KEY: OPENROUTER_KEY,
+    STRIPE_SECRET_KEY: STRIPE_SECRET,
     KEY_ENC_SECRET: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
     WorkflowAgent: namespaceStub({ publishedSpec: async () => null }),
     PortalIndex: namespaceStub({ resolve: async () => null }),
@@ -68,8 +70,13 @@ function namespaceStub(instance) {
   return { idFromName: name => name, get: () => instance };
 }
 
-/** Installs a fetch stub for the two vendor probes. */
-function stubFetch({ clerkStatus = 200, clerkIndicator = 'none', openRouterStatus = 200 } = {}) {
+/** Installs a fetch stub for the three vendor probes. */
+function stubFetch({
+  clerkStatus = 200,
+  clerkIndicator = 'none',
+  openRouterStatus = 200,
+  stripeStatus = 200,
+} = {}) {
   const seen = [];
   globalThis.fetch = async (url, init) => {
     const href = String(url);
@@ -82,6 +89,17 @@ function stubFetch({ clerkStatus = 200, clerkIndicator = 'none', openRouterStatu
     }
     if (href.includes('openrouter.ai')) {
       return jsonish({ data: { total_credits: 1 } }, openRouterStatus);
+    }
+    if (href.includes('api.stripe.com')) {
+      // Stripe error bodies QUOTE THE KEY BACK (`Expired API Key provided:
+      // sk_test_...`), so the stub does too: the probe must not read a body at
+      // all, and this is what would catch it starting to.
+      return stripeStatus >= 200 && stripeStatus < 300
+        ? jsonish({ object: 'list', data: [] }, stripeStatus)
+        : jsonish(
+            { error: { code: 'api_key_expired', message: `Expired API Key provided: ${STRIPE_SECRET}` } },
+            stripeStatus,
+          );
     }
     throw new Error(`Unexpected probe target: ${href}`);
   };
@@ -161,7 +179,7 @@ check(
 
 console.log('\nAggregation');
 {
-  stubFetch();
+  const probes = stubFetch();
   const payload = await collectStatus(healthyEnv());
   check('healthy deployment is operational', payload.status === 'operational', payload.summary);
   check('healthy deployment is green', payload.indicator === 'green');
@@ -170,8 +188,24 @@ console.log('\nAggregation');
   check(
     'every component is probed',
     payload.components.map(entry => entry.id).join(',') ===
-      'runtime,api,plans,vault,portals,downloads,auth,inference,telemetry',
+      'runtime,api,plans,vault,portals,downloads,auth,inference,billing,telemetry',
     payload.components.map(entry => entry.id).join(','),
+  );
+  check(
+    'billing is non-critical (requirement 35)',
+    byId(payload, 'billing').critical === false && byId(payload, 'billing').vendor === 'Stripe',
+    JSON.stringify(byId(payload, 'billing')),
+  );
+  check(
+    'the billing probe is a read-only GET against the price catalogue',
+    (() => {
+      const stripeCalls = probes.filter(entry => entry.href.includes('api.stripe.com'));
+      return (
+        stripeCalls.length === 1 &&
+        stripeCalls[0].href === 'https://api.stripe.com/v1/prices?limit=1'
+      );
+    })(),
+    JSON.stringify(probes.filter(entry => entry.href.includes('api.stripe.com'))),
   );
   check(
     'no component is unknown on a fully bound worker',
@@ -258,6 +292,62 @@ console.log('\nAggregation');
   check('model rate limiting is degraded, not down', byId(payload, 'inference').status === 'degraded');
 }
 
+// Requirement 35: Stripe stops new purchases, not running tenants, so its
+// outage must be amber. This is the assertion that catches somebody "promoting"
+// billing to critical because a payment provider feels important.
+{
+  stubFetch({ stripeStatus: 500 });
+  const payload = await collectStatus(healthyEnv());
+  check('an unreachable payment provider is an outage', byId(payload, 'billing').status === 'outage');
+  check('a billing outage is amber, never red', payload.status === 'degraded', payload.summary);
+  check('the billing component is named in the summary', payload.summary.includes('Subscriptions and payments'), payload.summary);
+}
+
+{
+  stubFetch({ stripeStatus: 401 });
+  const payload = await collectStatus(healthyEnv());
+  check('a rejected billing key is an outage', byId(payload, 'billing').status === 'outage');
+  check(
+    'the Stripe secret never reaches the response',
+    !JSON.stringify(payload).includes(STRIPE_SECRET),
+    byId(payload, 'billing').detail,
+  );
+  check(
+    'the Stripe error body never reaches the response',
+    !JSON.stringify(payload).includes('api_key_expired') &&
+      !JSON.stringify(payload).includes('Expired API Key'),
+    byId(payload, 'billing').detail,
+  );
+}
+
+{
+  stubFetch({ stripeStatus: 429 });
+  const payload = await collectStatus(healthyEnv());
+  check('billing rate limiting is degraded, not down', byId(payload, 'billing').status === 'degraded');
+}
+
+// A hosted worker with no Stripe secret is UNCONFIGURED, not broken: the billing
+// routes answer 501 naming the secret, and a public badge must not go amber for a
+// catalogue that has not launched yet.
+{
+  const probes = stubFetch();
+  const payload = await collectStatus(healthyEnv({ STRIPE_SECRET_KEY: undefined }));
+  check('an unconfigured hosted billing surface is unknown', byId(payload, 'billing').status === 'unknown');
+  check('unconfigured billing does not colour the rollup', payload.status === 'operational', payload.summary);
+  check(
+    'no Stripe call is made without a key',
+    probes.every(entry => !entry.href.includes('api.stripe.com')),
+  );
+}
+
+// An empty secret is what `wrangler secret put` stores for a stray newline. It
+// must read as absent rather than as a rejected credential.
+{
+  stubFetch();
+  const payload = await collectStatus(healthyEnv({ STRIPE_SECRET_KEY: '  \n' }));
+  check('a blank Stripe secret reads as absent', byId(payload, 'billing').status === 'unknown');
+}
+
 // ── BYO deployment: absent bindings must not read as failures ────────────────
 
 console.log('\nBYO deployment');
@@ -275,6 +365,9 @@ console.log('\nBYO deployment');
   check('absent downloads are unknown', byId(payload, 'downloads').status === 'unknown');
   check('absent Clerk is unknown', byId(payload, 'auth').status === 'unknown');
   check('absent hosted inference is unknown', byId(payload, 'inference').status === 'unknown');
+  // 9.4: a BYO worker binds no STRIPE_SECRET_KEY. Excluded from the rollup, not
+  // an outage.
+  check('absent billing is unknown', byId(payload, 'billing').status === 'unknown');
   // 12.7: no D1 means no telemetry store, which must not read as degraded.
   check('the absent telemetry store is unknown', byId(payload, 'telemetry').status === 'unknown');
   check('the runtime is still probed', byId(payload, 'runtime').status === 'operational');

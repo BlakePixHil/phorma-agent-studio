@@ -1,0 +1,163 @@
+# Phorma Agent Studio cloud runtime - local development vars TEMPLATE.
+#
+# Copy to `.dev.vars` and fill in real values. `.dev.vars*` is gitignored (see
+# `cloud/.gitignore`), THIS file is the one negated exception. Never put a real
+# secret in here - placeholders only.
+#
+#   Copy-Item .dev.vars.example .dev.vars
+#
+# `.dev.vars` covers LOCAL `wrangler dev` only. Deployed secrets are set with
+# `npx wrangler secret put <NAME>` (BYO) or `... --env hosted` (Phorma Cloud);
+# the full deployed list and what each one unlocks is in the header comment of
+# `wrangler.jsonc`.
+#
+# ── Two ways to run hosted mode locally ─────────────────────────────────────
+#
+#   npx wrangler dev --env hosted    # D1 + KV + R2 bindings, PHORMA_MODE and
+#                                    # ALLOWED_ORIGINS already come from
+#                                    # `wrangler.jsonc`
+#   npx wrangler dev                 # top-level (BYO) config: no DB/TENANTS
+#                                    # binding, so `/api/me`, `/api/infer` and
+#                                    # the telemetry views cannot work
+#
+# GOTCHA: with `--env hosted`, wrangler loads `.dev.vars.hosted` if that file
+# exists and then does NOT load `.dev.vars` at all - the two do not merge, so
+# every var has to be repeated in the environment-specific file. Prefer a single
+# `.dev.vars` unless you genuinely need two sets.
+#
+# Local D1 starts empty. Create the schema before expecting `/api/me` to answer:
+#   npx wrangler d1 migrations apply phorma-cloud --env hosted --local
+#
+# ── Hosted mode ─────────────────────────────────────────────────────────────
+
+# Switches the worker to multi-tenant hosted behaviour (fail-closed Clerk auth,
+# tenant ownership enforcement). Already a `var` under `env.hosted` in
+# `wrangler.jsonc`, so this line only matters for a plain `npx wrangler dev`.
+PHORMA_MODE=hosted
+
+# Clerk BACKEND key. MUST BE THE DEVELOPMENT (`sk_test_`) KEY.
+#
+# One worker holds one `CLERK_SECRET_KEY`, and a session token minted by one
+# Clerk instance fails `verifyToken` against another and reads 401 on every
+# request. So the key here has to match the PUBLISHABLE key the build you are
+# testing ships:
+#
+#   local `ng serve` / `npm start`  ->  `frontend/src/environments/clerk.ts`
+#                                       `pk_test_` (`flowing-seahorse-72`
+#                                       DEVELOPMENT instance)
+#                                   ->  `sk_test_...` HERE
+#   production build                ->  `frontend/src/environments/clerk.prod.ts`
+#                                       `pk_live_`, swapped in by
+#                                       `fileReplacements` in
+#                                       `frontend/angular.json`
+#                                   ->  `sk_live_...` on the DEPLOYED hosted
+#                                       worker, as a wrangler secret, never here
+#
+# The same split applies to `admin/` (`src/environments/environment.ts` dev,
+# `environment.prod.ts` production). Clerk rejects production keys on localhost
+# anyway, and pinning the development key locally is also what keeps Stripe
+# sandbox testing off the live Clerk instance entirely.
+#
+# Get the value from the Clerk dashboard (https://dashboard.clerk.com) for the
+# `flowing-seahorse-72` DEVELOPMENT instance, under API keys > Secret keys.
+CLERK_SECRET_KEY=sk_test_...
+
+# Comma-separated origins accepted as the JWT `azp` claim (replay protection).
+# Optional - when unset the check is skipped, and `@clerk/backend` compares by
+# exact string when it is set, so a missing origin reads 401 on every request
+# rather than degrading. 7322 is the studio dev server, 7323 the admin
+# dashboard.
+#
+# The DEPLOYED hosted worker sets this as a `var` under `env.hosted` in
+# `wrangler.jsonc`, covering both dev servers, the desktop build and the
+# deployed dashboard. This line OVERRIDES that var locally (`.dev.vars` wins
+# over `vars`, and does not merge with it), so keep the dev servers you actually
+# use in it. A desktop build sends `tauri://localhost` on macOS and Linux and
+# `http://tauri.localhost` on Windows, which only matters here if you point a
+# packaged build at your local worker.
+CLERK_AUTHORIZED_PARTIES=http://localhost:7322,http://localhost:7323
+
+# Clerk instance public key (PEM) for OFFLINE JWT verification - skips the JWKS
+# fetch on a Durable Object cold start. Optional locally. Must belong to the
+# SAME instance as `CLERK_SECRET_KEY` above.
+# CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+
+# base64 32 random bytes. AES-GCM key for stored tenant runtime keys and for the
+# SecretVault Durable Object. Without it `/api/connection-secrets` answers 501
+# and a provisioned tenant has no decryptable runtime key.
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+KEY_ENC_SECRET=
+
+# Static bearer guarding `POST /api/provision` and `POST /api/deactivate`, which
+# is how you create a local tenant row to test against. Also unlocks the
+# `?fresh` cache bypass on `/status.json`. Any non-empty string locally.
+PHORMA_ADMIN_TOKEN=
+
+# OpenRouter MANAGEMENT key - mints the per-tenant credit-limited runtime keys
+# that `/api/infer` spends. Absent means `/api/provision` writes a tenant row
+# with no runtime key, and hosted inference then refuses.
+#
+# Account-level, so it reaches every workspace on the account: there is no such
+# thing as a per-workspace management key, and the workspace a key lands in is a
+# field on the mint request (see OPENROUTER_WORKSPACE_ID below).
+OPENROUTER_PROVISIONING_KEY=sk-or-v1-...
+
+# OpenRouter WORKSPACE the minted keys land in. Optional, and absent means the
+# account's default workspace - which is where every key minted before this
+# existed lives, so leaving it out changes nothing. Set it only if you want your
+# local mints kept apart from the default workspace; find the UUID with
+#   curl -H "Authorization: Bearer $OPENROUTER_PROVISIONING_KEY" \
+#        https://openrouter.ai/api/v1/workspaces
+# OPENROUTER_WORKSPACE_ID=
+
+# Comma-separated Clerk user ids allowed to read `/api/admin/telemetry/*`.
+# Absent or empty means 403 for everyone, which is the intended default - so set
+# your own DEVELOPMENT-instance user id here to work on the admin dashboard.
+# TELEMETRY_ADMIN_USER_IDS=user_...
+
+# Comma-separated CORS allowlist for `/api/*`. Already a `var` under
+# `env.hosted`, and in hosted mode with this unset CORS falls back to `*`, so a
+# plain `wrangler dev` needs it only to reproduce an origin-scoping problem.
+# ALLOWED_ORIGINS=http://localhost:7322,http://localhost:7323
+
+# ── Billing (Stripe, hosted only) ───────────────────────────────────────────
+# Both are OPTIONAL. Leave them out and the worker is healthy with billing
+# switched off: a billing route answers 501 naming the secret it wants rather
+# than a 500, which is also exactly what a BYO deployment gets.
+#
+# Use SANDBOX values here, never live keys. Pairs with the DEVELOPMENT Clerk key
+# above - Stripe test mode touches nothing Clerk does, so dev Clerk plus the
+# Stripe sandbox is a complete local end-to-end setup.
+
+# Stripe API secret key. `sk_test_` locally; the deployed hosted worker holds the
+# `sk_live_` key as a wrangler secret.
+# STRIPE_SECRET_KEY=sk_test_...
+
+# Webhook endpoint signing secret. PER ENDPOINT, not per account, so this is NOT
+# the same value the deployed worker holds: get yours from the Stripe CLI, which
+# prints it when it starts forwarding, and keep that terminal open.
+#
+#   stripe listen --forward-to http://localhost:8787/api/stripe/webhook
+#   stripe trigger checkout.session.completed
+#
+# A restarted `stripe listen` can print a different secret. Symptom of a stale
+# one is a 400 with `no_match` in the worker log, on a delivery that otherwise
+# looks perfect.
+# STRIPE_WEBHOOK_SECRET=whsec_...
+
+# ── BYO mode (single tenant, your own keys) ─────────────────────────────────
+# Leave these out when testing hosted mode. `PHORMA_TOKEN` is the shared bearer
+# that protects triggers and monitoring when there is no Clerk key at all, and
+# it is also required before the credential vault will store anything.
+# PHORMA_TOKEN=
+# ANTHROPIC_API_KEY=
+# OPENAI_API_KEY=
+# GEMINI_API_KEY=
+# OPENROUTER_API_KEY=
+# BEDROCK_API_KEY=
+# BEDROCK_REGION=us-east-1
+# OLLAMA_BASE_URL=http://localhost:11434
+#
+# Per-run credentials, one var each, named by the engine:
+#   CONN_<ID>_<KEY>   connection secrets (`workerSecretName`)
+#   MCP_<AUTHKEY>     bearer tokens for REMOTE (sse) MCP nodes

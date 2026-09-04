@@ -12,11 +12,16 @@ export const environment = {
   /**
    * Clerk PUBLISHABLE key - safe to ship to the browser.
    *
-   * Deliberately the same `flowing-seahorse-72` development instance the studio
-   * ships in `frontend/src/environments/clerk.ts`, because that is the instance
-   * the hosted Worker's `CLERK_SECRET_KEY` verifies against. Swapping this to a
-   * `pk_live_...` key means swapping the Worker's secret in the same change, or
-   * every dashboard request reads as 401.
+   * The PRODUCTION instance (`clerk.phorma-labs.com`). This must stay paired with
+   * the live `CLERK_SECRET_KEY` on the hosted Worker: a token minted by one
+   * instance and verified against another reads as 401 on every dashboard
+   * request. `/status.json` cannot detect that mismatch, because its Clerk probe
+   * returns 200 for any valid key regardless of instance - confirm a rotation
+   * with `/api/me` and a production session token instead.
+   *
+   * The development key lives in `environment.ts` and is swapped in by the
+   * `fileReplacements` entry in `angular.json`. Production keys are rejected on
+   * localhost by Clerk, so the two files must never hold the same value.
    */
-  clerkPublishableKey: 'pk_test_Zmxvd2luZy1zZWFob3JzZS03Mi5jbGVyay5hY2NvdW50cy5kZXYk',
+  clerkPublishableKey: 'pk_live_Y2xlcmsucGhvcm1hLWxhYnMuY29tJA',
 };

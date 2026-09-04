@@ -315,7 +315,16 @@ export class McpOAuthService {
 
   /**
    * Opens any URL in the user's browser (system browser on desktop, new tab
-   * in browser mode). Used by guided OAuth-app setup links.
+   * in browser mode). The app's ONE external-link helper - guided OAuth-app
+   * setup links, the privacy policy, and Stripe Checkout / Billing Portal all
+   * come through here rather than growing a second copy.
+   *
+   * It cannot report whether the tab actually opened, and that is not a gap to
+   * fix here: `window.open` with `noopener` returns null UNCONDITIONALLY per
+   * spec, so a popup-blocker refusal is indistinguishable from success without
+   * dropping `noopener` - which is the one thing keeping the opened page away
+   * from `window.opener`. A caller that needs a recovery path should keep the URL
+   * and offer it as a link (see `BillingService.lastUrl`).
    */
   async openExternal(url: string): Promise<void> {
     if (this.tauri.isDesktop) {

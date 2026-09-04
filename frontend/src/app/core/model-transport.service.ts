@@ -467,14 +467,26 @@ class PhormaCloudModelClient implements ModelClient {
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => '');
       let message = detail;
+      // The entitlement gate's stable machine code, when the worker sent one
+      // (stripe-billing requirement 19). Read here because this is the LAST
+      // place the structured body exists: from here on the refusal is an Error
+      // travelling through the engine, so a code not lifted onto
+      // `ModelRequestError` now can only ever be recovered by parsing prose -
+      // which is the exact fragility requirement 19 removes. An older worker
+      // sends no `code`, leaving it undefined, and the consumers' prose
+      // fallback covers that (requirement 20).
+      let code: string | undefined;
       try {
-        message = (JSON.parse(detail) as { error?: string })?.error ?? detail;
+        const parsed = JSON.parse(detail) as { error?: string; code?: string };
+        message = parsed?.error ?? detail;
+        code = typeof parsed?.code === 'string' && parsed.code ? parsed.code : undefined;
       } catch {
         // keep raw text
       }
       throw new ModelRequestError(
         `Phorma Cloud request failed (${response.status}): ${message.slice(0, 300)}`,
         response.status,
+        code,
       );
     }
 

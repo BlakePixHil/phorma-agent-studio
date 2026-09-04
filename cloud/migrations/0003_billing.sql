@@ -1,0 +1,363 @@
+-- Phorma Cloud (hosted mode) - Stripe billing schema.
+--
+-- Applied with:  npx wrangler d1 migrations apply phorma-cloud --env hosted
+-- BYO deployments never bind D1 and never run these.
+--
+-- Additive only. Every statement either adds a column that existing rows read
+-- as NULL or 0, or adds an index. Nothing rewrites or drops data, so the
+-- currently deployed worker keeps working after this is applied and the deploy
+-- can follow the migration instead of having to land with it.
+--
+-- Unlike 0001 and 0002 this file is NOT self-healing. SQLite has no
+-- `ADD COLUMN IF NOT EXISTS`, so re-running the ALTERs below errors rather than
+-- no-opping, and wrangler's `d1_migrations` bookkeeping is the only thing that
+-- stops a second application. Never hand-run this file through `d1 execute`.
+--
+-- The whole billing schema lives in this ONE migration, following how 0001 and
+-- 0002 each carry a complete concern (tenancy, telemetry) rather than one table
+-- per file. `stripe_events` and `credit_grants` therefore land here too. The
+-- consequence: this file must not be applied to the remote database until the
+-- billing schema is complete, because wrangler records a migration as applied by
+-- FILENAME, and anything appended after that point would silently never run.
+
+-- Stripe identity on tenants.
+--
+-- The Stripe Customer and Subscription a tenant maps to. NULL for every
+-- pre-existing tenant and for anyone provisioned by hand: a tenant is a real
+-- account long before it is a paying one, and the webhook is the only writer
+-- that ever fills these in.
+ALTER TABLE tenants ADD COLUMN stripe_customer_id TEXT;
+ALTER TABLE tenants ADD COLUMN stripe_subscription_id TEXT;
+
+-- Ordering watermark for the webhook's stale-event guard: the `created`
+-- timestamp (epoch seconds) of the newest Stripe event already applied to this
+-- tenant. An event at or below the watermark is recorded `ignored_stale` and
+-- changes nothing. Stripe does not guarantee delivery order, so without this a
+-- retried `subscription.updated` arriving after `subscription.deleted` would
+-- resurrect a cancelled account and hand back a runtime key. DEFAULT 0 so the
+-- first event of any age always applies.
+ALTER TABLE tenants ADD COLUMN billing_event_at INTEGER NOT NULL DEFAULT 0;
+
+-- PARTIAL unique index, deliberately, rather than a plain UNIQUE.
+--
+-- Enforcement is the same either way: SQLite treats NULLs as distinct, so a
+-- plain UNIQUE already permits any number of unmapped tenants. The `WHERE`
+-- clause buys documentation instead - it records that an unmapped tenant is the
+-- expected steady state and not a gap waiting to be backfilled. What the index
+-- does enforce is the half that matters: one Stripe customer resolves to
+-- exactly one tenant, so a webhook keyed by customer id can never quietly pick
+-- a winner between two rows, and a duplicate mapping fails at write time
+-- instead of turning into a silent second account.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_stripe_customer
+  ON tenants(stripe_customer_id)
+  WHERE stripe_customer_id IS NOT NULL;
+
+-- Repair: the usage idempotency index that was documented but never created.
+--
+-- `TenantStore.recordRun` (cloud/src/tenants.ts) describes its idempotency as
+-- `INSERT OR IGNORE` "against the UNIQUE(tenant_id, run_id) index", and gates
+-- the quota rollup on whether that insert actually changed a row. The index does
+-- not exist: 0001_init.sql created only the non-unique `idx_usage_tenant_month`,
+-- and no runtime path self-heals it the way telemetry.ts does for its own
+-- tables. With nothing to conflict on, the insert always succeeds, `meta.changes`
+-- is always 1, and a retried settle charges the tenant a second time. Grant
+-- consumption is about to depend on that same idempotency, so the invariant has
+-- to become real rather than aspirational.
+--
+-- Verified safe to create against the hosted database on 2026-09-02: `usage`
+-- held 104 rows with 104 distinct (tenant_id, run_id) pairs, so no dedupe pass
+-- is needed. Re-check before applying if that has changed - CREATE UNIQUE INDEX
+-- fails outright on an existing duplicate, it does not skip it:
+--   SELECT tenant_id, run_id, COUNT(*) c FROM usage
+--   GROUP BY tenant_id, run_id HAVING c > 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_tenant_run
+  ON usage(tenant_id, run_id);
+
+-- Webhook idempotency ledger. One row per Stripe event id, forever.
+--
+-- Stripe delivers at least once and retries on any non-2xx, so the webhook has
+-- to recognise an event it has already handled. Stripe's own event id (`evt_*`)
+-- is the natural key for that: the handler does `INSERT OR IGNORE` and reads
+-- "no row changed" as "already applied, stop here". That is the same discipline
+-- `TenantStore.recordRun` uses over `usage(tenant_id, run_id)`, reused rather
+-- than reinvented. Requirement 13 is why it exists: without it a retried
+-- `checkout.session.completed` grants the same top-up twice.
+--
+-- `received_at` is a TEXT ISO 8601 timestamp, matching `created_at` and
+-- `updated_at` in 0001_init.sql and the repo's wider convention that a timestamp
+-- is stored as an ISO string and formatted at render time. Note the deliberate
+-- contrast with `tenants.billing_event_at` above, which is INTEGER: that column
+-- holds Stripe's own epoch-seconds `created` value and exists to be compared
+-- numerically, so it keeps Stripe's units. This column records when WE accepted
+-- the event and is only ever read by a human, so it keeps ours.
+--
+-- `id` is `NOT NULL` on top of `PRIMARY KEY`, which is not redundant here.
+-- SQLite only implies NOT NULL for an `INTEGER PRIMARY KEY` or a WITHOUT ROWID
+-- table, so a plain `TEXT PRIMARY KEY` accepts NULL, and NULLs compare distinct
+-- in the backing index. Verified against a local D1 on 2026-09-02: without the
+-- constraint, two inserts of a NULL id produced TWO rows. That is precisely the
+-- double-grant requirement 13 forbids, since the handler would see a row change
+-- on every retry. Note that `INSERT OR IGNORE` swallows a NOT NULL violation the
+-- same way it swallows a uniqueness one, so this constraint makes a missing id
+-- fail CLOSED (the row is skipped, nothing is applied) rather than raise. The
+-- webhook still has to validate the event id itself instead of relying on the
+-- schema to shout.
+CREATE TABLE IF NOT EXISTS stripe_events (
+  id          TEXT PRIMARY KEY NOT NULL,  -- Stripe event id, idempotency key
+  type        TEXT NOT NULL,              -- e.g. checkout.session.completed
+  tenant_id   TEXT,                       -- NULL when it resolved to no tenant
+  received_at TEXT NOT NULL,              -- ISO 8601 UTC, when we accepted it
+  status      TEXT NOT NULL               -- applied|ignored_stale|unresolved
+);
+
+-- The three `status` values, and why the third is a row rather than a discard:
+--
+--   applied       - the event changed tenant state or wrote a credit grant.
+--   ignored_stale - the event's `created` was at or below the tenant's
+--                   `billing_event_at` watermark, so it was deliberately not
+--                   applied (requirement 14). Recorded rather than dropped so
+--                   "nothing happened" is distinguishable from "never arrived".
+--   unresolved    - the event was authentic and understood, but none of the
+--                   three resolution paths (`client_reference_id`,
+--                   `customer.metadata.clerk_user_id`, `stripe_customer_id`)
+--                   found a tenant, so `tenant_id` is NULL.
+--
+-- `unresolved` is the one that earns its keep. Requirement 3 forbids discarding
+-- such an event, because a payment that cannot find its account is money taken
+-- for nothing: the buyer has been charged and has nothing to show for it, and
+-- the only party who can notice is us. A named row makes that discoverable with
+-- one query. Silence would make it discoverable only when the customer
+-- complains, which is both slower and worse.
+--
+-- No CHECK constraint on the vocabulary. SQLite would enforce it, but adding a
+-- fourth status later would then need a table rebuild in a file whose whole
+-- premise is that it is additive, and the only writer is one server-side handler
+-- rather than arbitrary callers.
+
+-- No secondary index here, deliberately.
+--
+-- The only hot read is the idempotency check, and the PRIMARY KEY on `id`
+-- already serves it: `INSERT OR IGNORE` conflicts on that index, and nothing
+-- else in the webhook path queries this table. The two queries that would want
+-- an index are "every unresolved event" and "one tenant's billing history",
+-- both ad-hoc and operator-run, against a table that grows by one row per Stripe
+-- event. For scale: the hosted database held 104 `usage` rows in total on
+-- 2026-09-02, and billing events are rarer than runs. Scanning that is cheaper
+-- than making every webhook insert maintain a second B-tree on the one path
+-- that is actually hot. If the table ever grows enough for an operator query to
+-- hurt, an index is a one-line additive migration at that point, chosen on
+-- evidence instead of on guess.
+
+-- No raw payload column, following the design.
+--
+-- The event id IS the pointer to the payload: Stripe's Events API serves the
+-- full body for 30 days, and the Dashboard event log keeps events for 13 months,
+-- truncated to a summary past 30 days. So an `unresolved` row is repairable by
+-- hand - look the id up in Stripe, read the customer, map it to the Clerk user,
+-- fix the tenant mapping - which is what requirement 3 asks for.
+--
+-- The tradeoff is real and worth naming: past 30 days the full body is gone from
+-- Stripe's API too, so an `unresolved` row nobody looked at for a month keeps
+-- its NAME but loses its DETAIL. The answer is monitoring the status, not a
+-- payload column. A checkout session body carries the buyer's email and billing
+-- address, and copying that into a D1 table with no retention pass, to cover a
+-- case alerting should catch in minutes, would put PII somewhere the repo's
+-- secrets-and-PII discipline says it should not be.
+-- Top-up credit grant ledger. One row per completed one-off purchase, forever.
+--
+-- Credits are DERIVED everywhere else in this system (`creditsForTier` turns real
+-- USD into the displayed number), so a purchase belongs in a ledger rather than
+-- a balance column. A balance column would need the same increment-exactly-once
+-- discipline as this table PLUS a reconciliation story for when it disagrees with
+-- Stripe. A ledger keyed on the payment id is self-reconciling: the rows ARE the
+-- history, and the balance is a SUM over them.
+--
+-- Requirement 21 - `stripe_payment_id TEXT NOT NULL UNIQUE` is the whole
+-- idempotency mechanism. The webhook does `INSERT OR IGNORE` and reads "no row
+-- changed" as "this payment was already granted". That is the third use of the
+-- same discipline in this database, after `usage(tenant_id, run_id)` and
+-- `stripe_events(id)`, deliberately reused rather than reinvented.
+--
+-- Note it is keyed on the PAYMENT id, not the EVENT id, even though
+-- `stripe_events` already dedupes by event id. The two are different identities:
+-- the event id identifies a MESSAGE, the payment id identifies MONEY. One
+-- payment can surface in more than one event Stripe sends us (a completed
+-- checkout session and its underlying payment intent are separate events), so
+-- event-level idempotency alone would happily grant the same purchase twice
+-- through two different, individually-unseen event ids. This column is what
+-- makes the grant idempotent on the thing the customer actually paid.
+--
+-- `NOT NULL` on top of `UNIQUE` is load-bearing for the same reason it was on
+-- `stripe_events.id`: SQLite treats NULLs as distinct inside a unique index, so
+-- without it two grants with a missing payment id would BOTH land, which is
+-- exactly the double-grant requirement 21 forbids. With it, `INSERT OR IGNORE`
+-- swallows the NOT NULL violation the same way it swallows a uniqueness one, so
+-- a missing payment id fails CLOSED (nothing is granted, nothing raises). The
+-- webhook still has to validate the id itself rather than expect a thrown error.
+--
+-- Requirement 22 - `credits` AND `cost_usd` are both stored, and neither is
+-- redundant. They serve two different readers: the Inference_Gate compares USD
+-- (`effectiveCostUsdLimit`, in the same units as `usage.cost_usd` and
+-- `quotas.cost_usd_used`, which is also what the OpenRouter key limit mirrors),
+-- while the studio may only ever display credits (requirement 25, and the wider
+-- credits-not-dollars product rule). Deriving either one at read time would
+-- re-run the pack's margin maths on every request, on the hot inference path.
+--
+-- The stronger reason the USD value is frozen in a column, rather than recomputed
+-- from `TIERS` when it is read: a grant must record the ratio that was in force
+-- when it was BOUGHT. `cost_usd` is computed once at purchase, per requirement 8,
+-- from the starter ratio rather than a literal:
+--
+--   usdPerCredit   = TIERS.starter.monthlyCostUsd / TIERS.starter.monthlyCredits
+--                  = 4 / 1000 = 0.004
+--   grant.cost_usd = credits * usdPerCredit
+--
+-- Tying the purchase-time calculation to `TIERS` means pack margin moves with the
+-- starter economics instead of quietly diverging. Storing the RESULT means a
+-- later reprice cannot reach backwards: if starter's USD budget were ever halved
+-- and `cost_usd` was derived at read time, every unspent pack anybody had already
+-- paid for would silently halve with it. A column makes a purchase immutable,
+-- which is what "a balance" means to the person who bought it.
+--
+-- Types follow that split. `credits` is INTEGER because it is a displayed count,
+-- matching `creditsForTier`'s rounded output; `cost_usd` is REAL because it is
+-- money in the same units the gate already sums.
+--
+-- Requirement 23 - THERE IS DELIBERATELY NO MONTH COLUMN, AND NO EXPIRY COLUMN.
+-- That absence is the mechanism, not an oversight, so do not "complete" this
+-- table by adding one.
+--
+-- `quotas` is keyed `(tenant_id, month)` and resets by acquiring a NEW row when
+-- the `YYYY-MM` rolls over; nothing zeroes anything, the old row is simply no
+-- longer the one being read. `credit_grants` has no month key to roll over and
+-- no expiry to evaluate, so the monthly reset cannot touch it and a grant
+-- survives by construction. That is requirement 23 exactly: a pack bought on the
+-- 28th is not mostly wasted.
+--
+-- `created_at` exists for audit and for reading the ledger in a sensible order.
+-- It is NOT an expiry basis, and must never be reinterpreted as one. If grant
+-- expiry ever becomes a product decision it is a new column and a deliberate
+-- migration, not a new reading of this one.
+--
+-- Requirement 24 - allowance first, then grants. This table only has to make
+-- that ORDERING EXPRESSIBLE; enforcement is tasks 6.3 and 6.4
+-- (`effectiveCostUsdLimit` raises the ceiling, `recordRun` only draws
+-- `cost_usd_consumed` once `quotas.cost_usd_used` has passed the tier's
+-- `monthlyCostUsd`).
+--
+-- The shape does support a deterministic draw order across MULTIPLE open grants,
+-- and task 6.4 depends on this: `id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, so
+-- it is monotonic per insert and, because AUTOINCREMENT keeps a high-water mark
+-- in `sqlite_sequence`, never reused even after a delete. `ORDER BY id` is
+-- therefore oldest-grant-first FIFO and is stable across queries.
+--
+-- Task 6.4 MUST order by `id`, never by `created_at`. `created_at` is a TEXT ISO
+-- string written by the webhook, so two grants accepted in the same second tie,
+-- and a tie makes the draw order arbitrary. `id` cannot tie. Verified on
+-- 2026-09-02 that the tie is reachable in practice, not theoretical: two grants
+-- written by one webhook pass shared `created_at` to the millisecond. Ordering by
+-- it is also slower, for a separate reason recorded in the index note below.
+--
+-- Ids are monotonic but NOT gapless, and 6.4 must depend on the order only, never
+-- on contiguity. An `INSERT OR IGNORE` that gets ignored still consumes an
+-- AUTOINCREMENT value: verified on 2026-09-02, four inserts where two were
+-- duplicate-ignored and two were NULL-ignored produced surviving ids 1 then 5.
+-- Deletes leave gaps too, and AUTOINCREMENT deliberately does NOT refill them -
+-- `sqlite_sequence` keeps a high-water mark, so deleting id 7 and inserting again
+-- yielded id 8, not 7. That is the property FIFO rests on: a reused rowid would
+-- make a brand new grant sort as though it were the oldest one.
+--
+-- FIFO is chosen for legibility rather than economics: with no expiry, draw order
+-- cannot change what a tenant is able to spend in total, so the only thing left
+-- to optimise for is that a human reading the ledger sees the oldest pack drain
+-- first. Nothing is gained by drawing smallest-first or largest-first.
+--
+-- The ceiling SUM in 6.3 is order-independent, so only 6.4's partial draw needs
+-- the ordering guarantee above.
+--
+-- NO CHECK CONSTRAINT ON OVERDRAW, and this is a decision rather than an
+-- omission: nothing here stops `cost_usd_consumed` exceeding `cost_usd`.
+--
+-- Part of the reasoning matches `stripe_events.status` above - a single
+-- server-side writer, and a constraint added later would need a table rebuild in
+-- a file whose whole premise is that it is additive. But the decisive argument is
+-- specific to these two columns. Both are REAL, so `cost_usd_consumed <=
+-- cost_usd` is a FLOAT comparison, and the failure mode it would most often
+-- catch is a draw that should land exactly on the ceiling landing a fraction of
+-- 1e-15 above it. This is not hypothetical: verified on 2026-09-02, two untouched
+-- grants of 4.8 and 9.6 summed to 14.399999999999999, so REAL drift is already
+-- present in this table before a single draw happens. A `<=` CHECK is exactly the
+-- kind of constraint that fires on that instead of on a real bug.
+--
+-- The write happens inside `recordRun`, which the settle path calls from its
+-- finally-block: a raise there loses the `usage` row too, so a rounding artifact
+-- would cost us the billing record AND the audit trail in exchange for catching a
+-- fraction of a cent.
+--
+-- The invariant is therefore enforced by ARITHMETIC in task 6.4 instead of by the
+-- schema: clamp the draw (`cost_usd_consumed = MIN(cost_usd, cost_usd_consumed +
+-- ?)`) and clamp the read (`MAX(0, SUM(cost_usd - cost_usd_consumed))`).
+-- Overdraw is bounded by the clamp, and the schema fails OPEN on money that has
+-- already been spent, which is the correct direction for a write that cannot be
+-- retried. Positivity of `credits` and `cost_usd` is unconstrained for the same
+-- reason, plus the webhook resolves both from the lookup-key allowlist (task 3.4)
+-- before it ever writes a row.
+CREATE TABLE IF NOT EXISTS credit_grants (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id         TEXT NOT NULL,
+  stripe_payment_id TEXT NOT NULL UNIQUE,       -- one grant per payment, forever
+  credits           INTEGER NOT NULL,           -- what the user is shown
+  cost_usd          REAL NOT NULL,              -- the real budget it buys
+  cost_usd_consumed REAL NOT NULL DEFAULT 0,    -- drawn only past the allowance
+  created_at        TEXT NOT NULL               -- ISO 8601 UTC, audit only
+);
+
+-- This index IS justified, unlike the one deliberately absent from
+-- `stripe_events`, and the contrast is the point: same evidence test, opposite
+-- answer, because the read profiles are opposite.
+--
+-- Both grant reads are per-tenant and run on the HOT inference path, once per
+-- request:
+--
+--   SELECT SUM(cost_usd - cost_usd_consumed) FROM credit_grants
+--     WHERE tenant_id = ?                                   -- 6.3, the ceiling
+--   SELECT id, cost_usd, cost_usd_consumed FROM credit_grants
+--     WHERE tenant_id = ? AND cost_usd_consumed < cost_usd
+--     ORDER BY id                                           -- 6.4, the FIFO draw
+--
+-- `stripe_events` has exactly one per-request read and its PRIMARY KEY already
+-- serves it; its per-tenant queries are ad-hoc and operator-run, which is why it
+-- got no secondary index. Here the per-tenant query IS the hot one.
+--
+-- A composite `(tenant_id, id)` was considered and rejected as a NO-OP, not as
+-- unnecessary. `id` is `INTEGER PRIMARY KEY`, which in SQLite is an alias for the
+-- rowid, and every index already appends the rowid to its key. So this index
+-- physically IS `(tenant_id, id)`: `WHERE tenant_id = ? ORDER BY id` is answered
+-- in index order with no temp B-tree for the sort. Naming `id` explicitly would
+-- add a redundant column to every key entry and change nothing.
+--
+-- Verified with EXPLAIN QUERY PLAN on a local D1, 2026-09-02. Both hot queries
+-- report `SEARCH credit_grants USING INDEX idx_grants_tenant (tenant_id=?)`, and
+-- the FIFO one reports NOTHING further, so the index supplies the ordering. The
+-- control that proves the planner is not simply skipping a cheap sort:
+-- `ORDER BY created_at` over the same rows adds `USE TEMP B-TREE FOR ORDER BY`.
+-- If a future change makes `id` stop being the rowid, that control is how you
+-- will notice, because the FIFO plan will grow the same line.
+--
+-- A covering `(tenant_id, cost_usd, cost_usd_consumed)` was also rejected. It
+-- would answer the SUM without touching the table, but grants per tenant are
+-- counted in single digits (one row per top-up ever purchased), so the saved
+-- rowid lookups are noise, while `cost_usd_consumed` is written on the settle
+-- path so a second B-tree would have to be maintained on every draw as well as
+-- every insert. Revisit on evidence if a tenant ever holds enough grants for it
+-- to matter, the same way `stripe_events` leaves its indexes to be added on
+-- evidence.
+CREATE INDEX IF NOT EXISTS idx_grants_tenant ON credit_grants(tenant_id);
+
+-- END OF THE BILLING SCHEMA.
+--
+-- Per the header: wrangler records a migration as applied by FILENAME, so
+-- anything appended below this line after 0003 has been applied to the remote
+-- database would silently never run. The billing schema is complete as of this
+-- line, so 0003 is now safe to apply remotely, and every further schema change
+-- belongs in 0004.

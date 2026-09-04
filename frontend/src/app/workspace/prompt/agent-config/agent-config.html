@@ -119,7 +119,11 @@
         }
       }
     </div>
-    @if (needsPhormaCloudSubscription()) {
+    <!-- A past_due tenant HAS a plan, so they get the update-card notice rather
+         than an offer to buy a second subscription (requirement 17). -->
+    @if (needsPhormaCloudSubscription() && phormaCloudPastDue()) {
+      <app-past-due-notice />
+    } @else if (needsPhormaCloudSubscription()) {
       <div class="phorma-prompt__subscribe">
         <p class="phorma-prompt__subscribe-title">
           <i class="ti ti-cloud" aria-hidden="true"></i>
@@ -134,10 +138,24 @@
           pButton
           class="phorma-prompt__subscribe-btn phorma-btn-shimmer"
           size="small"
-          (click)="openSubscribe()"
+          [disabled]="billing.busy()"
+          (click)="subscribe()"
         >
-          <span>Subscribe</span>
+          <span>{{ billing.busy() ? 'Opening checkout…' : 'Subscribe - Starter' }}</span>
         </button>
+        <p class="phorma-prompt__hint">
+          <button
+            type="button"
+            pButton
+            [text]="true"
+            size="small"
+            class="phorma-prompt__link"
+            (click)="openCloudPlans()"
+          >
+            See all plans
+          </button>
+        </p>
+        <app-checkout-fallback [attempted]="checkoutAttempted()" />
       </div>
     }
     @if (loadingModels()) {

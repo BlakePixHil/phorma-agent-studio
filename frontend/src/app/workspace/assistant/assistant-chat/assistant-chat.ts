@@ -18,6 +18,11 @@ import { SelectModule } from 'primeng/select';
 import { renderMarkdown } from '../../../shared/markdown/render-markdown';
 import { AssistantChatService } from '../../../core/assistant-chat.service';
 import type { AssistantMode, ChatTurn } from '../../../core/assistant-chat.model';
+import { BillingRefreshService } from '../../../core/billing-refresh.service';
+import { BillingService, subscriptionLookupKey } from '../../../core/billing.service';
+import { ENTRY_PLAN_TIER } from '../../../core/plan-catalog';
+import { CheckoutFallback } from '../../../shared/billing/checkout-fallback';
+import { PastDueNotice } from '../../../shared/billing/past-due-notice';
 import { MigrationImportService } from '../../../core/migration/migration-import.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
@@ -26,7 +31,8 @@ import { SettingsService } from '../../../core/settings.service';
 import { StudioActionRegistryService } from '../../../core/studio-actions/studio-action-registry.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
-import { CreditsDialogService } from '../../cloud/credits-dialog.service';
+import { refusalNotice } from '../../../core/billing-refusal';
+import { BillingCtaService } from '../../../shared/billing/billing-cta.service';
 import {
   MODEL_PROVIDERS,
   PROVIDER_MODEL_SUGGESTIONS,
@@ -52,15 +58,20 @@ const MODES: { id: AssistantMode; label: string; icon: string; title: string }[]
 @Component({
   selector: 'app-assistant-chat',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, ButtonModule, SelectModule],
+  imports: [FormsModule, ButtonModule, SelectModule, CheckoutFallback, PastDueNotice],
   templateUrl: './assistant-chat.html',
   styleUrl: './assistant-chat.scss',
 })
 export class AssistantChat {
   protected readonly chat = inject(AssistantChatService);
   protected readonly phormaCloud = inject(PhormaCloudService);
+  protected readonly billing = inject(BillingService);
+  private readonly billingRefresh = inject(BillingRefreshService);
+
+  /** True once a checkout was started from this view (arms the reopen link). */
+  protected readonly checkoutAttempted = signal(false);
   private readonly settingsDialog = inject(SettingsDialogService);
-  private readonly creditsDialog = inject(CreditsDialogService);
+  private readonly billingCta = inject(BillingCtaService);
   private readonly importer = inject(MigrationImportService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly transport = inject(ModelTransportService);
@@ -73,6 +84,10 @@ export class AssistantChat {
   readonly wide = input(false);
 
   protected readonly modes = MODES;
+  /** The billing CTA the last failed turn earned, or null for anything else. */
+  protected readonly billingCtaLabel = computed(
+    () => refusalNotice(this.chat.billingRemedy())?.label ?? null,
+  );
   protected readonly draft = signal('');
   /** Turn id whose copy button briefly shows the "copied" check. */
   protected readonly copiedTurnId = signal<string | null>(null);
@@ -345,12 +360,37 @@ export class AssistantChat {
     this.context.remove(item.docId);
   }
 
-  protected openSubscribe(): void {
-    this.settingsDialog.open('cloud');
+  /**
+   * Starts a real Stripe Checkout Session for the entry plan (requirement 27).
+   *
+   * Both upsells in this view - the plan-proposal "have it built for you" link and
+   * the Agent-mode composer hint - land here. They are mid-sentence links with no
+   * room for a plan comparison, so they buy {@link ENTRY_PLAN_TIER}; the recovery
+   * affordance renders once under the composer rather than inside a message
+   * bubble, which is why both share one {@link checkoutAttempted} flag.
+   */
+  protected async subscribe(): Promise<void> {
+    const lookupKey = subscriptionLookupKey(ENTRY_PLAN_TIER);
+    if (!lookupKey) return;
+    this.checkoutAttempted.set(true);
+    // Only a real hand-off opens the bounded `/api/me` window (requirements 29, 30).
+    if (await this.billing.startCheckout(lookupKey)) this.billingRefresh.watch();
   }
 
-  protected openCredits(): void {
-    this.creditsDialog.open();
+  /**
+   * The `past_due` counterpart to {@link subscribe} (requirement 17): the plan
+   * proposal's inline CTA points at the Billing Portal rather than at a second
+   * subscription, because the tenant already has one and it is the CARD that
+   * failed.
+   */
+  protected async updateCard(): Promise<void> {
+    this.checkoutAttempted.set(true);
+    await this.billingCta.updateCard();
+  }
+
+  /** Performs whatever the failed turn's refusal earned (requirement 19). */
+  protected runBillingCta(): void {
+    this.billingCta.run(this.chat.billingRemedy());
   }
 
   private scrollToBottom(): void {

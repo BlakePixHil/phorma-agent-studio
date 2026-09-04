@@ -1,0 +1,1245 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 `frontend/src/environments/clerk.ts` back to the DEVELOPMENT `pk_test_` key; new": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822673
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322844972
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788323222719
+      }
+    ],
+    "1.2 `fileReplacements` entry in `frontend/angular.json`'s production configuration, mirroring": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822725
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788323230966
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788323560433
+      }
+    ],
+    "1.5 `cloud/.dev.vars` documented with the DEVELOPMENT `CLERK_SECRET_KEY` for local": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822799
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788323570412
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788324851425
+      }
+    ],
+    "1.6 Add the production origin to `CLERK_AUTHORIZED_PARTIES`": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822837
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788324860250
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788325705432
+      }
+    ],
+    "1.7 Confirm the rotation with `/api/me` and a production session token returning 200, NOT with": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822876
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788325819709
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788326398980
+      }
+    ],
+    "1.8 Verify no tenant row is keyed to a development Clerk user id": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822923
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788326403467
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788326788226
+      }
+    ],
+    "2.1 `cloud/migrations/0003_billing.sql` - `stripe_customer_id`, `stripe_subscription_id`,": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322822976
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788326793343
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788327276230
+      }
+    ],
+    "2.2 `stripe_events` table (id, type, tenant_id, received_at, status)": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823036
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788327280643
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788329167375
+      }
+    ],
+    "2.3 `credit_grants` table with `stripe_payment_id UNIQUE`, `credits`, `cost_usd`,": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823070
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788329174587
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788330452834
+      }
+    ],
+    "2.4 `TenantRecord` gains the Stripe fields; `upsertTenant` persists them without clobbering on": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823119
+      },
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788330458474
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788335525950
+      }
+    ],
+    "3.1 `cloud/src/stripe.ts` - form-encoded `fetch` helper, 501 when `STRIPE_SECRET_KEY` absent": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823157
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788337675864
+      }
+    ],
+    "3.2 `verifyStripeSignature(raw, header, secret)` via `crypto.subtle.verify` HMAC-SHA256, 300s": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823204
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788337680744
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788339678602
+      }
+    ],
+    "3.3 `StripeEnv` (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`) folded into `ApiEnv`; document": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823273
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788339684314
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788340411693
+      }
+    ],
+    "3.4 Lookup-key allowlist and price-to-tier resolution via `metadata.tier`; `usdPerCredit`": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823318
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788340424722
+      },
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788341666647
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390008609
+      }
+    ],
+    "3.5 Unit tests: signature accept/reject, expired timestamp, tampered body, malformed header": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823352
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014600
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390036563
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390761944
+      }
+    ],
+    "4. Checkout and portal routes": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823385
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014666
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415252744
+      }
+    ],
+    "4.1 `POST /api/checkout` - Clerk JWT, lookup key from the allowlist, reuse or create Customer": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823422
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014730
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390767078
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788391624554
+      }
+    ],
+    "4.2 `POST /api/billing-portal` - Clerk JWT, returns a portal session URL": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823460
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014779
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788391631820
+      }
+    ],
+    "4.3 `GET /billing/return` - minimal worker-served completion page (the studio has no": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823507
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014826
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788391637193
+      }
+    ],
+    "4.4 Both routes placed after the `store.enabled` gate and outside the `isAdmin` branch": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823554
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014869
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788391642234
+      }
+    ],
+    "5.1 `POST /api/stripe/webhook` matched BEFORE any `request.json()` path; raw body read first": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823594
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014917
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788391649152
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393060010
+      }
+    ],
+    "5.2 `INSERT OR IGNORE` on `stripe_events.id`, skip when already applied": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823635
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390014966
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393065185
+      }
+    ],
+    "5.3 Stale-event guard against the `billing_event_at` watermark": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823675
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015016
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393070213
+      }
+    ],
+    "5.4 Tenant resolution: `client_reference_id`, then `customer.metadata.clerk_user_id`, then": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823722
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015084
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393075393
+      }
+    ],
+    "5.5 `checkout.session.completed` - subscription mode activates or upgrades; payment mode": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823771
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015172
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393080455
+      }
+    ],
+    "5.6 `customer.subscription.created` / `.updated` - sync tier and status": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823809
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015219
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393085386
+      }
+    ],
+    "5.7 `invoice.payment_failed` sets `past_due`; a subsequent success restores `active`": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823882
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015268
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393090899
+      }
+    ],
+    "5.8 `customer.subscription.deleted` sets `canceled` and disables the runtime key": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823924
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015318
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393095890
+      }
+    ],
+    "5.9 Miniflare suite through `withLoopbackRetry`; property test that replaying any event set in": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322823972
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015370
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788393100898
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788396682069
+      }
+    ],
+    "5.10 Register the new suite in `.github/workflows/ci.yml`": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824009
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015441
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788396687127
+      }
+    ],
+    "6.1 `resolveHostedInference` returns a stable `code` alongside its message": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824054
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015496
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788399553443
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788400759590
+      }
+    ],
+    "6.2 `past_due` becomes a distinct refusal (`subscription_past_due`) that retains tier, data": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824088
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015546
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788400765135
+      }
+    ],
+    "6.3 Grant-aware ceilings: `effectiveCostUsdLimit` / `effectiveCreditsLimit`, allowance spent": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824125
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015594
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788400771302
+      }
+    ],
+    "6.4 `recordRun` draws `cost_usd_consumed` only past the monthly allowance, idempotently": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824171
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015647
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788400776488
+      }
+    ],
+    "6.5 `/api/me` exposes grant credits as additive quota fields": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824219
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015694
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788400781438
+      }
+    ],
+    "6.6 Optional `code` on the `RunEvent` error payload in BOTH `engine/src/types.ts` and": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824251
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015744
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788400786675
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788401782866
+      }
+    ],
+    "6.7 Property tests: granting one payment id twice equals once; allowance-before-grants holds": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824295
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015797
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788401788289
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788404786864
+      }
+    ],
+    "7.1 `BillingService` as a DI leaf - `ClerkService` plus `loadPhormaCloudUrl()`, never": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824328
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015868
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788404792687
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788405632096
+      }
+    ],
+    "7.2 Replace `openSubscribe()` at all five call sites with real checkout via the existing": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824371
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015918
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788405638941
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788407368825
+      }
+    ],
+    "7.3 Plan cards on the Settings > Cloud page; Enterprise is a Contact sales link with no price": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824412
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390015967
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788407374487
+      }
+    ],
+    "7.4 Credits dialog packs become live, gated on `subscribed()`": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824485
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016021
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788407379955
+      }
+    ],
+    "7.5 Bounded post-checkout `refresh()` poll plus a focus-triggered refresh": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824523
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016068
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788407390933
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788408908842
+      }
+    ],
+    "7.6 `past_due` renders an update-card action pointing at the portal, never the Subscribe CTA": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824561
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016120
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788408915071
+      }
+    ],
+    "7.7 Consumers branch on `code` with the existing regex retained as fallback: the two sites are": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824608
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016169
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788408926621
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788409848676
+      }
+    ],
+    "7.8 Billing surfaces absent, not broken, on BYO": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824658
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016216
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788408920954
+      }
+    ],
+    "7.9 Fix the stale header comment in `frontend/src/app/core/credit-packs.ts` (documents": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824702
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016268
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788407385535
+      }
+    ],
+    "8.1 Patch the OpenRouter key `limit` on a tier change instead of leaving the old cap": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824736
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016316
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788409855322
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788412430254
+      }
+    ],
+    "8.2 Disable the superseded key whenever a replacement is minted": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824779
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016368
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788412437190
+      }
+    ],
+    "8.3 Report a failed disable (`runtimeKeyDisabled: false`) instead of swallowing it": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824810
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016414
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788412443092
+      }
+    ],
+    "8.4 Validate that a provisioned `tenantId` looks like a Clerk user id, so a typo cannot create": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824845
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016462
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788412449056
+      }
+    ],
+    "9. Stripe catalogue and status": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824892
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016517
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415256971
+      }
+    ],
+    "9.2a PRICING DECISION: accept 72.5% net margin on the Medium and Large top-up packs, or reduce": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322824937
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016568
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788413487781
+      }
+    ],
+    "9.1 Create the three top-up prices in the sandbox with lookup keys": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825004
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016632
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788413493663
+      }
+    ],
+    "9.3 Correct the margin comment block in `cloud/src/tenants.ts` - it states 80/79/78 computed": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825042
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016685
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788412457633
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788413291496
+      }
+    ],
+    "9.4 Stripe probe in `cloud/src/status.ts` as a non-critical component": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825086
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016736
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788413297295
+      }
+    ],
+    "9.5 Mirror the catalogue into live mode at release, by lookup key, with the same": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825121
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016785
+      }
+    ],
+    "9.6 Enable Stripe Tax and register the AU GST obligation in the Stripe Dashboard, in both": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825159
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016831
+      }
+    ],
+    "10.1 INVESTIGATION: determine how `POST /api/v1/keys` targets a workspace, or whether": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825195
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016884
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788413513086
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415223251
+      }
+    ],
+    "10.2 Re-runnable migration script: mint on the new workspace, store, disable the old key": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825240
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390016968
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415224204
+      }
+    ],
+    "10.3 Inventory existing tenants first": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825287
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390017021
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415225202
+      }
+    ],
+    "10.4 Manually disable stragglers left on the old workspace, since the new provisioning key": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825355
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390017080
+      }
+    ],
+    "11.1 `cloud-worker` steering: billing routes, the two new secrets, `past_due` semantics": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825396
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390017170
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415849737
+      }
+    ],
+    "11.2 `product` steering / `agent.md`: subscription and top-up flows are no longer placeholders": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825438
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390017232
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415851162
+      }
+    ],
+    "11.3 `.github/agent-memory.md`: prune the \"STRIPE NOT WIRED UP YET\" entry once this ships": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825488
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390017297
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415852563
+      }
+    ],
+    "11.4 `release` steering: the Clerk dev/prod split and the go-live secret checklist": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788322825536
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390017361
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415853548
+      }
+    ],
+    "1. Clerk environment split (prerequisite, unblocks local testing)": [
+      {
+        "executionId": "e07e08ab-2f5c-490b-b94a-d74b3254014c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788326788276
+      }
+    ],
+    "2. Schema": [
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788335526034
+      }
+    ],
+    "4.1a Automatic tax on, billing address collection on, tax id collection on - an inclusive": [
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788335553137
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788391642271
+      }
+    ],
+    "9.2b Confirm currency. GST is an AUD obligation and an inclusive USD price makes the remitted": [
+      {
+        "executionId": "5ff7bd9c-c951-4cc7-a675-3608193b77f7",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788335554070
+      },
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415870218
+      }
+    ],
+    "3. Stripe primitives (no SDK)": [
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788390762022
+      }
+    ],
+    "5. Webhook": [
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788396687213
+      }
+    ],
+    "6. Entitlement": [
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788404786942
+      }
+    ],
+    "7. Studio surface": [
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788409848762
+      }
+    ],
+    "8. Provisioning fixes": [
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788412449141
+      }
+    ],
+    "11. Documentation": [
+      {
+        "executionId": "f7b67678-d7ce-4082-8f22-87cc14a09c3c",
+        "chatSessionId": "sess_7dda6d9d-c078-45b9-9275-d98a0579bc19",
+        "timestamp": 1788415853628
+      }
+    ]
+  }
+}

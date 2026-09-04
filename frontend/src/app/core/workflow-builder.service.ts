@@ -4,6 +4,7 @@ import type { ChatMessage, ModelRequest, ModelUsage, ToolCall } from '@phorma/en
 
 import { AgentStreamService } from './agent-stream.service';
 import { AiEditSessionService } from './ai-edit-session.service';
+import { remedyForModelError, type BillingRemedy } from './billing-refusal';
 import { AssistantContextService } from './assistant-context.service';
 import type {
   AssistantMode,
@@ -48,11 +49,6 @@ const MAX_AGENT_ROUNDS = 12;
 const PLAN_APPLY_DELAY_MS = 220;
 
 export type BuilderStatus = 'idle' | 'thinking' | 'applying' | 'done' | 'error';
-
-/** True when a model error message means "credits/subscription problem". */
-export function isCreditsError(message: string): boolean {
-  return /\(402\)|credits exhausted|subscription/i.test(message);
-}
 
 /** Options shared by the chat-turn methods. */
 export interface ChatTurnOptions {
@@ -113,8 +109,15 @@ export class WorkflowBuilderService {
   readonly progress = signal<{ applied: number; total: number } | null>(null);
   /** Human-readable error from the last run (null when ok). */
   readonly error = signal<string | null>(null);
-  /** True when the last failure was a credits/subscription 402 - drives upsell. */
-  readonly creditsExhausted = signal(false);
+  /**
+   * What to offer after a hosted refusal, `'none'` when the last failure was not
+   * one (requirement 19).
+   *
+   * Replaced a boolean `creditsExhausted`, which could only ever offer Buy
+   * credits: it sent a `past_due` tenant to a top-up they cannot use, since a
+   * failed card blocks the run whether or not credits remain.
+   */
+  readonly billingRemedy = signal<BillingRemedy>('none');
   /** The model's one-line summary of what it built. */
   readonly summary = signal<string | null>(null);
 
@@ -197,7 +200,7 @@ export class WorkflowBuilderService {
     this.cancelled = false;
     this.error.set(null);
     this.summary.set(null);
-    this.creditsExhausted.set(false);
+    this.billingRemedy.set('none');
     this.progress.set(null);
     this.status.set('thinking');
 
@@ -217,7 +220,10 @@ export class WorkflowBuilderService {
       // A failed build must not leave a half-applied graph behind.
       this.session.rollbackActive();
       const message = err instanceof Error ? err.message : String(err);
-      this.creditsExhausted.set(/\(402\)|credits exhausted|subscription/i.test(message));
+      // The error is still the `ModelRequestError` the transport threw, so it
+      // still carries the gate's code; the prose regex it used to test is the
+      // fallback inside `remedyForModelError` (requirement 20).
+      this.billingRemedy.set(remedyForModelError(err));
       this.error.set(message);
       this.status.set('error');
     } finally {
@@ -455,7 +461,7 @@ export class WorkflowBuilderService {
     } catch (err) {
       this.session.rollbackActive();
       const message = err instanceof Error ? err.message : String(err);
-      this.creditsExhausted.set(isCreditsError(message));
+      this.billingRemedy.set(remedyForModelError(err));
       this.error.set(message);
       this.status.set('error');
       throw err;

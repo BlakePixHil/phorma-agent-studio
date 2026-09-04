@@ -83,6 +83,7 @@ import type { RunSource, SyncSummary } from './run-record.js';
 import { accumulateSync, createSyncSummary } from './run-record.js';
 import { RunGate, RunStoppedError } from './gate.js';
 import {
+  failureCodeOf,
   isTransientModelError,
   type ChatMessage,
   type ModelClient,
@@ -746,6 +747,9 @@ class WorkflowRun {
         : error instanceof Error
           ? error.message
           : String(error);
+      // A timeout is OUR verdict, not the responder's, so it never inherits a
+      // code from whatever the run happened to be doing when the clock expired.
+      const code = this.timedOut ? undefined : failureCodeOf(error);
       // A workflow-level Error Handler node (when present) gets one shot at
       // the failure — notifications, cleanup, escalation — before the run
       // settles as failed. Its own failures never mask the original error.
@@ -753,7 +757,7 @@ class WorkflowRun {
       // After the error handler, so a data node inside it still counts, and
       // immediately before the terminal event with nothing in between.
       this.emitSyncSummary();
-      this.emit({ type: 'run-failed', runId, error: message, at: Date.now() });
+      this.emit({ type: 'run-failed', runId, error: message, code, at: Date.now() });
     } finally {
       this.disarmWorkflowTimeout();
     }
@@ -894,6 +898,7 @@ class WorkflowRun {
           nodeId: node.id,
           nodeName: node.name,
           error: message,
+          code: failureCodeOf(error),
           at: Date.now(),
         });
         this.emit({
@@ -951,6 +956,7 @@ class WorkflowRun {
         nodeId: node.id,
         nodeName: node.name,
         error: error instanceof Error ? error.message : String(error),
+        code: failureCodeOf(error),
         at: Date.now(),
       });
       throw error;

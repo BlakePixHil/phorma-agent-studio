@@ -1,0 +1,72 @@
+@if (phormaCloud.signedIn()) {
+  <section class="phorma-plans" aria-label="Phorma Cloud plans">
+    <div class="phorma-plans__grid">
+      @for (plan of selfServePlans; track plan.tier) {
+        <div class="phorma-plans__card" [class.phorma-plans__card--current]="isCurrent(plan)">
+          <span class="phorma-plans__name">{{ plan.label }}</span>
+          <span class="phorma-plans__price">
+            ${{ plan.priceUsd }}<small>/month</small>
+          </span>
+          <ul class="phorma-plans__facts">
+            <li>{{ plan.credits | number }} credits</li>
+            <li>{{ plan.runs | number }} runs</li>
+            <li>
+              {{ plan.concurrentRuns }}
+              {{ plan.concurrentRuns === 1 ? 'concurrent run' : 'concurrent runs' }}
+            </li>
+          </ul>
+          <p class="phorma-plans__blurb">{{ plan.blurb }}</p>
+          <p-button
+            styleClass="phorma-plans__btn"
+            size="small"
+            [outlined]="hasSubscription()"
+            [disabled]="isCurrent(plan) || billing.busy()"
+            [loading]="isCheckingOut(plan)"
+            [label]="actionLabel(plan)"
+            (onClick)="choose(plan)"
+          />
+        </div>
+      }
+    </div>
+
+    @for (plan of salesPlans; track plan.tier) {
+      <div class="phorma-plans__sales">
+        <div class="phorma-plans__sales-text">
+          <span class="phorma-plans__name">{{ plan.label }}</span>
+          <p class="phorma-plans__blurb">{{ plan.blurb }}</p>
+        </div>
+        <p-button
+          styleClass="phorma-plans__btn"
+          size="small"
+          severity="secondary"
+          [outlined]="true"
+          label="Contact sales"
+          pTooltip="Opens phorma-labs.com in your browser"
+          tooltipPosition="top"
+          (onClick)="contactSales()"
+        />
+      </div>
+    }
+
+    <app-checkout-fallback [attempted]="attempted()" openLabel="Open Stripe" />
+
+    <div class="phorma-plans__foot">
+      <span>
+        Prices include tax. Checkout opens in your browser; your plan updates here once
+        the payment clears.
+      </span>
+      @if (hasSubscription()) {
+        <p-button
+          styleClass="phorma-plans__btn"
+          [text]="true"
+          severity="secondary"
+          size="small"
+          label="Manage billing"
+          [loading]="billing.portalPending()"
+          [disabled]="billing.busy()"
+          (onClick)="manageBilling()"
+        />
+      }
+    </div>
+  </section>
+}

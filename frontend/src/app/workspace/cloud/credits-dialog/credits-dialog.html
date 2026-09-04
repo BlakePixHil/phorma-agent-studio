@@ -31,22 +31,52 @@
               <p-button
                 styleClass="phorma-credits__btn"
                 [outlined]="true"
-                [disabled]="true"
                 size="small"
-                label="Coming soon"
-                pTooltip="Credit top-ups aren't available yet — check back soon."
+                label="Buy"
+                [disabled]="!canBuy() || billing.busy()"
+                [loading]="isBuying(pack)"
+                [pTooltip]="
+                  canBuy()
+                    ? 'Opens Stripe Checkout in your browser'
+                    : 'Top-ups need an active subscription'
+                "
                 tooltipPosition="top"
+                (onClick)="buy(pack)"
               />
             </div>
           }
         </div>
-        <p class="phorma-credits__note">
-          <i class="ti ti-info-circle" aria-hidden="true"></i>
-          Need credits every month? Upgrading your plan is the better deal for sustained usage.
-        </p>
+
+        @if (canBuy()) {
+          <p class="phorma-credits__note">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            Credits never expire and are spent only after your monthly allowance runs out.
+            Needing them every month? Upgrading your plan is the better deal.
+          </p>
+        } @else if (phormaCloud.pastDue()) {
+          <!-- They have a plan and it is the CARD that failed, so sending them to
+               the plan cards would be the wrong remedy (requirement 17). -->
+          <app-past-due-notice />
+        } @else {
+          <p class="phorma-credits__note">
+            <i class="ti ti-lock" aria-hidden="true"></i>
+            Top-ups add to a plan's monthly allowance, so they need an active subscription
+            first.
+          </p>
+        }
+
+        <app-checkout-fallback [attempted]="checkoutAttempted()" />
       </div>
 
       <footer class="phorma-credits__actions">
+        @if (!canBuy() && !phormaCloud.pastDue()) {
+          <p-button
+            styleClass="phorma-credits__btn"
+            size="small"
+            label="See plans"
+            (onClick)="openPlans()"
+          />
+        }
         <p-button
           styleClass="phorma-credits__btn"
           [text]="true"

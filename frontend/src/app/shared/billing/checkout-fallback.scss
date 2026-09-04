@@ -1,0 +1,41 @@
+// `display: contents` so the two paragraphs join the host surface's own flow
+// (every call site is a flex column or a block stack) instead of introducing a
+// wrapper whose margins the host would have to know about.
+:host {
+  display: contents;
+}
+
+.phorma-checkout-fallback__error,
+.phorma-checkout-fallback__retry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.phorma-checkout-fallback__error {
+  color: var(--phorma-accent-red, #ef4444);
+
+  > i {
+    flex: 0 0 auto;
+  }
+}
+
+.phorma-checkout-fallback__retry {
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+}
+
+// Sits inside a sentence, so it drops the button's own box entirely and keeps
+// only the underline. Scoped to `.p-button` and deleting the superseded chrome,
+// or PrimeNG's padding and background double up with the prose around it.
+:host ::ng-deep .phorma-checkout-fallback__link.p-button {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}

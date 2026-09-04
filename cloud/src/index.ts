@@ -13,15 +13,16 @@
  *  - `/api/*` control-plane routes (profile/quota, admin provisioning).
  *  - CORS is scoped via ALLOWED_ORIGINS instead of `*`.
  *
- * Three route groups are deliberately public and matched before any auth layer:
+ * Four route groups are deliberately public and matched before any auth layer:
  * `/status.*` (service health for the website), `/update|/download|/releases.json`
- * (installers and the updater manifest), and `/p/{slug}` (published portals).
+ * (installers and the updater manifest), `/p/{slug}` (published portals), and
+ * `/billing/return` (where Stripe sends the browser back after checkout).
  */
 
 import { routeAgentRequest } from 'agents';
 
 import { verifyBearer, verifyRequest, isHosted } from './auth';
-import { handleApiRequest, type ApiEnv } from './api';
+import { handleApiRequest, handleBillingReturnRequest, type ApiEnv } from './api';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
@@ -91,6 +92,15 @@ export default {
     // so it lives at the top level rather than under `/p/`.
     const embedResponse = handlePortalEmbedScript(request);
     if (embedResponse) return embedResponse;
+
+    // `GET /billing/return` - where Stripe sends the browser after checkout.
+    // PUBLIC, because the request is the user's own browser following a redirect
+    // with no bearer to present, and it carries NO CORS headers because a
+    // top-level navigation needs none. It is not under `/api/`, so
+    // `handleApiRequest` below would never see it. Static markup, no bindings, no
+    // billing state: the studio learns the outcome by polling `/api/me`.
+    const billingReturn = handleBillingReturnRequest(request);
+    if (billingReturn) return billingReturn;
 
     // Control-plane routes (hosted mode).
     const apiResponse = await handleApiRequest(request, env as ApiEnv, cors, ctx);

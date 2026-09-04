@@ -57,6 +57,35 @@ These are enforced across the codebase - breaking one is a regression, not a sty
 - Plan in chat is proposal-only (Apply button). Plan in the Ctrl+P palette auto-applies. That
   asymmetry is deliberate - speed is the palette's whole point.
 
+## Purchasing (live, no longer a placeholder)
+
+Subscribing and buying credits are real flows in the app. The "Coming soon" credit packs and the
+Subscribe CTAs that only deep-linked to a settings page are gone, and the admin-token-gated
+`POST /api/provision` is no longer the only way a tenant becomes `active`. Spec:
+`.kiro/specs/stripe-billing/`.
+
+- All five Subscribe CTAs start a real Stripe Checkout Session for `ENTRY_PLAN_TIER`
+  (`core/plan-catalog.ts`), each paired with a secondary "See all plans" link. A context-free CTA in a
+  narrow panel cannot ask which of three plans somebody wants.
+- The plan cards on Settings > Cloud are the considered path. Enterprise carries no Stripe price and
+  is a Contact sales link. A tenant who already HAS a subscription is routed to the Stripe Billing
+  Portal and never to a second checkout, because a second Checkout Session buys a SECOND subscription
+  instead of moving them between plans - and `past_due` counts as having one.
+- Credit packs in the credits dialog are live and subscriber-only.
+- Cancel, change plan, update card and invoice history are all the Billing Portal. We do not build
+  those surfaces.
+- Checkout opens through the existing `openExternal` helper and completes in an external browser, so
+  the studio refreshes `/api/me` on a bounded poll (24 attempts, 5s apart, behind
+  `BILLING_POLL_CONFIG`) plus a focus-triggered refresh. Nothing is inferred from the redirect: the
+  worker's webhook is the only writer of subscription state.
+- A `past_due` tenant keeps their plan, workflows and credits, and is offered Update card - never the
+  Subscribe CTA. Refusal copy lives in one place (`core/billing-refusal.ts`) so the toast, the Ctrl+P
+  palette and the chat cannot drift into three answers for one refusal.
+- Credits-not-dollars still holds: a purchased pack contributes CREDITS, and the USD budget behind it
+  is worker-side only.
+- Every billing surface is ABSENT, not broken, on a BYO deployment, which binds no D1 and must never
+  need Stripe configuration.
+
 ---
 
 #[[file:agent.md]]

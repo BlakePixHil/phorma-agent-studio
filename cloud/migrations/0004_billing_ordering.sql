@@ -1,0 +1,122 @@
+-- Phorma Cloud (hosted mode) - per-field ordering for Stripe billing state.
+--
+-- Applied with:  npx wrangler d1 migrations apply phorma-cloud --env hosted
+-- BYO deployments never bind D1 and never run these.
+--
+-- Additive only, plus one idempotent backfill. Every ALTER adds a column that
+-- existing rows read as 0 or NULL, so the currently deployed worker keeps
+-- working after this is applied and the deploy can follow the migration.
+--
+-- A SEPARATE FILE RATHER THAN AN APPEND TO 0003, DELIBERATELY. 0003's own footer
+-- says the billing schema is complete as of its last line and that every further
+-- change belongs in 0004, because wrangler records a migration as applied by
+-- FILENAME: anything appended to 0003 after it has been applied to the remote
+-- database would silently never run. Whether the remote apply has happened yet is
+-- not knowable from a checkout, and this file does not have to care - it is
+-- correct either way, which an append would not have been.
+--
+-- ## Why one watermark was not enough
+--
+-- `0003_billing.sql` added `tenants.billing_event_at`: ONE scalar holding the
+-- `created` of the newest Stripe event applied to the tenant, gating every
+-- subscription-state write. Stripe promises no delivery order, so the guard is
+-- necessary - but the event families it gates do not carry the same information:
+--
+--   SUPPLY a tier   customer.subscription.created / .updated, and a
+--                   subscription-mode checkout.session.completed. They carry a
+--                   price, so the tier comes out of the event.
+--   RESTATE a tier  invoice.payment_failed / .paid / .payment_succeeded and
+--                   customer.subscription.deleted. They carry no price, so the
+--                   handler reads the tier off the tenant row and writes it back.
+--
+-- With one watermark, a RESTATING event that happens to arrive first advances it
+-- and then censors the older, not-yet-delivered SUPPLYING event as "stale" - so
+-- the tier that event would have supplied is lost permanently. Measured, and the
+-- reason this migration exists: `customer.subscription.updated` (pro) followed a
+-- second later by `invoice.payment_failed`, delivered backwards, left the tenant
+-- on `starter`/`past_due` instead of `pro`/`past_due`. Requirement 18 says a
+-- `past_due` tenant RETAINS their tier. Stripe emits that pair a second apart
+-- with no ordering guarantee, so it is a live failure rather than a thought
+-- experiment. The same censoring lost the buyer's email, which only a Checkout
+-- Session ever supplies.
+--
+-- ## The model these columns implement
+--
+-- One clock PER FIELD, not one per tenant. A field is written only by an event
+-- that SUPPLIES it, and only when that event is newer than the field's own clock.
+-- Each clock is a monotone maximum, so every field is a last-writer-wins register
+-- over the event set and the result no longer depends on delivery order or on how
+-- many times Stripe redelivers. Requirement 14 is unchanged in intent and
+-- stronger in effect: a stale event cannot walk subscription state BACKWARDS,
+-- which was always the point, rather than "a stale event does nothing".
+--
+--   billing_tier_at     the newest event that supplied a TIER.
+--   billing_status_at   the newest SUBSCRIPTION-LIFECYCLE status
+--                       (created/updated/deleted, and a checkout's subscription).
+--   billing_dunning_at  the newest INVOICE status, with
+--   billing_dunning_status  the value that invoice reported.
+--
+-- Status needs TWO clocks because the two families are not comparable on one.
+-- The effective `status` column is the fold of the two registers:
+--
+--   status = 'canceled'                       when the newest lifecycle fact is a
+--                                             cancellation
+--          = the invoice value                when the newest invoice fact is
+--                                             newer than the newest lifecycle one
+--          = the lifecycle value              otherwise
+--
+-- The first line is the "never reactivate a cancelled tenant" rule, and it is why
+-- a single status clock cannot work: a cancellation has to be able to overrule an
+-- invoice that carries a HIGHER timestamp (an `invoice.paid` for a subscription
+-- that is gone means nothing), while still losing to a genuine later
+-- resubscription. That is a two-dimensional comparison, so it needs two clocks.
+-- With one, the same pair delivered in the two orders ended `canceled` one way and
+-- `active` the other - a cancelled account reading as entitled.
+--
+-- The fold lives in `upsertTenant`'s ON CONFLICT clause (cloud/src/tenants.ts) so
+-- it is evaluated inside the statement rather than across a read and a later
+-- write, which is what keeps two concurrent deliveries of different events
+-- converging. `status` stays the materialized effective value, so every reader -
+-- `/api/me`, `resolveHostedInference`, an operator's `SELECT status FROM tenants` -
+-- is untouched by this change.
+--
+-- `billing_event_at` SURVIVES, and its meaning narrows: it is now the newest
+-- Stripe event that wrote anything to this tenant, kept for audit and for the log
+-- line that answers "when did this tenant's billing last move". NOTHING MAY GATE
+-- ON IT AGAIN. Re-introducing a single-scalar gate is precisely the defect this
+-- file exists to remove.
+ALTER TABLE tenants ADD COLUMN billing_tier_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tenants ADD COLUMN billing_status_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tenants ADD COLUMN billing_dunning_status TEXT;
+ALTER TABLE tenants ADD COLUMN billing_dunning_at INTEGER NOT NULL DEFAULT 0;
+
+-- Backfill, so no protection is lost at the moment of the migration.
+--
+-- A row that already carries a watermark has had an event applied at that
+-- instant, and under the old single-scalar rule BOTH tier and status were
+-- protected up to it. Defaulting the new clocks to 0 would reopen that window:
+-- an ancient `customer.subscription.updated` redelivered just after the migration
+-- would read as brand new and could downgrade a paying tenant once.
+--
+-- `billing_dunning_at` is deliberately NOT backfilled. There is no stored fact
+-- about which invoice was seen, and leaving it 0 cannot lose a tier - an invoice
+-- event supplies no tier, and its status write is separately gated on
+-- `billing_status_at`, which IS backfilled, so an old invoice cannot move a
+-- status the lifecycle register already decided more recently either.
+--
+-- Idempotent by construction (it assigns from another column, so re-running
+-- assigns the same value), which matters because this file is not self-healing:
+-- SQLite has no `ADD COLUMN IF NOT EXISTS`, so the ALTERs above error on a second
+-- application and wrangler's `d1_migrations` bookkeeping is the only thing that
+-- stops one. Never hand-run this file through `d1 execute`.
+UPDATE tenants
+   SET billing_tier_at = billing_event_at,
+       billing_status_at = billing_event_at
+ WHERE billing_event_at > 0;
+
+-- No index on any of these columns. Every one of them is read as part of the
+-- single-row `WHERE id = ?` lookup that `getTenant` already performs, and written
+-- in the same statement's ON CONFLICT clause. There is no query that filters or
+-- orders by a clock, and the same evidence test 0003 applied to `stripe_events`
+-- gives the same answer here: an index would be maintained on the one path that
+-- is hot to serve a query nobody makes.

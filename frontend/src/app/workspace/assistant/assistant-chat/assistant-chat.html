@@ -45,9 +45,9 @@
               <div class="phorma-chat__error selectable">
                 <i class="ti ti-alert-triangle" aria-hidden="true"></i>
                 <span class="phorma-chat__error-text">{{ turn.error }}</span>
-                @if (chat.creditsExhausted()) {
-                  <button type="button" pButton severity="secondary" [outlined]="true" (click)="openCredits()">
-                    Buy credits
+                @if (billingCtaLabel(); as ctaLabel) {
+                  <button type="button" pButton size="small" severity="secondary" [outlined]="true" (click)="runBillingCta()">
+                    {{ ctaLabel }}
                   </button>
                 }
                 <button
@@ -170,13 +170,29 @@
                           ></i>
                           <span>{{ attachment.appliedAt ? 'Re-apply' : 'Apply to canvas' }}</span>
                         </button>
+                      } @else if (phormaCloud.pastDue()) {
+                        <!-- Apply is locked by a FAILED PAYMENT, not by a missing
+                             plan, so the link is the portal (requirement 17). -->
+                        <span class="phorma-chat__proposal-manual">
+                          Expand a step for instructions, or
+                          <button
+                            type="button"
+                            class="phorma-chat__proposal-link"
+                            [disabled]="billing.busy()"
+                            (click)="updateCard()"
+                          >
+                            update your card
+                          </button>
+                          to have it built for you again.
+                        </span>
                       } @else {
                         <span class="phorma-chat__proposal-manual">
                           Expand a step for instructions, or
                           <button
                             type="button"
                             class="phorma-chat__proposal-link"
-                            (click)="openSubscribe()"
+                            [disabled]="billing.busy()"
+                            (click)="subscribe()"
                           >
                             subscribe to Phorma Cloud
                           </button>
@@ -392,13 +408,30 @@
       <p class="phorma-chat__hint">{{ autoHint() }}</p>
     }
     @if (chat.mode() === 'agent' && agentLocked()) {
-      <p class="phorma-chat__hint phorma-chat__hint--upsell">
-        Agent mode edits the canvas for you —
-        <button type="button" pButton [text]="true" (click)="openSubscribe()">
-          subscribe to Phorma Cloud
-        </button>
-        to unlock it.
-      </p>
+      @if (phormaCloud.pastDue()) {
+        <!-- They have a plan; the remedy is a card update, not a purchase
+             (requirement 17). -->
+        <app-past-due-notice />
+      } @else {
+        <p class="phorma-chat__hint phorma-chat__hint--upsell">
+          Agent mode edits the canvas for you —
+          <button
+            type="button"
+            pButton
+            [text]="true"
+            size="small"
+            [disabled]="billing.busy()"
+            (click)="subscribe()"
+          >
+            subscribe to Phorma Cloud
+          </button>
+          to unlock it.
+        </p>
+      }
     }
+    <!-- One recovery affordance for both upsells above. A blocked popup is
+         undetectable, so the live Stripe URL is offered here rather than inside
+         a message bubble. -->
+    <app-checkout-fallback [attempted]="checkoutAttempted()" />
   </div>
 </div>

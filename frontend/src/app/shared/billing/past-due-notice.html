@@ -1,0 +1,21 @@
+<div class="phorma-past-due" role="status">
+  <p class="phorma-past-due__title">
+    <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+    Payment failed - hosted runs are paused
+  </p>
+  <p class="phorma-past-due__body">
+    Your plan, workflows and credits are all still here. Update your card and runs resume
+    as soon as the payment clears.
+  </p>
+  <div class="phorma-past-due__row">
+    <p-button
+      styleClass="phorma-past-due__btn"
+      size="small"
+      label="Update card"
+      [loading]="billing.portalPending()"
+      [disabled]="billing.busy()"
+      (onClick)="updateCard()"
+    />
+  </div>
+  <app-checkout-fallback [attempted]="attempted()" openLabel="Open billing portal" />
+</div>

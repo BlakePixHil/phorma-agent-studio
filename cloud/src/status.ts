@@ -37,6 +37,10 @@ import { isHosted, type AuthEnv } from './auth';
 import { WORKER_BUILD } from './build-info';
 import { portalIndex, type PortalIndex } from './portal-registry';
 import { secretVault, type SecretVaultEnv } from './secret-vault';
+// Type-only, so the billing probe reads the same ONE description of the worker's
+// Stripe configuration that `ApiEnv` folds in, without giving this module a
+// runtime import edge into `stripe.ts` (and through it into `tenants.ts`).
+import type { StripeEnv } from './stripe';
 import { ensureTelemetrySchema } from './telemetry';
 
 /** Per-component health. `unknown` means "not part of this deployment". */
@@ -84,7 +88,7 @@ export interface StatusPayload {
   components: StatusComponent[];
 }
 
-export interface StatusEnv extends AuthEnv, SecretVaultEnv {
+export interface StatusEnv extends AuthEnv, SecretVaultEnv, StripeEnv {
   /**
    * Untyped namespace to match `Env.WorkflowAgent`, then narrowed at the call
    * site - the same pattern `portal.ts` uses for its owner and session stubs.
@@ -133,6 +137,25 @@ const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
 
 /** Unauthenticated fallback when no provisioning key is bound. */
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+
+/**
+ * Stripe probe target: one page of the price catalogue, capped at a single
+ * object.
+ *
+ * Chosen over the other cheap reads because of what it does NOT touch. `/v1/prices`
+ * returns catalogue objects - no customer, no payment, no balance - so an
+ * unauthenticated public route can never surface personal or financial data even
+ * if a future change started reading the body. `/v1/balance` and
+ * `/v1/customers` both fail that test. It is also the exact resource
+ * `/api/checkout` reads when it resolves a lookup key, so a 200 here proves the
+ * specific credential AND permission a real checkout needs: a restricted key
+ * without price read fails this probe, which is the correct signal rather than a
+ * false green.
+ *
+ * `limit=1` keeps it to the smallest page Stripe will serve, and it is a GET, so
+ * the probe mutates nothing - no session, no customer, no charge.
+ */
+const STRIPE_PROBE_URL = 'https://api.stripe.com/v1/prices?limit=1';
 
 /** Sent on every outbound probe. Some public APIs reject UA-less requests. */
 const USER_AGENT = `PhormaStatus/${WORKER_BUILD} (+https://phorma-labs.com/status)`;
@@ -203,18 +226,29 @@ export async function collectStatus(env: StatusEnv): Promise<StatusPayload> {
   const hosted = isHosted(env);
   const notice = await readNotice(env);
 
-  const [runtime, database, plans, vault, portals, downloads, auth, inference, telemetry] =
-    await Promise.all([
-      timed(() => probeRuntime(env)),
-      timed(() => probeDatabase(env, hosted)),
-      timed(() => probePlanStore(env, hosted)),
-      timed(() => probeVault(env, hosted)),
-      timed(() => probePortals(env)),
-      timed(() => probeDownloads(env, hosted)),
-      timed(() => probeAuth(env, hosted)),
-      timed(() => probeInference(env, hosted)),
-      timed(() => probeTelemetry(env)),
-    ]);
+  const [
+    runtime,
+    database,
+    plans,
+    vault,
+    portals,
+    downloads,
+    auth,
+    inference,
+    billing,
+    telemetry,
+  ] = await Promise.all([
+    timed(() => probeRuntime(env)),
+    timed(() => probeDatabase(env, hosted)),
+    timed(() => probePlanStore(env, hosted)),
+    timed(() => probeVault(env, hosted)),
+    timed(() => probePortals(env)),
+    timed(() => probeDownloads(env, hosted)),
+    timed(() => probeAuth(env, hosted)),
+    timed(() => probeInference(env, hosted)),
+    timed(() => probeBilling(env)),
+    timed(() => probeTelemetry(env)),
+  ]);
 
   const components: StatusComponent[] = [
     describe('runtime', 'Workflow runtime', 'Runs your deployed workflows and streams live traces.', true, null, runtime),
@@ -225,6 +259,15 @@ export async function collectStatus(env: StatusEnv): Promise<StatusPayload> {
     describe('downloads', 'Downloads and updates', 'Installer downloads and the in-app auto-updater.', false, null, downloads),
     describe('auth', 'Sign-in', 'Account sign-in and session verification.', true, 'Clerk', auth),
     describe('inference', 'Hosted models', 'Model calls billed to your Phorma Cloud credits.', true, 'OpenRouter', inference),
+    // `critical: false` is requirement 35 and it is a product statement, not a
+    // hedge: Stripe being down stops somebody SUBSCRIBING or buying credits, and
+    // stops nobody already subscribed from running a workflow. Entitlement is
+    // read from our own D1 row, so a checkout outage cannot touch a running
+    // tenant. Amber, therefore, not red - and note the rollup gives a
+    // non-critical outage and a non-critical degradation the same amber, which is
+    // why this probe does not bother consulting Stripe's status page for nuance
+    // it could never colour differently.
+    describe('billing', 'Subscriptions and payments', 'Starting a plan, changing it, and buying credit top-ups.', false, 'Stripe', billing),
     describe('telemetry', 'Usage telemetry', 'Anonymous product usage counters.', false, null, telemetry),
   ];
 
@@ -501,6 +544,64 @@ async function probeInference(env: StatusEnv, hosted: boolean): Promise<ProbeRes
   }
   if (!response.ok) {
     return { status: 'outage', detail: 'Model provider is not responding correctly.' };
+  }
+  return OK;
+}
+
+/**
+ * Stripe reachability plus "is our API key still good", for the non-critical
+ * billing component (requirement 35).
+ *
+ * ABSENT KEY IS `unknown` IN BOTH MODES, which deliberately differs from the
+ * Clerk probe's hosted branch. A BYO worker binds no `STRIPE_SECRET_KEY` at all
+ * and must not read as broken, and a hosted worker without one is a
+ * configuration state rather than an outage: the billing routes already answer a
+ * precise 501 naming the missing secret (`requireStripeSecret`), which is the
+ * signal for whoever operates the worker. Turning a public badge amber because a
+ * not-yet-launched catalogue is not configured tells visitors nothing true about
+ * the service they are using.
+ *
+ * WHAT THIS PROBE CANNOT TELL YOU. A 200 proves Stripe is up and that this key is
+ * live and permitted to read prices. It does NOT prove the key is the RIGHT key
+ * for this deployment: an `sk_test_` key against a sandbox answers 200 exactly
+ * like an `sk_live_` key against live, so a test-vs-live mismatch reads as
+ * perfectly healthy here. That is the same blind spot the Clerk probe has, and
+ * for the same reason - a vendor credential check can only speak about the
+ * account the credential belongs to.
+ *
+ * It is not closed here on purpose. Refusing an `sk_test_` key on a hosted worker
+ * would paint the badge amber for the whole sandbox period before the live
+ * catalogue is mirrored (task 9.5), and `PHORMA_MODE` cannot distinguish a
+ * staging hosted worker from the production one, so the probe has no way to know
+ * which mode is correct. The checks that DO prove it are outside a health probe:
+ * the `sk_live_` prefix on the deployed secret at go-live, and a real Checkout
+ * Session appearing in the live Dashboard.
+ */
+async function probeBilling(env: StatusEnv): Promise<ProbeResult> {
+  // Trimmed, matching `requireStripeSecret`: `wrangler secret put` with a stray
+  // newline stores a blank string, and treating that as configured would send
+  // `Authorization: Bearer ` and report a rejected credential instead of an
+  // unconfigured one.
+  const key = env.STRIPE_SECRET_KEY?.trim();
+  if (!key) return absent('This deployment does not sell plans or credits.');
+
+  // A direct `fetch` rather than `stripeRequest`, because that helper folds every
+  // upstream failure into one 502 for a route to return - exactly the
+  // classification this probe needs to keep. Nothing is read off the body.
+  const response = await fetch(STRIPE_PROBE_URL, {
+    headers: { Authorization: `Bearer ${key}`, 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS - 500),
+  });
+  await drain(response);
+
+  if (response.status === 401 || response.status === 403) {
+    return { status: 'outage', detail: 'Payment provider credentials were rejected.' };
+  }
+  if (response.status === 429) {
+    return { status: 'degraded', detail: 'Payment provider is rate limiting requests.' };
+  }
+  if (!response.ok) {
+    return { status: 'outage', detail: 'Payment provider is not responding correctly.' };
   }
   return OK;
 }

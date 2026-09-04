@@ -17,7 +17,20 @@
 //      To use Clerk user auth instead, set:  npx wrangler secret put CLERK_SECRET_KEY
 //      (the studio then authenticates with Clerk session JWTs; PHORMA_TOKEN
 //      remains as a fallback for non-Clerk clients)
+//      One worker holds ONE `CLERK_SECRET_KEY`, and a session token minted by
+//      one Clerk instance fails verification against another and reads 401. So
+//      it has to match the publishable key the client build ships: a DEPLOYED
+//      worker takes the PRODUCTION (`sk_live_`) key that pairs with
+//      `frontend/src/environments/clerk.prod.ts`, while a local `wrangler dev`
+//      takes the DEVELOPMENT (`sk_test_`) key that pairs with `clerk.ts`. Never
+//      the live key in a `.dev.vars` - Clerk rejects production keys on
+//      localhost, and local Stripe sandbox testing must not need the live
+//      instance.
 //   4. npx wrangler deploy   (or use Deploy in the studio's Cloud dialog)
+//
+// Everything below is about the DEPLOYED worker. For a LOCAL `wrangler dev`,
+// copy `.dev.vars.example` to `.dev.vars` - it lists the same names with
+// placeholder values, plus which of them hosted mode actually needs.
 //
 // Credentials a DEPLOYED workflow needs never travel with a push - the studio's
 // keychain stays on the machine. Two ways to give the worker its own copy:
@@ -90,14 +103,35 @@
   // ── Phorma Labs hosted deployment (multi-tenant) ─────────────────────────
   // Deployed ONLY by Phorma:  npx wrangler deploy --env hosted
   // Additional secrets (set with `wrangler secret put <NAME> --env hosted`):
-  //   CLERK_SECRET_KEY            - Clerk backend key (required; fail-closed)
+  //   CLERK_SECRET_KEY            - Clerk backend key (required; fail-closed).
+  //                                 PRODUCTION `sk_live_` here, since this is the
+  //                                 worker production studio builds talk to. To
+  //                                 verify a rotation use `/api/me` with a
+  //                                 production session token: `/status.json`
+  //                                 cannot, its Clerk probe returns 200 for any
+  //                                 valid key regardless of instance.
   //   CLERK_JWT_KEY               - Clerk instance PEM for offline JWT verify
   //   KEY_ENC_SECRET              - base64 32-byte AES-GCM key for stored runtime keys
-  //   OPENROUTER_PROVISIONING_KEY - mints per-tenant credit-limited runtime keys
+  //   OPENROUTER_PROVISIONING_KEY - mints per-tenant credit-limited runtime keys.
+  //                                 Account-level: ONE management key reaches every
+  //                                 workspace, so a dedicated workspace needs the
+  //                                 `var` below, not a second key.
   //   PHORMA_ADMIN_TOKEN          - guards /api/provision + /api/deactivate
   //   TELEMETRY_ADMIN_USER_IDS    - comma-separated Clerk user ids allowed to read
   //                                 /api/admin/telemetry/* (absent or empty = 403
   //                                 for everyone, which is the intended default)
+  //   STRIPE_SECRET_KEY           - Stripe API secret (`sk_live_` on this worker,
+  //                                 `sk_test_` for a sandbox). Authenticates every
+  //                                 call the billing routes make.
+  //   STRIPE_WEBHOOK_SECRET       - signing secret (`whsec_`) for the webhook
+  //                                 endpoint, which is authenticated by SIGNATURE
+  //                                 and has no bearer. Per ENDPOINT, not per
+  //                                 account: `stripe listen --forward-to` prints a
+  //                                 different value than a Dashboard endpoint, so
+  //                                 a local run and this worker never share one.
+  // Both Stripe secrets are OPTIONAL. A BYO worker binds neither and stays
+  // healthy - an unconfigured billing route answers 501 naming the secret it
+  // wants, so "billing is off here" never reads as "the worker is broken".
   // One-time setup:
   //   npx wrangler d1 create phorma-cloud            (paste id below)
   //   npx wrangler kv namespace create TENANTS       (paste id below)
@@ -111,6 +145,22 @@
       "account_id": "a088bd7c3fb962dfb28d003e8478dffe",
       "vars": {
         "PHORMA_MODE": "hosted",
+        // OpenRouter workspace every per-tenant runtime key is minted into
+        // (requirement 36). A `var` and not a secret: a workspace UUID authorizes
+        // nothing by itself, `OPENROUTER_PROVISIONING_KEY` is what does, and that
+        // one management key reaches every workspace on the account.
+        //
+        // DELIBERATELY UNSET while the dedicated workspace does not exist yet.
+        // `POST /api/v1/keys` defaults to the account's DEFAULT workspace when the
+        // body carries no `workspace_id`, which is where every key minted so far
+        // lives, so absent means "carry on as before" rather than a broken mint.
+        //
+        // Setting it is only HALF the move: keys already minted stay where they
+        // are, because a key's workspace is fixed at creation and no PATCH moves
+        // it. Set this var, deploy, then run
+        // `npx tsx scripts/migrate-openrouter-workspace.mjs --apply` to re-mint
+        // the existing tenants and retire their old keys.
+        "OPENROUTER_WORKSPACE_ID": "4636ceab-0c37-4243-b504-5ad8b7a899eb",
         // The studio origins, plus the telemetry admin dashboard (the
         // `phorma-admin` worker). The dashboard belongs HERE because it is a
         // browser app on a real origin calling the authenticated
@@ -127,12 +177,43 @@
         // http://localhost:7322` (the list head is the fallback for an
         // unlisted origin) and every request fails the browser CORS check
         // before the authorization gate ever runs.
-        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev",
+        //
+        // The three `tauri*` entries are ONE client - the desktop build - whose
+        // webview origin is platform dependent. Tauri v2 serves
+        // `tauri://localhost` on macOS and Linux, and
+        // `http://tauri.localhost` on Windows and Android unless
+        // `app.windows.useHttpsScheme` is set, which
+        // `backend/src-tauri/tauri.conf.json` does not set. The `https://`
+        // form is kept because that flag (and Tauri v1) produce it: admitting a
+        // scheme no build currently uses costs nothing, while omitting the one
+        // it does use locks out every install on that platform.
+        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev",
         // BETA ONLY: the Admin_API's k-anonymity floor (9.15) folds any group
         // under 5 distinct installs into `other`, which is nearly everything
         // at beta volume. Flip to "false" (or remove this line) once out of
         // beta to fold again - no other code or config changes needed.
-        "TELEMETRY_K_ANONYMITY_DISABLED": "true"
+        "TELEMETRY_K_ANONYMITY_DISABLED": "true",
+        // Origins accepted as the Clerk JWT `azp` claim, which is the Origin the
+        // token was minted from. It is replay/CSRF protection layered on top of
+        // signature verification, NOT a substitute for `ALLOWED_ORIGINS`: CORS
+        // gates the browser, this gates the token.
+        //
+        // `@clerk/backend` compares `azp` by exact string and skips the check
+        // entirely when this var is unset (or when a token carries no `azp`), so
+        // the failure mode of an incomplete list is a hard 401 on every request
+        // from the missing origin rather than a degraded one. It therefore has
+        // to name every origin that runs Clerk.js against this worker, which is
+        // the same set as `ALLOWED_ORIGINS` above: both dev servers, the desktop
+        // build's three possible webview origins, and the deployed dashboard.
+        // Keep the two lists in step - an origin authorized here but rejected by
+        // CORS, or the reverse, is a bug either way.
+        //
+        // A `var` rather than a secret: it is a list of public origins and it
+        // belongs in version control beside the CORS list it mirrors. If a
+        // `CLERK_AUTHORIZED_PARTIES` secret was ever set on this worker, delete
+        // it (`npx wrangler secret delete ... --env hosted`) so one binding owns
+        // the name. A local `wrangler dev` overrides it from `.dev.vars`.
+        "CLERK_AUTHORIZED_PARTIES": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev"
       },
       // Telemetry retention pass, daily at 03:17 UTC (the odd minute keeps it
       // off the top-of-hour crowd). HOSTED ONLY on purpose: a BYO deployment has

@@ -136,6 +136,26 @@ export class PhormaCloudService {
   readonly subscribed = computed(() => this.profile()?.status === 'active');
 
   /**
+   * The tenant has a subscription whose last payment FAILED.
+   *
+   * A distinct state from unsubscribed, because the remedy is different: this
+   * user updates a card in the Billing Portal, an unsubscribed user buys a plan
+   * (requirement 17). Every Subscribe CTA in the studio branches on this, and
+   * the gate agrees - `resolveHostedInference` answers `subscription_past_due`
+   * rather than `no_subscription`.
+   *
+   * It reads the tenant `status` off `/api/me` and NOT a billing error code:
+   * `/api/checkout` and `/api/billing-portal` answer `{ error }` with no code,
+   * so there is nothing to branch on there, and a `past_due` tenant may never
+   * have touched a billing route in this session anyway.
+   *
+   * Note `subscribed()` stays false here, which is correct - hosted runs are
+   * paused - while the tenant keeps their tier, data and runtime key
+   * (requirement 18). So a surface must not read `!subscribed()` as "no plan".
+   */
+  readonly pastDue = computed(() => this.profile()?.status === 'past_due');
+
+  /**
     * Effective nested workflow frame depth. Unknown active custom tiers match
     * the hosted starter fallback (5) until custom limits are provisioned.
     * Inactive, missing, or malformed profiles use the Free limit of 2.

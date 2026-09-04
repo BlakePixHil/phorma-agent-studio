@@ -15,10 +15,16 @@ import { ButtonModule } from 'primeng/button';
 import { AssistantChatService } from '../../core/assistant-chat.service';
 import { AssistantDialogService } from '../assistant/assistant-dialog.service';
 import { CommandPaletteService, type BuilderMode } from '../../core/command-palette.service';
-import { CreditsDialogService } from '../cloud/credits-dialog.service';
+import { BillingRefreshService } from '../../core/billing-refresh.service';
+import { BillingService, subscriptionLookupKey } from '../../core/billing.service';
+import { refusalNotice } from '../../core/billing-refusal';
+import { BillingCtaService } from '../../shared/billing/billing-cta.service';
 import { PhormaCloudService } from '../../core/phorma-cloud.service';
+import { ENTRY_PLAN_TIER } from '../../core/plan-catalog';
 import { SettingsDialogService } from '../settings/settings-dialog.service';
 import { WorkflowBuilderService } from '../../core/workflow-builder.service';
+import { CheckoutFallback } from '../../shared/billing/checkout-fallback';
+import { PastDueNotice } from '../../shared/billing/past-due-notice';
 
 /**
  * The AI command palette (Ctrl+P / Cmd+P) — a VS Code-style floating input
@@ -33,7 +39,7 @@ import { WorkflowBuilderService } from '../../core/workflow-builder.service';
 @Component({
   selector: 'app-command-palette',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ButtonModule],
+  imports: [ButtonModule, CheckoutFallback, PastDueNotice],
   templateUrl: './command-palette.html',
   styleUrl: './command-palette.scss',
 })
@@ -42,9 +48,14 @@ export class CommandPalette {
   protected readonly builder = inject(WorkflowBuilderService);
   protected readonly phormaCloud = inject(PhormaCloudService);
   private readonly settingsDialog = inject(SettingsDialogService);
-  private readonly creditsDialog = inject(CreditsDialogService);
+  private readonly billingCta = inject(BillingCtaService);
   private readonly chat = inject(AssistantChatService);
   private readonly assistantDialog = inject(AssistantDialogService);
+  protected readonly billing = inject(BillingService);
+  private readonly billingRefresh = inject(BillingRefreshService);
+
+  /** True once a checkout was started from here (arms the reopen affordance). */
+  protected readonly checkoutAttempted = signal(false);
 
   protected readonly draft = signal('');
   /** Thread id of the last recorded exchange (drives "Continue in chat"). */
@@ -54,6 +65,15 @@ export class CommandPalette {
 
   /** True when the palette should show the subscriber input. */
   protected readonly canBuild = computed(() => this.phormaCloud.subscribed());
+
+  /**
+   * The billing CTA the last failure earned, or null when it was not a hosted
+   * refusal (or was one this build has no remedy for, in which case the error
+   * text stands on its own and the generic Retry is the honest offer).
+   */
+  protected readonly billingCtaLabel = computed(
+    () => refusalNotice(this.builder.billingRemedy())?.label ?? null,
+  );
 
   /** True while a build is running (input locked, status showing). */
   protected readonly busy = computed(() => {
@@ -145,13 +165,40 @@ export class CommandPalette {
     this.phormaCloud.signIn();
   }
 
-  protected openSubscribe(): void {
+  /**
+   * Starts a real Stripe Checkout Session for the entry plan (requirement 27).
+   *
+   * The palette stays OPEN, unlike every other action here. Checkout completes in
+   * an external browser, so closing it would take the "Didn't open?" recovery
+   * link away at exactly the moment a blocked popup makes it the only way
+   * through - and a blocked popup is undetectable, so that is not a rare case to
+   * discount.
+   */
+  protected async subscribe(): Promise<void> {
+    const lookupKey = subscriptionLookupKey(ENTRY_PLAN_TIER);
+    if (!lookupKey) return;
+    this.checkoutAttempted.set(true);
+    // Only a real hand-off opens the bounded `/api/me` window (requirements 29, 30).
+    if (await this.billing.startCheckout(lookupKey)) this.billingRefresh.watch();
+  }
+
+  /** Deep-links to Settings > Cloud, where the plan cards live. */
+  protected openCloudPlans(): void {
     this.palette.close();
     this.settingsDialog.open('cloud');
   }
 
-  protected openCredits(): void {
-    this.palette.close();
-    this.creditsDialog.open();
+  /**
+   * Performs whatever the last hosted refusal earned - a top-up, a card update,
+   * the plan cards - rather than the one CTA this used to hardcode.
+   *
+   * The palette closes first for every remedy except the card update, which
+   * hands off to an external browser and wants the "Didn't open?" affordance the
+   * `past_due` notice provides for the same reason `subscribe()` does.
+   */
+  protected runBillingCta(): void {
+    const remedy = this.builder.billingRemedy();
+    if (remedy !== 'update-card') this.palette.close();
+    this.billingCta.run(remedy);
   }
 }

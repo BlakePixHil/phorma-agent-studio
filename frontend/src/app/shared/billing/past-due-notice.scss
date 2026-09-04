@@ -1,0 +1,46 @@
+// Mirrors the shape of the subscribe box the five call sites already render, on
+// the amber note accent rather than the primary one: this is something to fix,
+// not something to buy. The literal fallback matters - `color-mix` with an
+// undefined custom property is invalid at computed-value time, and the tone
+// would silently collapse to a `currentColor` hairline.
+.phorma-past-due {
+  --phorma-past-due-accent: var(--phorma-accent-amber, #f59e0b);
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--phorma-past-due-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--phorma-past-due-accent) 9%, transparent);
+}
+
+.phorma-past-due__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--p-text-color);
+
+  > i {
+    color: var(--phorma-past-due-accent);
+  }
+}
+
+.phorma-past-due__body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
+}
+
+// A row rather than a bare button so a second action can join it later without
+// the button stretching to the flex column's full width.
+.phorma-past-due__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "stripe": {
+      "url": "https://mcp.stripe.com",
+      "headers": {
+        "Authorization": "Bearer ${STRIPE_MCP_KEY}"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "get_stripe_account_info",
+        "search_stripe_documentation",
+        "stripe_api_search",
+        "stripe_api_details",
+        "stripe_api_read",
+        "stripe_implementation_planner",
+        "list_metrics",
+        "explain_metric"
+      ],
+      "disabledTools": ["send_stripe_mcp_feedback"]
+    }
+  }
+}

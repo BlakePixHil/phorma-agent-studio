@@ -48,7 +48,9 @@ import {
   OPENROUTER_SLUG_PREFIX,
   TenantStore,
   decryptString,
+  resolveHostedInference,
   tierLimits,
+  type HostedInferenceRefusalCode,
   type TenantEnv,
   type TenantRecord,
 } from './tenants';
@@ -898,6 +900,12 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
               type: 'run-failed',
               runId: 'pending',
               error: result.error,
+              // The entitlement refusal code, when this rejection came from the
+              // hosted gate (requirement 19). This socket is the ONLY channel a
+              // monitor-initiated run has, so dropping it here would mean a
+              // deployed run's "out of credits" reached the studio as prose only
+              // while the same refusal over `POST /trigger` carried a code.
+              code: result.code,
               at: Date.now(),
             });
           }
@@ -1140,7 +1148,22 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     input: string,
     resumeRunId?: string,
     source: RunSource = 'manual',
-  ): Promise<{ ok: boolean; runId?: string; error?: string; status?: number }> {
+  ): Promise<{
+    ok: boolean;
+    runId?: string;
+    error?: string;
+    status?: number;
+    /**
+     * The entitlement refusal code, when the rejection came from the hosted gate
+     * (requirement 19). Present only for that family of failures - a missing spec
+     * or an already-running workflow is a state problem, not a billing one - and
+     * carried into the HTTP body of `POST /trigger` so the studio can pick the
+     * right call to action without matching prose. `publicTriggerError` still
+     * strips the operator-facing MESSAGE from a portal turn; the code is not part
+     * of that response at all.
+     */
+    code?: HostedInferenceRefusalCode;
+  }> {
     const spec = this.state.spec;
     if (!spec) return { ok: false, error: 'No workflow uploaded yet.', status: 409 };
     if (this.handle) return { ok: false, error: 'A run is already in progress.', status: 409 };
@@ -1149,43 +1172,26 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
     // Hosted mode: resolve the tenant, gate on subscription + quota, and
     // resolve the credit-limited OpenRouter runtime key.
+    //
+    // Delegated to `resolveHostedInference` rather than repeating the checks,
+    // which is what this block used to do. The two copies were kept in step by
+    // comment only, and tasks 6.2 and 6.3 are exactly the kind of change that
+    // breaks that: a `past_due` refusal and a grant-raised ceiling landing in one
+    // copy would have meant a tenant who bought a top-up could spend it on a local
+    // run and not on a deployed one, with no type error anywhere. Same reads as
+    // before (tenant, quota, runtime key), one implementation.
     let tenant: TenantRecord | null = null;
     let tenantKey: string | null = null;
     const store = new TenantStore(this.env);
     if (this.hosted) {
       const ownerId = this.state.ownerId;
       if (!ownerId) return { ok: false, error: 'Workflow has no owner. Push it again.', status: 409 };
-      tenant = await store.getTenant(ownerId);
-      if (!tenant || tenant.status !== 'active') {
-        return {
-          ok: false,
-          error: 'No active Phorma Cloud subscription. Visit Settings → Cloud to subscribe.',
-          status: 402,
-        };
+      const gate = await resolveHostedInference(store, ownerId);
+      if ('status' in gate) {
+        return { ok: false, error: gate.error, status: gate.status, code: gate.code };
       }
-      const quota = await store.getQuota(tenant.id, tenant.tier);
-      if (quota.runsUsed >= quota.limits.monthlyRuns) {
-        return {
-          ok: false,
-          error: `Monthly run limit reached (${quota.limits.monthlyRuns}). Resets next month or upgrade your plan.`,
-          status: 429,
-        };
-      }
-      if (quota.costUsdUsed >= quota.limits.monthlyCostUsd) {
-        return {
-          ok: false,
-          error: 'Monthly credits exhausted. Resets next month or upgrade your plan.',
-          status: 402,
-        };
-      }
-      tenantKey = await store.runtimeKey(tenant);
-      if (!tenantKey) {
-        return {
-          ok: false,
-          error: 'Your Phorma Cloud account has no runtime key yet. Contact support.',
-          status: 402,
-        };
-      }
+      tenant = gate.tenant;
+      tenantKey = gate.key;
     }
 
     this.runCounter += 1;
@@ -1455,6 +1461,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         void store
           .recordRun({
             tenantId: tenant.id,
+            // The tier the gate resolved at the top of this run, which is what
+            // decides the monthly allowance this cost is measured against before
+            // any purchased grant is drawn on (requirement 24).
+            tier: tenant.tier,
             runId,
             workflowId: spec.id ?? 'default',
             costUsd: runUsage.costUsd,

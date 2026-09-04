@@ -55,7 +55,13 @@
                   "maximumError": "26kB"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/clerk.ts",
+                  "with": "src/environments/clerk.prod.ts"
+                }
+              ]
             },
             "development": {
               "optimization": false,

@@ -18,6 +18,7 @@
  * layer actually holds the secret.
  */
 
+import type { RunFailureCode } from './events.js';
 import type { ModelProviderId } from './types.js';
 
 export const API_KEY_PLACEHOLDER = '{{API_KEY}}';
@@ -32,10 +33,43 @@ export class ModelRequestError extends Error {
     message: string,
     /** HTTP status, when the failure was an HTTP response (absent = network). */
     readonly status?: number,
+    /**
+     * Stable machine token from the responder, when it issued one - see
+     * {@link RunFailureCode}. Same motivation as `status` one line up: a
+     * consumer classifies the failure without parsing the message. This is what
+     * carries a hosted entitlement refusal (`credits_exhausted` and friends)
+     * from the `/api/infer` body out to the terminal `run-failed` event.
+     */
+    readonly code?: RunFailureCode,
   ) {
     super(message);
     this.name = 'ModelRequestError';
   }
+}
+
+/**
+ * Pulls the {@link RunFailureCode} off a thrown error, when it carries one, so
+ * the engine's failure events can forward it (`node-failed`, `run-failed`).
+ *
+ * Total: anything else - including a non-Error throw - yields `undefined`, never
+ * an empty string, so the field is absent once the event is serialized and
+ * `event.code ?? fallback` is enough for a consumer to reach its prose fallback
+ * (requirement 20). A present-but-empty token would read as "coded" and skip it.
+ *
+ * Narrowed to {@link ModelRequestError} ON PURPOSE, rather than duck-typing any
+ * error with a string `code`. Node system errors and undici's `fetch` failures
+ * already populate `code` (`ECONNRESET`, `ENOTFOUND`, `UND_ERR_*`), and a
+ * `DataFetcher` running under Node can throw one straight through, so a
+ * duck-typed reader would stamp a socket error into a field documented as a
+ * stable entitlement token. Consumers would still behave (an unrecognised token
+ * falls through to the fallback), but the run record and trace would then carry
+ * a token that means nothing, and the field would stop being trustworthy for the
+ * next thing that reads it. `DataTransportError` deliberately spells its own
+ * discriminant `kind` for the same reason.
+ */
+export function failureCodeOf(error: unknown): RunFailureCode | undefined {
+  if (!(error instanceof ModelRequestError)) return undefined;
+  return error.code !== undefined && error.code.length > 0 ? error.code : undefined;
 }
 
 /**

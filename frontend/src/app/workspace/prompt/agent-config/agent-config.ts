@@ -6,9 +6,14 @@ import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 
+import { BillingRefreshService } from '../../../core/billing-refresh.service';
+import { BillingService, subscriptionLookupKey } from '../../../core/billing.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { PanelRegistryService } from '../../../core/panel-registry.service';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
+import { ENTRY_PLAN_TIER } from '../../../core/plan-catalog';
+import { CheckoutFallback } from '../../../shared/billing/checkout-fallback';
+import { PastDueNotice } from '../../../shared/billing/past-due-notice';
 import { SettingsService } from '../../../core/settings.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { SkillEditorDialogService } from '../../skills/skill-editor-dialog.service';
@@ -62,6 +67,8 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
     InputNumberModule,
     InputTextModule,
     SelectModule,
+    CheckoutFallback,
+    PastDueNotice,
   ],
   templateUrl: './agent-config.html',
   styleUrl: './agent-config.scss',
@@ -75,6 +82,15 @@ export class AgentConfig {
   private readonly skills = inject(SkillsService);
   private readonly skillEditor = inject(SkillEditorDialogService);
   private readonly panels = inject(PanelRegistryService);
+  protected readonly billing = inject(BillingService);
+  private readonly billingRefresh = inject(BillingRefreshService);
+
+  /**
+   * True once a checkout was started from THIS surface, which arms the
+   * "Didn't open?" affordance. Both panel instances share the DOM, so each keeps
+   * its own flag and only the one the user clicked lights up.
+   */
+  protected readonly checkoutAttempted = signal(false);
 
   /** The agent being configured. */
   readonly agent = input.required<AgentNode>();
@@ -121,6 +137,15 @@ export class AgentConfig {
   protected readonly needsPhormaCloudSubscription = computed(
     () => this.agent().data.provider === 'phorma-cloud' && !this.phormaCloud.subscribed(),
   );
+
+  /**
+   * True when this agent is blocked because a PAYMENT failed rather than because
+   * there is no plan (requirement 17). The template swaps the Subscribe CTA for
+   * the update-card notice on this, since selling a second subscription to a
+   * tenant who already has one is the wrong remedy and, in Stripe, a second
+   * subscription rather than a fixed one.
+   */
+  protected readonly phormaCloudPastDue = computed(() => this.phormaCloud.pastDue());
 
   protected readonly inheritsDefault = computed(() => !this.agent().data.provider);
 
@@ -198,7 +223,23 @@ export class AgentConfig {
     });
   }
 
-  protected openSubscribe(): void {
+  /**
+   * Starts a real Stripe Checkout Session for the entry plan (requirement 27).
+   *
+   * This panel is a narrow column with no room for a plan comparison, so it buys
+   * {@link ENTRY_PLAN_TIER} and offers "See all plans" beside it for anyone who
+   * wants to choose. Stripe's page names the plan and the price before charging.
+   */
+  protected async subscribe(): Promise<void> {
+    const lookupKey = subscriptionLookupKey(ENTRY_PLAN_TIER);
+    if (!lookupKey) return;
+    this.checkoutAttempted.set(true);
+    // Only a real hand-off opens the bounded `/api/me` window (requirements 29, 30).
+    if (await this.billing.startCheckout(lookupKey)) this.billingRefresh.watch();
+  }
+
+  /** Deep-links to Settings > Cloud, where the plan cards live. */
+  protected openCloudPlans(): void {
     this.settingsDialog.open('cloud');
   }
 

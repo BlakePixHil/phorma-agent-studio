@@ -556,7 +556,12 @@ property('rejects any body that is not a plain object', () =>
       fc.constantFrom(null, undefined, true, false, 0, 1, -1, '', 'null', '{}'),
       fc.array(fc.integer(), { maxLength: 3 }),
       fc.double(),
-      fc.date().map(date => date.toISOString()),
+      // `noInvalidDate` because `fc.date()` generates an Invalid Date by default
+      // and `toISOString()` THROWS on one (`RangeError: Invalid time value`).
+      // That surfaced as a rare, seed-dependent failure of this property with no
+      // counterexample attached - the generator crashed before `normalizeRollup`
+      // was ever called, so the flake said nothing about the code under test.
+      fc.date({ noInvalidDate: true }).map(date => date.toISOString()),
     ),
     body => normalizeRollup(body, Date.now()) === null,
   ),

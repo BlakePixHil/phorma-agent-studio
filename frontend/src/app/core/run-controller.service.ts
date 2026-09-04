@@ -22,6 +22,7 @@ import {
 } from '@phorma/engine';
 
 import { AgentStreamService } from './agent-stream.service';
+import { refusalNotice, remedyForRunFailure } from './billing-refusal';
 import { ConnectionStoreService } from './connection-store.service';
 import {
   messageOf,
@@ -51,20 +52,11 @@ import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowStateService } from './workflow-state.service';
 import { WorkflowService } from './workflow.service';
+import { BillingCtaService } from '../shared/billing/billing-cta.service';
 import { ToastService } from '../shared/toast/toast.service';
-import { CreditsDialogService } from '../workspace/cloud/credits-dialog.service';
 import { PhormaCloudService } from './phorma-cloud.service';
 import { describeRunEvent, traceFromRunLog } from './run-trace';
 import { portBaseId, type WorkflowGraph, type WorkflowSpec } from './workflow.model';
-
-/**
- * Matches the "Monthly credits exhausted" 402 surfaced by the Phorma Cloud
- * proxy (`resolveHostedInference` in `cloud/src/tenants.ts`), wrapped by
- * `PhormaCloudModelClient` as `Phorma Cloud request failed (402): ...`. Used
- * to add a "Buy credits" CTA to the run-failed toast at the exact moment a
- * user hits the wall, rather than making them dig through Settings.
- */
-const CREDITS_EXHAUSTED_PATTERN = /credits exhausted/i;
 
 /** Live usage totals for the current run (see {@link RunControllerService.runUsage}). */
 export interface RunUsageTotals {
@@ -174,7 +166,10 @@ export class RunControllerService {
   private readonly toolHost = inject(ToolHostService);
   private readonly toast = inject(ToastService);
   private readonly panels = inject(PanelRegistryService);
-  private readonly creditsDialog = inject(CreditsDialogService);
+  // Every billing CTA a run failure can raise. Safe DI direction: it reaches
+  // only signal-holder dialog services, the `BillingService` leaf, and
+  // `PhormaCloudService`, which this service already injects one line down.
+  private readonly billingCta = inject(BillingCtaService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
   private readonly pricing = inject(ModelPricingService);
@@ -1094,16 +1089,13 @@ export class RunControllerService {
         this.telemetry.recordError('engine');
         this.terminal.setPhase('failed');
         this.console('problems', 'error', event.error);
-        // Catch the exact moment a Phorma Cloud tenant runs out of credits —
-        // surface a "Buy credits" CTA right on a toast instead of making them
-        // dig through Settings to find the top-up option. Other failures keep
-        // the existing console/trace-only behavior (no generic toast).
-        if (CREDITS_EXHAUSTED_PATTERN.test(event.error)) {
-          this.toast.error('Monthly credits exhausted', 'Resets next month, or top up now.', {
-            label: 'Buy credits',
-            onClick: () => this.creditsDialog.open(),
-          });
-        }
+        // Catch the exact moment a Phorma Cloud tenant hits an entitlement wall
+        // and put the remedy on a toast, instead of making them dig through
+        // Settings for whichever one applies. The code decides which
+        // (requirement 19); a worker too old to send one falls back to the prose
+        // this handler always matched (requirement 20). Other failures keep the
+        // existing console/trace-only behaviour, with no generic toast.
+        this.raiseBillingToast(event.error, event.code);
         this.finishRun();
         break;
 
@@ -1116,6 +1108,32 @@ export class RunControllerService {
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
+
+  /**
+   * Raises the billing toast a hosted refusal earns, if any.
+   *
+   * Only `run-failed` calls this, and that is deliberate. `node-failed` carries
+   * the same code, but a propagating failure emits one `node-failed` per ancestor
+   * frame, so a nested workflow that dies on an entitlement refusal would stack
+   * a toast per frame for a single wall. The terminal event fires exactly once
+   * per run, which is also the honest granularity: the remedy is for the run, not
+   * for a node.
+   *
+   * A remedy with no label (an internal fault the user cannot buy their way out
+   * of) still shows its notice, just without a button.
+   */
+  private raiseBillingToast(error: string, code?: string): void {
+    const remedy = remedyForRunFailure(error, code);
+    const notice = refusalNotice(remedy);
+    if (!notice) return;
+    this.toast.error(
+      notice.summary,
+      notice.detail,
+      notice.label === null
+        ? undefined
+        : { label: notice.label, onClick: () => this.billingCta.run(remedy) },
+    );
+  }
 
   /** Streaming console buffers: one console line per node per flush. */
   private readonly streamBuffers = new Map<string, string>();
