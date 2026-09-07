@@ -1,5 +1,45 @@
 # Desktop sign-in handoff - tasks
 
+## Status: LEAN V1 SHIPPED in 0.2.0-beta.18 (2026-09-07)
+
+Desktop sign-in works. The owner chose a lean cut over the full design to get it shipped, so read
+this list as "what shipped" plus "what the lean cut deliberately dropped" rather than as a plan.
+
+**Shipped:** the device-code browser handoff end to end - `cloud/src/device-auth.ts`,
+`cloud/src/device-auth-routes.ts`, the `verifyBearer` branch with `AuthContext.kind`, the
+credential-kind gate on `claim` and on the telemetry admin surface, `phorma-auth:` in the Rust
+keychain namespace plus `phorma_auth_token`, `DesktopAuthService`, the `sessionToken()` seam, the
+`signedIn`/`email` unions, and the Settings pending state. Covered by
+`cloud/test/auth-device.test.mjs` (~110 checks, two fast-check properties) and the rewritten
+`frontend/src/app/core/phorma-cloud.service.spec.ts`.
+
+**Deliberately dropped, and the consequences:**
+
+- **No refresh token and no `device_credentials` table.** One 30-day HMAC-signed token instead of a
+  short access token plus a revocable refresh token. So **a credential cannot be revoked before it
+  expires**: `signOut()` clears the keychain copy on that machine, and rotating
+  `PHORMA_AUTH_SECRET` is the only global kill switch (it signs every install out at once, which is
+  why `PHORMA_AUTH_SECRET_PREVIOUS` exists). Upgrading is tasks 1.1, 1.4 and 3.4 below.
+- **The token reaches the webview.** `phorma_auth_token` returns it, because the webview has to send
+  it as a bearer on `/api/me`, `/api/infer` and the billing routes. The keychain is doing at-rest
+  protection, not in-memory isolation. Closing that means proxying every one of those calls through
+  Rust, which is much larger than the credential is worth.
+- **`redeem` is one-shot by delete-then-mint, not by compare-and-swap.** KV has no CAS, so two
+  simultaneous redemptions can both mint. Both belong to the same verified `sub`, so it is a
+  duplicate credential for the legitimate user rather than a cross-tenant leak. Closing it needs the
+  D1 record above.
+- **`/api/me` gained no identity fields.** The email travels once through the handoff from the
+  sign-in page instead (display only, sanitized, never used for identity), because a brand new
+  account has no tenant row and the alternative was a Clerk Backend API call on every `/api/me`.
+  Task 3.7 is therefore NOT done and is no longer needed unless a display name is wanted.
+
+Remaining operator item: **task 0.1 is still open** - the Clerk instance's `home_url`,
+`after_sign_in_url` and `after_sign_up_url` should point at
+`https://cloud.phorma-labs.com/signed-in`, which now exists. The handoff does not depend on it (the
+sign-in page passes its own URL explicitly), but the Account Portal's own "back to app" links do.
+
+---
+
 Order matters: the worker can be built and tested with no studio changes at all, and the studio
 cannot be tested until the worker answers. Tasks 1-4 are shippable on their own and change nothing
 a user sees.
