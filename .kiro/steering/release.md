@@ -8,6 +8,12 @@ description: Release and distribution procedure for Phorma Agent Studio - versio
 
 One version bump, one push. CI builds, signs, publishes the GitHub Release, and syncs R2.
 
+> **Cutting an actual release? Read `.github/skills/release-playbook/SKILL.md` first and work it
+> top to bottom.** This file is the summary and the operator checklists; the playbook is the ordered,
+> gated procedure with an expected value at every step, and `references/failure-modes.md` beside it
+> catalogues every release failure this repo has had. Agents have repeatedly missed steps by working
+> from this summary alone.
+
 ## Procedure
 
 ```powershell

@@ -41,6 +41,7 @@ those files. `.github/skills/` holds Copilot-oriented packs.
 | `.github/skills/security-review/` | Data-flow security review, secrets, injection, access control |
 | `.github/skills/refactor/` | Surgical behaviour-preserving refactors |
 | `.github/skills/javascript-typescript-jest/` | JS/TS test structure and mocking strategy |
+| `.github/skills/release-playbook/` | **Cutting a release.** The ordered, gated procedure plus `references/failure-modes.md`. Read it BEFORE bumping a version or deploying the hosted worker - it is a gate, not a reference |
 | `.github/skills/harness-engineering/` | Turning repeated agent mistakes into durable repo instructions |
 | `.github/skills/conventional-commit/` | Commit message format |
 | `.github/skills/create-implementation-plan/` | Plan documents (prefer `.kiro/specs/` for spec-driven work) |
