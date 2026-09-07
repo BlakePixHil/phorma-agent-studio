@@ -13,16 +13,22 @@
  *  - `/api/*` control-plane routes (profile/quota, admin provisioning).
  *  - CORS is scoped via ALLOWED_ORIGINS instead of `*`.
  *
- * Four route groups are deliberately public and matched before any auth layer:
+ * Five route groups are deliberately public and matched before any auth layer:
  * `/status.*` (service health for the website), `/update|/download|/releases.json`
- * (installers and the updater manifest), `/p/{slug}` (published portals), and
- * `/billing/return` (where Stripe sends the browser back after checkout).
+ * (installers and the updater manifest), `/p/{slug}` (published portals),
+ * `/billing/return` (where Stripe sends the browser back after checkout), and
+ * `/signed-in` (where Clerk sends the browser after sign-in).
  */
 
 import { routeAgentRequest } from 'agents';
 
 import { verifyBearer, verifyRequest, isHosted } from './auth';
-import { handleApiRequest, handleBillingReturnRequest, type ApiEnv } from './api';
+import {
+  handleApiRequest,
+  handleBillingReturnRequest,
+  handleSignedInRequest,
+  type ApiEnv,
+} from './api';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
@@ -101,6 +107,15 @@ export default {
     // billing state: the studio learns the outcome by polling `/api/me`.
     const billingReturn = handleBillingReturnRequest(request);
     if (billingReturn) return billingReturn;
+
+    // `GET /signed-in` - where the Clerk instance sends a browser after sign-in
+    // and sign-up. Public for the same reasons as `/billing/return` above: a
+    // top-level navigation performed by the identity provider, no bearer, no XHR,
+    // so no CORS. It exists because a Clerk instance must name a post-sign-in URL
+    // and ours named a hostname with no DNS record, which ended every social
+    // sign-in on a browser error page.
+    const signedIn = handleSignedInRequest(request);
+    if (signedIn) return signedIn;
 
     // Control-plane routes (hosted mode).
     const apiResponse = await handleApiRequest(request, env as ApiEnv, cors, ctx);

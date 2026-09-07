@@ -194,6 +194,23 @@ async function handleConnectionSecretRequest(
 export const BILLING_RETURN_PATH = '/billing/return';
 
 /**
+ * Path of {@link handleSignedInRequest} - where the Clerk instance sends a
+ * browser after sign-in and sign-up.
+ *
+ * It exists because a Clerk instance MUST name a post-sign-in URL and ours named
+ * `https://app.phorma-labs.com`, a host with no DNS record at all. Every social
+ * sign-in therefore finished on a browser error page. There is no web app to send
+ * anyone to and creating that hostname would mean inventing one, so the honest
+ * target is a page on the worker that already serves the studio - no new DNS
+ * record, no new certificate, nothing to keep alive separately.
+ *
+ * This is also the page the desktop sign-in handoff completes on
+ * (`.kiro/specs/desktop-signin-handoff/`), so it is a down payment on that work
+ * rather than a placeholder to throw away.
+ */
+export const SIGNED_IN_PATH = '/signed-in';
+
+/**
  * A Stripe Customer id. Bounds the SHAPE only - Stripe documents object ids as
  * opaque - so the job is to refuse prose or an empty string before it is bound
  * into a Checkout Session, not to model Stripe's id alphabet.
@@ -482,6 +499,111 @@ function billingReturnPage(cancelled: boolean): string {
   <div class="mark"></div>
   <h1>${title}</h1>
   <p>${body}</p>
+</main>
+</body>
+</html>
+`;
+}
+
+/**
+ * `GET /signed-in` - where the Clerk instance sends a browser after sign-in.
+ *
+ * PUBLIC and unauthenticated for the same reasons `/billing/return` is: it is a
+ * top-level navigation the identity provider performs, there is no bearer to
+ * present, no XHR happens, and so no CORS headers are needed. Matched in
+ * `index.ts` with the other public routes.
+ *
+ * It reads NOTHING from the request and conveys NO account state. That is
+ * deliberate on both counts. Clerk redirects here with its own query parameters,
+ * and a page that echoed any of them back into markup on an unauthenticated route
+ * would be a reflected-injection surface for no benefit. And the page cannot
+ * honestly claim anything about the account: it holds no session of its own, the
+ * one that matters lives in this browser's cookies for `clerk.phorma-labs.com`,
+ * and asserting "you are signed in" without checking would be a guess.
+ *
+ * Self-contained by design - one inline stylesheet, no fonts, no images, no
+ * script - so it renders identically offline, in a webview and in a hardened
+ * browser. The CSP is the enforcement of that claim, not decoration.
+ *
+ * Returns null when the path is not this one, matching the other route helpers.
+ */
+export function handleSignedInRequest(request: Request): Response | null {
+  const url = new URL(request.url);
+  if (url.pathname !== SIGNED_IN_PATH) return null;
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    // Answered rather than passed through: falling through would land in the
+    // agent router and report a confusing 404 for a path that does exist.
+    return new Response('Method not allowed.', {
+      status: 405,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' },
+    });
+  }
+
+  return new Response(request.method === 'HEAD' ? null : signedInPage(), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy':
+        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+    },
+  });
+}
+
+/**
+ * The markup. No interpolation of any kind, which is what lets the CSP above be
+ * this strict and what keeps the route free of any reflected input.
+ *
+ * The second paragraph states that the desktop app will still read as signed out.
+ * It has to: that is true today, and it is the same sentence
+ * `PhormaCloudService.openAccountPortal` puts in its toast. If one of the two is
+ * ever softened without the other, the product tells the user two different
+ * stories about the same moment - so they change together or not at all.
+ */
+function signedInPage(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>You're signed in - Phorma Agent Studio</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f1115;
+    color: #e7e9ee;
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  main { max-width: 27rem; text-align: center; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.75rem; }
+  p { margin: 0; color: #a8aebb; }
+  p + p { margin-top: 0.75rem; }
+  .mark {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: 0 auto 1.25rem;
+    border-radius: 50%;
+    background: #1f6f4a;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark"></div>
+  <h1>You're signed in</h1>
+  <p>Your Phorma account is ready. You can close this tab.</p>
+  <p>Linking the desktop app to your account is not available yet, so Phorma Agent
+  Studio will still show you as signed out when you switch back to it.</p>
 </main>
 </body>
 </html>

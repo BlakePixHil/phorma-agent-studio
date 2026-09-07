@@ -65,7 +65,9 @@ registerHooks({
   },
 });
 
-const { handleApiRequest, handleBillingReturnRequest } = await import('../src/api.ts');
+const { handleApiRequest, handleBillingReturnRequest, handleSignedInRequest } = await import(
+  '../src/api.ts'
+);
 const { TenantStore } = await import('../src/tenants.ts');
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -304,6 +306,53 @@ console.log('\nGET /billing/return - the page a browser lands on');
   check('a POST is 405 rather than a confusing 404', posted.status === 405 && posted.headers.get('Allow') === 'GET, HEAD', `${posted.status} ${posted.headers.get('Allow')}`);
   check('another path is not this route', handleBillingReturnRequest(new Request(`${ORIGIN}/billing`)) === null);
   check('the page is not an /api/ route', (await handleApiRequest(new Request(RETURN_URL), hostedEnv(), CORS, CTX)) === null);
+}
+
+// ══ 1b. GET /signed-in - the Clerk post-sign-in landing page ════════════════
+//
+// Not a billing route, but it is the same SHAPE of route - a public top-level
+// navigation performed by a third party, no bearer, no CORS, static markup - and
+// this suite already owns the harness that proves those properties. A file of its
+// own would pay the Miniflare bundle cost again to assert the same six things.
+//
+// It exists because the Clerk instance's `after_sign_in_url` was
+// `https://app.phorma-labs.com`, a host with NO DNS record, so every social
+// sign-in finished on a browser error page.
+
+console.log('\nGET /signed-in - where Clerk sends the browser after sign-in');
+{
+  const SIGNED_IN_URL = `${ORIGIN}/signed-in`;
+  const page = handleSignedInRequest(new Request(SIGNED_IN_URL));
+  const html = await page.text();
+
+  check('answers 200 with HTML', page.status === 200 && /text\/html/.test(page.headers.get('Content-Type')), `${page.status} ${page.headers.get('Content-Type')}`);
+  check('carries NO CORS header', page.headers.get('Access-Control-Allow-Origin') === null, String(page.headers.get('Access-Control-Allow-Origin')));
+  check('declares a no-load CSP', /default-src 'none'/.test(page.headers.get('Content-Security-Policy') ?? ''), String(page.headers.get('Content-Security-Policy')));
+  check('is not cached', page.headers.get('Cache-Control') === 'no-store', String(page.headers.get('Cache-Control')));
+  check('carries no script', !/<script/i.test(html), html.slice(0, 120));
+  check('references no external asset', !/(src|href)\s*=/i.test(html), html.slice(0, 200));
+  check('tells the user to close the tab', /close this tab/i.test(html), html);
+
+  // The honesty assertion. The studio's own toast says the same thing, and the two
+  // must not drift into telling the user different stories about one moment.
+  check('says the desktop app will still read as signed out', /not available yet/i.test(html), html);
+
+  // It reads nothing from the request at all, so there is no reflection surface -
+  // which is what lets the CSP above be this strict. Clerk appends its own query
+  // parameters to this redirect, so this is not a hypothetical.
+  const injected = await handleSignedInRequest(
+    new Request(`${SIGNED_IN_URL}?x=${encodeURIComponent('<script>alert(1)</script>')}&__clerk_status=verified`),
+  ).text();
+  check('reflects nothing from the query string', injected === html, injected.slice(0, 200));
+
+  // A page with no session of its own cannot assert one, and must not imply it.
+  check('claims no account state it cannot know', !/\b(starter|pro|team|active|credits|welcome back)\b/i.test(html), html);
+
+  const posted = handleSignedInRequest(new Request(SIGNED_IN_URL, { method: 'POST' }));
+  check('a POST is 405 rather than a confusing 404', posted.status === 405 && posted.headers.get('Allow') === 'GET, HEAD', `${posted.status} ${posted.headers.get('Allow')}`);
+  check('HEAD is answered with no body', handleSignedInRequest(new Request(SIGNED_IN_URL, { method: 'HEAD' })).status === 200);
+  check('another path is not this route', handleSignedInRequest(new Request(`${ORIGIN}/signed`)) === null);
+  check('the page is not an /api/ route', (await handleApiRequest(new Request(SIGNED_IN_URL), hostedEnv(), CORS, CTX)) === null);
 }
 
 // ══ 2. Placement: the gates (task 4.4, requirement 32) ══════════════════════
