@@ -22,6 +22,7 @@ import { CloudService } from '../../core/cloud.service';
 import { WorkflowVersionsService } from '../../core/workflow-versions.service';
 import { SettingsService } from '../../core/settings.service';
 import { CloudDialogService } from '../../workspace/cloud/cloud-dialog.service';
+import { PhormaCloudService } from '../../core/phorma-cloud.service';
 import { SettingsDialogService } from '../../workspace/settings/settings-dialog.service';
 import { CommandPaletteService } from '../../core/command-palette.service';
 import { UpdateService } from '../../core/update.service';
@@ -55,6 +56,9 @@ export class Toolbar {
   protected readonly versions = inject(WorkflowVersionsService);
   protected readonly portal = inject(PortalService);
   protected readonly clerk = inject(ClerkService);
+  // Sign-in goes through here, not through `clerk` directly: the redirect targets
+  // have to be pinned per call. See `openSignIn` below.
+  private readonly phormaCloud = inject(PhormaCloudService);
   private readonly cloudDialog = inject(CloudDialogService);
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly commandPalette = inject(CommandPaletteService);
@@ -95,9 +99,15 @@ export class Toolbar {
     void this.updates.updateNow();
   }
 
-  /** Opens Clerk's modal sign-in flow. */
+  /**
+   * Opens Clerk's modal sign-in flow through `PhormaCloudService`, NOT through
+   * `ClerkService` directly. That service pins the redirect targets to this app's
+   * own URL, which the desktop build cannot sign in without - see the comment on
+   * `PhormaCloudService.signIn`. Calling `clerk.openSignIn()` here as well would
+   * be a second, unpinned entry point into the same flow.
+   */
   protected openSignIn(): void {
-    this.clerk.openSignIn();
+    this.phormaCloud.signIn();
   }
 
   /** Opens Clerk's account (user profile) window. */

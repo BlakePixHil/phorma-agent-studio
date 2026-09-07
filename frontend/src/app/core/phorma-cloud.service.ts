@@ -232,9 +232,34 @@ export class PhormaCloudService {
     });
   }
 
-  /** Opens Clerk's modal sign-in flow. */
+  /**
+   * Opens Clerk's modal sign-in flow, PINNED to this app's own URL.
+   *
+   * The redirect targets are passed explicitly rather than left to the Clerk
+   * instance defaults, and that is what makes sign-in work in the desktop build
+   * at all. A production Clerk instance carries `after_sign_in_url` and
+   * `home_url` from its Dashboard configuration, ours point at
+   * `https://app.phorma-labs.com`, and that host does not resolve. Email code
+   * sign-in completes inside the modal and never notices, but any flow that
+   * leaves the page and comes back - a social provider above all - hands the user
+   * to a dead hostname and simply never returns to the app. That is invisible
+   * from here: the studio sees no error, only a sign-in that never completes.
+   *
+   * `window.location.href` rather than a literal, because the origin differs by
+   * platform and by how the app is being run: `http://tauri.localhost` on Windows
+   * and Android, `tauri://localhost` on macOS and Linux, and
+   * `http://localhost:7322` under `ng serve`. All three desktop forms are
+   * registered as redirect URLs on the instance; a hardcoded value here would be
+   * wrong on two platforms out of three.
+   *
+   * `forceRedirectUrl` rather than `fallbackRedirectUrl`: the fallback only
+   * applies when Clerk has no opinion of its own, and here the instance DOES have
+   * one and it is broken, so it has to be overridden outright. `SignInProps` in
+   * `@clerk/types` 4.5.0 carries exactly these two and no sign-up variant, so this
+   * is the whole surface available.
+   */
   signIn(): void {
-    this.clerk.openSignIn();
+    this.clerk.openSignIn({ forceRedirectUrl: window.location.href });
   }
 
   /**
