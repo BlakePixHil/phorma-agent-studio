@@ -221,6 +221,57 @@ describe('PlanCards', () => {
     expect(watch).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * The three actions must share one baseline. The cards are equal-height grid
+   * items whose blurbs wrap to different numbers of lines, so a button that is
+   * laid out directly under its own blurb lands at a different y in each card -
+   * which is exactly what shipped (measured spread: 18px, one blurb line).
+   *
+   * Two things make this a real test rather than a tautology. The container width
+   * is pinned so auto-fit yields ONE row of three (different rows have different
+   * tops by design, and asserting across them would be meaningless), and the
+   * unequal content is FORCED with a min-height rather than left to text
+   * wrapping, because karma's font metrics are not the studio's and a run where
+   * every blurb happened to wrap identically would pass with the fix reverted.
+   */
+  it('keeps every card action on one baseline when the cards differ in content height', () => {
+    const cloud = cloudStub({ profile: profile({ provisioned: false, tier: null, status: null }) });
+    const { fixture } = mount(PlanCards, cloud);
+    const host = fixture.nativeElement as HTMLElement;
+
+    const section = host.querySelector('.phorma-plans') as HTMLElement;
+    // The real settings content pane is ~630px, which is where `auto-fit` still
+    // fits three 150px columns.
+    section.style.width = '630px';
+
+    const cards = Array.from(host.querySelectorAll('.phorma-plans__card')) as HTMLElement[];
+    const blurb = (card: HTMLElement) => card.querySelector('.phorma-plans__blurb') as HTMLElement;
+    // 18px is one wrapped line of the 12px/1.5 blurb - the studio's actual case.
+    blurb(cards[2]).style.minHeight = `${blurb(cards[2]).getBoundingClientRect().height + 18}px`;
+
+    const tops = cards.map(
+      (card) => (card.querySelector('.phorma-plans__btn') as HTMLElement).getBoundingClientRect().top,
+    );
+    const cardTops = cards.map((card) => card.getBoundingClientRect().top);
+    const cardHeights = cards.map((card) => card.getBoundingClientRect().height);
+    const blurbHeights = cards.map((card) => blurb(card).getBoundingClientRect().height);
+
+    // Preconditions: one stretched grid row, and content that does differ.
+    expect(Math.max(...cardTops) - Math.min(...cardTops))
+      .withContext('the three cards must share a grid row for the claim to mean anything')
+      .toBeLessThanOrEqual(1);
+    expect(Math.max(...cardHeights) - Math.min(...cardHeights))
+      .withContext('grid items stretch, so the cards are equal height')
+      .toBeLessThanOrEqual(1);
+    expect(Math.max(...blurbHeights) - Math.min(...blurbHeights))
+      .withContext('without unequal content there is nothing to misalign')
+      .toBeGreaterThan(1);
+
+    expect(Math.max(...tops) - Math.min(...tops))
+      .withContext(`button tops: ${tops.map((top) => top.toFixed(2)).join(', ')}`)
+      .toBeLessThanOrEqual(1);
+  });
+
   it('prices every self-serve plan and leaves the sales-led one unpriced', () => {
     for (const plan of PLAN_CARDS) {
       const priced = plan.priceUsd !== null;

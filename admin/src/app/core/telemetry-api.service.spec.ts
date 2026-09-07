@@ -41,7 +41,6 @@ import fc from 'fast-check';
 
 import { environment } from '../../environments/environment';
 import { TELEMETRY_ROUTES, type DateRange, type TelemetryRoute } from './models';
-import { environment } from '../../environments/environment';
 import {
   FORBIDDEN,
   NO_SESSION,

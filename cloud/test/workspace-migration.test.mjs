@@ -77,9 +77,15 @@ const mf = new Miniflare({
 });
 const DB = withLoopbackRetryD1(await mf.getD1Database('DB'));
 
+/**
+ * Splits a migration into statements. Split on `/\r?\n/`, never `'\n'`: a CRLF
+ * checkout leaves each line ending in `\r`, the `--` stripper then matches
+ * nothing, and the comment-only tail of a migration reaches D1 as "SQL code did
+ * not contain a statement".
+ */
 function statementsOf(file) {
   return readFileSync(join(migrations, file), 'utf8')
-    .split('\n')
+    .split(/\r?\n/)
     .map((line) => line.replace(/--.*$/, ''))
     .join('\n')
     .split(';')

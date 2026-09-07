@@ -80,10 +80,16 @@ const DB = withLoopbackRetryD1(await mf.getD1Database('DB'));
  * and every statement spans multiple lines, so `--` comments are stripped first
  * and the remainder is split on `;`. Safe for these files specifically: none of
  * them contains a string literal, so no `;` or `--` can be inside one.
+ *
+ * The split MUST tolerate CRLF. `git config core.autocrlf=true` rewrites these
+ * files with CRLF on every checkout, and against a line still carrying its `\r`
+ * the stripper `/--.*$/` matches nothing at all - `.` will not cross `\r` and
+ * `$` sits after it - so every comment survives, and the comment-only tail after
+ * the last `;` reaches D1 as "SQL code did not contain a statement".
  */
 function statementsOf(file) {
   return readFileSync(join(migrations, file), 'utf8')
-    .split('\n')
+    .split(/\r?\n/)
     .map((line) => line.replace(/--.*$/, ''))
     .join('\n')
     .split(';')

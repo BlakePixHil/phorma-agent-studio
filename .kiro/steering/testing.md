@@ -35,6 +35,12 @@ drive the actual surface the user touches.
 - Force a subscription with `pc.profile.set({status:'active', tier:'pro', ...})`; `subscribed()`
   reads `profile()?.status`. Also stub `phormaCloud.refresh = async () => {}` or the post-run
   refresh wipes the fake profile.
+- A profile alone does NOT render the billing surfaces - they sit behind Clerk. `phormaCloud.user`
+  is `toSignal(clerk.user$)` and `signedIn` is computed off it, so neither takes a `.set()`: push a
+  fake user into the subject (`pc.clerk.user$.next({id:'user_probe'})`), with `refresh` stubbed
+  FIRST or the constructor effect fires a real `/api/me`. Then pin the gates themselves
+  (`pc.signedIn = () => true`, plus `cmp.clerkUser = () => user` on the settings dialog): real Clerk
+  finishes loading a second later, emits null, and tears the panel back down mid-probe.
 - `palette.mode()` persists in localStorage. Set the mode explicitly, or a Plan-mode stub fed to an
   Agent-mode session yields text with no tool calls and zero nodes.
 - Both sidebars render duplicate pane instances, so `document.querySelector('.phorma-...')` can hit

@@ -20,9 +20,6 @@
 .phorma-plans__card {
   display: flex;
   flex-direction: column;
-  // Never shrink: this is a flex item in a column that scrolls, and a shrinking
-  // card collapses to its heading while `overflow` hides the rest.
-  flex: 0 0 auto;
   gap: 6px;
   padding: 12px;
   border: 1px solid var(--phorma-overlay-border, rgba(255, 255, 255, 0.12));
@@ -111,7 +108,21 @@
   min-width: 64px;
 }
 
+// Every card is a grid item stretched to the row height, so a card whose blurb
+// wraps to fewer lines has free space left over. The auto margin absorbs it and
+// the buttons share one baseline; without it each button sits directly under its
+// own blurb and the three land at different heights.
+//
+// It has to go on the <p-button> HOST, which is the card's flex item. The inner
+// <button> that `styleClass` reaches is not, so an auto margin there absorbs
+// nothing (measured: the spread stays put and only the 4px below disappears).
+.phorma-plans__card > p-button {
+  margin-top: auto;
+}
+
 :host ::ng-deep .phorma-plans__card .phorma-plans__btn.p-button {
+  // Breathing room on top of the card's 6px gap, and the floor the auto margin
+  // above cannot go below on the tallest card.
   margin-top: 4px;
   width: 100%;
 }
