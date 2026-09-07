@@ -9,9 +9,9 @@
  * Each property compares the module against an INDEPENDENT derivation rather than
  * a restatement of the implementation:
  *
- * - the disclosure gate is driven as a two-start bootstrap chain, so the claim is
- *   "the notice fires once per disclosure version and consent survives", not
- *   "the parser parses";
+ * - consent bootstrap is driven as a two-start chain, so the claim is "the
+ *   current disclosure version is stamped and consent survives", not "the parser
+ *   parses";
  * - counter accumulation is folded into a plain `Map` by a generator that tags
  *   each report as kept or dropped when it is built, so the oracle is told what
  *   should survive instead of re-deriving the guard;
@@ -55,7 +55,6 @@ import {
   sealEntry,
   sealInterimIfDue,
   sealRollup,
-  shouldShowNotice,
   type Accumulator,
   type ClientEnvironment,
   type IngestOutcome,
@@ -237,7 +236,7 @@ function pairOf(entry: QueueEntry): string {
   return `${entry.rollup.installId}\u0000${entry.rollup.metricDay}`;
 }
 
-// ─── Property 1: Disclosure gate decision ───────────────────────────────────
+// ─── Property 1: Consent bootstrap decision ─────────────────────────────────
 
 /**
  * A persisted `consent` value together with what it MEANS, decided when the case
@@ -246,7 +245,7 @@ function pairOf(entry: QueueEntry): string {
  * `isRecord` is whether anything usable was persisted at all, `enabled` is the
  * consent value the record carries (`null` when it carries none), and `version`
  * is the disclosure version it carries (`null` when unusable, which must read as
- * version 0 and therefore re-show the notice).
+ * version 0).
  */
 interface ConsentCase {
   raw: unknown;
@@ -287,9 +286,9 @@ const persistedConsentArb: fc.Arbitrary<ConsentCase> = fc
 
 const consentCaseArb = fc.oneof(absentConsentArb, persistedConsentArb);
 
-describe('telemetry disclosure gate', () => {
-  // Feature: telemetry-phone-home, Property 1: Disclosure gate decision
-  it('shows the notice once per disclosure version and never flips a persisted consent value', () => {
+describe('telemetry consent bootstrap', () => {
+  // Feature: telemetry-phone-home, Property 1: Consent bootstrap decision
+  it('stamps the current disclosure version and never flips a persisted consent value', () => {
     fc.assert(
       fc.property(
         consentCaseArb,
@@ -300,46 +299,45 @@ describe('telemetry disclosure gate', () => {
           const nowIso = new Date(decidedAtMs).toISOString();
           const stored = readConsent(probe.raw);
 
-          // Nothing usable persisted reads as "no record", which is what fires
-          // the notice on a fresh install.
+          // Nothing usable persisted reads as "no record", which is what a fresh
+          // install looks like.
           expect(stored === null).toBe(!probe.isRecord);
 
-          // FIRST START. The notice fires when no record was persisted, or when
-          // the persisted version is below the current one. An unusable version
-          // counts as 0.
-          const persistedVersion = probe.isRecord ? probe.version ?? 0 : null;
-          const expectedFirstShow = persistedVersion === null || persistedVersion < current;
-          expect(shouldShowNotice(stored, current)).toBe(expectedFirstShow);
+          // A salvaged record reports the version it actually carries, and an
+          // unusable one reads as 0. That number is what a future policy bump
+          // compares against, so the parser owes an answer for every shape.
+          if (stored !== null) {
+            expect(stored.disclosureVersion).toBe(probe.version ?? 0);
+          }
 
-          // The record written after presenting the disclosure keeps the user's
-          // choice and defaults an absent one to enabled.
+          // FIRST START. The record written keeps the user's choice and defaults
+          // an absent one to enabled - telemetry is on by default.
           const expectedEnabled = probe.enabled ?? true;
           const acknowledged = acknowledgeDisclosure(stored, nowIso, current);
           expect(acknowledged.enabled).toBe(expectedEnabled);
           expect(acknowledged.disclosureVersion).toBe(current);
           expect(acknowledged.decidedAt).toBe(nowIso);
 
-          // SECOND START, same disclosure version: the notice stays hidden and
-          // consent is unchanged. No dismissal flag is needed for this.
+          // SECOND START, same disclosure version: consent is unchanged.
           const reread = readConsent(JSON.parse(JSON.stringify(acknowledged)));
           expect(reread).not.toBeNull();
           expect(reread!.enabled).toBe(expectedEnabled);
-          expect(shouldShowNotice(reread, current)).toBe(false);
+          expect(reread!.disclosureVersion).toBe(current);
 
-          // SECOND START, bumped disclosure version: the notice returns exactly
-          // when the version actually moved, and consent still survives.
-          expect(shouldShowNotice(reread, current + bump)).toBe(bump > 0);
+          // SECOND START, bumped disclosure version: the new version is stamped
+          // and consent still survives. That version is the only record of which
+          // policy an install has acknowledged, and the download page's accept
+          // step is what it pairs with.
           const reacknowledged = acknowledgeDisclosure(reread, nowIso, current + bump);
           expect(reacknowledged.enabled).toBe(expectedEnabled);
           expect(reacknowledged.disclosureVersion).toBe(current + bump);
-          expect(shouldShowNotice(reacknowledged, current + bump)).toBe(false);
         },
       ),
       RUNS,
     );
   });
 
-  // Feature: telemetry-phone-home, Property 1: Disclosure gate decision
+  // Feature: telemetry-phone-home, Property 1: Consent bootstrap decision
   it('parses any persisted value without throwing, and only a plain object at all', () => {
     fc.assert(
       fc.property(fc.anything(), raw => {
@@ -351,16 +349,15 @@ describe('telemetry disclosure gate', () => {
           expect(Number.isFinite(stored.disclosureVersion)).toBe(true);
           expect(typeof stored.decidedAt).toBe('string');
         }
-        // Totality: the gate answers for anything, and defaults to showing the
-        // notice when nothing usable was persisted.
-        expect(typeof shouldShowNotice(stored, CURRENT_DISCLOSURE_VERSION)).toBe('boolean');
+        // Totality: the bootstrap answers for anything, and defaults an absent
+        // record to enabled.
         expect(() => acknowledgeDisclosure(stored, '', CURRENT_DISCLOSURE_VERSION)).not.toThrow();
       }),
       RUNS,
     );
   });
 
-  // Feature: telemetry-phone-home, Property 1: Disclosure gate decision
+  // Feature: telemetry-phone-home, Property 1: Consent bootstrap decision
   it('falls back to the shipped disclosure version when the ceiling is unusable', () => {
     fc.assert(
       fc.property(
@@ -368,9 +365,6 @@ describe('telemetry disclosure gate', () => {
         fc.constantFrom(Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY),
         (probe, ceiling) => {
           const stored = readConsent(probe.raw);
-          expect(shouldShowNotice(stored, ceiling)).toBe(
-            shouldShowNotice(stored, CURRENT_DISCLOSURE_VERSION),
-          );
           expect(acknowledgeDisclosure(stored, '2024-01-01T00:00:00.000Z', ceiling).disclosureVersion).toBe(
             CURRENT_DISCLOSURE_VERSION,
           );

@@ -49,7 +49,7 @@ Property tests run a minimum of 100 iterations and carry the tag
   - [x] 2.1 Create `frontend/src/app/core/telemetry-core.ts`
     - Wire models: `Rollup`, `ClientEnvironment`, `ROLLUP_KEYS`, `ENV_KEYS`
     - Local persisted models: `ConsentState`, `Accumulator`, `QueueEntry`, `UploadState`
-    - Pure functions: `metricDayUtc`, `readConsent`, `shouldShowNotice`, `applyIncrement`, `sealRollup`, `appendToQueue`, `classifyIngestStatus`, `backoffMs`, `resolveIngestUrl`, `resetDerivedState`
+    - Pure functions: `metricDayUtc`, `readConsent`, `acknowledgeDisclosure`, `applyIncrement`, `sealRollup`, `appendToQueue`, `classifyIngestStatus`, `backoffMs`, `resolveIngestUrl`, `resetDerivedState` (`shouldShowNotice` was here too and was removed on 2026-09-07 with the first-run notice)
     - Constants: `UPLOAD_INTERVAL_MS` 15 minutes, `MAX_BACKOFF_MS` 24 hours, `QUEUE_CAP` 30
     - `appendToQueue` dedupes on `(installId, metricDay)` first, then caps by dropping the oldest by `sealedAt`
     - No Angular, no DOM beyond types
@@ -57,9 +57,9 @@ Property tests run a minimum of 100 iterations and carry the tag
     - _Requirements: 3.2, 3.3, 3.4, 4.1, 4.5, 4.6, 4.7, 4.8, 5.2, 5.3, 5.4, 5.5, 11.2, 11.5_
 
   - [x]* 2.2 Write property test for the disclosure gate
-    - **Property 1: Disclosure gate decision**
-    - In `frontend/src/app/core/telemetry-core.spec.ts`, over `readConsent` and `shouldShowNotice`
-    - **Validates: Requirements 1.1, 1.2, 1.3, 1.8**
+    - **Property 1: Consent bootstrap decision** (was "Disclosure gate decision" until 2026-09-07)
+    - In `frontend/src/app/core/telemetry-core.spec.ts`, over `readConsent` and `acknowledgeDisclosure`; the `shouldShowNotice` assertions went with the notice
+    - **Validates: Requirements 1.1, 1.8**
 
   - [x]* 2.3 Write property test for consent and reset transitions
     - **Property 2: Consent and reset transitions clear derived state**
@@ -131,12 +131,12 @@ Property tests run a minimum of 100 iterations and carry the tag
 
   - [x] 5.2 Create `frontend/src/app/core/telemetry.service.ts`
     - Injects `TauriService` only; reads the base URL through `loadPhormaCloudUrl()` from `core/phorma-cloud-url.ts`
-    - Signals `active`, `enabled`, `noticePending`, `installId`, `pendingRollup`, `queueLength`
+    - Signals `active`, `enabled`, `installId`, `pendingRollup`, `queueLength` (`noticePending` existed here and was removed on 2026-09-07 with the first-run notice)
     - `bootstrap()` returns synchronously and schedules the real work on `requestIdleCallback` with a `setTimeout(..., 0)` fallback, wrapped so any throw leaves `active()` false
-    - Initialization order: read consent and compute `noticePending` before writing, persist the current disclosure version preserving any existing consent value, read or mint `installId` via `crypto.randomUUID()`, resolve `ClientEnvironment`, load and repair `accumulator` / `queue` / `upload`, roll the day, `count('session.started')`, start the 60 second tick
+    - Initialization order: read consent before writing, persist the current disclosure version preserving any existing consent value, read or mint `installId` via `crypto.randomUUID()`, resolve `ClientEnvironment`, load and repair `accumulator` / `queue` / `upload`, roll the day, `count('session.started')`, start the 60 second tick
     - Tick: roll the day, interim seal when 6 hours have elapsed and a counter is above zero, upload the head of queue when `now >= upload.nextAttemptAt`
     - Upload: single JSON `POST`, `AbortSignal.timeout(10_000)`, outcome routed through `classifyIngestStatus`, `nextAttemptAt = now + backoffMs(failureCount)` after every attempt
-    - `count(name, amount = 1)` and `recordError(category)` are the only increment APIs, both total and silent; `setEnabled`, `resetInstallId`, `dismissNotice` all converge on `resetDerivedState`
+    - `count(name, amount = 1)` and `recordError(category)` are the only increment APIs, both total and silent; `setEnabled` and `resetInstallId` both converge on `resetDerivedState`
     - Injects no toast service, no console service, no storage service, no settings service, and nothing on the usage or transport path
     - Verify with `cd frontend; npm run build`
     - _Requirements: 1.1, 1.5, 1.6, 1.7, 1.8, 2.1, 2.2, 2.3, 2.4, 2.5, 3.5, 3.6, 3.7, 4.1, 4.2, 4.3, 4.4, 4.6, 4.7, 4.9, 5.1, 5.2, 5.3, 5.4, 5.6, 5.7, 5.8, 11.5_
@@ -218,15 +218,14 @@ Property tests run a minimum of 100 iterations and carry the tag
     - _Requirements: 1.4, 1.5, 1.7, 2.4, 11.6_
 
   - [x] 8.3 Build the First_Run_Notice card
-    - `frontend/src/app/workspace/settings/privacy/telemetry-notice.ts`, a bespoke non-modal card anchored above the status bar, hosted in `app.html` inside `@if (telemetry.noticePending())`
-    - No `role="dialog"`, no focus trap; states the categories collected, carries a Privacy settings button that opens the Settings dialog on the `privacy` page, the policy link, and a `ti ti-x` dismiss calling `telemetry.dismissNotice()`
-    - Verify with `cd frontend; npm run build`
-    - _Requirements: 1.2, 1.3, 1.8_
+    - **REMOVED on 2026-09-07.** The card was built as described, shipped, and then deleted along with `noticePending` / `dismissNotice`. There is no in-app first-run disclosure any more: the disclosure is an accept-privacy step on the download website, before the installer is downloaded, and telemetry stays enabled by default. Do not rebuild this - see the decision record in `requirements.md`.
+    - What survived: `CURRENT_DISCLOSURE_VERSION` is still persisted with consent, as the record of which policy version an install acknowledged. Settings > Privacy (8.1, 8.2) is now the only in-app disclosure.
+    - _Requirements: 1.2, 1.3, 1.8 (all three rewritten by the removal)_
 
   - [x]* 8.4 Write rendering examples for the Privacy surfaces
     - `privacy-settings.spec.ts`: the toggle, install id, collected-data list and pending preview are present, and the collected-data copy is derived from the catalog rather than hard coded
-    - The notice renders the data categories, the settings control and the policy link
-    - _Requirements: 1.2, 1.4_
+    - The notice examples lived in `telemetry-notice.spec.ts` and were deleted with the component on 2026-09-07 (6 specs)
+    - _Requirements: 1.4_
 
 - [x] 9. Worker geo resolver and ingest validation
   - [x] 9.1 Create `cloud/src/telemetry-geo.ts`

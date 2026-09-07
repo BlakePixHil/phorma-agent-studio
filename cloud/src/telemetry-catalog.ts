@@ -26,7 +26,7 @@ export const TELEMETRY_SCHEMA_VERSION = 1;
 export const KNOWN_SCHEMA_VERSIONS: readonly number[] = [1];
 
 /**
- * Version of the privacy disclosure the studio's First_Run_Notice presents.
+ * Version of the privacy disclosure the studio records against an install.
  * Carried here for twin fidelity: the Worker never reads it, but the guard
  * compares the two modules field for field.
  */

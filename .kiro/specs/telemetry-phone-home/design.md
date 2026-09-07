@@ -36,7 +36,7 @@ flowchart TB
     svc["TelemetryService<br/>(DI leaf)"]
     core["telemetry-core.ts<br/>catalog, accumulate, seal,<br/>queue algebra, backoff"]
     store["localStorage<br/>phorma.telemetry.*"]
-    privacy["Settings > Privacy<br/>+ First_Run_Notice"]
+    privacy["Settings > Privacy<br/>only in-app disclosure"]
     surfaces -->|"count(name, amount)"| svc
     svc --> core
     svc <--> store
@@ -86,8 +86,10 @@ so it must be matched before `/api/*`. The insertion point is immediately after
 
 ## Locked decisions this design implements
 
-These come from the requirements and are not revisited here: opt-out consent with disclosure
-versioning; a client UUID v4 Install_Id in `localStorage`; a closed Counter_Catalog accumulating per
+These come from the requirements and are not revisited here: opt-out consent, enabled by default,
+disclosed on the download page before install with Settings &gt; Privacy as the only in-app
+disclosure, and a persisted disclosure version recording which policy an install has acknowledged;
+a client UUID v4 Install_Id in `localStorage`; a closed Counter_Catalog accumulating per
 UTC Metric_Day; cumulative-to-date Rollups with server-side replace on `(install_id, metric_day)`;
 an unauthenticated `POST /telemetry` on the existing Worker with its own CORS; server-side coarse
 geo with no address stored or logged; D1 storage with an idempotent migration and a 400-day
@@ -106,8 +108,8 @@ decision outward.
 | Component | Location | Pure | Public interface |
 |---|---|---|---|
 | Counter catalog | `frontend/src/app/core/telemetry-catalog.ts` and its twin `cloud/src/telemetry-catalog.ts` | yes | `COUNTER_CATALOG: ReadonlySet<string>`, `counterName(family, dimension?): string`, `ERROR_CATEGORIES`, `TELEMETRY_SCHEMA_VERSION`, `CURRENT_DISCLOSURE_VERSION` |
-| Telemetry core | `frontend/src/app/core/telemetry-core.ts` | yes | `metricDayUtc(now)`, `readConsent(raw)`, `shouldShowNotice(stored, current)`, `applyIncrement(acc, name, amount)`, `sealRollup(acc, installId, env)`, `appendToQueue(queue, entry, cap?)`, `classifyIngestStatus(status)`, `backoffMs(failures)`, `resolveIngestUrl(baseUrl)` |
-| Telemetry service | `frontend/src/app/core/telemetry.service.ts` | no | signals `active`, `enabled`, `noticePending`, `installId`, `pendingRollup`, `queueLength`; methods `bootstrap()`, `count(name, amount?)`, `recordError(category)`, `setEnabled(next)`, `resetInstallId()`, `dismissNotice()` |
+| Telemetry core | `frontend/src/app/core/telemetry-core.ts` | yes | `metricDayUtc(now)`, `readConsent(raw)`, `acknowledgeDisclosure(stored, nowIso, current)`, `applyIncrement(acc, name, amount)`, `sealRollup(acc, installId, env)`, `appendToQueue(queue, entry, cap?)`, `classifyIngestStatus(status)`, `backoffMs(failures)`, `resolveIngestUrl(baseUrl)` |
+| Telemetry service | `frontend/src/app/core/telemetry.service.ts` | no | signals `active`, `enabled`, `installId`, `pendingRollup`, `queueLength`; methods `bootstrap()`, `count(name, amount?)`, `recordError(category)`, `setEnabled(next)`, `resetInstallId()` |
 | Ingest handler | `cloud/src/telemetry.ts` | partly | `handleTelemetryRequest(request, env, ctx): Promise<Response \| null>`, `normalizeRollup(body, nowMs): Rollup \| null`, `TELEMETRY_SCHEMA_STATEMENTS`, `ensureTelemetrySchema(db)`, `runTelemetryRetention(env)` |
 | Geo resolver | `cloud/src/telemetry-geo.ts` | yes | `resolveCoarseGeo(request): CoarseGeo`, `COUNTRY_REGION`, `TELEMETRY_REGIONS` |
 | Admin API | `cloud/src/telemetry-admin.ts` | partly | `handleTelemetryAdminRequest(request, env, url, respond)`, `isTelemetryAdmin(allowlist, userId): boolean`, `parseDateRange(params, today): RangeResult`, `applyKAnonymity(rows, floor?): GroupRow[]` |
@@ -126,11 +128,10 @@ decision outward.
 | File | Contents |
 |---|---|
 | `core/telemetry-catalog.ts` | `TELEMETRY_SCHEMA_VERSION`, counter families, dimension lists, `COUNTER_CATALOG` (a `ReadonlySet<string>`), `counterName()`, `ERROR_CATEGORIES`. Structural twin of `cloud/src/telemetry-catalog.ts`. |
-| `core/telemetry-core.ts` | Pure state algebra: `readConsent`, `shouldShowNotice`, `applyIncrement`, `sealRollup`, `appendToQueue`, `classifyIngestStatus`, `backoffMs`, `metricDayUtc`, `resolveIngestUrl`. No Angular, no DOM beyond types. |
+| `core/telemetry-core.ts` | Pure state algebra: `readConsent`, `acknowledgeDisclosure`, `applyIncrement`, `sealRollup`, `appendToQueue`, `classifyIngestStatus`, `backoffMs`, `metricDayUtc`, `resolveIngestUrl`. No Angular, no DOM beyond types. |
 | `core/telemetry-storage.ts` | `loadTelemetry` / `saveTelemetry` / `removeTelemetry` over the `phorma.telemetry.` prefix, try/catch wrapped, exactly like `core/layout-storage.ts`. |
 | `core/telemetry.service.ts` | The Angular service: signals, timer, fetch, and the public `count()` / `recordError()` API. |
-| `workspace/settings/privacy/*` | The Privacy section body (`customTemplate: 'privacy'`). |
-| `workspace/settings/privacy/telemetry-notice.ts` | The First_Run_Notice card. |
+| `workspace/settings/privacy/*` | The Privacy section body (`customTemplate: 'privacy'`), the only in-app disclosure surface. |
 
 `telemetry-core.ts` is where every property test points. The service is a thin shell that owns the
 clock, the storage adapter and `fetch`, and delegates every decision to the core.
@@ -267,8 +268,6 @@ export class TelemetryService {
   readonly active = signal(false);
   /** Consent_State. Writing it through `setEnabled` is the only way to change it. */
   readonly enabled = signal(true);
-  /** Session-only: true when the First_Run_Notice should be shown. */
-  readonly noticePending = signal(false);
   readonly installId = signal('');
   /** The Rollup that would be uploaded right now, for the Privacy preview. */
   readonly pendingRollup = computed<Rollup | null>(() => ...);
@@ -283,7 +282,6 @@ export class TelemetryService {
 
   setEnabled(next: boolean): void;
   resetInstallId(): void;
-  dismissNotice(): void;
 }
 ```
 
@@ -301,12 +299,12 @@ first-paint path (Requirement 4.9). The whole body is wrapped so that any throw 
 
 Initialization order inside the idle callback:
 
-1. Read `consent`. Compute `noticePending = stored === null || stored.disclosureVersion < CURRENT_DISCLOSURE_VERSION`, **before** writing. Then persist
+1. Read `consent`, **before** writing, so an existing choice is never flipped. Then persist
    `{ enabled: stored?.enabled ?? true, disclosureVersion: CURRENT_DISCLOSURE_VERSION }`, preserving
-   an existing consent value. This single field covers all four disclosure criteria: a fresh install
-   gets enabled consent plus the notice (1.1, 1.2), a dismissal is remembered because the persisted
-   version already equals the current one (1.3), and a version bump re-shows the notice while
-   preserving consent (1.8).
+   an existing consent value. A fresh install gets enabled consent (1.1) and a version bump
+   re-stamps the version while preserving consent (1.8). Nothing is displayed either way (1.2): the
+   disclosure is made on the download page before the installer is fetched, and Settings &gt;
+   Privacy is the only in-app disclosure (1.3).
 2. Read or mint `installId` via `crypto.randomUUID()`.
 3. Resolve `ClientEnvironment` (the only awaited step, and it is guarded).
 4. Load `accumulator`, `queue`, `upload`, repairing any malformed value to its default.
@@ -471,16 +469,21 @@ renders once). Contents, top to bottom:
 UI conventions: Tabler icons only, explicit `size="small"` on the toggle and every button,
 `.phorma-btn-content` on any solid button, no `p-dialog`, rem values against a 14px root.
 
-### First_Run_Notice
+### No in-app first-run disclosure
 
-A bespoke non-modal card anchored above the status bar, hosted in `app.html` inside
-`@if (telemetry.noticePending())`. Not a dialog: it does not trap focus, does not carry
-`role="dialog"`, and never blocks the workspace. It states the categories collected, carries a
-"Privacy settings" button that opens the Settings dialog on the `privacy` page, a privacy policy
-link, and a `ti ti-x` dismiss button calling `telemetry.dismissNotice()`.
+There is no first-run notice, banner, toast or onboarding step. A `TelemetryNotice` card existed and
+was removed on 2026-09-07; the disclosure is now an accept-privacy step on the download website,
+presented before the installer is downloaded. Telemetry stays enabled by default. See the decision
+record in `requirements.md` for the accepted tradeoff and why a Windows-only installer checkbox was
+rejected.
 
-`CURRENT_DISCLOSURE_VERSION` is a single integer in `telemetry-catalog.ts`. Bumping it re-shows the
-notice on the next start for every install, without touching anyone's consent value.
+Do not reintroduce a replacement surface here. The Privacy page above is the studio's disclosure, and
+it is reachable at any time rather than shown once.
+
+`CURRENT_DISCLOSURE_VERSION` is still a single integer in `telemetry-catalog.ts`, and it is still
+persisted with consent. Nothing in the app reads it to decide whether to show something; it records
+WHICH policy version an install has acknowledged, which is what the download-page step pairs with.
+Bumping it re-stamps every install on the next start without touching anyone's consent value.
 
 ---
 
@@ -1088,15 +1091,19 @@ The governing rule is that telemetry is invisible. Every failure has a defined, 
 system, essentially a formal statement about what the system should do. Properties serve as the
 bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-### Property 1: Disclosure gate decision
+### Property 1: Consent bootstrap decision
 
 For any persisted consent record (absent, malformed, or well formed with any disclosure version) and
-any current disclosure version, bootstrap shows the First_Run_Notice exactly when no record was
-persisted or the persisted version is lower than the current one, persists the current version,
-preserves any previously persisted consent value, defaults an absent record to enabled, and never
-throws.
+any current disclosure version, bootstrap reports the version the record actually carries (an
+unusable one as `0`), persists the current version, preserves any previously persisted consent value,
+defaults an absent record to enabled, and never throws.
 
-**Validates: Requirements 1.1, 1.2, 1.3, 1.8**
+Originally "Disclosure gate decision", also asserting when the First_Run_Notice fires. The notice was
+removed on 2026-09-07 along with `shouldShowNotice`, so those assertions went with it; the consent
+parse and acknowledge assertions stayed, because `readConsent` and `acknowledgeDisclosure` are still
+the bootstrap.
+
+**Validates: Requirements 1.1, 1.8**
 
 ### Property 2: Consent and reset transitions clear derived state
 
@@ -1404,7 +1411,7 @@ jasmine specs, which works because `fc.assert` is a plain synchronous call. The 
 | `core/telemetry-catalog.spec.ts` | Property 5 |
 | `core/telemetry-core.spec.ts` | Properties 1, 2, 6, 7, 8, 9, 10, 11, 12, 13, 16 |
 | `core/telemetry.service.spec.ts` | Properties 3, 4, 14, 15, plus examples for the 10 second abort (5.6), the non-blocking bootstrap (4.9) and the desktop/browser `osVersion` branch (3.8) |
-| `workspace/settings/privacy/privacy-settings.spec.ts` | Examples for the Privacy section contents (1.4) and the notice contents (1.2) |
+| `workspace/settings/privacy/privacy-settings.spec.ts` | Examples for the Privacy section contents (1.4). A sibling `telemetry-notice.spec.ts` covered the notice; both it and the component were removed on 2026-09-07 |
 
 The service specs inject a fake clock, a fake storage adapter, a recording `fetch`, and spies on the
 toast and console services, so no test touches real `localStorage` or the network. `telemetry-core`

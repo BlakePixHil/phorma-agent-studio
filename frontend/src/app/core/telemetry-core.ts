@@ -163,14 +163,14 @@ export function isMetricDay(value: unknown): value is string {
   return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
 }
 
-// ─── Consent and the disclosure gate ────────────────────────────────────────
+// ─── Consent bootstrap ──────────────────────────────────────────────────────
 
 /**
  * Parses a persisted `consent` value. Returns `null` when nothing usable was
- * persisted, which is what makes the First_Run_Notice fire on a fresh install.
+ * persisted, which is what a fresh install looks like.
  * A partially malformed record is salvaged rather than discarded: a boolean
- * `enabled` is preserved, and an unusable disclosure version reads as `0`, so
- * the notice is re-shown and consent survives.
+ * `enabled` is preserved, and an unusable disclosure version reads as `0`, so a
+ * bumped policy version is re-stamped and consent survives.
  */
 export function readConsent(raw: unknown): ConsentState | null {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -184,23 +184,14 @@ export function readConsent(raw: unknown): ConsentState | null {
 }
 
 /**
- * Whether to show the First_Run_Notice: nothing persisted, or a persisted
- * disclosure version below the current one. A dismissal needs no flag of its own
- * because the persisted version already equals the current one by then.
- */
-export function shouldShowNotice(
-  stored: ConsentState | null,
-  current: number = CURRENT_DISCLOSURE_VERSION,
-): boolean {
-  if (stored === null) return true;
-  const ceiling = Number.isFinite(current) ? Math.trunc(current) : CURRENT_DISCLOSURE_VERSION;
-  return stored.disclosureVersion < ceiling;
-}
-
-/**
- * The consent record to persist once the current disclosure has been presented:
+ * The consent record to persist for the disclosure version this build presents:
  * the existing consent value when there is one, enabled by default, stamped with
  * the current disclosure version. Never flips an existing choice.
+ *
+ * The version field is the record of WHICH policy version an install has
+ * acknowledged. There is no in-app gate reading it any more - the disclosure is
+ * made on the download page before the installer is fetched - but it stays
+ * persisted so a future policy change has something to pair with.
  */
 export function acknowledgeDisclosure(
   stored: ConsentState | null,

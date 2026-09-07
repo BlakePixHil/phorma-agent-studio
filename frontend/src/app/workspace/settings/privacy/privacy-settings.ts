@@ -22,8 +22,10 @@ import { ToastService } from '../../../shared/toast/toast.service';
 /**
  * Where the plain-language policy lives.
  *
- * ONE constant for both surfaces: this page's policy button and the
- * First_Run_Notice's, so the two links cannot drift apart.
+ * Exported rather than inlined so anything else in the studio that needs to
+ * reach the policy takes the same URL. This page is now the ONLY in-app
+ * disclosure - the first-run notice was removed and the disclosure moved to the
+ * download page - so this link is the one the user can always get back to.
  */
 export const PRIVACY_POLICY_URL = 'https://phorma-labs.com/privacy';
 

@@ -60,7 +60,6 @@ import {
   rollDayIfNeeded,
   sealInterimIfDue,
   sealRollup,
-  shouldShowNotice,
 } from './telemetry-core';
 import {
   type TelemetryStorage,
@@ -139,9 +138,6 @@ export class TelemetryService {
 
   /** Consent_State. `setEnabled` is the only way to change it. */
   readonly enabled = signal(true);
-
-  /** Session-only: true while the First_Run_Notice should be shown. */
-  readonly noticePending = signal(false);
 
   readonly installId = signal('');
 
@@ -255,16 +251,6 @@ export class TelemetryService {
     this.writeDerivedState();
   }
 
-  /**
-   * Hides the First_Run_Notice for good at the current disclosure version. The
-   * persisted disclosure version already equals the current one by the time the
-   * notice is visible, so this needs no flag of its own and touches neither
-   * consent nor accumulated counters (1.3).
-   */
-  dismissNotice(): void {
-    this.noticePending.set(false);
-  }
-
   // ─── Initialization ───────────────────────────────────────────────────────
 
   /**
@@ -275,10 +261,10 @@ export class TelemetryService {
     try {
       const now = this.nowMs();
 
-      // 1. Consent and the disclosure gate, READ before any write, so the
-      //    notice decision is made against what the user has actually seen.
+      // 1. Consent. Read before any write, so an existing choice is never
+      //    flipped, and stamp the disclosure version this build presents. The
+      //    disclosure itself lives on the download page, not in the app.
       const stored = readConsent(this.storage.load<unknown>('consent', null));
-      this.noticePending.set(shouldShowNotice(stored));
       const consent = acknowledgeDisclosure(stored, safeIso(now));
       this.consent = consent;
       this.enabled.set(consent.enabled);

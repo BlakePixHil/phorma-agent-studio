@@ -19,9 +19,11 @@ import type { WorkflowNodeKind } from './workflow.model';
 export const TELEMETRY_SCHEMA_VERSION = 1;
 
 /**
- * Version of the privacy disclosure the First_Run_Notice presents. Bumping it
- * re-shows the notice on the next start for every install without touching
- * anyone's Consent_State.
+ * Version of the privacy disclosure this build acknowledges. The disclosure
+ * itself is made on the download page, before the installer is fetched, not in
+ * the app - this integer only RECORDS which policy version an install has
+ * stamped, and bumping it re-stamps every install without touching anyone's
+ * Consent_State.
  */
 export const CURRENT_DISCLOSURE_VERSION = 1;
 

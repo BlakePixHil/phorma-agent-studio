@@ -10,10 +10,11 @@ Cloudflare request headers so the client never sends or the server never stores 
 A separately deployed Angular admin dashboard reads a Clerk-authenticated admin API on the same
 Worker, authorized against an allowlist of owner Clerk user ids held in a Worker secret.
 
-Telemetry is opt-out: enabled by default after a first-run disclosure, with a single toggle in a new
-Privacy section of the Settings dialog. Scope for this version is counters only. No prompt text, no
-workflow names, no run payloads, no per-event stream, and no reads from the credit or usage
-accounting stores.
+Telemetry is opt-out: enabled by default, disclosed on the download page before the installer is
+downloaded, with a single toggle in a new Privacy section of the Settings dialog. That Privacy
+section is the only in-app disclosure; there is no first-run notice. Scope for this version is
+counters only. No prompt text, no workflow names, no run payloads, no per-event stream, and no reads
+from the credit or usage accounting stores.
 
 ## Glossary
 
@@ -23,8 +24,9 @@ accounting stores.
   install identity, counter accumulation, rollup, and upload.
 - **Consent_State**: the persisted boolean recording whether the current install uploads telemetry,
   together with the version of the disclosure the user has seen.
-- **First_Run_Notice**: the one-time in-app disclosure shown on the first launch of an install,
-  stating that anonymous usage counters are collected and how to turn collection off.
+- **Download_Disclosure**: the accept-privacy step on the download website, presented before the
+  installer is downloaded, stating that anonymous usage counters are collected by default and how to
+  turn collection off. It lives outside this repository.
 - **Privacy_Settings_Section**: the new Privacy section of the existing Settings dialog, holding the
   telemetry toggle and the privacy policy reference.
 - **Install_Id**: a client-generated random identifier (UUID v4) identifying one installation of the
@@ -56,21 +58,40 @@ accounting stores.
 
 ## Requirements
 
-### Requirement 1: Consent and first-run disclosure
+### Requirement 1: Consent and disclosure
 
-**User Story:** As a Studio user, I want to be told that anonymous usage counters are collected and
-to be able to turn collection off in one place, so that I stay in control of what leaves my machine.
+**User Story:** As a Studio user, I want to be told that anonymous usage counters are collected
+before I install, and to be able to turn collection off in one place inside the app, so that I stay
+in control of what leaves my machine.
+
+#### Decision record: the disclosure moved out of the app (2026-09-07)
+
+This requirement originally mandated a First_Run_Notice: a one-time in-app card, shown on the first
+launch of an install and again whenever the disclosure version was bumped. It was built, shipped, and
+has now been removed. The disclosure moved to an accept-privacy step on the download website,
+presented before the installer is downloaded, and telemetry stays enabled by default.
+
+The owner made that call and accepted the tradeoff: a user who obtains the app by any route other
+than the download page - a copied installer, a mirrored build, an existing install carried forward -
+now sees no disclosure until they open Settings > Privacy, where the full disclosure and the toggle
+still live. In exchange the studio has one fewer unasked-for interruption on the first launch.
+
+An installer checkbox was considered as a middle ground and rejected: `tauri.conf.json` builds
+`nsis`, `app`, `dmg`, `appimage` and `deb`, so only Windows has an installer UI at all, and a
+Windows-only checkbox would leave macOS and Linux users with nothing.
+
+Criterion numbering is preserved rather than compacted, because tasks and design trace to
+`1.1`-`1.8` by number.
 
 #### Acceptance Criteria
 
 1. WHEN the Studio starts and no Consent_State is persisted, THE Telemetry_Service SHALL persist
-   Consent_State with collection enabled and record the disclosure version that the First_Run_Notice
-   presents.
-2. WHEN the Studio starts and no Consent_State was persisted before that start, THE Studio SHALL
-   display the First_Run_Notice containing the categories of data collected, a control that opens
-   Privacy_Settings_Section, and a link to the privacy policy.
-3. WHEN the user dismisses the First_Run_Notice, THE Studio SHALL keep the notice hidden on every
-   subsequent start for the same persisted disclosure version.
+   Consent_State with collection enabled and record the current disclosure version.
+2. THE Studio SHALL display no in-app first-run disclosure of telemetry, on any start. The
+   disclosure that anonymous usage counters are collected by default is made by the
+   Download_Disclosure, before the installer is downloaded.
+3. THE Privacy_Settings_Section SHALL be the only in-app disclosure surface, reachable at any time
+   from the Settings dialog and never requiring a dismissal.
 4. THE Privacy_Settings_Section SHALL render one toggle bound to Consent_State, the Install_Id, a
    plain-language list of the Counter_Catalog categories and Client_Environment fields, and the
    privacy policy reference.
@@ -81,9 +102,10 @@ to be able to turn collection off in one place, so that I stay in control of wha
    Ingest_Endpoint.
 7. WHEN the user sets the Consent_State toggle from disabled to enabled, THE Telemetry_Service SHALL
    resume accumulation starting from the current Metric_Day with all Counters at zero.
-8. IF the persisted disclosure version is lower than the current disclosure version, THEN THE Studio
-   SHALL display the First_Run_Notice again and persist the current disclosure version, preserving
-   the existing Consent_State value.
+8. IF the persisted disclosure version is lower than the current disclosure version, THEN THE
+   Telemetry_Service SHALL persist the current disclosure version, preserving the existing
+   Consent_State value, and SHALL display nothing. The persisted version is the record of which
+   policy version an install has acknowledged, which is what the Download_Disclosure pairs with.
 
 ### Requirement 2: Install identity
 
