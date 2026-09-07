@@ -20,3 +20,20 @@
  * localhost, so the two files must never hold the same value.
  */
 export const CLERK_PUBLISHABLE_KEY = 'pk_live_Y2xlcmsucGhvcm1hLWxhYnMuY29tJA';
+
+/**
+ * Clerk's hosted Account Portal for the production instance, no trailing slash.
+ *
+ * This is the ONLY sign-in surface the packaged desktop build can currently
+ * complete, and it works because the browser loads it first-party on
+ * `phorma-labs.com`: Clerk's `__client` cookie is `SameSite=Lax` and scoped to
+ * `clerk.phorma-labs.com`, so it travels here and does NOT travel inside the
+ * Tauri webview, whose origin (`http://tauri.localhost`) is cross-site. See
+ * `PhormaCloudService.signIn` for the full mechanism and the measurements.
+ *
+ * Verified live: `/sign-in` and `/sign-up` both render the full Clerk form,
+ * including Continue with Google. Note that a scripted request without a
+ * browser User-Agent gets a 403 from Clerk's bot protection, so probe this host
+ * with a real browser before concluding it is down.
+ */
+export const CLERK_ACCOUNT_PORTAL_URL = 'https://accounts.phorma-labs.com';

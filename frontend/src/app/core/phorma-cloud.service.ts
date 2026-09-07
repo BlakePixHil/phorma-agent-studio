@@ -3,7 +3,11 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
+import { CLERK_ACCOUNT_PORTAL_URL } from '../../environments/clerk';
+import { ToastService } from '../shared/toast/toast.service';
+import { McpOAuthService } from './mcp-oauth.service';
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
+import { TauriService } from './tauri.service';
 import { TelemetryService } from './telemetry.service';
 
 /** Profile + quota returned by the hosted control plane's `GET /api/me`. */
@@ -114,6 +118,15 @@ export class PhormaCloudService {
   // `TelemetryService` is a leaf that injects only `TauriService`, so it cannot
   // reach `CloudService` or `RunControllerService` from here.
   private readonly telemetry = inject(TelemetryService);
+  // Also safe on the NG0200 cycle, and checked rather than assumed:
+  // `TauriService` is a leaf, `ToastService` injects nothing at all, and
+  // `McpOAuthService` reaches only `TauriService` + `SettingsService`, neither of
+  // which touches `CloudService` or `RunControllerService`. `McpOAuthService` is
+  // reused for `openExternal` rather than re-importing the opener plugin here -
+  // `BillingService` already takes that rail for Stripe Checkout.
+  private readonly tauri = inject(TauriService);
+  private readonly links = inject(McpOAuthService);
+  private readonly toast = inject(ToastService);
 
   /** Current Clerk user (null until Clerk loads / when signed out). */
   readonly user = toSignal(this.clerk.user$, { initialValue: null });
@@ -233,33 +246,104 @@ export class PhormaCloudService {
   }
 
   /**
-   * Opens Clerk's modal sign-in flow, PINNED to this app's own URL.
+   * True when sign-in has to leave the app and happen in the system browser,
+   * which is every DESKTOP build. Surfaces read it so their copy can promise
+   * what will actually happen instead of implying an in-app modal.
+   */
+  readonly signInIsExternal = this.tauri.isDesktop;
+
+  /**
+   * Starts sign-in: Clerk's in-app modal in a browser tab, the system browser on
+   * desktop.
    *
-   * The redirect targets are passed explicitly rather than left to the Clerk
-   * instance defaults, and that is what makes sign-in work in the desktop build
-   * at all. A production Clerk instance carries `after_sign_in_url` and
-   * `home_url` from its Dashboard configuration, ours point at
-   * `https://app.phorma-labs.com`, and that host does not resolve. Email code
-   * sign-in completes inside the modal and never notices, but any flow that
-   * leaves the page and comes back - a social provider above all - hands the user
-   * to a dead hostname and simply never returns to the app. That is invisible
-   * from here: the studio sees no error, only a sign-in that never completes.
+   * ## Why desktop cannot use the modal
    *
-   * `window.location.href` rather than a literal, because the origin differs by
-   * platform and by how the app is being run: `http://tauri.localhost` on Windows
-   * and Android, `tauri://localhost` on macOS and Linux, and
-   * `http://localhost:7322` under `ng serve`. All three desktop forms are
-   * registered as redirect URLs on the instance; a hardcoded value here would be
-   * wrong on two platforms out of three.
+   * Clerk's in-webview modal CANNOT complete against a PRODUCTION Clerk
+   * instance, and no amount of Clerk Dashboard configuration changes that. The
+   * mechanism, measured in Chromium at the real webview origin:
    *
-   * `forceRedirectUrl` rather than `fallbackRedirectUrl`: the fallback only
-   * applies when Clerk has no opinion of its own, and here the instance DOES have
-   * one and it is broken, so it has to be overridden outright. `SignInProps` in
-   * `@clerk/types` 4.5.0 carries exactly these two and no sign-up variant, so this
-   * is the whole surface available.
+   * A production instance identifies the browser client with a `__client` cookie
+   * scoped `Domain=clerk.phorma-labs.com; Secure; HttpOnly; SameSite=Lax`. The
+   * Tauri webview's origin is `http://tauri.localhost` (Windows and Android) or
+   * `tauri://localhost` (macOS and Linux), which is cross-site with
+   * `phorma-labs.com`. So Chromium (1) REFUSES TO STORE that cookie, and (2)
+   * refuses to send it even when it is injected into the jar by hand, because a
+   * `SameSite=Lax` cookie never rides a cross-site subresource request. clerk-js
+   * is therefore handed a brand new anonymous client on every single FAPI call.
+   *
+   * The visible symptom is the Google button. Clerk still returns a Google URL,
+   * the browser makes the round trip, and the callback at
+   * `https://clerk.phorma-labs.com/v1/oauth_callback` then arrives with no client
+   * to attach the attempt to - so Clerk answers 403 `authorization_invalid`
+   * ("You are not authorized to perform this request") and the webview renders
+   * that raw JSON as a dead-end page with no way back into the app.
+   *
+   * Two things that look like fixes and are not:
+   * - `Clerk.load({ standardBrowser: false })`. clerk-js hardcodes
+   *   `credentials: 'include'` for FAPI in BOTH its standard and non-standard
+   *   load paths, so the browser bundle has no cookie-free transport to switch to.
+   * - `app.windows.useHttpsScheme` in `tauri.conf.json`. The discriminator is
+   *   cross-site-ness, not the scheme: Cloudflare's `SameSite=None` cookies were
+   *   stored from the very same response that had Clerk's `SameSite=Lax` ones
+   *   rejected.
+   *
+   * A DEVELOPMENT instance is exempt and always looked fine locally, which is why
+   * this survived to a release: dev instances are cookieless
+   * (`auth_config.cookieless_dev`) and thread the client through the URL as
+   * `__clerk_db_jwt`, needing no cross-site cookie at all.
+   *
+   * ## What the desktop path does today
+   *
+   * It opens Clerk's hosted Account Portal in the system browser, where the same
+   * flow is first-party on `phorma-labs.com` and works, Google included. That is
+   * enough to CREATE and manage an account, and it is deliberately not dressed up
+   * as more than that: the desktop app cannot yet pick the resulting session up,
+   * because doing so needs the browser to hand a credential back to the app.
+   * `.kiro/specs/desktop-signin-handoff/` is that work. Until it lands the toast
+   * is the honest answer, and it must not be softened into "signing you in".
+   *
+   * The browser path still needs no `forceRedirectUrl`: the instance's
+   * `after_sign_in_url` points at `https://app.phorma-labs.com`, which does not
+   * resolve, but the Account Portal is a normal web page and landing on a broken
+   * host AFTER authenticating leaves the account created and the session live.
+   * Fixing that Dashboard value is still worth doing - it is the difference
+   * between finishing on a real page and finishing on a browser error.
    */
   signIn(): void {
+    if (this.signInIsExternal) {
+      void this.openAccountPortal();
+      return;
+    }
+    // Browser parity path. `forceRedirectUrl` overrides the instance's broken
+    // `after_sign_in_url`; `forceRedirectUrl` and not `fallbackRedirectUrl`
+    // because the fallback only applies when Clerk has no opinion of its own,
+    // and here the instance has one and it is wrong.
     this.clerk.openSignIn({ forceRedirectUrl: window.location.href });
+  }
+
+  /**
+   * Hands the Account Portal to the OS browser and says so.
+   *
+   * `sign-up` rather than `sign-in` is the landing page on purpose: the portal
+   * carries a "Sign in" link for anyone who already has an account, while a user
+   * with no account who lands on `sign-in` has to notice a smaller link to get
+   * anywhere. Both pages offer Continue with Google.
+   */
+  private async openAccountPortal(): Promise<void> {
+    const url = `${CLERK_ACCOUNT_PORTAL_URL}/sign-up`;
+    try {
+      await this.links.openExternal(url);
+      this.toast.warning(
+        'Finish signing in in your browser',
+        'Your Phorma account is created and managed in the browser. Linking this ' +
+          'desktop app to that account is not available yet, so the studio will ' +
+          'still show you as signed out when you come back.',
+      );
+    } catch {
+      // A failed hand-off leaves the user with no way to reach the portal, so the
+      // URL itself becomes the message - they can copy it out of the toast.
+      this.toast.error('Could not open your browser', url);
+    }
   }
 
   /**

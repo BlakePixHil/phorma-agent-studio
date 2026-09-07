@@ -986,11 +986,27 @@
                             Sign in with your Phorma account to deploy agents to
                             Phorma Cloud. A subscription is required to run workflows.
                           </p>
+                          <!-- Desktop cannot complete Clerk's in-app modal against a
+                               production instance, so the flow leaves for the system
+                               browser and the app cannot yet pick the session back up.
+                               See `PhormaCloudService.signIn`. Say so here rather than
+                               let a "Sign in" button imply it signs you in. -->
+                          @if (phormaCloud.signInIsExternal) {
+                            <p class="phorma-settings__note">
+                              <i class="ti ti-external-link" aria-hidden="true"></i>
+                              Accounts are created and managed in your browser. Linking
+                              the desktop app to a Phorma account is not available yet.
+                            </p>
+                          }
                           <p-button
                             styleClass="phorma-settings__btn"
                             size="small"
                             icon="ti ti-login-2"
-                            label="Sign in to Phorma Cloud"
+                            [label]="
+                              phormaCloud.signInIsExternal
+                                ? 'Open Phorma accounts in browser'
+                                : 'Sign in to Phorma Cloud'
+                            "
                             (onClick)="phormaCloud.signIn()"
                           />
                         }
