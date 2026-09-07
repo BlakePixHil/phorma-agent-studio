@@ -166,3 +166,64 @@ compares your worker's build against the app's and warns you when it is behind.
 Working from this repo instead? Point the runtime folder at `cloud/` after
 `npm install` there. Local cloud testing without an account: `npx wrangler dev`
 in `cloud/`.
+
+## Run Phorma Cloud locally (contributors)
+
+By default the studio talks to the **deployed** Phorma Cloud worker at
+`https://cloud.phorma-labs.com`, which holds **production** Clerk credentials and
+**live** Stripe keys. A local build ships the *development* Clerk key, so every
+authenticated call against it answers `401 Unauthorized`. Running the app locally
+does not change that on its own — the endpoint is a persisted setting.
+
+To work on anything that touches accounts, billing or usage, run your own worker:
+
+```powershell
+cd cloud
+npm run dev:setup
+```
+
+That one command writes `cloud/.dev.vars` (generating `KEY_ENC_SECRET` and
+`PHORMA_ADMIN_TOKEN` for you), applies the migrations to the local D1, and
+provisions your tenant row. It prompts for the three values it cannot generate:
+
+| Value | Where from |
+|---|---|
+| `CLERK_SECRET_KEY` | Clerk Dashboard, the **development** instance, API keys. Must be `sk_test_` |
+| `STRIPE_SECRET_KEY` | Stripe Dashboard in **test** mode, Developers > API keys |
+| `OPENROUTER_PROVISIONING_KEY` | Optional. Skip it and only hosted *inference* refuses |
+
+It also wants your **development-instance** Clerk user id (`user_...`) for the
+tenant row. The script refuses a live-mode key, refuses a placeholder that is too
+short to be real, and is safe to re-run: existing values are never overwritten.
+
+Then, in three terminals:
+
+```powershell
+cd cloud; npx wrangler dev --env hosted   # the worker, on http://localhost:8787
+cd cloud; npm run dev:webhooks            # Stripe webhook forwarder
+cd frontend; npm start                    # the studio, on http://localhost:7322
+```
+
+Finally point the studio at your worker: **Settings → Cloud → Phorma Cloud URL** →
+`http://localhost:8787`. Without this step you are still talking to production and
+will still see `401 Unauthorized`.
+
+Three things that cost real debugging time here:
+
+- **Use `npm run dev:webhooks`, never a bare `stripe listen`.** The Stripe CLI
+  keeps its own credential from `stripe login`, which can point at a *different*
+  sandbox than your `STRIPE_SECRET_KEY`. The mismatch is close to invisible: the
+  listener starts fine and prints a valid `whsec_`, the worker verifies against it
+  happily, and no event ever arrives. The wrapper pins the CLI to the same key the
+  worker reads.
+- Paste the `whsec_` the forwarder prints into `cloud/.dev.vars` and **restart the
+  worker** — wrangler reads that file only at startup.
+- `wrangler d1 migrations apply` records a migration by **filename**. If a
+  migration file grew after you first applied it, the new statements never run and
+  nothing complains. Check `sqlite_master` for the tables it should have created,
+  not `d1_migrations`. On a local database the fix is free: stop the worker, delete
+  `cloud/.wrangler/state/v3/d1`, and re-apply.
+
+Pass flags to these scripts with `node`, not npm: `npm run dev:setup -- --dry-run`
+does **not** work, because npm swallows unrecognised flags as its own config. Use
+`node scripts/setup-local-dev.mjs --dry-run`.
