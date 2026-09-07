@@ -183,6 +183,21 @@ repo: `d1_migrations` listed all four while `credit_grants` and `stripe_events` 
 
 ---
 
+## A HEAD probe on a release asset 404s while GET returns it
+
+**Signature.** `Invoke-WebRequest <asset> -Method Head` returns 404, so a verification step
+concludes the release did not publish. `-Method Get` on the same URL returns 200 and the real
+installer.
+
+**Cause.** `handleReleaseRequest` gates on `if (request.method !== 'GET') return null`, so a HEAD
+falls through to the agent router, which 404s. Open, minor, and harmless to real clients: the Tauri
+updater and browsers both GET.
+
+**Prevention.** Probe with `-Method Get ... -MaximumRedirection 0` and read `RawContentLength`.
+Fixable by admitting HEAD (Workers strips the body automatically), but not worth its own release.
+
+---
+
 ## Local suites that die at import, not at an assertion
 
 **Signature.** A `cloud` suite fails instantly with `ERR_UNKNOWN_BUILTIN_MODULE` (`node:sqlite`) or

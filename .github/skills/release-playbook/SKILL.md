@@ -233,16 +233,47 @@ key regardless of instance. `/api/me` with a real production session token retur
 
 ## Phase 8 - Prove it reached users
 
+Three checks, all against the live worker. Substitute the version you just cut and the one before it.
+
 ```powershell
-(Invoke-WebRequest https://releases.phorma-labs.com/releases.json).Content   # or the R2 public route
+# 1. The manifest names the new version
+(Invoke-WebRequest https://cloud.phorma-labs.com/releases.json).Content | ConvertFrom-Json |
+  Select-Object -First 1
+
+# 2. THE decisive one: an OLDER client is offered the update.
+#    Expect 200 + JSON carrying the new version and a signature. 204 here is the
+#    poisoned-manifest failure and it is silent on every client.
+$r = Invoke-WebRequest "https://cloud.phorma-labs.com/update/stable/windows/x86_64/<PREVIOUS>" -SkipHttpErrorCheck
+$r.StatusCode; ($r.Content | ConvertFrom-Json).version
+
+# 3. And a CURRENT client is not. Expect 204.
+(Invoke-WebRequest "https://cloud.phorma-labs.com/update/stable/windows/x86_64/<NEW>" -SkipHttpErrorCheck).StatusCode
+
+# 4. The website's five download slugs redirect to the new version. Expect 302 each.
+foreach ($p in @('windows-x64','macos-arm64','macos-intel','linux-appimage','linux-deb')) {
+  $d = Invoke-WebRequest "https://cloud.phorma-labs.com/download/stable/latest/$p" `
+        -Method Get -SkipHttpErrorCheck -MaximumRedirection 0
+  "$p -> $($d.StatusCode) $($d.Headers.Location)"
+}
 ```
 
-Check `stable/latest.json` names the new version and the updater answers **200 plus JSON** for an
-older version (not 204). GitHub marks the newest **non-prerelease** as "Latest", so on a beta chain
-GitHub's "Latest" lags far behind - never rely on `gh`'s Latest fallback. A bare
-`gh release download` once poisoned `stable/latest.json` with an old version and returned 204 to
-every updater client; `publish-r2.mjs` now aborts on a version mismatch, and the workflow sets
-`VERSION` on the download step for exactly this reason.
+**Two traps in the probes themselves**, both hit while writing this:
+
+- **Do not probe an asset with `-Method Head`.** `handleReleaseRequest` gates on
+  `request.method !== 'GET'`, so HEAD falls through to the agent router and **404s** while the
+  identical GET returns 200 and the real installer. The 404 reads as a missing artifact and sends
+  you to debug R2 for nothing. Use `-Method Get ... -MaximumRedirection 0` and read
+  `RawContentLength`.
+- **The download slugs are not the updater's target strings.** The website route takes
+  `windows-x64` / `macos-arm64` / `macos-intel` / `linux-appimage` / `linux-deb`
+  (`DOWNLOAD_PLATFORM_MAP`); the updater path takes `windows/x86_64` style (`updaterPlatformKey`).
+  Guessing `windows` or `linux` on the download route 404s and looks like a broken release.
+
+GitHub marks the newest **non-prerelease** as "Latest", so on a beta chain GitHub's "Latest" lags far
+behind - never rely on `gh`'s Latest fallback. A bare `gh release download` once poisoned
+`stable/latest.json` with an old version and returned 204 to every updater client; `publish-r2.mjs`
+now aborts on a version mismatch, and the workflow sets `VERSION` on the download step for exactly
+this reason.
 
 ## Phase 9 - Post-release
 
