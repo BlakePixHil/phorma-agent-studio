@@ -82,6 +82,24 @@ CLERK_AUTHORIZED_PARTIES=http://localhost:7322,http://localhost:7323
 # SAME instance as `CLERK_SECRET_KEY` above.
 # CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
 
+# base64 32 random bytes. HMAC key signing the desktop sign-in tokens that
+# `/api/auth/device/redeem` issues, verified by `verifyBearer`. Optional: leave it
+# unset and desktop sign-in answers 501, which is also exactly what a BYO worker
+# does. Rotating it invalidates every token already issued - in production, set
+# PHORMA_AUTH_SECRET_PREVIOUS for the overlap window and delete it afterwards.
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# PHORMA_AUTH_SECRET=
+# PHORMA_AUTH_SECRET_PREVIOUS=
+
+# Clerk PUBLISHABLE key the `/auth/device` sign-in page loads clerk-js with. A
+# PUBLIC value, so it is a `var` in wrangler.jsonc for the deployed worker and only
+# needs to be here to override it locally. It MUST name the same instance as
+# `CLERK_SECRET_KEY` above, or the page signs the user in to one instance and the
+# claim is verified against another - a flat 401 with nothing to explain it.
+# Locally that means the DEVELOPMENT `pk_test_` key from
+# `frontend/src/environments/clerk.ts`.
+# CLERK_PUBLISHABLE_KEY=
+
 # base64 32 random bytes. AES-GCM key for stored tenant runtime keys and for the
 # SecretVault Durable Object. Without it `/api/connection-secrets` answers 501
 # and a provisioned tenant has no decryptable runtime key.

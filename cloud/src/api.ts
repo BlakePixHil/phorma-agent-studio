@@ -38,6 +38,7 @@ import {
   type StripeEnv,
   type StripeResult,
 } from './stripe';
+import { handleDeviceAuthApi, type DeviceAuthEnv } from './device-auth-routes';
 import { handleStripeWebhookRequest } from './stripe-webhook';
 import {
   handleTelemetryAdminRequest,
@@ -71,7 +72,12 @@ import {
  * `wrangler.jsonc` secret header, local ones in `.dev.vars.example`; a new secret
  * goes in BOTH.
  */
-export type ApiEnv = AuthEnv & TenantEnv & SecretVaultEnv & TelemetryAdminEnv & StripeEnv;
+export type ApiEnv = AuthEnv &
+  TenantEnv &
+  SecretVaultEnv &
+  TelemetryAdminEnv &
+  StripeEnv &
+  DeviceAuthEnv;
 
 /** JSON responder bound to the current request's CORS headers. */
 type Respond = (body: unknown, status?: number) => Response;
@@ -683,6 +689,20 @@ async function routeApiRequest(
   if (url.pathname === '/api/connection-secrets') {
     return handleConnectionSecretRequest(request, env, respond);
   }
+
+  // ── /api/auth/device/* — the desktop sign-in handoff ──────────────────────
+  //
+  // ABOVE the `store.enabled` gate on purpose: these three routes touch KV only,
+  // never D1, so a tenant-store outage must not stop a user signing in. Signing in
+  // is also the thing they would need to do in order to see anything about that
+  // outage.
+  //
+  // Under `/api/` so they inherit the scoped CORS computed from `ALLOWED_ORIGINS`
+  // - the studio calls `start` and `redeem` cross-origin from the webview, and a
+  // second CORS implementation is how the two drift apart. The browser PAGE is not
+  // under `/api/`; `index.ts` serves it with the other public navigations.
+  const deviceAuth = await handleDeviceAuthApi(request, env, url, respond, verifyRequest);
+  if (deviceAuth) return deviceAuth;
 
   // ── /api/admin/telemetry/* — owner-only telemetry aggregates (9.1) ─────────
   // Also deliberately ABOVE the hosted-bindings gate: this surface carries its

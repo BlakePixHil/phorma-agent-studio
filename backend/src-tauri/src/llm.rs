@@ -73,12 +73,30 @@ const MCP_SECRET_PREFIX: &str = "mcp:";
 /// chunked `store_secret_value` / `clear_secret_value` path.
 const CONNECTION_SECRET_PREFIX: &str = "conn:";
 
+/// Prefix for the Phorma account credential namespace.
+///
+/// Exactly one entry lives under it, [`DEVICE_TOKEN_KEY`]. It is a prefix rather
+/// than a bare name so it passes the same namespace validation as the other two
+/// and so a future second entry (a refresh token, when lean v1 grows one) needs no
+/// change here.
+const PHORMA_AUTH_PREFIX: &str = "phorma-auth:";
+
+/// Keychain entry holding the Phorma desktop sign-in token.
+///
+/// Written by the studio after the browser handoff completes, read back by
+/// [`phorma_auth_token`], and deleted on sign-out.
+pub(crate) const DEVICE_TOKEN_KEY: &str = "phorma-auth:device-token";
+
 fn validate_secret_key(key: &str) -> Result<(), String> {
-    if key.starts_with(MCP_SECRET_PREFIX) || key.starts_with(CONNECTION_SECRET_PREFIX) {
+    if key.starts_with(MCP_SECRET_PREFIX)
+        || key.starts_with(CONNECTION_SECRET_PREFIX)
+        || key.starts_with(PHORMA_AUTH_PREFIX)
+    {
         Ok(())
     } else {
         Err(format!(
-            "Secret key must start with '{MCP_SECRET_PREFIX}' or '{CONNECTION_SECRET_PREFIX}'."
+            "Secret key must start with '{MCP_SECRET_PREFIX}', '{CONNECTION_SECRET_PREFIX}' or \
+             '{PHORMA_AUTH_PREFIX}'."
         ))
     }
 }
@@ -491,6 +509,40 @@ pub(crate) fn get_secret(key: &str) -> Option<String> {
     read_secret_value(key).ok().flatten()
 }
 
+/// Reads the stored Phorma desktop sign-in token. `None` when signed out.
+///
+/// This is the ONE command that hands a stored secret back to the webview, and the
+/// exception is deliberate rather than an erosion of the rule. Two things make it
+/// different from a provider API key:
+///
+/// 1. **It is our credential for our own API, not the user's credential for a third
+///    party.** An Anthropic or OpenAI key that leaks costs the user money at a
+///    vendor we do not control and cannot revoke for them. This token addresses one
+///    Phorma tenant, expires on its own, and can be invalidated wholesale by
+///    rotating `PHORMA_AUTH_SECRET` on the worker.
+/// 2. **The webview has to present it.** It is a bearer on `fetch` calls the studio
+///    makes from the webview (`/api/me`, `/api/infer`, the billing routes). The only
+///    design in which the webview never sees it is one where every one of those
+///    calls is proxied through Rust, which is a much larger change than the
+///    credential is worth at this stage.
+///
+/// So the keychain is doing at-rest protection here - OS-guarded storage instead of
+/// `localStorage` or IndexedDB, surviving restarts - and NOT in-memory isolation.
+///
+/// Note the entry name is HARD-CODED. There is deliberately no generic
+/// "read any secret" command: one that took a key would let the webview ask for
+/// `mcp:*` and `conn:*` values, which is exactly what `get_secret` staying
+/// `pub(crate)` prevents.
+///
+/// # Errors
+///
+/// Returns a user-facing error when the keychain cannot be read. A missing entry is
+/// `Ok(None)`, not an error - being signed out is a normal state.
+#[tauri::command]
+pub fn phorma_auth_token() -> Result<Option<String>, String> {
+    read_secret_value(DEVICE_TOKEN_KEY)
+}
+
 /// Starts a streaming LLM request. Response lines are emitted as
 /// `llm-stream-event` events tagged with `request_id`; the command returns
 /// once the stream ends (the events carry the data).
@@ -658,17 +710,44 @@ mod tests {
     }
 
     #[test]
-    fn accepts_mcp_and_connection_prefixes() {
+    fn accepts_mcp_connection_and_phorma_auth_prefixes() {
         assert!(validate_secret_key("mcp:node-1:API_TOKEN").is_ok());
         assert!(validate_secret_key("conn:conn-crm:apiKey").is_ok());
+        assert!(validate_secret_key(DEVICE_TOKEN_KEY).is_ok());
+    }
+
+    /// The entry `phorma_auth_token` reads must be inside the validated namespace.
+    /// If these ever disagree, storing the token from the studio would be refused
+    /// while reading it silently returned `None` - a sign-in that appears to work
+    /// and never persists.
+    #[test]
+    fn the_device_token_entry_is_inside_the_phorma_auth_namespace() {
+        assert!(DEVICE_TOKEN_KEY.starts_with(PHORMA_AUTH_PREFIX));
+        assert!(validate_secret_key(DEVICE_TOKEN_KEY).is_ok());
     }
 
     #[test]
-    fn rejects_any_other_prefix_naming_both_accepted_ones() {
-        for key in ["", "anthropic", "conn", "mcp", "CONN:x:y", " conn:x:y", "other:x"] {
+    fn rejects_any_other_prefix_naming_every_accepted_one() {
+        for key in [
+            "",
+            "anthropic",
+            "conn",
+            "mcp",
+            "CONN:x:y",
+            " conn:x:y",
+            "other:x",
+            // Near-misses on the new namespace, which must not open it up.
+            "phorma-auth",
+            "phorma_auth:device-token",
+            "PHORMA-AUTH:device-token",
+        ] {
             let error = validate_secret_key(key).expect_err("key must be rejected");
             assert!(error.contains("mcp:"), "message names the mcp prefix: {error}");
             assert!(error.contains("conn:"), "message names the conn prefix: {error}");
+            assert!(
+                error.contains("phorma-auth:"),
+                "message names the phorma-auth prefix: {error}"
+            );
         }
     }
 

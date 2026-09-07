@@ -22,19 +22,3 @@
  */
 export const CLERK_PUBLISHABLE_KEY =
   'pk_test_Zmxvd2luZy1zZWFob3JzZS03Mi5jbGVyay5hY2NvdW50cy5kZXYk';
-
-/**
- * Clerk's hosted Account Portal for this instance, with no trailing slash.
- *
- * The DESKTOP build sends the user here in their system browser instead of
- * opening Clerk's in-webview modal, because the modal cannot complete against a
- * production instance - see `PhormaCloudService.signIn` for the mechanism. This
- * file's value is the development instance's portal, which is what a
- * `backend/npm run dev` desktop shell talks to.
- *
- * A development instance serves its portal from `<slug>.accounts.dev`; a
- * production instance serves it from `accounts.<your-domain>`. The two are
- * different hosts, so this constant is part of the `fileReplacements` pair
- * rather than derived from the publishable key at runtime.
- */
-export const CLERK_ACCOUNT_PORTAL_URL = 'https://flowing-seahorse-72.accounts.dev';

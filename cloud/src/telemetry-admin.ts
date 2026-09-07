@@ -427,7 +427,16 @@ export async function handleTelemetryAdminRequest(
 
   // 9.4, 9.5 - verified, but not the owner. A different fact from 401, and the
   // body says nothing about why or about who is on the list (9.6).
-  if (!isTelemetryAdmin(env.TELEMETRY_ADMIN_USER_IDS, auth.userId)) {
+  //
+  // The KIND check is part of that gate, not an extra. A Phorma desktop token
+  // carries the same `userId` as the Clerk session that minted it, so an owner
+  // signing in on the desktop app would otherwise carry operator access on a
+  // long-lived bearer that sits in a laptop's keychain and cannot be revoked
+  // before it expires (lean v1 - see `device-auth.ts`). Operator surfaces require
+  // a human who authenticated in a browser just now, so this asks for a Clerk
+  // session specifically. It answers 403 rather than 401 because the credential
+  // IS valid; it is just not an operator credential.
+  if (auth.kind !== 'clerk' || !isTelemetryAdmin(env.TELEMETRY_ADMIN_USER_IDS, auth.userId)) {
     return reply({ error: 'Forbidden.' }, 403);
   }
 

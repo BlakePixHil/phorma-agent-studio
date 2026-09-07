@@ -43,6 +43,10 @@ pub fn run() {
             llm::list_provider_models,
             llm::set_secret,
             llm::has_secret,
+            // The one command that returns a stored secret to the webview. See its
+            // doc comment for why the Phorma account token is the exception and a
+            // provider API key is not.
+            llm::phorma_auth_token,
             llm::llm_proxy_stream,
             llm::cancel_llm_stream,
             data::data_request,

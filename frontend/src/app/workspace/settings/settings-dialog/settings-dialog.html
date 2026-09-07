@@ -987,28 +987,38 @@
                             Phorma Cloud. A subscription is required to run workflows.
                           </p>
                           <!-- Desktop cannot complete Clerk's in-app modal against a
-                               production instance, so the flow leaves for the system
-                               browser and the app cannot yet pick the session back up.
-                               See `PhormaCloudService.signIn`. Say so here rather than
-                               let a "Sign in" button imply it signs you in. -->
-                          @if (phormaCloud.signInIsExternal) {
+                               production instance, so sign-in happens in the system
+                               browser and hands a credential back. See
+                               `PhormaCloudService.signIn`. The pending state matters:
+                               the user is looking at another window, so this one has
+                               to say it is waiting and offer a way out. -->
+                          @if (desktopAuthPending()) {
                             <p class="phorma-settings__note">
                               <i class="ti ti-external-link" aria-hidden="true"></i>
-                              Accounts are created and managed in your browser. Linking
-                              the desktop app to a Phorma account is not available yet.
+                              Waiting for you to finish signing in in your browser.
                             </p>
+                            <p-button
+                              styleClass="phorma-settings__btn"
+                              size="small"
+                              [outlined]="true"
+                              label="Cancel"
+                              (onClick)="cancelDesktopSignIn()"
+                            />
+                          } @else {
+                            @if (phormaCloud.signInIsExternal) {
+                              <p class="phorma-settings__note">
+                                <i class="ti ti-external-link" aria-hidden="true"></i>
+                                Sign-in opens in your browser, then returns you here.
+                              </p>
+                            }
+                            <p-button
+                              styleClass="phorma-settings__btn"
+                              size="small"
+                              icon="ti ti-login-2"
+                              label="Sign in to Phorma Cloud"
+                              (onClick)="phormaCloud.signIn()"
+                            />
                           }
-                          <p-button
-                            styleClass="phorma-settings__btn"
-                            size="small"
-                            icon="ti ti-login-2"
-                            [label]="
-                              phormaCloud.signInIsExternal
-                                ? 'Open Phorma accounts in browser'
-                                : 'Sign in to Phorma Cloud'
-                            "
-                            (onClick)="phormaCloud.signIn()"
-                          />
                         }
                       }
 

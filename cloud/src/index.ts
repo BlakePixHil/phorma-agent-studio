@@ -29,6 +29,7 @@ import {
   handleSignedInRequest,
   type ApiEnv,
 } from './api';
+import { handleDeviceAuthPage } from './device-auth-routes';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
@@ -116,6 +117,15 @@ export default {
     // sign-in on a browser error page.
     const signedIn = handleSignedInRequest(request);
     if (signedIn) return signedIn;
+
+    // `GET /auth/device` - the page that signs a desktop install in. Public and
+    // CORS-free like the two above: the studio hands the browser this URL, so it
+    // is a top-level navigation with no bearer. It is the only one of the three
+    // that runs script, because loading clerk-js FIRST-PARTY on this origin is
+    // the entire mechanism - the studio's own webview is cross-site with
+    // `clerk.phorma-labs.com` and can never hold a Clerk session.
+    const devicePage = handleDeviceAuthPage(request, env);
+    if (devicePage) return devicePage;
 
     // Control-plane routes (hosted mode).
     const apiResponse = await handleApiRequest(request, env as ApiEnv, cors, ctx);

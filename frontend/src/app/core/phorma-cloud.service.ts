@@ -3,9 +3,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
-import { CLERK_ACCOUNT_PORTAL_URL } from '../../environments/clerk';
 import { ToastService } from '../shared/toast/toast.service';
-import { McpOAuthService } from './mcp-oauth.service';
+import { DesktopAuthService } from './desktop-auth.service';
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
 import { TauriService } from './tauri.service';
 import { TelemetryService } from './telemetry.service';
@@ -125,17 +124,40 @@ export class PhormaCloudService {
   // reused for `openExternal` rather than re-importing the opener plugin here -
   // `BillingService` already takes that rail for Stripe Checkout.
   private readonly tauri = inject(TauriService);
-  private readonly links = inject(McpOAuthService);
   private readonly toast = inject(ToastService);
+  // The desktop credential. A DI LEAF (`TauriService` + `McpOAuthService` only), so
+  // injecting it here does not close the NG0200 cycle this service sits on.
+  private readonly desktopAuth = inject(DesktopAuthService);
 
-  /** Current Clerk user (null until Clerk loads / when signed out). */
+  /**
+   * Current Clerk user. Always null on desktop, and that is not a bug: the webview
+   * cannot hold a Clerk session against a production instance, so a desktop install
+   * is signed in via {@link DesktopAuthService} and Clerk never loads a user here.
+   * Read {@link signedIn} rather than this for "is there an account".
+   */
   readonly user = toSignal(this.clerk.user$, { initialValue: null });
-  /** True once Clerk reports a signed-in user. */
-  readonly signedIn = computed(() => this.user() != null);
-  /** Signed-in email (best-effort display value). */
+
+  /**
+   * True when this install has an account, by EITHER route.
+   *
+   * Clerk in a browser build, the desktop credential in a packaged one. Every gate
+   * in the studio reads this, so keeping it a union is what let the desktop
+   * credential land without touching the billing surfaces, the model picker or the
+   * run path.
+   */
+  readonly signedIn = computed(() => this.user() != null || this.desktopAuth.signedIn());
+  /**
+   * Signed-in email (best-effort display value).
+   *
+   * On desktop it comes from the sign-in page via the handoff rather than from a
+   * Clerk user object, and it can legitimately be null - a tenant row only exists
+   * once someone has subscribed, so there is no server-side address to fall back on
+   * for a brand new account. Surfaces must render an account with no address rather
+   * than treat null as signed out.
+   */
   readonly email = computed(() => {
     const user = this.user();
-    return user?.primaryEmailAddress?.emailAddress ?? null;
+    return user?.primaryEmailAddress?.emailAddress ?? this.desktopAuth.email() ?? null;
   });
 
   /** Latest /api/me response (null until fetched or when signed out). */
@@ -243,6 +265,12 @@ export class PhormaCloudService {
       if (signedIn) void this.refresh();
       else this.profile.set(null);
     });
+
+    // Adopt a credential left by a previous session. No-op in a browser build.
+    // This flips `signedIn()` when it finds one, which the effect above then turns
+    // into the first `/api/me` - so a desktop user who signed in last week is
+    // signed in again before any gated surface reads `subscribed()`.
+    void this.desktopAuth.restore();
   }
 
   /**
@@ -292,73 +320,92 @@ export class PhormaCloudService {
    * (`auth_config.cookieless_dev`) and thread the client through the URL as
    * `__clerk_db_jwt`, needing no cross-site cookie at all.
    *
-   * ## What the desktop path does today
+   * ## What the desktop path does instead
    *
-   * It opens Clerk's hosted Account Portal in the system browser, where the same
-   * flow is first-party on `phorma-labs.com` and works, Google included. That is
-   * enough to CREATE and manage an account, and it is deliberately not dressed up
-   * as more than that: the desktop app cannot yet pick the resulting session up,
-   * because doing so needs the browser to hand a credential back to the app.
-   * `.kiro/specs/desktop-signin-handoff/` is that work. Until it lands the toast
-   * is the honest answer, and it must not be softened into "signing you in".
-   *
-   * The browser path still needs no `forceRedirectUrl`: the instance's
-   * `after_sign_in_url` points at `https://app.phorma-labs.com`, which does not
-   * resolve, but the Account Portal is a normal web page and landing on a broken
-   * host AFTER authenticating leaves the account created and the session live.
-   * Fixing that Dashboard value is still worth doing - it is the difference
-   * between finishing on a real page and finishing on a browser error.
+   * It runs the browser handoff in {@link DesktopAuthService}: the studio mints a
+   * one-time code, the system browser signs in on `cloud.phorma-labs.com` (which IS
+   * same-site with Clerk, so cookies work there), and the studio exchanges the code
+   * for a Phorma credential it keeps in the OS keychain. Clerk still authenticates
+   * every human; it just does it somewhere the cookie can live.
    */
   signIn(): void {
     if (this.signInIsExternal) {
-      void this.openAccountPortal();
+      void this.beginDesktopSignIn();
       return;
     }
-    // Browser parity path. `forceRedirectUrl` overrides the instance's broken
+    // Browser parity path. `forceRedirectUrl` overrides the instance's
     // `after_sign_in_url`; `forceRedirectUrl` and not `fallbackRedirectUrl`
     // because the fallback only applies when Clerk has no opinion of its own,
-    // and here the instance has one and it is wrong.
+    // and here the instance has one and it points elsewhere.
     this.clerk.openSignIn({ forceRedirectUrl: window.location.href });
   }
 
   /**
-   * Hands the Account Portal to the OS browser and says so.
+   * Runs the handoff and reports the outcome.
    *
-   * `sign-up` rather than `sign-in` is the landing page on purpose: the portal
-   * carries a "Sign in" link for anyone who already has an account, while a user
-   * with no account who lands on `sign-in` has to notice a smaller link to get
-   * anywhere. Both pages offer Continue with Google.
+   * Every failure gets a distinct sentence, because they have distinct remedies and
+   * the previous version of this flow failed by showing the user a vendor error page
+   * with no way back. `timed-out` is by far the most likely and is not an error at
+   * all - it is what an abandoned sign-in looks like.
    */
-  private async openAccountPortal(): Promise<void> {
-    const url = `${CLERK_ACCOUNT_PORTAL_URL}/sign-up`;
-    try {
-      await this.links.openExternal(url);
-      this.toast.warning(
-        'Finish signing in in your browser',
-        'Your Phorma account is created and managed in the browser. Linking this ' +
-          'desktop app to that account is not available yet, so the studio will ' +
-          'still show you as signed out when you come back.',
-      );
-    } catch {
-      // A failed hand-off leaves the user with no way to reach the portal, so the
-      // URL itself becomes the message - they can copy it out of the toast.
-      this.toast.error('Could not open your browser', url);
+  private async beginDesktopSignIn(): Promise<void> {
+    const signedIn = await this.desktopAuth.begin();
+    if (signedIn) {
+      await this.refresh();
+      this.toast.success('Signed in', this.email() ?? undefined);
+      return;
+    }
+    switch (this.desktopAuth.failure()) {
+      case 'cancelled':
+        return; // The user did it on purpose; a toast would be noise.
+      case 'timed-out':
+        this.toast.warning(
+          'Sign-in was not completed',
+          'The browser sign-in did not finish in time. You can start again whenever you like.',
+        );
+        return;
+      case 'unreachable':
+        this.toast.error(
+          'Could not reach Phorma Cloud',
+          'Check your connection and try again. Nothing was changed.',
+        );
+        return;
+      default:
+        this.toast.error(
+          'Sign-in was refused',
+          'Phorma Cloud would not authorize this device. Try again, or contact support if it keeps happening.',
+        );
     }
   }
 
   /**
-   * Resolves a fresh Clerk session JWT for authenticating to the Phorma Cloud
-   * API (e.g. /api/infer). Returns null when signed out or no session token
-   * can be minted. Used by the local-run Phorma Cloud model transport.
+   * The bearer for Phorma Cloud calls, or null when signed out.
+   *
+   * THE seam that makes one credential change reach everything. `/api/me` here,
+   * `/api/infer` through `ModelTransportService`, and the billing routes through
+   * `BillingService` all call this, so none of them needed editing when desktop
+   * stopped carrying a Clerk session: a browser build still gets a short-lived
+   * Clerk JWT, a desktop build gets its Phorma device token, and the worker's
+   * `verifyBearer` accepts either.
    */
   async sessionToken(): Promise<string | null> {
+    if (this.tauri.isDesktop) return await this.desktopAuth.token();
     if (!this.signedIn()) return null;
     const session = await firstValueFrom(this.clerk.session$);
     return (await session?.getToken()) ?? null;
   }
 
-  /** Signs the Clerk session out and clears the cached profile. */
+  /**
+   * Signs out and clears the cached profile.
+   *
+   * Both credentials are cleared regardless of platform. That is deliberate rather
+   * than lazy: `isDesktop` decides which one EXISTS, and a sign-out that consulted
+   * it would leave a stale credential behind on any build where that assumption was
+   * ever wrong. Note the desktop half is local-only in lean v1 - see
+   * `DesktopAuthService.signOut`.
+   */
   async signOut(): Promise<void> {
+    await this.desktopAuth.signOut();
     const clerk = await firstValueFrom(this.clerk.clerk$);
     await clerk?.signOut();
     this.profile.set(null);
@@ -385,12 +432,13 @@ export class PhormaCloudService {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const session = await firstValueFrom(this.clerk.session$);
-      const jwt = await session?.getToken();
-      if (!jwt) throw new Error('Could not get a session token. Sign in again.');
+      // Through the seam, not through Clerk directly: on desktop there is no Clerk
+      // session to mint from and this would always have thrown.
+      const bearer = await this.sessionToken();
+      if (!bearer) throw new Error('Could not get a session token. Sign in again.');
 
       const response = await fetch(`${base}/api/me`, {
-        headers: { Authorization: `Bearer ${jwt}` },
+        headers: { Authorization: `Bearer ${bearer}` },
       });
       if (!response.ok) {
         // A 401 from the control plane means the session the studio holds is not

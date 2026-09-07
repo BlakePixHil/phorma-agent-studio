@@ -40,6 +40,7 @@ import { WorkflowService } from '../../../core/workflow.service';
 import { ConnectionStoreService } from '../../../core/connection-store.service';
 import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
+import { DesktopAuthService } from '../../../core/desktop-auth.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
 import { SettingsService } from '../../../core/settings.service';
 import {
@@ -569,6 +570,16 @@ export class SettingsDialog {
     this.dialog.activePageId.set('cloud');
   }
 
+  /**
+   * Abandons a pending browser sign-in.
+   *
+   * Nothing needs revoking: the device code simply expires worker-side within its
+   * ten-minute window, and it can only ever be redeemed once.
+   */
+  protected cancelDesktopSignIn(): void {
+    this.desktopAuth.cancel();
+  }
+
   /** Opens the Buy Credits pack picker. */
   protected openBuyCredits(): void {
     this.creditsDialog.open();
@@ -756,6 +767,11 @@ export class SettingsDialog {
 
   protected readonly cloud = inject(CloudService);
   protected readonly phormaCloud = inject(PhormaCloudService);
+  // The browser handoff is the only sign-in a desktop build has, and while it is
+  // running the user is looking at a different window. This panel has to say so and
+  // offer a way out, or an abandoned attempt looks like a frozen button.
+  private readonly desktopAuth = inject(DesktopAuthService);
+  protected readonly desktopAuthPending = computed(() => this.desktopAuth.state() === 'pending');
   protected readonly deployConfig = inject(DeployConfigService);
   protected readonly tierLabel = tierLabel;
 

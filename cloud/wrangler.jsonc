@@ -110,7 +110,25 @@
   //                                 production session token: `/status.json`
   //                                 cannot, its Clerk probe returns 200 for any
   //                                 valid key regardless of instance.
-  //   CLERK_JWT_KEY               - Clerk instance PEM for offline JWT verify
+  //   CLERK_JWT_KEY               - Clerk instance PEM for offline JWT verify.
+  //                                 This is the instance's PUBLIC key, so it can
+  //                                 always be regenerated rather than recovered:
+  //                                 take `n`/`e` from
+  //                                 https://clerk.<domain>/.well-known/jwts.json
+  //                                 and export SPKI PEM. With a PEM set,
+  //                                 @clerk/backend NEVER falls back to the secret
+  //                                 key, so a STALE one 401s every production
+  //                                 token with a failure that reads exactly like a
+  //                                 wrong CLERK_SECRET_KEY.
+  //   PHORMA_AUTH_SECRET          - base64 32 random bytes. HMAC key signing the
+  //                                 desktop sign-in tokens issued by
+  //                                 /api/auth/device/redeem. OPTIONAL: unset
+  //                                 disables desktop sign-in entirely and leaves
+  //                                 BYO behaviour byte-identical. Rotating it
+  //                                 signs EVERY desktop install out at once, so
+  //                                 set PHORMA_AUTH_SECRET_PREVIOUS for the
+  //                                 overlap window and delete it afterwards.
+  //   PHORMA_AUTH_SECRET_PREVIOUS - optional, verification only, rotation only.
   //   KEY_ENC_SECRET              - base64 32-byte AES-GCM key for stored runtime keys
   //   OPENROUTER_PROVISIONING_KEY - mints per-tenant credit-limited runtime keys.
   //                                 Account-level: ONE management key reaches every
@@ -187,7 +205,12 @@
         // form is kept because that flag (and Tauri v1) produce it: admitting a
         // scheme no build currently uses costs nothing, while omitting the one
         // it does use locks out every install on that platform.
-        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev",
+        // `https://cloud.phorma-labs.com` is this worker's OWN origin. It is here
+        // because `GET /auth/device` runs clerk-js on it and that page POSTs to
+        // `/api/auth/device/claim`. Same-origin, so the browser needs no CORS for
+        // it - but the two lists are kept in step deliberately (see
+        // `CLERK_AUTHORIZED_PARTIES` below, where the same entry is NOT optional).
+        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev,https://cloud.phorma-labs.com",
         // BETA ONLY: the Admin_API's k-anonymity floor (9.15) folds any group
         // under 5 distinct installs into `other`, which is nearly everything
         // at beta volume. Flip to "false" (or remove this line) once out of
@@ -213,7 +236,21 @@
         // `CLERK_AUTHORIZED_PARTIES` secret was ever set on this worker, delete
         // it (`npx wrangler secret delete ... --env hosted`) so one binding owns
         // the name. A local `wrangler dev` overrides it from `.dev.vars`.
-        "CLERK_AUTHORIZED_PARTIES": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev"
+        // `https://cloud.phorma-labs.com` is REQUIRED here, not tidiness. The
+        // desktop sign-in page runs clerk-js on this worker's own origin, so the
+        // session token it mints carries `azp: https://cloud.phorma-labs.com`.
+        // `@clerk/backend` matches `azp` by exact string, so omitting this makes
+        // `POST /api/auth/device/claim` a hard 401 and desktop sign-in silently
+        // impossible - with nothing in the response to say why.
+        "CLERK_AUTHORIZED_PARTIES": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev,https://cloud.phorma-labs.com",
+
+        // Clerk PUBLISHABLE key for the instance this worker verifies against -
+        // a PUBLIC value, which is why it is a `var` and not a secret. It must
+        // pair with `CLERK_SECRET_KEY`: `GET /auth/device` signs the user in to
+        // whichever instance this names, and `verifyBearer` verifies against
+        // whichever instance the secret names. A mismatch is a 401 on claim.
+        // `pk_live_` here, matching `frontend/src/environments/clerk.prod.ts`.
+        "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsucGhvcm1hLWxhYnMuY29tJA"
       },
       // Telemetry retention pass, daily at 03:17 UTC (the odd minute keeps it
       // off the top-of-hour crowd). HOSTED ONLY on purpose: a BYO deployment has
