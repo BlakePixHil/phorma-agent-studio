@@ -32,6 +32,14 @@ export default defineConfig({
     // close enough to the edge to flake. This is a ceiling for a known-slow
     // setup, not cover for a slow test.
     testTimeout: 90_000,
+    // `testTimeout` does NOT cover a `beforeAll`, and vitest's `hookTimeout`
+    // defaults to 10s - which is why the three `src/infra` suites that synthesize
+    // in a hook each pass an explicit value. Setting it here too means a new
+    // synthesizing suite inherits the right ceiling instead of failing at 10s and
+    // reading as a broken assertion. Raised from an effective 30s after
+    // `iam-assertions.spec.ts` timed out reproducibly on Windows/Node 24 while
+    // every one of its 25 assertions passed given room to run.
+    hookTimeout: 90_000,
     reporters: ['default'],
   },
 });

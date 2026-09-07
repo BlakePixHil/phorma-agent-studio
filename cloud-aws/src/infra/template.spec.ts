@@ -784,13 +784,14 @@ function dockerImageEntries(
 describe('Template - Container_Image paths', () => {
   // Both paths are synthesized here, once, and shared by every assertion below:
   // the asset path fingerprints the repository-root build context, so a synth per
-  // test would multiply seconds. The explicit 30s is the HOOK timeout, which
-  // `testTimeout` in `vitest.config.ts` does not cover - it defaults to 10s,
-  // under what a cold asset fingerprint can cost.
+  // test would multiply seconds. The ceiling is `hookTimeout` in
+  // `vitest.config.ts` - vitest's `hookTimeout` defaults to 10s and `testTimeout`
+  // does not cover a hook, so it has to be set somewhere; one place beats three
+  // literals drifting apart.
   beforeAll(() => {
     assetPath();
     referencePath();
-  }, 30_000);
+  });
 
   // -- asset path ----------------------------------------------------------
 

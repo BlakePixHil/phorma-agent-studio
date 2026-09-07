@@ -271,7 +271,9 @@ beforeAll(() => {
     trust,
     imageUri: '210987654321.dkr.ecr.us-east-1.amazonaws.com/platform/phorma-host:1.2.3',
   }).toJSON() as Record<string, unknown>;
-}, 30_000);
+  // Hook ceiling comes from `hookTimeout` in `vitest.config.ts`, not a literal
+  // here - two synths in one hook is the slowest setup in the package.
+});
 
 afterAll(() => {
   if (!processEnv) return;

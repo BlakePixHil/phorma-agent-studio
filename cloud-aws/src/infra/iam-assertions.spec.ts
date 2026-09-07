@@ -47,9 +47,12 @@ function synthesize(overrides: Partial<AwsDeployConfig> = {}): Template {
   return Template.fromStack(stack);
 }
 
+// The cold synth is the slow part, not the assertions. The ceiling comes from
+// `hookTimeout` in `vitest.config.ts` rather than a literal here, so one place
+// governs every suite that synthesizes in a hook.
 beforeAll(() => {
   template = synthesize();
-}, 30_000);
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
