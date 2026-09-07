@@ -16,7 +16,17 @@ cd frontend; npm run build; cd ..           # PRE-FLIGHT: only the production bu
 node scripts/release.mjs 0.2.0-beta.9       # bumps every manifest, commits, tags (--dry-run to preview)
 git push origin main v0.2.0-beta.9          # the TAG is what triggers CI
 gh run watch                                # ~15-20 min
+cd cloud; npm run check                     # then, if cloud/ changed at all:
+npx wrangler deploy --env hosted            # AFTER the bump, never before - see below
 ```
+
+CI does NOT deploy the worker; it builds installers and syncs R2. The worker is a separate manual
+step, and it belongs **after** `release.mjs` runs, because the script bumps `cloud/src/build-info.ts`
+and that constant is what `/status.json` reports as `build`. Deploying the worker before the bump, or
+from a mid-development tree, is how the live worker came to report `0.2.0-beta.12` while serving
+beta.14's billing routes - drift that stays invisible until someone probes a route and reads 401
+instead of 404. `/status.json`'s `build` matching the tag is the only cheap evidence that the deployed
+worker is the one you think it is, so check it after every release.
 
 `.github/workflows/release.yml` then builds signed installers for Windows, macOS (arm64 + x64), and
 Linux via `tauri-action` using the `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]` secrets, publishes a
@@ -82,8 +92,18 @@ cannot confirm that rotation - its Clerk probe returns 200 for any valid key reg
 ## Phorma Cloud go-live checklist (billing)
 
 The billing code shipped (`.kiro/specs/stripe-billing/`). Everything below is operator work against
-live accounts and NONE of it has been done yet, so treat it as a checklist and verify each step rather
-than assuming a previous release covered it.
+live accounts, so treat it as a checklist and VERIFY each step against the live account rather than
+assuming a previous release covered it - or that this list is current. Steps 1-5 were verified done on
+2026-09-07; steps 6 and 7 are still unverified.
+
+Verify, do not assume, in both directions. Every check below is read-only and needs no Dashboard:
+
+```powershell
+npx wrangler versions view <version-id> --env hosted   # secret NAMES, vars, bindings, DO migrations
+npx wrangler deployments list --env hosted             # which version is live, and what caused it
+npx wrangler d1 execute phorma-cloud --env hosted --remote --json --command `
+  "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+```
 
 1. `npx wrangler secret put CLERK_SECRET_KEY --env hosted` with the `sk_live_` key.
 2. `npx wrangler secret put CLERK_JWT_KEY --env hosted` with the production PEM. Rotate both in one
@@ -94,8 +114,12 @@ than assuming a previous release covered it.
    `npx wrangler secret put STRIPE_WEBHOOK_SECRET --env hosted`, both live-mode values. The webhook
    secret is per ENDPOINT, so take it from the live Dashboard endpoint and never from
    `stripe listen`.
-4. `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote` - `0003_billing.sql` and
-   `0004_billing_ordering.sql` are not applied remotely yet.
+4. `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote`. **DONE** - verified
+   2026-09-07: `d1_migrations` lists all four, `credit_grants` and `stripe_events` exist, `tenants`
+   carries both `stripe_*` columns and all four `billing_*` clocks, and `idx_usage_tenant_run` is
+   present. Check the COLUMNS and not just `d1_migrations`: a migration edited after a partial apply
+   stays stamped while its later statements never run, which is a failure this repo has already had
+   locally.
 5. `npx wrangler deploy --env hosted`. A `var` edit (`CLERK_AUTHORIZED_PARTIES`,
    `OPENROUTER_WORKSPACE_ID`) takes effect ONLY here; a `wrangler secret put` publishes no config
    change of its own.
