@@ -440,6 +440,18 @@ console.log('\nGET /auth/device - the page that does the signing in');
   check('derives the Clerk host from the publishable key', host === 'flowing-seahorse-72.clerk.accounts.dev', host);
   check('the CSP allows script only from that host', csp.includes(`script-src 'unsafe-inline' https://${host}`), csp);
   check('the CSP still forbids everything by default', csp.includes("default-src 'none'"), csp);
+
+  // clerk-js builds a Worker from a blob URL. `worker-src` falls back to
+  // `script-src` when absent, which does not admit `blob:`, so omitting this
+  // directive blocks the worker and logs a violation on every load. It must be
+  // its OWN directive: adding `blob:` to `script-src` would also let a blob run
+  // as a top-level script on the page that handles sign-in.
+  check('the CSP admits the clerk-js blob worker', /worker-src [^;]*blob:/.test(csp), csp);
+  check(
+    "...without letting a blob be a top-level script",
+    !/script-src [^;]*blob:/.test(csp),
+    csp,
+  );
   check('the CSP forbids form submission and base rewriting', /form-action 'none'/.test(csp) && /base-uri 'none'/.test(csp), csp);
   check('loads clerk-js from that host and nowhere else', html.includes(`https://${host}/npm/@clerk/clerk-js`), '');
   check('posts the claim to a relative path', html.includes("fetch('/api/auth/device/claim'"), '');

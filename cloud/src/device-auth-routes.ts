@@ -270,8 +270,16 @@ async function handleRedeem(
  * Unlike those two, this page DOES run script - it has to, because loading
  * clerk-js first-party is the entire point. So the CSP is widened by exactly what
  * that needs and nothing else: script and connections to the Clerk instance host,
- * plus the inline bootstrap. No styles from anywhere, no images, no fonts, no
- * frames.
+ * plus the inline bootstrap, plus `worker-src blob:` because clerk-js runs its
+ * timers in a `Worker` built from a blob URL. No styles from anywhere, no fonts,
+ * and frames only for the Clerk host.
+ *
+ * `worker-src` is NOT optional and its absence is not a cosmetic warning. With it
+ * missing the browser falls back to `script-src`, which does not admit `blob:`, so
+ * the console shows "Creating a worker from 'blob:...' violates the following
+ * Content Security Policy directive" on every load. It is listed explicitly rather
+ * than by widening `script-src` with `blob:`, which would also let a blob become a
+ * top-level script on the page that handles sign-in.
  *
  * The device code is read from the query string and passed to `fetch` as a JSON
  * VALUE - it is never interpolated into markup. The one thing embedded in the
@@ -321,9 +329,12 @@ export function handleDeviceAuthPage(request: Request, env: DeviceAuthEnv): Resp
       'Content-Security-Policy': [
         "default-src 'none'",
         `script-src 'unsafe-inline' https://${clerkHost}`,
+        // clerk-js spawns a Worker from a blob URL. Without this the browser
+        // falls back to `script-src`, blocks it, and logs a CSP violation.
+        "worker-src blob:",
         `connect-src https://${clerkHost} 'self'`,
         "style-src 'unsafe-inline'",
-        "img-src data: https:",
+        'img-src data: https:',
         `frame-src https://${clerkHost}`,
         "base-uri 'none'",
         "form-action 'none'",
@@ -358,6 +369,7 @@ function unavailablePage(): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
 <title>Sign-in unavailable - Phorma Agent Studio</title>
 <style>
   :root { color-scheme: light dark; }
@@ -389,6 +401,9 @@ function devicePage(clerkHost: string, publishableKey: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<!-- The worker serves no icon, so an empty data URI stops the browser asking
+     for /favicon.ico and logging a 404 next to the real diagnostics. -->
+<link rel="icon" href="data:,">
 <title>Sign in to Phorma Agent Studio</title>
 <style>
   :root { color-scheme: light dark; }

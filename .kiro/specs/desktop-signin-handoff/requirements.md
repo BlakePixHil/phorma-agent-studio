@@ -96,12 +96,25 @@ because they are cheap and they sit on this path:
 `PHORMA_CLOUD_DEFAULT_URL` is `https://cloud.phorma-labs.com`. **The worker is already on a
 `phorma-labs.com` subdomain**, which makes it same-site with `clerk.phorma-labs.com`. A page served
 by the worker, loaded in the user's real browser, can run clerk-js first-party with cookies that
-work. No new DNS record, no new Cloudflare custom domain, and no new Clerk `allowed_origins` entry
-(Clerk's Frontend API accepts cross-origin requests from any subdomain of the instance's root
-domain).
+work. No new DNS record and no new Cloudflare custom domain.
 
-So the handoff needs a page the worker already knows how to serve and a credential the studio can
-hold. It does not need new infrastructure.
+**CORRECTED 2026-09-08.** This section originally also claimed "no new Clerk `allowed_origins`
+entry (Clerk's Frontend API accepts cross-origin requests from any subdomain of the instance's root
+domain)". The general statement is Clerk's default, but it was **not true of our instance**, and
+shipping on it broke sign-in in beta.18. The production instance has **Enable allowed subdomains**
+turned on, so FAPI answered `cloud.phorma-labs.com` a `403 subdomain_not_allowed` and clerk-js could
+never load. The fix is Dashboard-only - add `cloud.phorma-labs.com` at
+`dashboard.clerk.com/~/domains/allowed-subdomains`. There is no `allowed_subdomains` field in the
+Backend API, and `PATCH /v1/instance` `allowed_origins` is a *different* gate (non-web origins) that
+has no effect on a subdomain refusal.
+
+The lesson worth keeping: an assumption about a third-party default is only evidence once it has
+been measured against the actual instance, for the actual origin the new code will use. The probe
+costs one request - `POST /v1/client/sign_ins` with an empty `strategy=` and the Origin header, per
+the measurement notes above.
+
+So the handoff needs a page the worker already knows how to serve, a credential the studio can hold,
+and that one allowlist entry. It does not need new infrastructure.
 
 ## Requirements
 
