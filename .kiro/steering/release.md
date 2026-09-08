@@ -131,7 +131,24 @@ npx wrangler d1 execute phorma-cloud --env hosted --remote --json --command `
    change of its own.
 6. Mirror the Stripe catalogue into LIVE mode BY LOOKUP KEY, with `tax_behavior: 'inclusive'` on every
    price, and enable Stripe Tax plus the AU GST obligation in the Dashboard for both sandbox and live.
-   `tax_behavior` is permanent once set, so creation is the only chance to get it right.
+   **PARTIALLY DONE** - verified and corrected 2026-09-08 on `acct_1UB18DFzmpLXhRYz`: all six
+   `phorma_*` live prices now carry their `metadata` AND `tax_behavior: inclusive`.
+
+   Two traps this step hid for weeks, both worth reading before touching another catalogue:
+
+   - **Metadata belongs on the PRICE, not the product.** All six prices shipped with
+     `metadata: {}` while `tier` and `credits` sat on the parent products, so `tierForPrice`
+     (which reads `price.metadata.tier` by requirement 7) refused every plan with "a plan price
+     carries no metadata.tier". Verify with `GET /v1/prices` and read `data[].metadata` - the
+     product's metadata is not what the worker sees.
+   - **`tax_behavior` is only correctable while it is `unspecified`.** Stripe: "Once specified as
+     either inclusive or exclusive, it cannot be changed." It shipped as `unspecified`, which the
+     worker LOGS rather than refuses (deliberately - refusing would strand a deployment), so it was
+     invisible. Fixed in place because nothing had sold yet; after a sale the only remedy is a
+     replacement price plus a subscriber migration. Check this BEFORE the first payment, always.
+
+   Still outstanding: `GET /v1/tax/registrations` is EMPTY, so the AU GST registration was never
+   added, and the account default is `inferred_by_currency`. That is Dashboard work.
 7. Re-provision the owner tenant under the PRODUCTION Clerk user id and rotate
    `TELEMETRY_ADMIN_USER_IDS`. Clerk cannot migrate users from a development instance to a production
    one, so a dev-keyed `tenants` row is unrecoverable rather than portable.
