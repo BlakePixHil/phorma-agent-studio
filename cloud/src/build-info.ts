@@ -16,4 +16,4 @@
  * `cloud/test/deploy-config.test.mjs` fails if it drifts from
  * `cloud/package.json`.
  */
-export const WORKER_BUILD = '0.2.0-beta.19';
+export const WORKER_BUILD = '0.2.0-beta.20';
