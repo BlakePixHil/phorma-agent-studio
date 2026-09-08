@@ -322,7 +322,15 @@ export function handleDeviceAuthPage(request: Request, env: DeviceAuthEnv): Resp
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
+      // `no-transform` is the half that matters beyond caching: the zone is
+      // proxied through Cloudflare with Web Analytics on automatic setup, which
+      // REWRITES any HTML response to inject `static.cloudflareinsights.com/
+      // beacon.min.js`. The CSP below (correctly) blocks it, so every load of
+      // this page logged a violation for a script we never asked for. Cloudflare
+      // documents `no-transform` as the opt-out that stops the proxy modifying
+      // the payload, which is the right fix here - widening `script-src` to admit
+      // an analytics CDN on the page that handles sign-in is not.
+      'Cache-Control': 'no-store, no-transform',
       'X-Content-Type-Options': 'nosniff',
       // The code is in this URL, so it must not travel onward in a Referer.
       'Referrer-Policy': 'no-referrer',

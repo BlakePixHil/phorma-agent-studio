@@ -144,12 +144,27 @@
     />
     <span class="phorma-toolbar-divider"></span>
     <!--
-      Clerk auth control (far right). When signed in, renders the Clerk
-      UserButton (avatar + dropdown menu). When signed out, a plain avatar
-      icon that opens Clerk's sign-in modal on click.
+      Account control (far right). Three states, not two, because the desktop
+      build signs in through the browser handoff and Clerk never loads a user
+      there - so `<clerk-user-button>` would render an empty box for an account
+      that IS signed in. Order matters: the Clerk user is the narrower case and
+      is tested first.
     -->
-    @if (isSignedIn()) {
+    @if (clerkUser()) {
       <clerk-user-button class="flex" />
+    } @else if (isSignedIn()) {
+      <!-- Signed in via the device token. Opens Settings > Cloud, which is where
+           the account, plan and quota actually render. -->
+      <p-button
+        [text]="true"
+        severity="secondary"
+        size="small"
+        icon="ti ti-user-check"
+        [pTooltip]="accountTooltip()"
+        tooltipPosition="bottom"
+        (onClick)="openAccount()"
+        ariaLabel="Your Phorma account"
+      />
     } @else {
       <p-button
         [text]="true"

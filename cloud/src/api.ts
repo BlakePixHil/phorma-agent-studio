@@ -451,7 +451,10 @@ export function handleBillingReturnRequest(request: Request): Response | null {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
+      // `no-transform` keeps Cloudflare's proxy from injecting the Web Analytics
+      // beacon into this HTML, which the CSP below would block and log. See the
+      // same header on `GET /auth/device` for the full reasoning.
+      'Cache-Control': 'no-store, no-transform',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       // `default-src 'none'` is the claim that this page loads nothing; the one
@@ -550,7 +553,10 @@ export function handleSignedInRequest(request: Request): Response | null {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
+      // `no-transform` for the same reason as `/billing/return` and
+      // `/auth/device`: it stops Cloudflare's proxy rewriting this HTML to add the
+      // Web Analytics beacon that the CSP then blocks.
+      'Cache-Control': 'no-store, no-transform',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'Content-Security-Policy':

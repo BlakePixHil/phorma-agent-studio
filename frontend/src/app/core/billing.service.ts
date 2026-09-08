@@ -49,6 +49,7 @@ import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom, timeout } from 'rxjs';
 
 import type { CreditPack } from './credit-packs';
+import { DesktopAuthService } from './desktop-auth.service';
 import { McpOAuthService } from './mcp-oauth.service';
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
 
@@ -175,6 +176,10 @@ function hostedBillingUrl(value: unknown): string | null {
 export class BillingService {
   private readonly clerk = inject(ClerkService);
   private readonly links = inject(McpOAuthService);
+  // The desktop credential. Safe for a leaf: `DesktopAuthService` injects only
+  // `TauriService` and `McpOAuthService`, so it reaches nothing on the NG0200
+  // cycle. Required rather than convenient - see `signedIn` below.
+  private readonly desktopAuth = inject(DesktopAuthService);
 
   /**
    * Clerk's user, read as a signal for the same reason `PhormaCloudService`
@@ -183,8 +188,16 @@ export class BillingService {
    */
   private readonly user = toSignal(this.clerk.user$, { initialValue: null });
 
-  /** True once Clerk reports a signed-in user. */
-  readonly signedIn = computed(() => this.user() != null);
+  /**
+   * True when this install has an account, by EITHER route.
+   *
+   * Must be the same union as `PhormaCloudService.signedIn`, and this was a
+   * SHIPPED BUG when it was not: on desktop Clerk never loads a user, so a
+   * Clerk-only gate here made `sessionToken()` return null for every signed-in
+   * desktop install and every Checkout and Billing Portal call failed with
+   * "Sign in to continue" while the rest of the app showed the account as live.
+   */
+  readonly signedIn = computed(() => this.user() != null || this.desktopAuth.signedIn());
 
   private readonly request = signal<BillingRequest | null>(null);
   private readonly lastError = signal<BillingError | null>(null);
@@ -327,15 +340,23 @@ export class BillingService {
   }
 
   /**
-   * A fresh Clerk session JWT, or null.
+   * The bearer for a billing call: the desktop device token, or a fresh Clerk JWT.
    *
    * The equivalent of `PhormaCloudService.sessionToken()`, which this service may
-   * not inject (see the file header). Two guards make it safe to await from a
-   * button handler: the signed-in signal, and a timeout on `session$` - Clerk's
-   * subjects replay a value only once Clerk has loaded, so both a signed-out user
-   * and a Clerk that never arrives answer null instead of hanging.
+   * not inject (see the file header), and it must stay behaviourally identical -
+   * the worker's `verifyBearer` accepts either credential, so a billing surface
+   * that only knew about Clerk was refusing work the API would have allowed.
+   *
+   * The desktop branch comes FIRST and returns without touching Clerk, because on
+   * a packaged build Clerk never loads and `session$` would only ever time out.
+   *
+   * Two guards make the Clerk branch safe to await from a button handler: the
+   * signed-in signal, and a timeout on `session$` - Clerk's subjects replay a
+   * value only once Clerk has loaded, so both a signed-out user and a Clerk that
+   * never arrives answer null instead of hanging.
    */
   private async sessionToken(): Promise<string | null> {
+    if (this.desktopAuth.signedIn()) return await this.desktopAuth.token();
     if (!this.signedIn()) return null;
     try {
       const session = await firstValueFrom(

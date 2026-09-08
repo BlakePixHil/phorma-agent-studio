@@ -428,7 +428,22 @@ console.log('\nGET /auth/device - the page that does the signing in');
 
   check('answers 200 with HTML', page.status === 200 && /text\/html/.test(page.headers.get('Content-Type')), String(page.status));
   check('carries NO CORS header', page.headers.get('Access-Control-Allow-Origin') === null);
-  check('is not cached', page.headers.get('Cache-Control') === 'no-store');
+
+  // `no-store` AND `no-transform`, asserted as two independent directives rather
+  // than one exact string so the order cannot make this brittle. `no-transform`
+  // is load-bearing, not tidiness: the zone runs Cloudflare Web Analytics on
+  // automatic setup, which REWRITES any HTML response to inject
+  // `static.cloudflareinsights.com/beacon.min.js`. The CSP below correctly
+  // refuses it, so without this directive every real load of this page logged a
+  // CSP violation for a script we never asked for. Widening `script-src` to admit
+  // an analytics CDN on the page that handles sign-in is the wrong fix.
+  const cacheControl = page.headers.get('Cache-Control') ?? '';
+  check('is not cached', /\bno-store\b/.test(cacheControl), cacheControl);
+  check(
+    'forbids the proxy rewriting the HTML (Cloudflare beacon injection)',
+    /\bno-transform\b/.test(cacheControl),
+    cacheControl,
+  );
 
   // The code is in the URL, so it must not leak onward in a Referer, and it must
   // not be baked into the document either - the script reads it from location.

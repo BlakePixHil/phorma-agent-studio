@@ -28,6 +28,7 @@ import { AwsRequestService } from './deploy/aws-request.service';
 
 import { ConnectionStoreService } from './connection-store.service';
 import { DeployConfigService, BYO_CONFIG_FILENAME } from './deploy-config.service';
+import { DesktopAuthService } from './desktop-auth.service';
 import { RunControllerService } from './run-controller.service';
 import { SettingsService } from './settings.service';
 import { SkillsService } from './skills.service';
@@ -147,6 +148,10 @@ export class CloudService {
   // cycle: `TelemetryService` is a leaf that injects only `TauriService`, so it
   // cannot reach back into `RunControllerService`.
   private readonly telemetry = inject(TelemetryService);
+  // The desktop credential, for `resolveAuthToken` below. Also a leaf
+  // (`TauriService` + `McpOAuthService`), so it cannot close the cycle either -
+  // and deliberately NOT `PhormaCloudService`, which injects THIS service.
+  private readonly desktopAuth = inject(DesktopAuthService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -1404,11 +1409,21 @@ export class CloudService {
   }
 
   /**
-   * Resolves the bearer token to send to the cloud worker. Prefers a fresh
-   * Clerk session JWT when the user is signed in. Own-Cloudflare deployments
-   * may fall back to the static PHORMA_TOKEN; Phorma Cloud is Clerk-only.
+   * Resolves the bearer token to send to the cloud worker.
+   *
+   * The desktop device token comes FIRST, and that ordering is the fix for a
+   * shipped bug: on a packaged build Clerk never loads a session, so this method
+   * fell through to `provider() === 'phorma' -> null` and every deploy, status and
+   * monitor call went out with NO Authorization header at all. The hosted worker
+   * fails those closed, so a signed-in desktop user could not deploy.
+   *
+   * After that, a fresh Clerk session JWT for a browser build. Own-Cloudflare
+   * deployments may fall back to the static PHORMA_TOKEN; Phorma Cloud accepts
+   * only a verified account credential, never the static token.
    */
   private async resolveAuthToken(): Promise<string | null> {
+    const deviceToken = await this.desktopAuth.token();
+    if (deviceToken) return deviceToken;
     const clerk = await firstValueFrom(this.clerk.clerk$);
     const session = await firstValueFrom(this.clerk.session$);
     if (clerk && session) {

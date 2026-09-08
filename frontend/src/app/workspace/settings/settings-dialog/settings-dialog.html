@@ -882,12 +882,12 @@
                       </div>
 
                       @if (settings.cloudProvider() === 'phorma') {
-                        @if (clerkUser(); as user) {
+                        @if (accountSignedIn()) {
                           <div class="phorma-settings__account">
                             <div class="phorma-settings__account-head">
                               <i class="ti ti-user-circle" aria-hidden="true"></i>
                               <div>
-                                <h5>{{ phormaCloud.email() ?? user.id }}</h5>
+                                <h5>{{ phormaCloud.email() ?? accountId() }}</h5>
                                 @if (phormaCloud.profile(); as profile) {
                                   @if (profile.provisioned && profile.status === 'active') {
                                     <p>

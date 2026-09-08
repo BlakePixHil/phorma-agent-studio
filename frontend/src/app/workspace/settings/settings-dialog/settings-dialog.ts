@@ -775,8 +775,27 @@ export class SettingsDialog {
   protected readonly deployConfig = inject(DeployConfigService);
   protected readonly tierLabel = tierLabel;
 
-  /** Signed-in Clerk user (null while loading / signed out). */
-  protected readonly clerkUser = this.phormaCloud.user;
+  /**
+   * Whether to render the signed-in account card.
+   *
+   * The Clerk-or-device-token union, NOT the Clerk user object. It used to be
+   * `phormaCloud.user`, and that was a shipped bug: on desktop Clerk never loads a
+   * user, so this whole card - plan, quota, Refresh, Sign out, the past-due banner
+   * and the plan cards - collapsed into the "Sign in with your Phorma account"
+   * note for an account that was already signed in.
+   */
+  protected readonly accountSignedIn = this.phormaCloud.signedIn;
+
+  /**
+   * Display label for the account when no email is known.
+   *
+   * A brand new account has no tenant row and the handoff may carry no address, so
+   * the card needs something to show. Prefers the Clerk user id in a browser build
+   * and the device token's subject on desktop; both are the same Clerk user id.
+   */
+  protected readonly accountId = computed(
+    () => this.phormaCloud.user()?.id ?? this.desktopAuth.userId() ?? 'Phorma account',
+  );
 
   /**
    * Selects a Deploy_Target and persists it through

@@ -282,7 +282,12 @@ console.log('\nGET /billing/return - the page a browser lands on');
   // would be the wrong fix for a problem it does not have.
   check('carries NO CORS header', page.headers.get('Access-Control-Allow-Origin') === null, String(page.headers.get('Access-Control-Allow-Origin')));
   check('declares a no-load CSP', /default-src 'none'/.test(page.headers.get('Content-Security-Policy') ?? ''), String(page.headers.get('Content-Security-Policy')));
-  check('is not cached', page.headers.get('Cache-Control') === 'no-store', String(page.headers.get('Cache-Control')));
+  // Two independent directives, not one exact string, so directive order cannot
+  // make this brittle. `no-transform` stops Cloudflare's proxy injecting the Web
+  // Analytics beacon into this HTML - the CSP above would block it and log a
+  // violation for a script the page never asked for.
+  check('is not cached', /\bno-store\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
+  check('forbids the proxy rewriting the HTML', /\bno-transform\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
   // Self-contained: no script, and nothing fetched from anywhere.
   check('carries no script', !/<script/i.test(html), html.slice(0, 120));
   check('references no external asset', !/(src|href)\s*=/i.test(html), html.slice(0, 200));
@@ -328,7 +333,8 @@ console.log('\nGET /signed-in - where Clerk sends the browser after sign-in');
   check('answers 200 with HTML', page.status === 200 && /text\/html/.test(page.headers.get('Content-Type')), `${page.status} ${page.headers.get('Content-Type')}`);
   check('carries NO CORS header', page.headers.get('Access-Control-Allow-Origin') === null, String(page.headers.get('Access-Control-Allow-Origin')));
   check('declares a no-load CSP', /default-src 'none'/.test(page.headers.get('Content-Security-Policy') ?? ''), String(page.headers.get('Content-Security-Policy')));
-  check('is not cached', page.headers.get('Cache-Control') === 'no-store', String(page.headers.get('Cache-Control')));
+  check('is not cached', /\bno-store\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
+  check('forbids the proxy rewriting the HTML', /\bno-transform\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
   check('carries no script', !/<script/i.test(html), html.slice(0, 120));
   check('references no external asset', !/(src|href)\s*=/i.test(html), html.slice(0, 200));
   check('tells the user to close the tab', /close this tab/i.test(html), html);

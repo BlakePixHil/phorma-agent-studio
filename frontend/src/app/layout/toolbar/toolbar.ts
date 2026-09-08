@@ -57,8 +57,9 @@ export class Toolbar {
   protected readonly portal = inject(PortalService);
   protected readonly clerk = inject(ClerkService);
   // Sign-in goes through here, not through `clerk` directly: the redirect targets
-  // have to be pinned per call. See `openSignIn` below.
-  private readonly phormaCloud = inject(PhormaCloudService);
+  // have to be pinned per call. See `openSignIn` below. Also the source of the
+  // Clerk-or-device-token `signedIn` union that every gate here reads.
+  protected readonly phormaCloud = inject(PhormaCloudService);
   private readonly cloudDialog = inject(CloudDialogService);
   private readonly settingsDialog = inject(SettingsDialogService);
   private readonly commandPalette = inject(CommandPaletteService);
@@ -73,13 +74,36 @@ export class Toolbar {
   private readonly toast = inject(ToastService);
   private readonly versionHistory = inject(VersionHistoryDialogService);
 
-  /** Current Clerk user (null until Clerk loads / when signed out). */
+  /**
+   * Current Clerk user (null until Clerk loads / when signed out, and ALWAYS null
+   * on desktop). Read only by the `<clerk-user-button>` branch below, which needs
+   * a real Clerk user to render anything; use {@link isSignedIn} for every gate.
+   */
   protected readonly clerkUser = toSignal(this.clerk.user$, { initialValue: null });
-  /** True once Clerk reports a signed-in user. */
-  protected readonly isSignedIn = computed(() => this.clerkUser() != null);
+  /**
+   * True when this install has an account, by EITHER route.
+   *
+   * Delegates to `PhormaCloudService.signedIn`, which is the Clerk-or-device-token
+   * union. This USED to be `clerkUser() != null`, and that was a shipped bug: a
+   * desktop install signs in through the browser handoff and Clerk never loads a
+   * user, so the toolbar kept offering "Sign in", the overflow menu kept offering
+   * "Sign-in", and `openCloud()` bounced every click to Settings - all while the
+   * account was live and the success toast had already named the user's email.
+   */
+  protected readonly isSignedIn = this.phormaCloud.signedIn;
 
   /** True when running inside the Tauri desktop runtime. */
   protected readonly isDesktop = this.tauri.isDesktop;
+
+  /**
+   * Tooltip for the device-token account button. Names the address when the
+   * handoff supplied one - a brand new account has no tenant row and therefore no
+   * server-side email, so null is legitimate and must not read as signed out.
+   */
+  protected readonly accountTooltip = computed(() => {
+    const email = this.phormaCloud.email();
+    return email ? `Signed in as ${email}` : 'Your Phorma account';
+  });
 
   /** Tooltip for the toolbar Update button, reflecting the update state. */
   protected readonly updateTooltip = computed(() => {
@@ -110,8 +134,19 @@ export class Toolbar {
     this.phormaCloud.signIn();
   }
 
-  /** Opens Clerk's account (user profile) window. */
+  /**
+   * Opens the account surface.
+   *
+   * Clerk's own profile modal only works where Clerk holds a session, which is a
+   * browser build. On desktop the account lives behind the device token and Clerk
+   * has nothing to show, so this opens Settings > Cloud - the panel that actually
+   * renders the signed-in account, its plan and its quota.
+   */
   protected openAccount(): void {
+    if (this.clerkUser() == null) {
+      this.settingsDialog.open('cloud');
+      return;
+    }
     this.clerk.openUserProfile();
   }
 
