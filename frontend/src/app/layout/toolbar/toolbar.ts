@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@a
 import { toSignal } from '@angular/core/rxjs-interop';
 import { MenubarModule } from 'primeng/menubar';
 import { ButtonModule } from 'primeng/button';
+import { MenuModule } from 'primeng/menu';
 import { TooltipModule } from 'primeng/tooltip';
 import type { MenuItem } from 'primeng/api';
 import { ClerkService, ClerkUserButtonComponent } from 'ngx-clerk';
@@ -38,7 +39,7 @@ import { VersionHistoryDialogService } from '../../workspace/workflows/version-h
  */
 @Component({
   selector: 'app-toolbar',
-  imports: [MenubarModule, ButtonModule, TooltipModule, ClerkUserButtonComponent],
+  imports: [MenubarModule, ButtonModule, MenuModule, TooltipModule, ClerkUserButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './toolbar.html',
   styleUrl: './toolbar.scss',
@@ -103,6 +104,47 @@ export class Toolbar {
   protected readonly accountTooltip = computed(() => {
     const email = this.phormaCloud.email();
     return email ? `Signed in as ${email}` : 'Your Phorma account';
+  });
+
+  /**
+   * One initial for the avatar stand-in.
+   *
+   * Clerk's provider image (the Google photo) is NOT reachable on desktop: it
+   * lives on the Clerk user object, and a device-token install has no Clerk
+   * session to load one from. An initial is the honest substitute - it identifies
+   * the account without pretending to a photo we cannot fetch. Falls back to a
+   * person glyph's stead ('P' for Phorma) when the handoff supplied no email.
+   */
+  protected readonly accountInitial = computed(() => {
+    const email = this.phormaCloud.email();
+    const first = email?.trim()?.[0];
+    return first ? first.toUpperCase() : 'P';
+  });
+
+  /**
+   * The device-token account menu.
+   *
+   * This exists because dropping `<clerk-user-button>` on desktop also dropped
+   * the only Sign out control in the toolbar - a REGRESSION, since that popover
+   * carried "Manage account" and "Sign out" and the replacement button carried
+   * neither. The email is a disabled header rather than a tooltip alone, so the
+   * account is identifiable from the keyboard and not only on hover.
+   */
+  protected readonly accountMenu = computed<MenuItem[]>(() => {
+    const email = this.phormaCloud.email();
+    return [
+      ...(email ? [{ label: email, disabled: true } satisfies MenuItem] : []),
+      {
+        label: 'Account and plan',
+        icon: 'ti ti-user-circle',
+        command: () => this.settingsDialog.open('cloud'),
+      },
+      {
+        label: 'Sign out',
+        icon: 'ti ti-logout',
+        command: () => void this.phormaCloud.signOut(),
+      },
+    ];
   });
 
   /** Tooltip for the toolbar Update button, reflecting the update state. */

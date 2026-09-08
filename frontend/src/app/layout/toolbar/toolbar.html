@@ -153,18 +153,26 @@
     @if (clerkUser()) {
       <clerk-user-button class="flex" />
     } @else if (isSignedIn()) {
-      <!-- Signed in via the device token. Opens Settings > Cloud, which is where
-           the account, plan and quota actually render. -->
+      <!--
+        Signed in via the device token, so there is no Clerk user and no Clerk
+        avatar to show. This opens a MENU rather than jumping straight to
+        Settings: dropping the Clerk UserButton also dropped its popover, which
+        was the only Sign out control in the toolbar. `initials` stands in for the
+        provider image - Clerk's avatar is not reachable without a Clerk session.
+      -->
       <p-button
         [text]="true"
         severity="secondary"
         size="small"
-        icon="ti ti-user-check"
+        styleClass="phorma-toolbar__account"
         [pTooltip]="accountTooltip()"
         tooltipPosition="bottom"
-        (onClick)="openAccount()"
+        (onClick)="accountMenuRef.toggle($event)"
         ariaLabel="Your Phorma account"
-      />
+      >
+        <span class="phorma-toolbar__avatar" aria-hidden="true">{{ accountInitial() }}</span>
+      </p-button>
+      <p-menu #accountMenuRef [model]="accountMenu()" [popup]="true" appendTo="body" />
     } @else {
       <p-button
         [text]="true"
