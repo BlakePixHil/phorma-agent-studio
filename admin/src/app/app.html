@@ -1,11 +1,20 @@
 <!--
   The auth switch. Each branch is exclusive, and the dashboard branch is the only
   one that contains `router-outlet`, so no view is constructed - and no view
-  request is issued - unless there is a session and no 403 (Requirements 10.3,
-  10.4).
+  request is issued - unless there is a session, no 403 and no rejected session
+  (Requirements 10.3, 10.4).
+
+  `sessionRejected` is its own branch rather than folded into `!signedIn`: a 401 on
+  a token we DID send means the Worker verifies a different Clerk instance or is
+  missing this origin from its authorized parties, and rendering the sign-in form
+  for that tells an operator to do the one thing that cannot help. It is ordered
+  above `forbidden` because a rejected session is the more fundamental failure -
+  the Worker never got far enough to have an opinion about the allowlist.
 -->
 @if (!signedIn()) {
   <admin-signed-out />
+} @else if (sessionRejected()) {
+  <admin-session-rejected />
 } @else if (forbidden()) {
   <admin-not-authorized />
 } @else {

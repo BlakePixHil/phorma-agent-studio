@@ -5,19 +5,75 @@
 // `/api/admin/telemetry/*` routes on the `phorma-agent-studio-cloud` Worker with
 // a Clerk session token. Nothing privileged lives here.
 //
-// The worker name must stay `phorma-admin`: the resulting origin
-// `https://phorma-admin.phorma-agent-studio.workers.dev` is listed in
-// `ALLOWED_ORIGINS` under `env.hosted` in `cloud/wrangler.jsonc`, so renaming
-// the worker silently breaks CORS for every admin request. A custom domain
-// would need adding to that list too.
+// THE CUSTOM DOMAIN IS NOT OPTIONAL, and this is the one thing to understand
+// before changing anything here.
 //
-// Deploy (independent of the installer and of the cloud Worker):
+// A browser origin that is CROSS-SITE with the Clerk Frontend API
+// (`clerk.phorma-labs.com`) can never hold a Clerk session on a PRODUCTION
+// instance - the session cookie is first-party to the FAPI's registrable domain.
+// This repo already relies on that fact elsewhere: it is the entire reason
+// `GET /auth/device` exists on the cloud Worker rather than the studio's webview
+// signing in directly (see `device-auth-routes.ts`).
+//
+// `phorma-admin.phorma-agent-studio.workers.dev` is on `workers.dev`, a different
+// registrable domain from `phorma-labs.com`, so it is in exactly that position.
+// Measured on 2026-09-09: clerk-js loads there (`/v1/environment` answers 200 for
+// any origin, so that endpoint proves nothing), the sign-in form renders with
+// production branding, and the sign-in attempt then fails with Clerk's
+// `authorization_invalid`. The instance also reports
+// `url_based_session_syncing: true` and has NO satellite domain configured.
+//
+// So the dashboard is served from `telemetry-admin.phorma-labs.com`, a subdomain of
+// the Clerk primary domain, where cookies are first-party and no satellite handshake
+// is involved. The workers.dev origin stays listed in the cloud Worker's origin
+// lists because the worker still answers there, but it cannot sign anyone in.
+//
+// Adding or changing an origin is FOUR steps, and each has a distinct failure:
+//   1. here (a `routes` entry with `custom_domain: true`),
+//   2. both origin lists in `cloud/wrangler.jsonc`,
+//   3. `wrangler deploy --env hosted` - a `vars` change reaches production only on
+//      a deploy. Miss this and every request from the origin is a hard 401.
+//   4. the Clerk PRODUCTION instance's allowlist. WHICH list depends on the origin:
+//      an unrelated host goes in `allowed_origins`
+//      (`PATCH https://api.clerk.com/v1/instance`, which REPLACES the array, so a
+//      partial list locks out whatever was left off), while a SUBDOMAIN of the
+//      primary domain needs the separate ALLOWED SUBDOMAINS list. Miss this and the
+//      page renders but nobody can sign in, with no error in our own logs - the
+//      credential-free probe below is how to tell.
+//
+// Probe an origin without any secret:
+//   curl -s -X POST "https://clerk.phorma-labs.com/v1/client/sign_ins?_clerk_js_version=5.0.0" \
+//        -H "Origin: <candidate>" -H "Content-Type: application/x-www-form-urlencoded" --data "strategy="
+// 422 `form_param_nil` = allowed, 403 `subdomain_not_allowed` = a primary-domain
+// subdomain that is not allowlisted, `origin_invalid` = an unrelated refused origin.
+//
+// LOCAL `npm start` CANNOT talk to the deployed worker. `ng serve` uses the
+// `development` configuration, which has no `fileReplacements`, so it ships the
+// `pk_test_` DEV key - while the deployed worker verifies against the PRODUCTION
+// Clerk instance. A dev-minted token fails signature verification there and the
+// dashboard renders "Session not accepted". For local work, point
+// `environment.ts`'s `apiBaseUrl` at a local `wrangler dev --env hosted` carrying
+// the DEV `CLERK_SECRET_KEY` and `CLERK_JWT_KEY` in `cloud/.dev.vars`.
+//
+// Deploy (independent of the installer, but AFTER the cloud Worker when a release
+// adds admin routes, so the API exists before the dashboard calls it):
 //   1. npx wrangler login
-//   2. npm run build      # writes dist/admin/browser
+//   2. npm run build      # writes dist/admin/browser, with the pk_live_ key
 //   3. npx wrangler deploy
 {
   "name": "phorma-admin",
   "compatibility_date": "2025-05-01",
+  // `custom_domain: true` has Cloudflare create and manage the DNS record and the
+  // certificate for this hostname, which is what a static-asset worker on its own
+  // subdomain wants; a plain route pattern would need a record to attach to. The
+  // zone `phorma-labs.com` already lives on this account (it serves
+  // `cloud.phorma-labs.com`), so there is no zone setup involved.
+  "routes": [
+    {
+      "pattern": "telemetry-admin.phorma-labs.com",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     // The Angular application builder writes the browser bundle here
     // (`outputPath: dist/admin` plus the builder's own `browser` subfolder).

@@ -7,8 +7,16 @@
  */
 export const environment = {
   production: true,
-  /** The hosted cloud Worker. */
-  apiBaseUrl: 'https://phorma-agent-studio-cloud.phorma-agent-studio.workers.dev',
+  /**
+   * The hosted cloud Worker, on its custom domain.
+   *
+   * `cloud.phorma-labs.com` rather than the `workers.dev` origin: it is the same
+   * script, but it is the hostname the studio and the desktop sign-in page already
+   * use (`PHORMA_CLOUD_DEFAULT_URL`), and a custom domain survives a workers.dev
+   * subdomain being renamed or disabled. It is also listed in the Worker's own
+   * `ALLOWED_ORIGINS`, so the two never disagree.
+   */
+  apiBaseUrl: 'https://cloud.phorma-labs.com',
   /**
    * Clerk PUBLISHABLE key - safe to ship to the browser.
    *

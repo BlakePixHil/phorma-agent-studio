@@ -1,5 +1,6 @@
 import { Route, Routes } from '@angular/router';
 
+import { BILLING_VIEW_ID } from './core/billing-models';
 import { TELEMETRY_ROUTES, type TelemetryRoute } from './core/models';
 
 /** The lazy component loader shape the router accepts. */
@@ -36,5 +37,15 @@ export const routes: Routes = [
     data: { view },
     loadComponent: VIEW_LOADERS[view],
   })),
+  // The spend view is listed EXPLICITLY rather than derived, because it is not a
+  // telemetry aggregate: it reads `/api/admin/billing/*` and fetches two routes,
+  // so there is no one-to-one route to derive it from. Keeping the telemetry map
+  // exhaustive over `TelemetryRoute` preserves the property that matters - a sixth
+  // aggregate route still cannot compile without a loader and a nav entry.
+  {
+    path: BILLING_VIEW_ID,
+    data: { view: BILLING_VIEW_ID },
+    loadComponent: () => import('./views/spend/spend').then((m) => m.Spend),
+  },
   { path: '**', redirectTo: TELEMETRY_ROUTES[0] },
 ];

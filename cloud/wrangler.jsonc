@@ -210,7 +210,15 @@
         // `/api/auth/device/claim`. Same-origin, so the browser needs no CORS for
         // it - but the two lists are kept in step deliberately (see
         // `CLERK_AUTHORIZED_PARTIES` below, where the same entry is NOT optional).
-        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev,https://cloud.phorma-labs.com",
+        // The telemetry dashboard has TWO origins and both are listed, but only the
+        // FIRST can sign anyone in: `telemetry-admin.phorma-labs.com` is a subdomain
+        // of the Clerk primary domain, so its session cookie is first-party, while
+        // `phorma-admin.phorma-agent-studio.workers.dev` is cross-site with
+        // `clerk.phorma-labs.com` and therefore can never hold a Clerk session - the
+        // same constraint that makes `GET /auth/device` necessary for the desktop app.
+        // The workers.dev origin stays listed because the worker still answers there.
+        // `admin/wrangler.jsonc` carries the full four-step origin procedure.
+        "ALLOWED_ORIGINS": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://telemetry-admin.phorma-labs.com,https://phorma-admin.phorma-agent-studio.workers.dev,https://cloud.phorma-labs.com",
         // BETA ONLY: the Admin_API's k-anonymity floor (9.15) folds any group
         // under 5 distinct installs into `other`, which is nearly everything
         // at beta volume. Flip to "false" (or remove this line) once out of
@@ -242,7 +250,7 @@
         // `@clerk/backend` matches `azp` by exact string, so omitting this makes
         // `POST /api/auth/device/claim` a hard 401 and desktop sign-in silently
         // impossible - with nothing in the response to say why.
-        "CLERK_AUTHORIZED_PARTIES": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://phorma-admin.phorma-agent-studio.workers.dev,https://cloud.phorma-labs.com",
+        "CLERK_AUTHORIZED_PARTIES": "http://localhost:7322,http://localhost:7323,tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://telemetry-admin.phorma-labs.com,https://phorma-admin.phorma-agent-studio.workers.dev,https://cloud.phorma-labs.com",
 
         // Clerk PUBLISHABLE key for the instance this worker verifies against -
         // a PUBLIC value, which is why it is a `var` and not a secret. It must

@@ -41,6 +41,12 @@ import {
 import { handleDeviceAuthApi, type DeviceAuthEnv } from './device-auth-routes';
 import { handleStripeWebhookRequest } from './stripe-webhook';
 import {
+  BILLING_ADMIN_PREFIX,
+  handleBillingAdminRequest,
+  type BillingAdminEnv,
+} from './billing-admin';
+import { BRAND_PAGE_CSP, brandPageDocument } from './brand-page';
+import {
   handleTelemetryAdminRequest,
   TELEMETRY_ADMIN_PREFIX,
   type TelemetryAdminEnv,
@@ -76,6 +82,7 @@ export type ApiEnv = AuthEnv &
   TenantEnv &
   SecretVaultEnv &
   TelemetryAdminEnv &
+  BillingAdminEnv &
   StripeEnv &
   DeviceAuthEnv;
 
@@ -457,61 +464,35 @@ export function handleBillingReturnRequest(request: Request): Response | null {
       'Cache-Control': 'no-store, no-transform',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
-      // `default-src 'none'` is the claim that this page loads nothing; the one
-      // exception is the inline stylesheet it carries.
-      'Content-Security-Policy':
-        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+      // Still "this page loads nothing remote": the exceptions are its own inline
+      // stylesheet and its `data:` favicon. `img-src data:` names no host and no
+      // scheme, so it cannot become a route to a remote image. See
+      // `brand-page.ts` for why the favicon is a data URI at all.
+      'Content-Security-Policy': BRAND_PAGE_CSP,
     },
   });
 }
 
+/**
+ * The markup, from the shared brand shell (`brand-page.ts`).
+ *
+ * The outcome travels in TWO channels, which is why the state dot is not doing the
+ * work alone: the heading says which happened, and the dot colours it. The old
+ * version had colour as the only visual difference between "paid" and "cancelled",
+ * which is not a distinction a colour-blind reader could make at a glance.
+ */
 function billingReturnPage(cancelled: boolean): string {
   const title = cancelled ? 'Checkout cancelled' : 'Thanks - payment received';
-  const body = cancelled
-    ? 'Nothing was charged. You can close this tab and pick a plan again whenever you like.'
-    : 'You can close this tab now. Phorma Agent Studio updates your plan on its own within a ' +
-      'few seconds.';
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${title} - Phorma Agent Studio</title>
-<style>
-  :root { color-scheme: light dark; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #0f1115;
-    color: #e7e9ee;
-    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    padding: 24px;
-  }
-  main { max-width: 27rem; text-align: center; }
-  h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.75rem; }
-  p { margin: 0; color: #a8aebb; }
-  .mark {
-    width: 2.5rem;
-    height: 2.5rem;
-    margin: 0 auto 1.25rem;
-    border-radius: 50%;
-    background: ${cancelled ? '#3a3f4b' : '#1f6f4a'};
-  }
-</style>
-</head>
-<body>
-<main>
-  <div class="mark"></div>
-  <h1>${title}</h1>
-  <p>${body}</p>
-</main>
-</body>
-</html>
-`;
+  return brandPageDocument({
+    title,
+    state: cancelled ? 'pending' : 'ok',
+    body: [
+      cancelled
+        ? 'Nothing was charged. You can close this tab and pick a plan again whenever you like.'
+        : 'You can close this tab now. Phorma Agent Studio updates your plan on its own within a ' +
+          'few seconds.',
+    ],
+  });
 }
 
 /**
@@ -559,8 +540,7 @@ export function handleSignedInRequest(request: Request): Response | null {
       'Cache-Control': 'no-store, no-transform',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy':
-        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+      'Content-Security-Policy': BRAND_PAGE_CSP,
     },
   });
 }
@@ -576,50 +556,15 @@ export function handleSignedInRequest(request: Request): Response | null {
  * stories about the same moment - so they change together or not at all.
  */
 function signedInPage(): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>You're signed in - Phorma Agent Studio</title>
-<style>
-  :root { color-scheme: light dark; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #0f1115;
-    color: #e7e9ee;
-    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    padding: 24px;
-  }
-  main { max-width: 27rem; text-align: center; }
-  h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.75rem; }
-  p { margin: 0; color: #a8aebb; }
-  p + p { margin-top: 0.75rem; }
-  .mark {
-    width: 2.5rem;
-    height: 2.5rem;
-    margin: 0 auto 1.25rem;
-    border-radius: 50%;
-    background: #1f6f4a;
-  }
-</style>
-</head>
-<body>
-<main>
-  <div class="mark"></div>
-  <h1>You're signed in</h1>
-  <p>Your Phorma account is ready. You can close this tab.</p>
-  <p>Linking the desktop app to your account is not available yet, so Phorma Agent
-  Studio will still show you as signed out when you switch back to it.</p>
-</main>
-</body>
-</html>
-`;
+  return brandPageDocument({
+    title: "You're signed in",
+    state: 'ok',
+    body: [
+      'Your Phorma account is ready. You can close this tab.',
+      'Linking the desktop app to your account is not available yet, so Phorma Agent ' +
+        'Studio will still show you as signed out when you switch back to it.',
+    ],
+  });
 }
 
 /**
@@ -721,6 +666,24 @@ async function routeApiRequest(
     // without a cast rather than pretending that null is reachable.
     return (
       (await handleTelemetryAdminRequest(request, env, url, respond)) ??
+      respond({ error: 'Not found.' }, 404)
+    );
+  }
+
+  // ── /api/admin/billing/* — operator-only cost and revenue ─────────────────
+  // Beside the telemetry aggregates and ABOVE the hosted-bindings gate for the
+  // same reason: same operator gate (`admin-auth.ts`), and its own D1 handling.
+  // An absent `DB` reads as "nothing committed" rather than as a 501 about
+  // bindings, because the OpenRouter balance half needs no D1 at all and is the
+  // half an operator opens the page for.
+  //
+  // A SEPARATE prefix from telemetry, not a sixth aggregate route: telemetry
+  // bodies carry no install id by construction and fold small groups for
+  // anonymity, while these bodies name paying tenants on purpose. Opposite
+  // privacy contracts over different tables - see `billing-admin.ts`.
+  if (url.pathname.startsWith(BILLING_ADMIN_PREFIX)) {
+    return (
+      (await handleBillingAdminRequest(request, env, url, respond)) ??
       respond({ error: 'Not found.' }, 404)
     );
   }

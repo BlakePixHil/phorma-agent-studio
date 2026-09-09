@@ -21,6 +21,17 @@ export const SESSION_ENDED_REASON = 'Your session ended. Sign in again.';
 export const NOT_AUTHORIZED_REASON = 'This account cannot view telemetry.';
 
 /**
+ * Copy for a token the Worker refused.
+ *
+ * Deliberately does NOT say "sign in again": a 401 on a token we sent means the
+ * Worker verifies a different Clerk instance, or this origin is missing from its
+ * authorized parties, and neither is fixable from a browser. The shell swaps this
+ * view out for the dedicated surface immediately, so this string is only ever seen
+ * for an instant - but it must not contradict that surface while it is.
+ */
+export const SESSION_REJECTED_REASON = 'The admin API rejected this session.';
+
+/**
  * The value of a successful Admin_API call, or a throw carrying display copy.
  *
  * Throwing is what puts the view into its failed state with a retry control
@@ -30,6 +41,7 @@ export function unwrapAdminResult<T>(result: AdminResult<T>): T {
   if (isOk(result)) return result.value;
   if (result.kind === 'forbidden') throw new Error(NOT_AUTHORIZED_REASON);
   if (result.kind === 'no-session') throw new Error(SESSION_ENDED_REASON);
+  if (result.kind === 'session-rejected') throw new Error(SESSION_REJECTED_REASON);
   throw new Error(result.reason);
 }
 

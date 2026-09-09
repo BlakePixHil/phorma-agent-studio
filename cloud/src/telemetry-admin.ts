@@ -3,35 +3,32 @@
  * under `/api/admin/telemetry/` inside the existing `/api/*` control-plane
  * branch (9.1).
  *
- * This module is FAIL-CLOSED. Authorization is two independent facts about the
- * caller, answered in this order and never merged:
+ * This module is FAIL-CLOSED, and the authorization itself lives in
+ * `admin-auth.ts` rather than here: `/api/admin/billing/*` is a second operator
+ * surface behind the SAME door, and two implementations of one privilege is how
+ * one of them starts admitting what the other refuses. `refuseNonOperator` owns
+ * the 401/403 split, the "absent bearer is not a rejected bearer" rule, the
+ * "missing secret closes the door" rule (9.5) and the desktop-token refusal;
+ * that module's header is the long version.
  *
- * | Condition                                                  | Status | Body                        |
- * |------------------------------------------------------------|--------|-----------------------------|
- * | No bearer token, or `verifyRequest` returns null           | 401    | `{"error":"Unauthorized."}`  |
- * | Verified, but the user id is null or not on the allowlist   | 403    | `{"error":"Forbidden."}`     |
- * | `TELEMETRY_ADMIN_USER_IDS` absent, empty or whitespace-only | 403    | `{"error":"Forbidden."}`     |
- * | Allowlisted                                                | 200    | the aggregate               |
- *
- * Both failure bodies are fixed literals. No route returns the Owner_Allowlist
- * and no response body ever names an allowlist entry (9.6). Every response this
- * module produces carries `Cache-Control: no-store`, including 400, 401, 403,
- * 404 and 405 (9.16).
- *
- * A missing secret means NO access, never open access (9.5): the allowlist is
- * the only key to this surface, so an unset secret closes the door rather than
- * removing it.
+ * What is still local to this file: every response carries
+ * `Cache-Control: no-store`, including 400, 401, 403, 404 and 405 (9.16), and no
+ * response body ever names an allowlist entry (9.6).
  */
 
-import { verifyRequest, type AuthEnv } from './auth';
+import {
+  isOperator,
+  noStoreResponder,
+  refuseNonOperator,
+  type AdminAuthEnv,
+  type AdminRespond,
+} from './admin-auth';
 import { COUNTER_CATALOG } from './telemetry-catalog';
 import { ensureTelemetrySchema, isMetricDay, metricDayUtc, type TelemetryEnv } from './telemetry';
 
-/** The bindings the Admin_API touches: auth, the allowlist secret, and D1. */
-export type TelemetryAdminEnv = AuthEnv &
+/** The bindings the Admin_API touches: the operator gate, and D1. */
+export type TelemetryAdminEnv = AdminAuthEnv &
   TelemetryEnv & {
-    /** Comma-separated Clerk user ids (the Owner_Allowlist). Worker secret. */
-    TELEMETRY_ADMIN_USER_IDS?: string;
     /**
      * Beta-only override: `"true"` turns the k-anonymity floor (9.15) off
      * everywhere, so every aggregate reports exact rows instead of folding
@@ -46,35 +43,24 @@ export type TelemetryAdminEnv = AuthEnv &
 
 /**
  * The JSON responder `routeApiRequest` passes in, already bound to the current
- * request's CORS headers.
+ * request's CORS headers. Alias of the shared `AdminRespond` so both admin
+ * modules cannot drift on the responder's shape.
  */
-export type TelemetryAdminRespond = (body: unknown, status?: number) => Response;
+export type TelemetryAdminRespond = AdminRespond;
 
 /** The path prefix this module owns. Every route sits below it. */
 export const TELEMETRY_ADMIN_PREFIX = '/api/admin/telemetry/';
 
 /**
- * Exact membership in the Owner_Allowlist after trimming each entry.
+ * The Owner_Allowlist membership test (9.4, 9.5).
  *
- * NEVER a substring, prefix or `includes()` test on the raw secret: with a raw
- * substring check `user_123` would authorize `user_1234`, and an allowlist that
- * silently admits longer ids is not an allowlist. The secret is split on commas,
- * each entry is trimmed, empties are dropped, and the caller's id must equal one
- * of the survivors.
- *
- * An absent, empty or whitespace-only secret has no surviving entry, so this
- * returns false for every caller (9.5). A null user id - a shared-token or
- * open-instance identity - is never a member (9.4).
+ * The implementation moved to `admin-auth.ts` as `isOperator` when billing became
+ * a second operator surface. This alias stays because the requirement numbers and
+ * the property tests in `test/telemetry.test.mjs` are written against this name,
+ * and an allowlist predicate is exactly the wrong thing to duplicate in order to
+ * rename it.
  */
-export function isTelemetryAdmin(allowlist: string | undefined, userId: string | null): boolean {
-  if (!allowlist) return false;
-  const ids = allowlist
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  if (ids.length === 0) return false; // fail closed (9.5)
-  return userId !== null && ids.includes(userId);
-}
+export const isTelemetryAdmin = isOperator;
 
 // --- Date range ------------------------------------------------------------
 
@@ -412,33 +398,12 @@ export async function handleTelemetryAdminRequest(
 ): Promise<Response | null> {
   if (!url.pathname.startsWith(TELEMETRY_ADMIN_PREFIX)) return null;
 
-  const reply = noStore(respond);
+  const reply = noStoreResponder(respond);
 
-  // 9.3 - an absent bearer token is a 401 on every deployment shape. Checked
-  // here rather than left to `verifyRequest`, which hands an anonymous context
-  // to an unprotected BYO worker; that identity would otherwise arrive at the
-  // allowlist check and answer 403 for a request that carried no credential at
-  // all.
-  const token = readBearerToken(request);
-  if (token === null) return reply({ error: 'Unauthorized.' }, 401);
-
-  const auth = await verifyRequest(env, request);
-  if (auth === null) return reply({ error: 'Unauthorized.' }, 401); // 9.3
-
-  // 9.4, 9.5 - verified, but not the owner. A different fact from 401, and the
-  // body says nothing about why or about who is on the list (9.6).
-  //
-  // The KIND check is part of that gate, not an extra. A Phorma desktop token
-  // carries the same `userId` as the Clerk session that minted it, so an owner
-  // signing in on the desktop app would otherwise carry operator access on a
-  // long-lived bearer that sits in a laptop's keychain and cannot be revoked
-  // before it expires (lean v1 - see `device-auth.ts`). Operator surfaces require
-  // a human who authenticated in a browser just now, so this asks for a Clerk
-  // session specifically. It answers 403 rather than 401 because the credential
-  // IS valid; it is just not an operator credential.
-  if (auth.kind !== 'clerk' || !isTelemetryAdmin(env.TELEMETRY_ADMIN_USER_IDS, auth.userId)) {
-    return reply({ error: 'Forbidden.' }, 403);
-  }
+  // 9.3, 9.4, 9.5 - the whole gate, shared with `/api/admin/billing/*`. Returns
+  // the refusal to hand straight back, or null when the caller is an operator.
+  const refusal = await refuseNonOperator(request, env, reply);
+  if (refusal) return refusal;
 
   if (request.method !== 'GET') return reply({ error: 'Method not allowed.' }, 405);
 
@@ -833,28 +798,6 @@ function copyRow(row: GroupRow): GroupRow {
   return { ...row };
 }
 
-/**
- * Wraps the shared responder so every answer carries `Cache-Control: no-store`
- * (9.16). Aggregated product telemetry must never sit in a shared cache, and an
- * authorization failure must never be cached either.
- */
-function noStore(respond: TelemetryAdminRespond): TelemetryAdminRespond {
-  return (body: unknown, status = 200): Response => {
-    const base = respond(body, status);
-    const headers = new Headers(base.headers);
-    headers.set('Cache-Control', 'no-store');
-    return new Response(base.body, { status: base.status, headers });
-  };
-}
-
-/**
- * The bearer token, or `null` when the request carries none. An empty or
- * whitespace-only token counts as none: it is an absent credential, not a
- * rejected one.
- */
-function readBearerToken(request: Request): string | null {
-  const header = request.headers.get('Authorization') ?? '';
-  if (!header.startsWith('Bearer ')) return null;
-  const token = header.slice('Bearer '.length).trim();
-  return token.length > 0 ? token : null;
-}
+// `noStore` and `readBearerToken` moved to `admin-auth.ts` (as `noStoreResponder`
+// and `readBearerToken`) when `/api/admin/billing/*` needed the identical
+// behaviour. Both are part of the gate rather than of telemetry.

@@ -270,6 +270,68 @@ async function api(env, path, { method = 'POST', body, token, bearer } = {}) {
   };
 }
 
+// --- Self-containment ------------------------------------------------------
+
+/**
+ * Every `src`, `href` or `xlink:href` value in `html`, including the SVG forms,
+ * so a `<use href>` cannot slip past a check written only for `src`.
+ */
+function referenceValues(html) {
+  return [...html.matchAll(/(?:xlink:href|src|href)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map(
+    ([, doubleQuoted, singleQuoted]) => (doubleQuoted ?? singleQuoted ?? '').trim(),
+  );
+}
+
+/**
+ * Whether any reference in `html` would cause a NETWORK request.
+ *
+ * The rule is deliberately an allowlist of exactly one shape - a `data:` URI -
+ * rather than a blocklist of schemes, so a form nobody thought of fails closed.
+ * Everything else counts as remote: any `scheme:` prefix (`https:`, `http:`,
+ * `//host`, and anything exotic), and any path (`/favicon.ico`, `logo.svg`), since
+ * a root-relative path on this Worker is still a request it would have to serve.
+ *
+ * An EMPTY value is remote too. `href=""` resolves to the current document, which
+ * is a real second request for this page.
+ */
+function remoteReference(html) {
+  return referenceValues(html).some((value) => !value.toLowerCase().startsWith('data:'));
+}
+
+function remoteReferenceDetail(html) {
+  const remote = referenceValues(html).filter(
+    (value) => !value.toLowerCase().startsWith('data:'),
+  );
+  return remote.length > 0 ? `remote references: ${JSON.stringify(remote).slice(0, 200)}` : '';
+}
+
+// Prove the guard above is not vacuous: it must actually reject the shapes it
+// claims to, or "no remote references" becomes a sentence that is true of
+// everything. Runs before the page assertions so a broken matcher fails first.
+console.log('\nThe self-containment guard rejects every remote reference shape');
+{
+  const remoteCases = [
+    '<img src="https://cdn.example.com/logo.png">',
+    '<img src="//cdn.example.com/logo.png">',
+    '<link rel="icon" href="/favicon.ico">',
+    '<link rel="stylesheet" href="styles.css">',
+    '<svg><use href="#icon"/></svg>',
+    '<svg><use xlink:href="sprite.svg#icon"/></svg>',
+    '<a href="">self</a>',
+  ];
+  for (const markup of remoteCases) {
+    check(`rejects ${markup.slice(0, 46)}`, remoteReference(markup), markup);
+  }
+  const localCases = [
+    '<link rel="icon" href="data:image/svg+xml,%3Csvg%3E%3C/svg%3E">',
+    '<svg class="brand__mark" viewBox="0 0 600 600"><path d="M1 2H3"/></svg>',
+    '<p>no references at all</p>',
+  ];
+  for (const markup of localCases) {
+    check(`accepts ${markup.slice(0, 46)}`, !remoteReference(markup), markup);
+  }
+}
+
 // ══ 1. GET /billing/return (task 4.3, requirement 27) ═══════════════════════
 
 console.log('\nGET /billing/return - the page a browser lands on');
@@ -288,9 +350,17 @@ console.log('\nGET /billing/return - the page a browser lands on');
   // violation for a script the page never asked for.
   check('is not cached', /\bno-store\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
   check('forbids the proxy rewriting the HTML', /\bno-transform\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
-  // Self-contained: no script, and nothing fetched from anywhere.
+  // Self-contained: no script, and nothing fetched over the network.
   check('carries no script', !/<script/i.test(html), html.slice(0, 120));
-  check('references no external asset', !/(src|href)\s*=/i.test(html), html.slice(0, 200));
+  // NARROWED from "no src= or href= at all" when the page gained its brand mark
+  // and favicon. The claim that matters is that this page makes NO NETWORK
+  // REQUEST, which is what lets its CSP be `default-src 'none'` and what keeps it
+  // rendering offline and in a hardened browser. An inline `<svg>` is not a fetch,
+  // and a `data:` favicon is not a fetch. A remote reference still is, so every
+  // scheme and every protocol-relative or root-relative path is refused - and
+  // `<use href>` / `xlink:href` with them, since those WOULD be fetches.
+  check('references nothing over the network', !remoteReference(html), remoteReferenceDetail(html));
+  check('carries the Phorma brand mark inline', /<svg[^>]*class="brand__mark"/.test(html), html.slice(0, 200));
   check('tells the user to close the tab', /close this tab/i.test(html), html);
   // Requirement 10: the webhook is the only writer of subscription state, so this
   // page must not claim a tier or a status it cannot know yet.
@@ -336,7 +406,8 @@ console.log('\nGET /signed-in - where Clerk sends the browser after sign-in');
   check('is not cached', /\bno-store\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
   check('forbids the proxy rewriting the HTML', /\bno-transform\b/.test(page.headers.get('Cache-Control') ?? ''), String(page.headers.get('Cache-Control')));
   check('carries no script', !/<script/i.test(html), html.slice(0, 120));
-  check('references no external asset', !/(src|href)\s*=/i.test(html), html.slice(0, 200));
+  check('references nothing over the network', !remoteReference(html), remoteReferenceDetail(html));
+  check('carries the Phorma brand mark inline', /<svg[^>]*class="brand__mark"/.test(html), html.slice(0, 200));
   check('tells the user to close the tab', /close this tab/i.test(html), html);
 
   // The honesty assertion. The studio's own toast says the same thing, and the two
