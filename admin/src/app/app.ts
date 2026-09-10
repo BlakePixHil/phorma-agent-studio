@@ -6,7 +6,10 @@ import { InputTextModule } from 'primeng/inputtext';
 import { ClerkService, ClerkUserButtonComponent } from 'ngx-clerk';
 
 import { NotAuthorized } from './auth/not-authorized';
+import { SessionRejected } from './auth/session-rejected';
 import { SignedOut } from './auth/signed-out';
+import { AdminRequestService } from './core/admin-api';
+import { BILLING_VIEW_ID } from './core/billing-models';
 import {
   DateRangeService,
   MAX_RANGE_DAYS,
@@ -14,19 +17,18 @@ import {
   type RangePresetDays,
 } from './core/date-range.service';
 import { TELEMETRY_ROUTES, type DateRange, type TelemetryRoute } from './core/models';
-import { TelemetryApiService } from './core/telemetry-api.service';
 
-/** One header nav entry. `route` is both the URL path and the Admin_API route. */
+/** One header nav entry. `route` is the URL path segment. */
 export interface ViewNavItem {
-  route: TelemetryRoute;
+  route: string;
   label: string;
   icon: string;
 }
 
 /**
- * The view nav, in the order `TELEMETRY_ROUTES` lists the aggregate routes.
- * Labels and icons live here; the set of entries does not, so a sixth aggregate
- * route cannot be silently missing from the nav.
+ * Labels and icons for the five telemetry views. The SET of entries is derived
+ * from `TELEMETRY_ROUTES` rather than written out, so a sixth aggregate route
+ * cannot be silently missing from the nav.
  */
 const NAV_LABELS: Record<TelemetryRoute, { label: string; icon: string }> = {
   summary: { label: 'Overview', icon: 'ti-gauge' },
@@ -36,10 +38,18 @@ const NAV_LABELS: Record<TelemetryRoute, { label: string; icon: string }> = {
   trend: { label: 'Trend', icon: 'ti-chart-line' },
 };
 
-export const VIEW_NAV: readonly ViewNavItem[] = TELEMETRY_ROUTES.map((route) => ({
-  route,
-  ...NAV_LABELS[route],
-}));
+/**
+ * The view nav: the five telemetry aggregates, then the spend view.
+ *
+ * Spend is appended explicitly because it is not a telemetry aggregate - it reads
+ * the billing route family and has no single API route to derive a path from. Last
+ * in the order deliberately: it is the operator's money view, consulted
+ * occasionally, while the telemetry views are the daily ones.
+ */
+export const VIEW_NAV: readonly ViewNavItem[] = [
+  ...TELEMETRY_ROUTES.map((route) => ({ route, ...NAV_LABELS[route] })),
+  { route: BILLING_VIEW_ID, label: 'Spend', icon: 'ti-cash' },
+];
 
 /**
  * The copy the header shows when a typed range is one the Admin_API would
@@ -75,6 +85,7 @@ export const RANGE_REJECTED_MESSAGE = `Pick a start on or before the end, within
     ClerkUserButtonComponent,
     SignedOut,
     NotAuthorized,
+    SessionRejected,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
@@ -82,7 +93,7 @@ export const RANGE_REJECTED_MESSAGE = `Pick a start on or before the end, within
 })
 export class App {
   private readonly dateRange = inject(DateRangeService);
-  private readonly api = inject(TelemetryApiService);
+  private readonly api = inject(AdminRequestService);
 
   /** The nav entries and the presets, for the template. */
   readonly nav = VIEW_NAV;
@@ -100,6 +111,14 @@ export class App {
 
   /** True once any Admin_API call has been answered 403 (10.4). */
   readonly forbidden = this.api.forbidden;
+
+  /**
+   * True once any Admin_API call was answered 401 for a token we DID send.
+   *
+   * A separate surface from `signedIn` on purpose: the two look identical to a
+   * visitor and have opposite remedies. See `auth/session-rejected.ts`.
+   */
+  readonly sessionRejected = this.api.sessionRejected;
 
   /** The selected range, for the header summary. */
   readonly from = this.dateRange.from;

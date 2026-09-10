@@ -16,11 +16,13 @@ user's own Cloudflare account and keys).
   bundling fails with "Could not resolve ai" otherwise.
 - Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.
   `check` runs no tests, so it alone is not verification. No Cloudflare account needed.
-  `npm test` = `test:unit`, 22 suites: projection, embed, deploy-config, connections, data-host,
+  `npm test` = `test:unit`, 23 suites: projection, embed, deploy-config, connections, data-host,
   workflow-state, portal-cleanup, run-wiring, status, releases, telemetry, tenant-billing,
-  entitlement, stripe, billing-routes, stripe-webhook, provisioning, workspace-migration, plus four
+  entitlement, stripe, billing-routes, billing-admin, stripe-webhook, provisioning,
+  workspace-migration, plus four
   Miniflare suites (deploy-validation, connection-secrets, telemetry-ingest, telemetry-admin).
-  `tenant-billing`, `entitlement`, `billing-routes`, `stripe-webhook`, `provisioning` and
+  `tenant-billing`, `entitlement`, `billing-routes`, `billing-admin`, `stripe-webhook`,
+  `provisioning` and
   `workspace-migration` are also Miniflare-backed but take the D1
   binding straight out of the instance with `getD1Database` and never call `dispatchFetch`: a real
   local D1 with the real migrations applied,
@@ -46,7 +48,11 @@ user's own Cloudflare account and keys).
   new worker through `withLoopbackRetry` and every `getD1Database` handle through
   `withLoopbackRetryD1` (`cloud/test/miniflare-loopback.mjs`); keep the D1-proxy-heavy billing suites
   LAST in `test:unit` so the fetch property suites start against a clean port range; and put
-  `node test/await-port-drain.mjs` in front of a suite that needs thousands of sockets to itself.
+  `node test/await-port-drain.mjs` in front of a suite that needs thousands of sockets to itself
+  (there are now two such barriers, before `billing-admin` and before `stripe-webhook`). A fourth
+  rule for any NEW D1-backed suite: batch per-iteration setup with `DB.batch([...])` rather than a
+  loop of `run()` calls, since each statement is a socket - `withLoopbackRetryD1` wraps `batch` and
+  unwraps each statement's `__inner`, so batching keeps the retry protection.
   Both wrappers retry connect-time port exhaustion only; every other error propagates on the first
   attempt. The wrappers survive a transient shortage, NOT an empty range - their ladder tops out at
   ~22s against a 120s TIME_WAIT - which is why the barrier exists: `stripe-webhook` spends ~7,050
@@ -142,6 +148,49 @@ user's own Cloudflare account and keys).
   in subscription mode would activate a plan for a payment that failed. Its `tenant_id` comes from
   `client_reference_id` only, because the fallback resolution paths can cost a Stripe read that can
   fail, and asking for a redelivery of an event we will never act on is a non-2xx over nothing.
+- **Every `/api/admin/*` surface shares ONE gate**, `refuseNonOperator` in `cloud/src/admin-auth.ts`,
+  which also owns `isOperator`, `noStoreResponder` and `readBearerToken`. There are two operator
+  route families now - `/api/admin/telemetry/*` (`telemetry-admin.ts`) and `/api/admin/billing/*`
+  (`billing-admin.ts`) - and both are mounted beside each other in `routeApiRequest`, ABOVE the
+  `store.enabled` gate, because each carries its own authorization and its own D1 handling. A new
+  admin surface calls that gate; it never re-implements the 401/403 split. `telemetry-admin.ts` still
+  exports `isTelemetryAdmin` as an alias of `isOperator` because `test/telemetry.test.mjs` and the
+  requirement numbers are written against that name.
+  The gate's rules, none of which are negotiable: an ABSENT bearer is 401 (checked before
+  `verifyRequest`, which hands an anonymous context to an open BYO worker and would otherwise answer
+  403 to a request carrying no credential); a non-`clerk` credential kind is 403, so a long-lived
+  desktop `phd_` token sitting in a laptop keychain cannot carry operator access; and a missing
+  allowlist secret means NO access rather than open access.
+  **`TELEMETRY_ADMIN_USER_IDS` is a BARE comma-separated list, not JSON.** `["user_a","user_b"]`
+  splits into `["user_a` and `"user_b"]`, neither of which equals a user id, so a JSON-shaped value
+  fails closed and every operator reads 403 with nothing in the log to say why - indistinguishable
+  from not being an operator. The name is historical (telemetry was the only admin surface when it was
+  created) and is deliberately NOT renamed: one allowlist, one door, and renaming a secret costs a
+  window where one of the two surfaces 403s for everyone.
+- `/api/admin/billing/*` is a SEPARATE prefix from the telemetry aggregates, not a sixth aggregate
+  route, and the reason is a privacy contract rather than tidiness: telemetry bodies carry no
+  `install_id` by construction and fold groups under five installs into `other`, while these bodies
+  name identified paying tenants on purpose - "which account is cancelled but still holding a live
+  key" is not actionable without the id. Two routes: `costs` (OpenRouter balance via
+  `GET /api/v1/credits`, trailing-30-day burn from `usage`, runway, the committed ceiling summed over
+  ACTIVE tenants, and the attention lists) and `revenue` (Stripe `/v1/invoices` for gross/tax/net plus
+  `/v1/balance_transactions` for the processing fee, KV-cached 300s). Split rather than merged so a
+  Stripe outage degrades one card instead of blanking the balance and runway, which are what an
+  operator opens the page for during exactly that outage.
+  Three invariants there. **A NULL IS NOT A ZERO** in any response field: `balanceUsd: null` means the
+  vendor read failed and `0` means the account is empty, and rendering them alike turns a blip into a
+  false emergency. **Every USD figure is DOLLARS**, converted from Stripe's minor units once at the
+  boundary. **`net = gross - tax` is the only margin basis** (requirement 49), and Stripe carries the
+  tax in TWO shapes - the scalar `invoice.tax` and the `total_taxes[]` breakdown - so both are read;
+  reading one silently reports zero tax and inflates the margin, which is worse than not measuring it.
+- The OpenRouter BALANCE is deliberately absent from `/status.json`. `probeInference` there calls the
+  credits endpoint but `drain()`s the body unread, so it measures reachability plus credential
+  validity only and a dry account reads green. That is not a bug to fix in `status.ts`: the badge is
+  rendered on phorma-labs.com's public footer, so anything that moved its colour would tell visitors
+  about our funding rather than about their service. Balance, burn and runway belong behind the
+  operator allowlist. Note also that nothing in this repo ever FUNDS the OpenRouter account - every
+  vendor write is a spend limit on a key, and OpenRouter has no card-based credits-purchase API, so
+  topping up is a manual dashboard action forever.
 - `resolveHostedInference` (`cloud/src/tenants.ts`) is the ONE entitlement gate. `/api/infer` and
   `WorkflowAgent.trigger()` both call it - the DO used to carry a second copy of the checks, and two
   copies is how a top-up ends up raising the ceiling for a local run and not a deployed one. It
@@ -238,8 +287,10 @@ user's own Cloudflare account and keys).
   customer id (a plain UNIQUE enforces the same thing, the `WHERE` clause documents that an unmapped
   tenant is the steady state), the `idx_usage_tenant_run` repair that finally makes `recordRun`'s
   documented idempotency real, `stripe_events` and `credit_grants`. `0004_billing_ordering.sql` adds
-  the per-field clocks. NEITHER IS APPLIED REMOTELY YET - the go-live steps are in the `release`
-  steering. One SQLite trap in there is worth carrying forward: `stripe_events.id` declares
+  the per-field clocks. Both ARE now applied remotely (verified 2026-09-09 -
+  `npx wrangler d1 migrations list phorma-cloud --env hosted --remote` answers "No migrations to
+  apply!"); that command is the only trustworthy answer to the question, so run it rather than
+  believing a line of prose. One SQLite trap in there is worth carrying forward: `stripe_events.id` declares
   `PRIMARY KEY NOT NULL` because a bare `TEXT PRIMARY KEY` accepts NULL and NULLs compare distinct, so
   two `INSERT OR IGNORE` of a NULL id produced TWO rows and defeated the entire idempotency gate.
   `credit_grants.stripe_payment_id` is `NOT NULL UNIQUE` for the same reason, and it keys on the
@@ -273,6 +324,18 @@ user's own Cloudflare account and keys).
   hosted worker takes PRODUCTION `sk_live_` pairing with the `.prod.ts` twins. `/status.json`
   CANNOT verify a rotation - its Clerk probe returns 200 for any valid key regardless of instance.
   `/api/me` with a production session token returning 200 is the only real check.
+- **A production Clerk instance cannot sign anyone in on a CROSS-SITE origin.** The session cookie
+  is first-party to the Frontend API's registrable domain, so any browser surface that needs a Clerk
+  SESSION must be served from a `phorma-labs.com` subdomain. This is why `GET /auth/device` runs
+  clerk-js on the worker's own origin rather than the studio's webview doing it, and why the telemetry
+  dashboard is served from `telemetry-admin.phorma-labs.com` rather than its `workers.dev` origin -
+  that origin loads clerk-js fine and then fails the sign-in attempt with `authorization_invalid`.
+  Adding an origin to `ALLOWED_ORIGINS`, to `CLERK_AUTHORIZED_PARTIES` and to Clerk's allowlist is
+  necessary but NOT sufficient; the domain has to be right first. Two probe traps: `GET /v1/environment`
+  answers 200 for any origin at all, so "clerk-js loads" proves nothing, and a 422 from
+  `POST /v1/client/sign_ins` only proves the origin is not allowlist-refused. `GET /v1/environment` is
+  public and is the cheapest read of the instance's real config (Account Portal URLs,
+  `after_sign_in_url`, `url_based_session_syncing`, `partitioned_cookies`).
 - `CLERK_AUTHORIZED_PARTIES` is the JWT `azp` allowlist and is a hosted `var`, not a secret, so it
   must hold the SAME origin set as `ALLOWED_ORIGINS`: both dev servers (7322, 7323), the desktop
   build's webview origins (`tauri://localhost` on macOS and Linux, `http://tauri.localhost` on
@@ -293,6 +356,32 @@ user's own Cloudflare account and keys).
   `env.hosted` AND `DeployConfigService`'s generated override, which REPLACES the committed config
   on every BYO deploy. `cloud/test/deploy-config.test.mjs` derives the expected class list from
   `src/index.ts`'s export statement and will catch a miss.
+
+## Browser-facing pages (`cloud/src/brand-page.ts`)
+
+Four pages land in an external browser during sign-in or checkout, and ALL of them render through
+`brandPageDocument`: `GET /billing/return`, `GET /signed-in` (both `api.ts`), `GET /auth/device` and
+its 503 `unavailablePage` variant (`device-auth-routes.ts`). Do not hand-write a fifth.
+
+- The Phorma mark is an INLINE `<svg>`, never an `<img>` or a `<use href>`. Two pages answer
+  `default-src 'none'` and the worker binds no `assets` directory, so an inline element is the only
+  form that needs no CSP change and no binding - and these pages must render offline, in a webview,
+  and on a BYO worker that binds nothing. `PHORMA_MARK_SVG` is a HAND COPY of
+  `frontend/public/logo.svg` (`cloud/` cannot import from `frontend/`), so it is a structural twin:
+  a brand change edits both. Its gradient ids are namespaced `phorma-mark-*` because an id in an
+  inline SVG is document-global.
+- `BRAND_PAGE_CSP` is the shared policy for the three pages that run no script. It adds exactly
+  `img-src data:` over the old policy, for the favicon, which is a deliberately SIMPLIFIED flat mark -
+  the real one's three gradients composite into a single smudge at 16px.
+- The mark is the brand and the DOT is the state. Never tint the mark: a red logo reads as a broken
+  logo, not an error. Every state also changes the heading TEXT, so the colour is a second signal.
+- `state: 'none'` renders the mark with no dot, for a page reporting no request outcome (the 503).
+- The `<h1>` holds TWO spans - the dot FIRST, then the text - so a script that rewrites the heading
+  must target `BRAND_HEADING_TEXT_CLASS`. `#title span` matches the dot and writes the heading into an
+  8px circle; it looks correct in the markup and is only visible in a screenshot.
+- `cloud/test/billing-routes.test.mjs` asserts these pages reference NOTHING over the network -
+  `data:` URIs only, every scheme and every path refused. Adding a remote reference is a deliberate
+  decision that has to change that assertion.
 
 ## Public service status (`cloud/src/status.ts`)
 

@@ -517,9 +517,24 @@ async function clerkVendorStatus(): Promise<ProbeResult | null> {
 
 /**
  * OpenRouter has no public status JSON (its status page serves HTML only), so
- * this is a functional probe. With a provisioning key it reads the credit
- * balance, which also proves the key still works; without one it falls back to
- * the public model list. Neither spends credits.
+ * this is a functional probe. With a provisioning key it calls the credits
+ * endpoint, which proves the key still works; without one it falls back to the
+ * public model list. Neither spends credits.
+ *
+ * WHAT THIS PROBE DOES NOT DO, corrected 2026-09-09: it does not read the credit
+ * BALANCE. The docstring here used to claim it did, and the claim was wrong -
+ * `drain(response)` below cancels the body unread, so only `response.status` is
+ * ever examined. A dry account answers `200 {"data":{"total_credits":N,
+ * "total_usage":N}}` and reads as fully green here, and the first symptom of an
+ * empty account is `/api/infer` forwarding OpenRouter's 402 to a paying tenant
+ * whose own quota says they are fine.
+ *
+ * That is DELIBERATELY not fixed here. `/status.json` is rendered on
+ * phorma-labs.com's public footer, so anything that moved its colour would tell
+ * visitors about our funding rather than about their service - a low balance is a
+ * business fact, not an outage. The balance, the burn rate and the runway live
+ * behind the operator allowlist instead, on `GET /api/admin/billing/costs`
+ * (`billing-admin.ts`), which parses the same body this one throws away.
  */
 async function probeInference(env: StatusEnv, hosted: boolean): Promise<ProbeResult> {
   if (!hosted && !env.OPENROUTER_PROVISIONING_KEY) {

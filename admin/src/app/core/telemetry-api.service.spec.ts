@@ -45,6 +45,7 @@ import {
   FORBIDDEN,
   NO_SESSION,
   REQUEST_FAILURE_FALLBACK,
+  SESSION_REJECTED,
   SESSION_TOKEN_RESOLVER,
   TELEMETRY_ADMIN_PREFIX,
   TelemetryApiService,
@@ -434,15 +435,48 @@ describe('TelemetryApiService outcomes', () => {
     });
   });
 
-  it('surfaces an expired token as signed out on 401', async () => {
+  // A 401 on a token we DID send is not the same as never having had one, and
+  // this used to conflate them. The old behaviour returned NO_SESSION, so the
+  // shell rendered the sign-in form to an operator who was already signed in -
+  // pointing them at the one action that cannot fix a Worker verifying a
+  // different Clerk instance. Both halves are pinned: the distinct outcome, and
+  // that it is NOT the signed-out one.
+  it('reports a token the Worker refused as session-rejected, not signed out, on 401', async () => {
     await withService(resolverFor(TOKEN), async (service, http) => {
+      expect(service.sessionRejected()).toBe(false);
+
       const { result, requests } = await issue(service, http, 'features', RANGE);
       requests[0].flush({ error: 'Unauthorized.' }, { status: 401, statusText: 'Unauthorized' });
 
-      expect(await result).toEqual(NO_SESSION);
-      // 401 is not 403: the shell renders sign-in, not not-authorized.
+      const settled = await result;
+      expect(settled).toEqual(SESSION_REJECTED);
+      expect(settled).not.toEqual(NO_SESSION);
+      expect(service.sessionRejected()).toBe(true);
+      // 401 is not 403: the shell renders session-rejected, not not-authorized.
       expect(service.forbidden()).toBe(false);
     });
+  });
+
+  it('clears the session-rejected signal once a later call succeeds', async () => {
+    await withService(resolverFor(TOKEN), async (service, http) => {
+      const denied = await issue(service, http, 'summary', RANGE);
+      denied.requests[0].flush({}, { status: 401, statusText: 'Unauthorized' });
+      await denied.result;
+      expect(service.sessionRejected()).toBe(true);
+
+      const allowed = await issue(service, http, 'summary', RANGE);
+      allowed.requests[0].flush({ range: RANGE });
+      expect(isOk(await allowed.result)).toBe(true);
+      expect(service.sessionRejected()).toBe(false);
+    });
+  });
+
+  // The three refusals the shell branches on must stay mutually distinguishable.
+  // A regression that collapsed any two of them would be invisible in a test that
+  // only ever asserted one at a time.
+  it('keeps no-session, session-rejected and forbidden as three distinct outcomes', () => {
+    const kinds = [NO_SESSION.kind, SESSION_REJECTED.kind, FORBIDDEN.kind];
+    expect(new Set(kinds).size).toBe(3);
   });
 
   it('fails with the served copy on any other error status', async () => {

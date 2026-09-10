@@ -53,15 +53,15 @@ cd frontend; npm run build                       # production build: the ONLY th
 cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1003 specs, ~11s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
 cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
-cd cloud;    npm run test:unit                   # 22 worker suites (`test` is the same; the portal e2e is manual)
+cd cloud;    npm run test:unit                   # 23 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
 cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)
 cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
 cd backend/src-tauri; cargo test                 # 29 unit tests (sql, llm, data, deploy_assets)
-cd admin; npm run build                          # dashboard production build: 786 kB initial, 1.5MB warning / 2MB error
-cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 38 specs, ~15s
+cd admin; npm run build                          # dashboard production build: 791 kB initial, 1.5MB warning / 2MB error
+cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 43 specs, ~15s
 node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
 node scripts/check-telemetry-catalog.mjs         # the two Counter_Catalog twins and the D1 migration still agree
 node scripts/check-telemetry-isolation.mjs       # TelemetryService import list is still a DI leaf
@@ -82,9 +82,9 @@ manually started `wrangler dev` and a local model.
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
-  warning / 26kB error. `initial` currently sits at 2.70MB, so the warning is expected and only the
+  warning / 26kB error. `initial` currently sits at 2.74MB, so the warning is expected and only the
   3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
-  786kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
+  791kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
   (chart.js) behind `@defer (on immediate)`.
 - `engine/` has no local TypeScript install. For a type-only check there use
   `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json`. Running `npx tsc` inside

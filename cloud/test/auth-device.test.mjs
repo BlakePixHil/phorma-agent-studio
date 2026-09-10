@@ -471,6 +471,58 @@ console.log('\nGET /auth/device - the page that does the signing in');
   check('loads clerk-js from that host and nowhere else', html.includes(`https://${host}/npm/@clerk/clerk-js`), '');
   check('posts the claim to a relative path', html.includes("fetch('/api/auth/device/claim'"), '');
 
+  // --- The heading swap targets the TEXT, not the state dot ----------------
+  //
+  // This page is the only one that rewrites its own heading at runtime, and the
+  // `<h1>` holds TWO spans: the state dot first, then the text. The obvious
+  // selector, `#title span`, therefore matches the DOT - so `show()` wrote the
+  // heading into an 8px circle and produced a page with the old heading still
+  // visible and the new one overflowing beside it.
+  //
+  // Every markup assertion in this suite passed while that was live, because the
+  // markup was correct and only the SELECTOR was wrong. It was found in a
+  // screenshot. These three checks are the cheap standing detector.
+  const headingTextClass = 'brand__heading-text';
+  check(
+    'the heading text span carries its own class',
+    new RegExp(`<span class="${headingTextClass}">`).test(html),
+    html.slice(html.indexOf('<h1'), html.indexOf('</h1>') + 5),
+  );
+  check(
+    'the state dot is the FIRST span in the heading, which is why a bare selector is wrong',
+    /<h1[^>]*>\s*<span class="dot"/.test(html),
+    html.slice(html.indexOf('<h1'), html.indexOf('</h1>') + 5),
+  );
+  check(
+    'the runtime heading swap selects that class rather than a bare span',
+    html.includes(`querySelector('#title .${headingTextClass}')`) &&
+      !/querySelector\('#title span'\)/.test(html),
+    (html.match(/querySelector\([^)]*\)/g) ?? []).join(' | '),
+  );
+
+  // --- Branding (task group: worker page branding) --------------------------
+  check(
+    'the page carries the Phorma mark inline, with no network fetch for it',
+    /<svg class="brand__mark"/.test(html) && !/<img/i.test(html),
+    html.slice(0, 200),
+  );
+  check(
+    'the mark uses namespaced gradient ids, so two inline SVGs could not collide',
+    html.includes('phorma-mark-a') && !html.includes('paint0_linear'),
+    '',
+  );
+  check(
+    'the favicon is an inline data URI rather than a request to this worker',
+    /<link rel="icon" href="data:image\/svg\+xml,/.test(html) &&
+      !/<link rel="icon" href="\/|<link rel="icon" href="data:,/.test(html),
+    '',
+  );
+  check(
+    'and the CSP admits that data URI',
+    /img-src [^;]*data:/.test(csp),
+    csp,
+  );
+
   // A deployment with no desktop sign-in configured must say so, not render a page
   // whose script cannot work. This is the BYO shape.
   const byo = handleDeviceAuthPage(new Request(PAGE), { PHORMA_MODE: undefined });

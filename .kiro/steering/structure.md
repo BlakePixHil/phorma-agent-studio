@@ -43,12 +43,43 @@ Panels register themselves as tabs in `DEFAULT_TABS` (`core/panel-registry.servi
 Consequences: element ids must be scoped, and DOM queries in tests must filter for the visible
 one (`getBoundingClientRect().width > 0`).
 
+## Admin dashboard layout (`admin/`)
+
+Two concerns behind one shell: five telemetry aggregate views, and a Spend view over the billing
+route family.
+
+- `admin/src/app/core/admin-api.ts` - the ONE transport. Owns the session-token funnel (the branded
+  `SessionToken`, `SESSION_TOKEN_RESOLVER`, `clerkSessionTokenResolver`), the `AdminResult` union, and
+  the two auth signals (`forbidden`, `sessionRejected`). Both feature services go through it, because
+  one operator allowlist gates both prefixes on the Worker.
+- `telemetry-api.service.ts` and `billing-api.service.ts` - a prefix plus typed methods each, nothing
+  more. The telemetry one RE-EXPORTS everything from `admin-api.ts` so the views and specs that
+  already imported those names from it keep working.
+- `core/models.ts` and `core/billing-models.ts` - response shapes, each a structural twin of its
+  Worker module. `models.ts` bodies carry no identity by construction; `billing-models.ts` bodies name
+  tenants on purpose. Do not merge them.
+- `views/` - one folder per view. The nav (`app.ts` `VIEW_NAV`) and the router (`app.routes.ts`) DERIVE
+  the five telemetry entries from `TELEMETRY_ROUTES`, so a sixth aggregate route cannot compile without
+  a nav entry and a loader. The Spend view is appended EXPLICITLY, because it reads two API routes and
+  so has no single route to derive a path from. Its view id is `spend`, deliberately not `costs`, so one
+  word does not mean both a URL segment and one of the two routes behind it.
+- Auth surfaces in `auth/`: `signed-out` (no Clerk session), `session-rejected` (a token we sent was
+  refused - 401), `not-authorized` (403). Three screens because the remedies differ, and the shell
+  orders them in that sequence.
+- Every shared class already exists in `admin/src/styles.scss` (`.admin-view`, `.admin-grid`,
+  `.admin-card`, `.admin-stat`, `.admin-table`, `.admin-footnote`, `.admin-columns`). A new view should
+  add no SCSS; the budget is 1.5MB warning against ~791kB.
+
 ## Structural twins - keep in sync
 
 The engine and the studio each declare the workflow contract independently. They are structural
 twins, not shared imports:
 
 - `engine/src/types.ts` and `frontend/src/app/core/workflow.model.ts`
+- `cloud/src/telemetry-admin.ts` and `admin/src/app/core/models.ts`
+- `cloud/src/billing-admin.ts` and `admin/src/app/core/billing-models.ts`
+- `frontend/public/logo.svg` and `PHORMA_MARK_SVG` in `cloud/src/brand-page.ts` - `cloud/` cannot
+  import from `frontend/`, so the brand mark is hand-copied. A brand change edits both.
 
 Node kinds, node data interfaces, `WorkflowSettings`, and `ModelProviderId` exist in BOTH. Adding
 or changing one without the other compiles in one package and breaks the other.

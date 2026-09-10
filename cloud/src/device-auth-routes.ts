@@ -60,6 +60,7 @@
  */
 
 import type { AuthContext, AuthEnv } from './auth';
+import { BRAND_HEADING_TEXT_CLASS, BRAND_PAGE_CSP, brandPageDocument } from './brand-page';
 import {
   DEVICE_CODE_TTL_SECONDS,
   deviceCodeKey,
@@ -312,8 +313,11 @@ export function handleDeviceAuthPage(request: Request, env: DeviceAuthEnv): Resp
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'no-referrer',
-        'Content-Security-Policy':
-          "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+        // Shared with `/billing/return` and `/signed-in`: loads nothing remote, and
+        // `img-src data:` is what admits the inline favicon. This page runs no
+        // script at all, so it does not need the wider policy the device page
+        // below builds for clerk-js.
+        'Content-Security-Policy': BRAND_PAGE_CSP,
       },
     });
   }
@@ -369,32 +373,27 @@ export function clerkHostFromPublishableKey(key: string): string {
   }
 }
 
-/** Shown when this deployment has no desktop sign-in configured (e.g. BYO). */
+/**
+ * Shown when this deployment has no desktop sign-in configured (e.g. BYO).
+ *
+ * Carries the mark but NO state dot: it is a statement about the deployment rather
+ * than the outcome of a request, so there is no pending, success or failure for a
+ * dot to report. It was previously the only one of these pages with no visual
+ * identity at all, which made a BYO user's first Phorma-served page the least
+ * recognisable one.
+ */
 function unavailablePage(): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<link rel="icon" href="data:,">
-<title>Sign-in unavailable - Phorma Agent Studio</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-    background:#0f1115; color:#e7e9ee; padding:24px;
-    font:16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 27rem; text-align: center; }
-  h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.75rem; }
-  p { margin: 0; color: #a8aebb; }
-</style>
-</head>
-<body><main>
-  <h1>Sign-in is not available here</h1>
-  <p>This deployment is not configured for Phorma account sign-in. You can close this tab.</p>
-</main></body>
-</html>
-`;
+  return brandPageDocument({
+    title: 'Sign-in unavailable',
+    heading: 'Sign-in is not available here',
+    state: 'none',
+    // A NON-BREAKING hyphen in "sign-in". Browsers break a line at an ordinary
+    // hyphen, and at this column that split the word across two lines as "sign-" /
+    // "in.", which reads as a typo on the one page a BYO user sees.
+    body: [
+      'This deployment is not configured for Phorma account sign&#8209;in. You can close this tab.',
+    ],
+  });
 }
 
 function devicePage(clerkHost: string, publishableKey: string): string {
@@ -403,49 +402,28 @@ function devicePage(clerkHost: string, publishableKey: string): string {
   // `clerkHostFromPublishableKey`; `publishableKey` is a deploy-time var and a
   // public value. The device code is NOT here - the script reads it from
   // `location.search` and only ever sends it as a JSON value.
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<!-- The worker serves no icon, so an empty data URI stops the browser asking
-     for /favicon.ico and logging a 404 next to the real diagnostics. -->
-<link rel="icon" href="data:,">
-<title>Sign in to Phorma Agent Studio</title>
-<style>
-  :root { color-scheme: light dark; }
-  body {
-    margin: 0; min-height: 100vh; display: flex; align-items: center;
-    justify-content: center; background: #0f1115; color: #e7e9ee;
-    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    padding: 24px;
-  }
-  main { max-width: 27rem; text-align: center; }
-  h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.75rem; }
-  p { margin: 0; color: #a8aebb; }
-  .mark {
-    width: 2.5rem; height: 2.5rem; margin: 0 auto 1.25rem; border-radius: 50%;
-    background: #3a3f4b;
-  }
-  .ok .mark { background: #1f6f4a; }
-  .bad .mark { background: #7a2f2f; }
-</style>
-</head>
-<body>
-<main id="root">
-  <div class="mark"></div>
-  <h1 id="title">Signing you in</h1>
-  <p id="detail">One moment.</p>
-</main>
-<script src="https://${clerkHost}/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
-        data-clerk-publishable-key="${publishableKey}" crossorigin="anonymous"></script>
-<script>
+  // The state dot swaps at runtime, so `show()` writes `<main>`'s class. It also
+  // rewrites the heading, so the outcome never depends on the dot's colour alone.
+  return brandPageDocument({
+    title: 'Sign in to Phorma Agent Studio',
+    heading: 'Signing you in',
+    state: 'pending',
+    rootId: 'root',
+    headingId: 'title',
+    bodyId: 'detail',
+    body: ['One moment.'],
+    extraHead: `<script src="https://${clerkHost}/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+        data-clerk-publishable-key="${publishableKey}" crossorigin="anonymous"></script>`,
+    extraBody: `<script>
 (async function () {
   var root = document.getElementById('root');
   function show(state, title, detail) {
     root.className = state;
-    document.getElementById('title').textContent = title;
+    // Target the heading TEXT span by class, never \`#title span\`: the <h1> also
+    // contains the state dot as its FIRST span, so the loose selector writes the
+    // heading into the dot and turns an 8px circle into overflowing text. It looks
+    // correct in the markup and is only visible in a screenshot.
+    document.querySelector('#title .${BRAND_HEADING_TEXT_CLASS}').textContent = title;
     document.getElementById('detail').textContent = detail;
   }
   // The code arrives in the query string and is only ever sent as a JSON value.
@@ -485,8 +463,6 @@ function devicePage(clerkHost: string, publishableKey: string): string {
     show('bad', 'Could not authorize this device', 'Start the sign-in again from Phorma Agent Studio.');
   }
 })();
-</script>
-</body>
-</html>
-`;
+</script>`,
+  });
 }
