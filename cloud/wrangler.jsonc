@@ -348,11 +348,5 @@
 				}
 			]
 		}
-	},
-	"r2_buckets": [
-		{
-			"bucket_name": "phorma-backups",
-			"binding": "phorma_backups"
-		}
-	]
+	}
 }
