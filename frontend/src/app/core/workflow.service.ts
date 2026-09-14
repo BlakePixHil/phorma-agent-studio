@@ -10,6 +10,7 @@ import { TelemetryService } from './telemetry.service';
 import { ToastService } from '../shared/toast/toast.service';
 import { ConfirmDialogService } from '../shared/confirm-dialog/confirm-dialog.service';
 import { WorkflowVersionsService } from './workflow-versions.service';
+import { mintWorkflowId } from './workflow-id';
 import type { WorkflowVersion, WorkflowVersionTrigger } from './workflow-versions.model';
 import {
   canConnectPorts,
@@ -48,6 +49,15 @@ export interface OpenWorkflowDoc {
   /** Historical preview tabs are immutable and cannot be saved over the library. */
   readOnly?: boolean;
 }
+
+/**
+ * What a {@link WorkflowService.restoreSpec} call did.
+ *
+ * Four outcomes rather than a boolean because a restore-all has to report counts
+ * (Requirement 18.5), and "the user chose to keep their local copy" is a success
+ * that must not be counted as a failure.
+ */
+export type WorkflowRestoreOutcome = 'restored' | 'replaced' | 'kept-local' | 'failed';
 
 /** Shape persisted to layout storage for tab-session restore. */
 interface PersistedWorkflowTabs {
@@ -318,7 +328,7 @@ export class WorkflowService {
 
     const baseSpec: WorkflowSpec = {
       version: WORKFLOW_SPEC_VERSION,
-      id: doc.workflowId ?? `wf-${Date.now().toString(36)}`,
+      id: doc.workflowId ?? mintWorkflowId(),
       name: name.trim() || 'Untitled Workflow',
       description: doc.description.trim() || undefined,
       graph: structuredClone(doc.graph),
@@ -361,8 +371,13 @@ export class WorkflowService {
    * graph extraction and other background workflow-creation features.
    */
   async saveNewSpecToLibrary(spec: WorkflowSpec): Promise<WorkflowSpec | null> {
+    // Last-resort collision guard. Unreachable for a freshly minted id since
+    // `mintWorkflowId` carries 48 bits of entropy (Requirement 14.4), but a spec
+    // arriving from elsewhere can still carry an id this library already holds -
+    // and this rail is a COPY, so re-minting is the right answer here. A restore
+    // is the opposite case and goes through `restoreSpec`.
     const id = this.libraryState().some(item => item.id === spec.id)
-      ? `wf-${Date.now().toString(36)}`
+      ? mintWorkflowId()
       : spec.id;
     const next = this.withEmbeddedClosure(
       {
@@ -384,6 +399,91 @@ export class WorkflowService {
     }
   }
 
+  /**
+   * Writes a spec into the library keeping its `id` EXACTLY as received - the
+   * identity-preserving counterpart to {@link importSpec} (Requirement 15).
+   *
+   * The distinction is the whole point. A file import is a COPY, so it mints a
+   * fresh id; a restore is the SAME workflow arriving from somewhere else (a
+   * cloud backup, or the spec read back off its own deployment), so it must keep
+   * the id or it stops addressing its own deployment instance, run history,
+   * usage rows and backup revisions (Requirement 15.4). Restoring under a new id
+   * would leave the original deployment exactly as orphaned as before.
+   *
+   * `collision` decides what happens when the library already holds that id.
+   * `'ask'` is the interactive default (Requirement 15.3); a restore-all passes
+   * an explicit policy instead, because N dialogs is not a recovery flow. No
+   * branch ever mints a new id.
+   */
+  async restoreSpec(
+    spec: WorkflowSpec,
+    collision: 'ask' | 'replace' | 'skip' = 'ask',
+  ): Promise<WorkflowRestoreOutcome> {
+    const existing = this.libraryState().find(item => item.id === spec.id);
+    if (existing) {
+      if (collision === 'skip') return 'kept-local';
+      if (collision === 'ask') {
+        const replace = await this.confirmDialog.confirm({
+          title: 'Replace the local copy?',
+          message:
+            `"${existing.name}" is already in your library. Restoring replaces it with the ` +
+            `copy from the cloud. Its version history is kept, so you can go back.`,
+          confirmLabel: 'Replace',
+          cancelLabel: 'Keep local',
+          tone: 'danger',
+        });
+        if (!replace) return 'kept-local';
+      }
+    }
+
+    const restored = this.withEmbeddedClosure(
+      {
+        ...structuredClone(spec),
+        version: WORKFLOW_SPEC_VERSION,
+        savedAt: new Date().toISOString(),
+      },
+      spec.subWorkflows,
+      // Prefer the registry the spec ARRIVED with: a restore is rehydration, so
+      // the carried closure is the faithful record. Library-first resolution
+      // would quietly graft whatever the local library happens to hold onto a
+      // workflow that has just been recovered from somewhere else.
+      true,
+    );
+
+    try {
+      await this.storage.saveWorkflow(restored);
+    } catch {
+      this.toast.error('Restore failed', 'The workflow could not be written to storage.');
+      return 'failed';
+    }
+
+    this.libraryState.update(specs => [restored, ...specs.filter(item => item.id !== restored.id)]);
+    // An open tab pointing at this workflow follows the restore, exactly as
+    // `restoreVersion` does - otherwise the tab keeps editing the copy that was
+    // just replaced and the next save undoes the restore.
+    this.docsState.update(docs =>
+      docs.map(doc =>
+        doc.workflowId === restored.id
+          ? {
+              ...doc,
+              name: restored.name,
+              description: restored.description ?? '',
+              graph: structuredClone(restored.graph),
+              settings: restored.settings ? { ...restored.settings } : {},
+              subWorkflows: restored.subWorkflows
+                ? structuredClone(restored.subWorkflows)
+                : undefined,
+              dirty: false,
+            }
+          : doc,
+      ),
+    );
+    // A restore is a save from history's point of view, so the copy it replaced
+    // stays recoverable from the version panel.
+    await this.versions.recordSave(restored, 'restore').catch(() => undefined);
+    return existing ? 'replaced' : 'restored';
+  }
+
   /** Deletes a saved workflow from the library (open tabs become unsaved). */
   async removeFromLibrary(workflowId: string): Promise<void> {
     try {
@@ -394,6 +494,15 @@ export class WorkflowService {
     }
     this.libraryState.update(specs => specs.filter(item => item.id !== workflowId));
     await this.versions.deleteForWorkflow(workflowId).catch(() => undefined);
+    // Forget what cloud backup uploaded for this workflow (Requirement 13.4).
+    //
+    // A LOCAL write and nothing else. The cloud copy is deliberately untouched: a
+    // local delete never propagates, so uninstalling, wiping this database or
+    // deleting a workflow here are all recoverable (Requirement 17.3). Reached
+    // through storage rather than through the backup service, because
+    // `WorkflowService` must stay upstream of it - the reverse edge would close the
+    // NG0200 cycle through the run path.
+    await this.storage.removeBackupState(workflowId).catch(() => undefined);
     this.docsState.update(docs =>
       docs.map(doc =>
         doc.workflowId === workflowId ? { ...doc, workflowId: null, dirty: true } : doc,
@@ -471,7 +580,7 @@ export class WorkflowService {
     this.skillsLibrary.syncAttachedSkills(graph);
     const spec: WorkflowSpec = {
       version: WORKFLOW_SPEC_VERSION,
-      id: doc.workflowId ?? `wf-${Date.now().toString(36)}`,
+      id: doc.workflowId ?? mintWorkflowId(),
       name: doc.name,
       description: doc.description || undefined,
       graph,

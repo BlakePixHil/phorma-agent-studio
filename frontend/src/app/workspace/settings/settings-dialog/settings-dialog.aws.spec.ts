@@ -384,6 +384,27 @@ function scopePrefix(section: HTMLElement): string {
   return anchor.id.slice(0, anchor.id.length - 'accountId'.length);
 }
 
+/**
+ * Sibling sections that live inside the Cloud page's single settings section but
+ * are NOT part of the AWS body: the Reconciliation_List and the Library_Exporter
+ * (cloud-workflow-backup). They are their own components, rendered outside the
+ * per-provider branch because they describe the account and the local library
+ * rather than one deploy target.
+ *
+ * The chrome assertions below are about the AWS FORM, so they exclude these -
+ * otherwise this file's counts would track edits to unrelated sections, which is
+ * how a guard turns into a chore and then gets deleted.
+ */
+const SIBLING_SECTIONS =
+  'app-deployments-settings, app-library-export-settings, app-backup-settings';
+
+/** Every element of the AWS body, excluding the sibling sections beside it. */
+function awsBodyElements(section: HTMLElement): HTMLElement[] {
+  return Array.from(section.querySelectorAll<HTMLElement>('*')).filter(
+    element => element.closest(SIBLING_SECTIONS) === null,
+  );
+}
+
 /** The laid-out controls carrying exactly the scoped id for one field. */
 function controlsFor(section: HTMLElement, prefix: string, suffix: string): HTMLInputElement[] {
   const id = `${prefix}${suffix}`;
@@ -696,7 +717,7 @@ describe('Property 18: The AWS form covers every field with the required chrome'
     const section = awsSection(fixture);
     const found: string[] = [];
 
-    for (const element of Array.from(section.querySelectorAll<HTMLElement>('*'))) {
+    for (const element of awsBodyElements(section)) {
       const tag = element.tagName.toLowerCase();
       if (tag.startsWith('p-') && !PRIMENG_COMPOSITE_TAGS.includes(tag)) {
         expect(PRIMENG_BASE_CLASSES)
@@ -730,7 +751,7 @@ describe('Property 18: The AWS form covers every field with the required chrome'
     const section = awsSection(fixture);
     let icons = 0;
 
-    for (const element of Array.from(section.querySelectorAll<HTMLElement>('*'))) {
+    for (const element of awsBodyElements(section)) {
       const classes = Array.from(element.classList);
       const primeIcons = classes.filter((name) => name === 'pi' || name.startsWith('pi-'));
       expect(primeIcons)

@@ -1,0 +1,198 @@
+// Shared recipes for the bespoke sections on the Settings dialog's Cloud page.
+//
+// Three of them now - "Deployed in your account", "Library export" and "Cloud
+// backup" - and each is its own component rather than more markup in
+// `settings-dialog.html`, because that sheet compiles to ~21.8kB against a 22kB
+// `anyComponentStyle` warning and one more section there would trip it.
+//
+// Angular scopes component styles, so the surrounding `.phorma-settings__*`
+// recipes do not reach into a child component and each of the three would
+// otherwise restate the same eight rules. `@use` this and `@include
+// settings-section.base;` once per sheet: the emitted class names are identical
+// in all three, which is safe precisely BECAUSE the scoping keeps them apart.
+//
+// Root font size is 14px, so every rem here is against 14 (0.857rem = 12px).
+//
+// Every `color-mix` carries a literal fallback. That is not defensive noise: a
+// `color-mix` with an undefined custom property is invalid at computed-value
+// time, and `border-color` then silently falls back to `currentColor` - which is
+// how hairlines once rendered in the text colour across the whole app.
+
+@mixin base {
+  :host {
+    display: flex;
+    flex-direction: column;
+    // Matches `.phorma-settings__section`'s own gap, so the page reads as one
+    // rhythm rather than as separate widgets.
+    gap: 10px;
+    // A direct child of a flex column collapses to its header height without
+    // this, and `overflow: auto` then hides the rest.
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  /* ── Heading row ───────────────────────────────────────────────────────── */
+  .settings-section__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  // `margin-left: auto` on the trailing action rather than a float: a float lets
+  // the description below wrap up under the heading.
+  .settings-section__heading {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.857rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--p-text-muted-color);
+  }
+
+  .settings-section__desc {
+    margin: 0;
+    font-size: 0.857rem;
+    line-height: 1.6;
+    color: var(--p-text-muted-color);
+  }
+
+  /* ── Notes ─────────────────────────────────────────────────────────────── */
+  // One tone knob, like `.phorma-settings__note`.
+  .settings-section__note {
+    --settings-note-accent: var(--p-text-color, #71717a);
+
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--settings-note-accent) 26%, transparent);
+    background: color-mix(in srgb, var(--settings-note-accent) 7%, transparent);
+    color: var(--p-text-muted-color);
+    font-size: 0.857rem;
+    line-height: 1.6;
+
+    > i {
+      margin-top: 2px;
+      flex-shrink: 0;
+      color: var(--settings-note-accent);
+    }
+  }
+
+  .settings-section__note--warn {
+    --settings-note-accent: var(--phorma-warning, #f59e0b);
+  }
+
+  .settings-section__note--info {
+    --settings-note-accent: var(--p-primary-color, #8578f6);
+  }
+
+  /* ── Rows ──────────────────────────────────────────────────────────────── */
+  .settings-section__row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--phorma-overlay-border, rgb(113 113 122 / 22%));
+    background: color-mix(in srgb, var(--p-text-color, #71717a) 3%, transparent);
+  }
+
+  .settings-section__row--busy {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .settings-section__row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .settings-section__row-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    > i {
+      flex-shrink: 0;
+      color: var(--p-text-muted-color);
+    }
+  }
+
+  .settings-section__name {
+    font-size: 0.929rem;
+    font-weight: 600;
+    // A workflow name is user-authored and can be one long token.
+    overflow-wrap: anywhere;
+  }
+
+  .settings-section__meta {
+    margin: 4px 0 0;
+    font-size: 0.857rem;
+    line-height: 1.5;
+    color: var(--p-text-muted-color);
+  }
+
+  /* ── Badges ────────────────────────────────────────────────────────────── */
+  .settings-section__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--p-text-color, #71717a) 20%, transparent);
+    background: color-mix(in srgb, var(--p-text-color, #71717a) 6%, transparent);
+    color: var(--p-text-muted-color);
+    font-size: 0.786rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .settings-section__badge--warn {
+    border-color: color-mix(in srgb, var(--phorma-warning, #f59e0b) 40%, transparent);
+    background: color-mix(in srgb, var(--phorma-warning, #f59e0b) 12%, transparent);
+    color: var(--phorma-warning, #f59e0b);
+  }
+
+  // A badge that is also a link. A `<button>` rather than an `<a>`, because
+  // desktop opens the system browser through `openExternal` and an in-webview
+  // navigation would replace the studio.
+  .settings-section__badge--link {
+    cursor: pointer;
+    font-family: inherit;
+
+    &:hover {
+      border-color: color-mix(in srgb, var(--p-primary-color, #8578f6) 50%, transparent);
+      color: var(--p-primary-color, #8578f6);
+    }
+  }
+
+  /* ── Actions ───────────────────────────────────────────────────────────── */
+  .settings-section__actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  // Scoped to `.p-button` so the override wins, and the superseded padding is
+  // replaced rather than layered - otherwise the chrome doubles up. Font size is
+  // deliberately the only typographic override: the PrimeNG size token drives
+  // height, so these stay `size="small"` in the template.
+  .settings-section__btn.p-button {
+    padding: 4px 8px;
+    gap: 5px;
+    font-size: 0.857rem;
+  }
+
+  // Destructive actions stay `severity="secondary"` and go red only on hover, so
+  // a row does not read as a wall of warnings.
+  .settings-section__btn--danger.p-button:hover:not(:disabled) {
+    color: var(--phorma-danger, #ef4444);
+  }
+}

@@ -71,6 +71,9 @@ import { PastDueNotice } from '../../../shared/billing/past-due-notice';
 import { InfoPopover } from '../../../shared/info-popover/info-popover';
 import { PlanCards } from '../../cloud/plan-cards/plan-cards';
 import { PrivacySettings } from '../privacy/privacy-settings';
+import { DeploymentsSettings } from '../deployments/deployments-settings';
+import { LibraryExportSettings } from '../library-export/library-export-settings';
+import { BackupSettings } from '../backup/backup-settings';
 import {
   MODEL_PROVIDERS,
   PROVIDER_MODEL_SUGGESTIONS,
@@ -105,7 +108,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, CheckoutFallback, PastDueNotice, InfoPopover, PlanCards, PrivacySettings],
+  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, CheckoutFallback, PastDueNotice, InfoPopover, PlanCards, PrivacySettings, DeploymentsSettings, LibraryExportSettings, BackupSettings],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })

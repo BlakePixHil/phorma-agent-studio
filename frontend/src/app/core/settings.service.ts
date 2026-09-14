@@ -136,6 +136,22 @@ export class SettingsService {
     loadLayout<CloudProviderChoice>('cloudProvider', null),
   );
 
+  // ── Library export (cloud-workflow-backup, Requirement 21) ──────────────
+
+  /**
+   * Absolute path of the folder the workflow library exports to. Empty until the
+   * user picks one; the browser build never sets it and downloads a single
+   * bundle instead.
+   *
+   * This is the durability path for a BYO or free install: "bring your own
+   * everything" means a user who runs their own account gets a real recovery
+   * story without a subscription.
+   */
+  readonly libraryExportFolder = signal(loadLayout('libraryExportFolder', ''));
+
+  /** Rewrite the export after a library save. Off until the folder is chosen. */
+  readonly libraryExportOnSave = signal(loadLayout('libraryExportOnSave', false));
+
   // ── Credential flags ────────────────────────────────────────────────────
 
   /** provider id → whether a key is configured (for Settings UI badges). */
@@ -161,6 +177,21 @@ export class SettingsService {
     effect(() => saveLayout('gridSnapSize', this.gridSnapSize()));
     effect(() => saveLayout('autoUpdate', this.autoUpdate()));
     effect(() => saveLayout('cloudProvider', this.cloudProvider()));
+    effect(() => saveLayout('libraryExportOnSave', this.libraryExportOnSave()));
+  }
+
+  /**
+   * Sets the library export folder, normalizing a trailing separator.
+   *
+   * Clearing it also turns rewrite-on-save off, because the alternative is a
+   * toggle that reads as on while writing nowhere - the exact shape of a
+   * durability feature that quietly is not there.
+   */
+  setLibraryExportFolder(path: string): void {
+    const trimmed = path.trim().replace(/[\\/]$/, '');
+    this.libraryExportFolder.set(trimmed);
+    saveLayout('libraryExportFolder', trimmed);
+    if (trimmed.length === 0) this.libraryExportOnSave.set(false);
   }
 
   setOllamaBaseUrl(url: string): void {

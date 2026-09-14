@@ -2031,6 +2031,31 @@
                         }
                       }
                     }
+
+                    <!--
+                      The Reconciliation_List, OUTSIDE the per-provider branch on
+                      purpose: it describes what is running in the Phorma Cloud
+                      ACCOUNT, which is independent of where the next deploy will
+                      go. A user who has since switched their deploy target can
+                      still find and remove what they left behind. The component
+                      gates itself on being signed in.
+                    -->
+                    <app-deployments-settings />
+
+                    <!--
+                      Cloud backup. Gates itself on being signed in AND the
+                      deployment having backup storage, so it is absent rather than
+                      broken on a BYO worker.
+                    -->
+                    <app-backup-settings />
+
+                    <!--
+                      Durability that needs no subscription. Shown to every user,
+                      not only BYO ones: a subscriber with cloud backup on still
+                      benefits from a copy that does not depend on Phorma being
+                      reachable.
+                    -->
+                    <app-library-export-settings />
                   }
 
                   @case ('privacy') {

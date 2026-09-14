@@ -19,6 +19,7 @@ import {
 } from '@phorma/engine';
 
 import type { ChatThread } from './assistant-chat.model';
+import type { WorkflowBackupState } from './backup.model';
 import type { InstalledConnector } from './connectors.model';
 import type { PromptEntry } from './prompt-library.model';
 import type { SkillDef } from './skills.model';
@@ -27,7 +28,7 @@ import { WORKFLOW_VERSIONS_KEEP, type WorkflowVersion } from './workflow-version
 import { TelemetryService } from './telemetry.service';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -123,6 +124,20 @@ const CONNECTORS_STORE = 'connectors';
  */
 const WORKFLOW_STATE_STORE = 'workflow-state';
 const WORKFLOW_STATE_BY_WORKFLOW = 'by-workflow';
+
+/**
+ * Object store tracking what cloud backup has already uploaded (keyPath
+ * `workflowId`) - cloud-workflow-backup Requirement 13.
+ *
+ * One row per workflow holding `lastUploadedHash` and the server-assigned
+ * `revision`. It exists so restarting the studio does not re-upload the whole
+ * library, and so the next upload can carry the right `If-Match`.
+ *
+ * GLOBAL like `skills` and `connections`, so there is no workflow index: the
+ * workflow id IS the key. Deleting a workflow locally deletes its row here and
+ * makes NO cloud call - a local delete never propagates.
+ */
+const WORKFLOW_BACKUP_STATE_STORE = 'workflow-backup-state';
 
 /**
  * IndexedDB-backed persistence for workflow documents.
@@ -483,6 +498,68 @@ export class IndexedDbStorageService {
     const db = await this.open();
     const store = db.transaction(WORKFLOW_VERSIONS_STORE, 'readwrite').objectStore(WORKFLOW_VERSIONS_STORE);
     await Promise.all(versions.map(version => this.request(store.delete(version.id))));
+  }
+
+  // ── Cloud backup state (cloud-workflow-backup, Requirement 13) ────────
+
+  /** Every workflow this install has uploaded, for the settings surface. */
+  async listBackupState(): Promise<WorkflowBackupState[]> {
+    const db = await this.open();
+    return this.request<WorkflowBackupState[]>(
+      db
+        .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readonly')
+        .objectStore(WORKFLOW_BACKUP_STATE_STORE)
+        .getAll(),
+    );
+  }
+
+  /** What was last uploaded for one workflow, or undefined. */
+  async getBackupState(workflowId: string): Promise<WorkflowBackupState | undefined> {
+    const db = await this.open();
+    return this.request<WorkflowBackupState | undefined>(
+      db
+        .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readonly')
+        .objectStore(WORKFLOW_BACKUP_STATE_STORE)
+        .get(workflowId),
+    );
+  }
+
+  async saveBackupState(state: WorkflowBackupState): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readwrite')
+        .objectStore(WORKFLOW_BACKUP_STATE_STORE)
+        .put(state),
+    );
+  }
+
+  /**
+   * Forgets one workflow's upload state.
+   *
+   * LOCAL ONLY, and that is the whole point: a workflow leaving the library drops
+   * this row and makes no cloud call, so the backup survives the delete
+   * (Requirement 13.4, 17.3).
+   */
+  async removeBackupState(workflowId: string): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readwrite')
+        .objectStore(WORKFLOW_BACKUP_STATE_STORE)
+        .delete(workflowId),
+    );
+  }
+
+  /** Clears every row, for the disable-and-delete-all control. */
+  async clearBackupState(): Promise<void> {
+    const db = await this.open();
+    await this.request(
+      db
+        .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readwrite')
+        .objectStore(WORKFLOW_BACKUP_STATE_STORE)
+        .clear(),
+    );
   }
 
   // ── Connection metadata (P1-1, Requirement 3.4) ───────────────────────
@@ -905,6 +982,13 @@ export class IndexedDbStorageService {
         if (!db.objectStoreNames.contains(WORKFLOW_STATE_STORE)) {
           const state = db.createObjectStore(WORKFLOW_STATE_STORE, { keyPath: 'key' });
           state.createIndex(WORKFLOW_STATE_BY_WORKFLOW, 'workflowKey');
+        }
+        // v11: what cloud backup has already uploaded. A guarded create like every
+        // block above, so an existing install keeps every store and every row it
+        // already had (Requirement 13.3) - there is no record-level migration here
+        // and nothing to rewrite.
+        if (!db.objectStoreNames.contains(WORKFLOW_BACKUP_STATE_STORE)) {
+          db.createObjectStore(WORKFLOW_BACKUP_STATE_STORE, { keyPath: 'workflowId' });
         }
       };
       request.onsuccess = () => resolve(request.result);

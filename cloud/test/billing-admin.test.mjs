@@ -366,7 +366,26 @@ function vendorStub({ credits, invoices = [[]], balanceTransactions = [[]] } = {
   };
 }
 
-const RANGE = { from: '2026-09-01', to: '2026-09-08' };
+/**
+ * The range every `revenue` check queries, as a ROLLING window ending today.
+ *
+ * It used to be the fixed literal `2026-09-01 .. 2026-09-08`, and that was a time
+ * bomb: `seedUsage` places rows relative to `Date.now()`, so once the real clock
+ * moved past 2026-09-10 every seeded row fell OUTSIDE the window, `vendorCostUsd`
+ * read 0, and the two margin checks below started failing - having silently stopped
+ * covering the vendor-cost half of the subtraction some days earlier.
+ *
+ * Thirty days back, so `daysAgo: 1`, `2` and `3` all land inside it, and derived
+ * from the UTC day because that is the clock `parseDateRange` measures against.
+ * Nothing in this file asserts that a row is EXCLUDED by the range, so widening it
+ * costs no coverage.
+ */
+const RANGE = (() => {
+  const day = 86_400_000;
+  const iso = (at) => new Date(at).toISOString().slice(0, 10);
+  const today = Date.now();
+  return { from: iso(today - 30 * day), to: iso(today) };
+})();
 
 // ══ 1. The shared operator gate ═════════════════════════════════════════════
 

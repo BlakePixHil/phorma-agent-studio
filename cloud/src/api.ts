@@ -39,6 +39,8 @@ import {
   type StripeResult,
 } from './stripe';
 import { handleDeviceAuthApi, type DeviceAuthEnv } from './device-auth-routes';
+import { handleDeploymentsRequest, type DeploymentsEnv } from './deployments';
+import { handleBackupRequest, type BackupRoutesEnv } from './backup-routes';
 import { handleStripeWebhookRequest } from './stripe-webhook';
 import {
   BILLING_ADMIN_PREFIX,
@@ -84,7 +86,9 @@ export type ApiEnv = AuthEnv &
   TelemetryAdminEnv &
   BillingAdminEnv &
   StripeEnv &
-  DeviceAuthEnv;
+  DeviceAuthEnv &
+  DeploymentsEnv &
+  BackupRoutesEnv;
 
 /** JSON responder bound to the current request's CORS headers. */
 type Respond = (body: unknown, status?: number) => Response;
@@ -655,6 +659,20 @@ async function routeApiRequest(
   const deviceAuth = await handleDeviceAuthApi(request, env, url, respond, verifyRequest);
   if (deviceAuth) return deviceAuth;
 
+  // ── GET /api/deployments - what is running in this account ────────────────
+  //
+  // ABOVE the `store.enabled` gate for a specific reason: the registry it reads
+  // lives in the `PortalIndex` Durable Object, which a BYO worker binds too, and
+  // Requirement 5.5 wants the list with a NULL spend figure rather than a 501
+  // about hosted bindings. "I cannot tell you what it cost" and "I cannot tell
+  // you what is running" are different answers, and only the first is acceptable
+  // here - this route is how a user finds a deployment they can no longer name.
+  //
+  // Also deliberately not gated on subscription (Requirement 5.6): a lapsed
+  // subscriber is exactly who needs to stop a cron deployment.
+  const deployments = await handleDeploymentsRequest(request, env, url, respond);
+  if (deployments) return deployments;
+
   // ── /api/admin/telemetry/* — owner-only telemetry aggregates (9.1) ─────────
   // Also deliberately ABOVE the hosted-bindings gate: this surface carries its
   // own authorization (`verifyRequest` plus the TELEMETRY_ADMIN_USER_IDS
@@ -852,6 +870,16 @@ async function routeApiRequest(
       },
     });
   }
+
+  // ── /api/backups/* — hosted workflow backup ───────────────────────────────
+  //
+  // BELOW the `store.enabled` gate, unlike `/api/deployments` above it. The
+  // asymmetry is the point: the deployment registry lives in a Durable Object a
+  // BYO worker binds too, while backup needs the hosted D1 and R2. So this whole
+  // surface is ABSENT on a BYO deployment rather than broken, and those users get
+  // the file-based library export instead.
+  const backups = await handleBackupRequest(request, env, url, respond);
+  if (backups) return backups;
 
   // ── POST /api/checkout — start a Stripe Checkout Session ──────────────────
   // Placed HERE deliberately (task 4.4): after the `store.enabled` gate, so a BYO

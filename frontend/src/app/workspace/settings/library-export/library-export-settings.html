@@ -1,0 +1,123 @@
+<div class="settings-section__head">
+  <h4 class="settings-section__heading">Library export</h4>
+  <button
+    pButton
+    type="button"
+    class="settings-section__btn"
+    severity="secondary"
+    [outlined]="true"
+    size="small"
+    [disabled]="exporting() || count() === 0"
+    (click)="exportNow()"
+  >
+    <i
+      class="ti"
+      [class.ti-download]="!exporting()"
+      [class.ti-loader-2]="exporting()"
+      [class.phorma-icon-spin]="exporting()"
+      aria-hidden="true"
+    ></i>
+    <span>Export now</span>
+  </button>
+</div>
+
+<p class="settings-section__desc">
+  Writes every workflow in your library to a folder you choose, plus a
+  <code>deployments.json</code> manifest recording what is currently deployed. No subscription
+  needed, and nothing leaves your machine.
+</p>
+
+@if (count() === 0) {
+  <p class="settings-section__note">
+    <i class="ti ti-folder-off" aria-hidden="true"></i>
+    <span>Your library is empty, so there is nothing to export yet.</span>
+  </p>
+}
+
+@if (tauri.isDesktop) {
+  <div class="settings-section__row">
+    <div class="settings-section__row-main">
+      <div class="settings-section__row-title">
+        <i class="ti ti-folder" aria-hidden="true"></i>
+        <span class="settings-section__name">
+          {{ folder() || 'No folder chosen' }}
+        </span>
+      </div>
+      <p class="settings-section__meta">
+        @if (folder()) {
+          {{ count() }} {{ count() === 1 ? 'workflow' : 'workflows' }} plus the manifest.
+        } @else {
+          Choose where the export should go.
+        }
+      </p>
+    </div>
+    <div class="settings-section__actions">
+      <button
+        pButton
+        type="button"
+        class="settings-section__btn"
+        severity="secondary"
+        [text]="true"
+        size="small"
+        (click)="pickFolder()"
+      >
+        <i class="ti ti-folder-search" aria-hidden="true"></i>
+        <span>{{ folder() ? 'Change' : 'Choose folder' }}</span>
+      </button>
+      @if (folder()) {
+        <button
+          pButton
+          type="button"
+          class="settings-section__btn settings-section__btn--danger"
+          severity="secondary"
+          [text]="true"
+          size="small"
+          (click)="clearFolder()"
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+          <span>Clear</span>
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="phorma-library-export__toggle">
+    <div class="settings-section__row-main">
+      <label class="settings-section__name" [attr.for]="id('on-save')">
+        Keep the export up to date
+      </label>
+      <p class="settings-section__meta">
+        Rewrite the folder a few seconds after each save, so the copy on disk never falls
+        behind.
+      </p>
+    </div>
+    <p-toggleswitch
+      [inputId]="id('on-save')"
+      size="small"
+      ariaLabel="Keep the library export up to date"
+      [disabled]="!folder()"
+      [ngModel]="settings.libraryExportOnSave()"
+      (ngModelChange)="onRewriteChange($event)"
+    />
+  </div>
+} @else {
+  <!--
+    Browser parity: the app must run under plain `ng serve` with no Tauri, and a
+    webview cannot write a folder. One downloaded file carrying every spec is the
+    same durability with a different shape.
+  -->
+  <p class="settings-section__note settings-section__note--info">
+    <i class="ti ti-browser" aria-hidden="true"></i>
+    <span>
+      In the browser the library downloads as a single file instead of a folder. The desktop
+      app can write a folder and keep it up to date automatically.
+    </span>
+  </p>
+}
+
+@if (lastDestination(); as destination) {
+  <p class="settings-section__meta">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    Last export: {{ destination }}
+  </p>
+}

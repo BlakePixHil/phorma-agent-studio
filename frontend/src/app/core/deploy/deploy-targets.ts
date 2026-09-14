@@ -63,7 +63,19 @@ export type CloudOperation =
   | 'run-detail'
   | 'usage'
   | 'put-secret'
-  | 'list-secret-names';
+  | 'list-secret-names'
+  // cloud-workflow-backup Phase 1: the reconciliation surface.
+  | 'list-deployments'
+  | 'read-spec'
+  | 'undeploy'
+  // cloud-workflow-backup Phase 2: hosted backup. Phorma Cloud only - a BYO
+  // worker binds no D1 or R2 and gets the file-based library export instead.
+  | 'backup-list'
+  | 'backup-upload'
+  | 'backup-revisions'
+  | 'backup-download'
+  | 'backup-delete'
+  | 'backup-delete-all';
 
 /**
  * Everything an endpoint may need to build its path.
@@ -79,6 +91,17 @@ export interface CloudEndpointContext {
   secretKey?: string;
   since?: string;
   continuationToken?: string;
+  /** Backup revision to download. */
+  revision?: number;
+  /**
+   * The backup revision the client last observed, sent as `If-Match`
+   * (Requirement 16.2). `null` means "I hold none", which the worker accepts only
+   * for a workflow it has never backed up - so a client that lost its local state
+   * cannot silently overwrite a newer cloud copy.
+   */
+  ifMatch?: number | null;
+  /** Destroy a tombstone rather than creating one. */
+  purge?: boolean;
 }
 
 /** Logical payload for `push-spec`: the spec plus its connection metadata. */
@@ -114,6 +137,12 @@ export interface CloudEndpointSpec {
   path(ctx: CloudEndpointContext): string;
   /** Reshapes the logical payload for this host. */
   body?(payload: unknown, ctx: CloudEndpointContext): unknown;
+  /**
+   * Per-endpoint request headers. NEVER the credential - a transport owns its own
+   * `Authorization`, and setting that here would put the credential model back in
+   * the route table. Used for `If-Match` on a backup upload.
+   */
+  headers?(ctx: CloudEndpointContext): Record<string, string>;
   /** Normalizes this host's response body into the shape the Studio consumes. */
   unwrap?(parsed: unknown): unknown;
 }
@@ -160,6 +189,18 @@ function arrayField(value: unknown, key: string): unknown[] | undefined {
 function stringField(value: unknown, key: string): string | undefined {
   const field = asRecord(value)?.[key];
   return typeof field === 'string' ? field : undefined;
+}
+
+/**
+ * One field read as a number, or null.
+ *
+ * Null rather than undefined, because every consumer of this in the backup
+ * responses treats null as a real value: "no read-only countdown applies" is a
+ * different fact from "we did not read one".
+ */
+function numberField(value: unknown, key: string): number | null {
+  const field = asRecord(value)?.[key];
+  return typeof field === 'number' && Number.isFinite(field) ? field : null;
 }
 
 /** The `items` page of a `PaginatedResult`, or an empty list. */
@@ -278,6 +319,104 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
         .map((entry) => stringField(entry, 'name'))
         .filter((name): name is string => name !== undefined),
   },
+  // ── cloud-workflow-backup Phase 1 ──────────────────────────────────────────
+  //
+  // Every deployment in the account, with its month-to-date credits. Root-scoped
+  // because a Durable Object namespace cannot be enumerated: the answer comes
+  // from the `PortalIndex` registry through a control-plane route, never from
+  // asking each instance in turn.
+  'list-deployments': {
+    method: 'GET',
+    scope: 'root',
+    path: () => '/api/deployments',
+    // `month` is normalized to a string and `deployments` to an array, so a
+    // partial body renders as an empty list rather than throwing in a template.
+    unwrap: (parsed) => ({
+      month: stringField(parsed, 'month') ?? '',
+      deployments: arrayField(parsed, 'deployments') ?? [],
+    }),
+  },
+  // The deployed spec itself, which is what makes a deployment a recoverable
+  // copy when the local library is gone.
+  'read-spec': {
+    method: 'GET',
+    scope: 'instance',
+    path: () => '/workflow',
+    unwrap: (parsed) => asRecord(parsed)?.['spec'] ?? null,
+  },
+  // Stops a deployment without destroying its run history, usage ledger or
+  // connection metadata - the reversible half of the pair with `purge`.
+  undeploy: {
+    method: 'DELETE',
+    scope: 'instance',
+    path: () => '/workflow',
+  },
+  // ── cloud-workflow-backup Phase 2 ──────────────────────────────────────────
+  //
+  // All root-scoped: a backup belongs to the ACCOUNT, not to a deployed instance,
+  // and a workflow can have a backup while having no deployment at all - which is
+  // the ordinary case for anything the user has not published.
+  'backup-list': {
+    method: 'GET',
+    scope: 'root',
+    path: () => '/api/backups',
+    unwrap: (parsed) => ({
+      backups: arrayField(parsed, 'backups') ?? [],
+      writable: asRecord(parsed)?.['writable'] === true,
+      readOnlyDaysRemaining: numberField(parsed, 'readOnlyDaysRemaining'),
+      cap: numberField(parsed, 'cap') ?? 0,
+      used: numberField(parsed, 'used') ?? 0,
+      revisionsKept: numberField(parsed, 'revisionsKept') ?? 0,
+    }),
+  },
+  'backup-upload': {
+    method: 'POST',
+    scope: 'root',
+    path: (ctx) => `/api/backups/${encodeURIComponent(ctx.workflowId)}`,
+    // The whole `{spec, connections}` body travels as-is: the worker rebuilds
+    // `connections` from it and discards anything beyond `{id, name}`.
+    body: (payload) => payload,
+    // Absent when the client holds no revision, which is what the worker reads as
+    // "this is a first upload".
+    headers: (ctx) => {
+      const headers: Record<string, string> = {};
+      if (ctx.ifMatch !== undefined && ctx.ifMatch !== null) {
+        headers['If-Match'] = String(ctx.ifMatch);
+      }
+      return headers;
+    },
+  },
+  'backup-revisions': {
+    method: 'GET',
+    scope: 'root',
+    path: (ctx) => `/api/backups/${encodeURIComponent(ctx.workflowId)}/revisions`,
+    unwrap: (parsed) => ({
+      current: numberField(parsed, 'current') ?? 0,
+      revisions: (arrayField(parsed, 'revisions') ?? []).filter(
+        (value): value is number => typeof value === 'number',
+      ),
+    }),
+  },
+  'backup-download': {
+    method: 'GET',
+    scope: 'root',
+    path: (ctx) =>
+      `/api/backups/${encodeURIComponent(ctx.workflowId)}/${ctx.revision ?? 1}`,
+  },
+  // Soft delete by default; `purge` destroys a tombstone. One operation with a
+  // flag rather than two, because they are the same route and the worker refuses a
+  // purge that was not preceded by a delete.
+  'backup-delete': {
+    method: 'DELETE',
+    scope: 'root',
+    path: (ctx) =>
+      `/api/backups/${encodeURIComponent(ctx.workflowId)}${ctx.purge ? '?purge=1' : ''}`,
+  },
+  'backup-delete-all': {
+    method: 'DELETE',
+    scope: 'root',
+    path: () => '/api/backups',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -300,6 +439,10 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
  *   deployed".
  * - `list-secret-names` - Secrets Manager entries are written, never listed
  *   back. `connectionSecretNames()` answers `[]`.
+ * - `list-deployments`, `read-spec`, `undeploy` - the reconciliation surface is
+ *   a Phorma Cloud control-plane concern, and `DeploymentsService` pins the
+ *   `phorma` table for exactly that reason. An AWS deployment is enumerable from
+ *   the user's own AWS console, so there is nothing to recover here.
  *
  * `push-connections` is absent too, but for a different reason: it is FOLDED
  * into `push-spec`, whose body carries `{ workflowId, spec, connections }` -

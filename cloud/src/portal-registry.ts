@@ -70,6 +70,63 @@ export interface PortalStatus {
   record: PublishRecord | null;
 }
 
+// ── Deployment registry (cloud-workflow-backup Phase 1) ─────────────────────
+
+/**
+ * Owner segment used by a single-tenant BYO deployment, where `ownerId` is
+ * null everywhere else in this file.
+ *
+ * A literal rather than an empty segment so the key shape stays uniform
+ * (`deploy:{owner}:{workflowId}` always has three parts) and a prefix scan
+ * cannot accidentally match every owner (Requirement 1.5).
+ */
+export const DEFAULT_DEPLOYMENT_OWNER = 'default';
+
+/**
+ * One live deployment, as the Deployment_Registry holds it.
+ *
+ * Deliberately NOT a workflow spec and never a secret (Requirement 1.6): this
+ * is the answer to "what is running in my account", which has to survive the
+ * loss of the local library, and every field here is already visible to the
+ * owner somewhere else.
+ *
+ * Timestamps are epoch ms, matching `PublishRecord.publishedAt` rather than the
+ * spec's ISO `savedAt`, so one DO does not hold two time formats. The backfill
+ * converts (see `WorkflowAgent.backfillDeployment`).
+ */
+export interface DeploymentRecord {
+  /** Library workflow id - the DO instance name, before owner prefixing. */
+  workflowId: string;
+  /** Clerk userId in hosted mode; {@link DEFAULT_DEPLOYMENT_OWNER} in BYO. */
+  ownerId: string;
+  workflowName: string;
+  /** First time this workflow was seen deployed. Preserved across re-pushes. */
+  deployedAt: number;
+  /** Most recent push (or backfill) that wrote this record. */
+  updatedAt: number;
+  /** `fnv1a(canonicalJson(spec))` - lets a client spot a drifted local copy. */
+  specHash: string;
+  /** True when a schedule trigger is armed on this deployment. */
+  cronArmed: boolean;
+  /** Published portal address, or null when nothing is published. */
+  portalSlug: string | null;
+}
+
+/**
+ * A registry key component may not contain the separator.
+ *
+ * This is an isolation guard, not tidiness. `listDeployments` is a prefix scan
+ * over `deploy:{owner}:`, so a workflowId carrying a colon could produce a key
+ * that reads as a DIFFERENT owner's record - `deploy:a:b:wf` is inside both
+ * `deploy:a:` and (as far as string matching cares) an owner literally named
+ * `a:b`. Ids in this product never contain one (`wf-...` and Clerk's
+ * `user_...`), so refusing is free and keeps the scan sound if that ever
+ * changes.
+ */
+function isRegistrySegment(value: string): boolean {
+  return value.length > 0 && !value.includes(':');
+}
+
 /** Verdict from the rate limiter. */
 export interface RateVerdict {
   allowed: boolean;
@@ -187,6 +244,77 @@ export class PortalIndex extends DurableObject {
     for (const sessionId of sessionIds) {
       await this.ctx.storage.delete(`session:${workflowId}:${sessionId}`);
     }
+  }
+
+  // ── Deployment registry ───────────────────────────────────────────────────
+  //
+  // The third key space in this DO, `deploy:{ownerId}:{workflowId}`, holding one
+  // {@link DeploymentRecord} per live deployment.
+  //
+  // It lives here for the same reason the slug table does: a Durable Object
+  // NAMESPACE CANNOT BE ENUMERATED. Without a registry, the only handle on a
+  // deployed workflow is its id, and the only copy of that id was in the user's
+  // local IndexedDB - so a reinstall left a deployment running cron, answering a
+  // portal and spending credits with no way for its owner to name it, let alone
+  // remove it.
+  //
+  // Writes come from `WorkflowAgent` alone (Requirement 2.4), which is what makes
+  // the list correct for a client that crashed, was uninstalled, or is an old
+  // version. Adding it to `PortalIndex` rather than a fourth DO class is
+  // deliberate: no new binding, no migration tag, no `renamed_classes`, and it
+  // exists in hosted AND BYO shape because this class already does
+  // (Requirements 1.3, 1.4).
+
+  /**
+   * Creates or updates one deployment record.
+   *
+   * `deployedAt` is PRESERVED from any existing record and `updatedAt` is taken
+   * from the caller (Requirement 2.7), which is also what makes a repeated write
+   * of the same record byte-identical rather than merely equivalent
+   * (Requirement 1.7).
+   */
+  async registerDeployment(
+    record: DeploymentRecord,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!isRegistrySegment(record.ownerId) || !isRegistrySegment(record.workflowId)) {
+      return { ok: false, error: 'A deployment owner and workflow id must not contain ":".' };
+    }
+    const key = deploymentKey(record.ownerId, record.workflowId);
+    const existing = await this.ctx.storage.get<DeploymentRecord>(key);
+    await this.ctx.storage.put(key, {
+      ...record,
+      deployedAt: existing?.deployedAt ?? record.deployedAt,
+    } satisfies DeploymentRecord);
+    return { ok: true };
+  }
+
+  /** Removes one deployment record. Idempotent (Requirement 1.8). */
+  async deregisterDeployment(ownerId: string, workflowId: string): Promise<{ removed: boolean }> {
+    if (!isRegistrySegment(ownerId) || !isRegistrySegment(workflowId)) {
+      return { removed: false };
+    }
+    return { removed: await this.ctx.storage.delete(deploymentKey(ownerId, workflowId)) };
+  }
+
+  /** One deployment record, or null. */
+  async getDeployment(ownerId: string, workflowId: string): Promise<DeploymentRecord | null> {
+    if (!isRegistrySegment(ownerId) || !isRegistrySegment(workflowId)) return null;
+    return (await this.ctx.storage.get<DeploymentRecord>(deploymentKey(ownerId, workflowId))) ?? null;
+  }
+
+  /**
+   * Every deployment for one owner, newest first.
+   *
+   * The trailing colon in the prefix is load-bearing: without it an owner named
+   * `user_a` would also match `user_ab`'s records. Same trap the
+   * `{workflowId}::` state scope separator exists to avoid.
+   */
+  async listDeployments(ownerId: string): Promise<DeploymentRecord[]> {
+    if (!isRegistrySegment(ownerId)) return [];
+    const map = await this.ctx.storage.list<DeploymentRecord>({
+      prefix: `deploy:${ownerId}:`,
+    });
+    return [...map.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   /** The record for a workflow, whatever slug it currently holds. */
@@ -310,6 +438,22 @@ export class PortalIndex extends DurableObject {
       .filter(record => record.workflowId === workflowId)
       .map(record => record.slug);
   }
+}
+
+/** The one place the deployment key shape is written. */
+function deploymentKey(ownerId: string, workflowId: string): string {
+  return `deploy:${ownerId}:${workflowId}`;
+}
+
+/**
+ * The owner segment for a deployment key: the verified Clerk userId in hosted
+ * mode, the {@link DEFAULT_DEPLOYMENT_OWNER} literal in BYO.
+ *
+ * Every caller goes through this so "BYO has one owner" is stated once rather
+ * than re-derived from a nullable field at each call site.
+ */
+export function deploymentOwner(ownerId: string | null | undefined): string {
+  return ownerId && ownerId.length > 0 ? ownerId : DEFAULT_DEPLOYMENT_OWNER;
 }
 
 // ── Accessor ────────────────────────────────────────────────────────────────

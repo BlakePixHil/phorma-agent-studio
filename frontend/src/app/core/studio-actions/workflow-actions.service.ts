@@ -1,10 +1,13 @@
 import { Injectable, inject } from '@angular/core';
 
 import { CloudService } from '../cloud.service';
+import { DeploymentsService } from '../deployments.service';
 import { TauriService } from '../tauri.service';
+import { WorkflowBackupService } from '../cloud/workflow-backup.service';
 import { WorkflowService } from '../workflow.service';
 import { WorkflowVersionsService } from '../workflow-versions.service';
 import { hasPromptField } from './graph-actions.service';
+import type { BackupSummary } from '../backup.model';
 import {
   actionFail,
   actionOk,
@@ -33,6 +36,11 @@ export class WorkflowActionsService {
   private readonly versions = inject(WorkflowVersionsService);
   private readonly cloud = inject(CloudService);
   private readonly tauri = inject(TauriService);
+  // The recovery surfaces. Both PIN Phorma Cloud rather than the chosen deploy
+  // target, and both sit downstream of `CloudService`, so injecting them here adds
+  // no edge the action registry does not already have.
+  private readonly deployments = inject(DeploymentsService);
+  private readonly backup = inject(WorkflowBackupService);
 
   actions(): StudioAction[] {
     return [
@@ -202,6 +210,108 @@ export class WorkflowActionsService {
           'Run wrangler to deploy the Cloudflare worker from your local cloud/ folder? This changes live infrastructure in your Cloudflare account.',
         activity: () => 'Deploying the Cloudflare worker',
         run: () => this.provisionWorker(),
+      },
+
+      // ── Recovery: deployments and cloud backups ────────────────────────────
+      //
+      // Every executor below DELEGATES to `DeploymentsService`, `WorkflowBackupService`
+      // or `WorkflowService`; nothing here reimplements a capability
+      // (Requirement 22.3). The two reads are `silent`, and the four writes are
+      // `confirm` because each one either destroys something in the cloud or replaces
+      // a local workflow the Edit_Session cannot roll back (Requirement 22.2).
+      //
+      // The data reaches the model through READ ACTIONS, never a system prompt
+      // (Requirement 22.4), so prompt size stays flat as an account accumulates
+      // deployments and backups.
+      {
+        id: 'deployment_list',
+        label: 'List cloud deployments',
+        description:
+          "Lists every workflow currently deployed in the user's Phorma Cloud account, with the credits each has spent this month, whether a schedule is armed, any published portal address, and whether a local copy exists. Use this to find a deployment the user cannot account for.",
+        surface: 'deploy',
+        access: 'read',
+        risk: 'silent',
+        activity: () => 'Listing cloud deployments',
+        run: () => this.listDeployments(),
+      },
+      {
+        id: 'backup_list',
+        label: 'List cloud backups',
+        description:
+          "Lists the workflows in the user's Phorma Cloud backup, with their version number, size and whether they are deleted but still restorable. Use this before offering to restore anything.",
+        surface: 'workflows',
+        access: 'read',
+        risk: 'silent',
+        activity: () => 'Listing cloud backups',
+        run: () => this.listBackups(),
+      },
+      {
+        id: 'backup_restore',
+        label: 'Restore a workflow from backup',
+        description:
+          'Restores a workflow from the cloud backup into the local library, keeping its original id so it still addresses its own deployment and history. Replaces a local workflow with the same id.',
+        surface: 'workflows',
+        access: 'write',
+        risk: 'confirm',
+        params: {
+          workflowId: { type: 'string', description: 'Backed-up workflow id.', required: true },
+          revision: {
+            type: 'number',
+            description: 'Version to restore. Omit for the newest.',
+          },
+        },
+        confirmSummary: args =>
+          `Restore '${argStr(args, 'workflowId') ?? 'the workflow'}' from your cloud backup? A local workflow with the same id is replaced.`,
+        activity: () => 'Restoring from cloud backup',
+        run: args => this.restoreBackup(args),
+      },
+      {
+        id: 'deployment_undeploy',
+        label: 'Stop a cloud deployment',
+        description:
+          'Stops a deployed workflow: scheduled runs are cancelled and the deployed copy removed, while run history and usage are kept. Reversible by deploying again.',
+        surface: 'deploy',
+        access: 'write',
+        risk: 'confirm',
+        params: {
+          workflowId: { type: 'string', description: 'Deployed workflow id.', required: true },
+        },
+        confirmSummary: args =>
+          `Stop the cloud deployment of '${argStr(args, 'workflowId') ?? 'the workflow'}'? Scheduled runs stop and any published page goes offline. Run history is kept.`,
+        activity: () => 'Stopping a cloud deployment',
+        run: args => this.undeployWorkflow(args),
+      },
+      {
+        id: 'backup_delete',
+        label: 'Delete a cloud backup',
+        description:
+          'Marks a cloud backup deleted. It stays restorable for 30 days, then it is removed. The local workflow is not touched.',
+        surface: 'workflows',
+        access: 'write',
+        risk: 'confirm',
+        params: {
+          workflowId: { type: 'string', description: 'Backed-up workflow id.', required: true },
+        },
+        confirmSummary: args =>
+          `Delete the cloud backup of '${argStr(args, 'workflowId') ?? 'the workflow'}'? It stays restorable for 30 days. The local copy is not touched.`,
+        activity: () => 'Deleting a cloud backup',
+        run: args => this.deleteBackup(args, false),
+      },
+      {
+        id: 'backup_purge',
+        label: 'Permanently delete a cloud backup',
+        description:
+          'Destroys every stored copy of a backup immediately, earlier versions included. Only works on a backup that has already been deleted. Cannot be undone.',
+        surface: 'workflows',
+        access: 'write',
+        risk: 'confirm',
+        params: {
+          workflowId: { type: 'string', description: 'Backed-up workflow id.', required: true },
+        },
+        confirmSummary: args =>
+          `Permanently destroy every stored copy of '${argStr(args, 'workflowId') ?? 'the workflow'}'? This cannot be undone.`,
+        activity: () => 'Permanently deleting a cloud backup',
+        run: args => this.deleteBackup(args, true),
       },
     ];
   }
@@ -408,6 +518,103 @@ export class WorkflowActionsService {
   private async provisionWorker(): Promise<ActionResult> {
     await this.cloud.deploy();
     return actionOk({ started: true }, { revertable: false });
+  }
+
+  // ── Recovery executors ────────────────────────────────────────────────────
+
+  private async listDeployments(): Promise<ActionResult> {
+    await this.deployments.refresh();
+    const failure = this.deployments.error();
+    if (failure && this.deployments.deployments().length === 0) return actionFail(failure);
+    return actionOk({
+      month: this.deployments.month(),
+      // Credits, never dollars - the worker has already converted.
+      deployments: this.deployments.deployments().map(row => ({
+        workflowId: row.workflowId,
+        name: row.workflowName,
+        deployedAt: new Date(row.deployedAt).toISOString(),
+        cronArmed: row.cronArmed,
+        portalSlug: row.portalSlug,
+        creditsSpentThisMonth: row.creditsSpent,
+        runsThisMonth: row.runsThisMonth,
+        // The state worth naming: deployed, spending, and with no local copy.
+        hasLocalCopy: !row.orphan,
+      })),
+    });
+  }
+
+  private async listBackups(): Promise<ActionResult> {
+    await this.backup.refresh();
+    if (!this.backup.available()) {
+      return actionFail('This deployment has no cloud backup storage.');
+    }
+    const failure = this.backup.error();
+    if (failure && !this.backup.hasAnyBackup()) return actionFail(failure);
+    const project = (row: BackupSummary): Record<string, unknown> => ({
+      workflowId: row.workflowId,
+      name: row.name,
+      revision: row.revision,
+      sizeBytes: row.sizeBytes,
+      savedAt: row.savedAt,
+      deleted: row.deletedAt !== null,
+      daysUntilRemoved: row.daysRemaining,
+    });
+    return actionOk({
+      backingUp: this.backup.active(),
+      writable: this.backup.writable(),
+      readOnlyDaysRemaining: this.backup.readOnlyDaysRemaining(),
+      cap: this.backup.cap(),
+      backups: this.backup.backups().map(project),
+      // Listed separately so the model cannot offer to restore a tombstone without
+      // knowing it is one, or forget that it can.
+      deletedButRestorable: this.backup.tombstones().map(project),
+    });
+  }
+
+  private async restoreBackup(args: ActionArgs): Promise<ActionResult> {
+    const workflowId = argStr(args, 'workflowId');
+    if (!workflowId) return actionFail('Missing the workflow id.');
+    const revision = argNum(args, 'revision');
+    const result = await this.backup.restore(workflowId, {
+      revision: revision === undefined ? undefined : Math.max(1, Math.round(revision)),
+      // The confirm tier already asked, so a second dialog would double-prompt.
+      collision: 'replace',
+    });
+    if (result.outcome === 'failed') return actionFail('The backup could not be restored.');
+    return actionOk(
+      {
+        workflowId,
+        outcome: result.outcome,
+        // Reported, not fixed: a connection needs a credential and a backup carries
+        // none, so the user has to reconnect these by hand.
+        reconnectRequired: result.missingConnections,
+      },
+      { revertable: false },
+    );
+  }
+
+  private async undeployWorkflow(args: ActionArgs): Promise<ActionResult> {
+    const workflowId = argStr(args, 'workflowId');
+    if (!workflowId) return actionFail('Missing the workflow id.');
+    const stopped = await this.deployments.undeploy(workflowId);
+    if (!stopped) {
+      return actionFail('The deployment was not stopped. A run may still be in progress.');
+    }
+    return actionOk({ workflowId, stopped: true }, { revertable: false });
+  }
+
+  private async deleteBackup(args: ActionArgs, purge: boolean): Promise<ActionResult> {
+    const workflowId = argStr(args, 'workflowId');
+    if (!workflowId) return actionFail('Missing the workflow id.');
+    const done = await this.backup.deleteBackup(workflowId, { purge });
+    if (!done) {
+      return actionFail(
+        purge
+          ? 'The backup was not purged. It has to be deleted before it can be purged.'
+          : 'The backup was not deleted.',
+      );
+    }
+    return actionOk({ workflowId, purged: purge }, { revertable: false });
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
