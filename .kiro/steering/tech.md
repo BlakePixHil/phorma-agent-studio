@@ -59,7 +59,7 @@ cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)
 cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
-cd backend/src-tauri; cargo test                 # 29 unit tests (sql, llm, data, deploy_assets)
+cd backend/src-tauri; cargo test                 # 30 unit tests (sql, llm, data, deploy_assets)
 cd admin; npm run build                          # dashboard production build: 791 kB initial, 1.5MB warning / 2MB error
 cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 43 specs, ~15s
 node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
@@ -82,7 +82,7 @@ manually started `wrangler dev` and a local model.
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
-  warning / 26kB error. `initial` currently sits at 2.74MB, so the warning is expected and only the
+  warning / 26kB error. `initial` currently sits at 2.81MB, so the warning is expected and only the
   3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
   791kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
   (chart.js) behind `@defer (on immediate)`.

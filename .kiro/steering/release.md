@@ -120,8 +120,12 @@ npx wrangler d1 execute phorma-cloud --env hosted --remote --json --command `
    `npx wrangler secret put STRIPE_WEBHOOK_SECRET --env hosted`, both live-mode values. The webhook
    secret is per ENDPOINT, so take it from the live Dashboard endpoint and never from
    `stripe listen`.
-4. `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote`. **DONE** - verified
-   2026-09-07: `d1_migrations` lists all four, `credit_grants` and `stripe_events` exist, `tenants`
+4. `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote`. **DONE** - re-verified
+   2026-09-14 for the workflow-backup migration too: `migrations list ... --remote` answers "No
+   migrations to apply!" and `workflow_backups` exists in `sqlite_master`, so `0005` really ran
+   rather than only being stamped. The `phorma-backups` R2 bucket also exists
+   (`npx wrangler r2 bucket list`), which is the other operator prerequisite that release needed.
+   Verified 2026-09-07: `d1_migrations` lists all four, `credit_grants` and `stripe_events` exist, `tenants`
    carries both `stripe_*` columns and all four `billing_*` clocks, and `idx_usage_tenant_run` is
    present. Check the COLUMNS and not just `d1_migrations`: a migration edited after a partial apply
    stays stamped while its later statements never run, which is a failure this repo has already had
