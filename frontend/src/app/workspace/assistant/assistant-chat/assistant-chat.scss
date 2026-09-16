@@ -272,10 +272,17 @@
 
   p { margin: 0 0 0.7rem; }
 
+  /* Tailwind's preflight sets `list-style: none` on every ol/ul, so markdown
+     lists render as bare indented text until the markers are put back. */
   ul, ol {
     margin: 0 0 0.7rem;
-    padding-left: 1.25rem;
+    padding-left: 1.35rem;
   }
+  ul { list-style: disc outside; }
+  ul ul { list-style: circle outside; }
+  ul ul ul { list-style: square outside; }
+  ol { list-style: decimal outside; }
+  ol ol { list-style: lower-alpha outside; }
   li { margin: 0.2rem 0; }
   /* A nested list belongs to its parent item, so it loses the block gap. */
   li > ul,

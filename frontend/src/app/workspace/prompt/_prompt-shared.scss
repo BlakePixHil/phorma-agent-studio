@@ -243,7 +243,15 @@
   h2 { font-size: 0.9rem; }
   h3 { font-size: 0.82rem; }
   p, ul, ol { margin: 0.35em 0; }
-  ul, ol { padding-left: 1.2em; }
+  // Tailwind's preflight sets `list-style: none` on every ol/ul, so markdown
+  // lists render as bare indented text until the markers are put back.
+  ul, ol { padding-left: 1.35em; }
+  ul { list-style: disc outside; }
+  ul ul { list-style: circle outside; }
+  ul ul ul { list-style: square outside; }
+  ol { list-style: decimal outside; }
+  ol ol { list-style: lower-alpha outside; }
+  li::marker { color: var(--p-text-muted-color); }
   code {
     padding: 0.08em 0.3em;
     border-radius: 0.3em;
