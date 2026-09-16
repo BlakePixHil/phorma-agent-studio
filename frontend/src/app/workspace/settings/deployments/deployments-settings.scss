@@ -1,0 +1,20 @@
+// "Deployed in your account" - the Reconciliation_List, on the Settings dialog's
+// Cloud page.
+//
+// Everything structural comes from the shared partial, which the two sibling
+// sections on this page use too. Only the one rule that is genuinely specific to
+// this list stays here.
+
+@use '../section' as settings-section;
+
+@include settings-section.base;
+
+// The state the whole surface exists for: a deployment running in the cloud with
+// no copy in the local library. It earns a warning tone rather than the neutral
+// badge because it is the row a user cannot open, edit or delete locally, and is
+// nonetheless being billed for.
+.phorma-deployments__badge--orphan {
+  border-color: color-mix(in srgb, var(--phorma-warning, #f59e0b) 40%, transparent);
+  background: color-mix(in srgb, var(--phorma-warning, #f59e0b) 12%, transparent);
+  color: var(--phorma-warning, #f59e0b);
+}

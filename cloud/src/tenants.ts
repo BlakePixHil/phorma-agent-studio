@@ -77,6 +77,14 @@ export interface TierLimits {
    * capped per tier rather than left unbounded.
    */
   publishedPortals: number;
+  /**
+   * Max workflows with a live backup (cloud-workflow-backup, Requirement 10.9).
+   *
+   * A CEILING ON NEW workflows only: a tenant at the cap keeps accepting uploads
+   * for workflows that already have a row, because a backup going stale because
+   * of a cap is the failure this feature exists to prevent (Requirement 10.11).
+   */
+  backupWorkflows: number;
 }
 
 // Base rate: 125 credits ≈ $1 of real inference ($0.008/credit) with NO bonus
@@ -127,9 +135,9 @@ export interface TierLimits {
 // enterprise tier that is provisioned per-deal (no fixed limits here —
 // unknown tiers fall back to starter until provisioned properly).
 export const TIERS: Record<string, TierLimits> = {
-  starter: { monthlyCredits: 1000, monthlyCostUsd: 4, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1, subWorkflowDepth: 5, publishedPortals: 1 },
-  pro: { monthlyCredits: 3000, monthlyCostUsd: 12.6, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5, subWorkflowDepth: 8, publishedPortals: 5 },
-  team: { monthlyCredits: 10000, monthlyCostUsd: 44, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20, subWorkflowDepth: 10, publishedPortals: 25 },
+  starter: { monthlyCredits: 1000, monthlyCostUsd: 4, monthlyRuns: 300, concurrentRuns: 1, schedulesPerWorkflow: 1, subWorkflowDepth: 5, publishedPortals: 1, backupWorkflows: 25 },
+  pro: { monthlyCredits: 3000, monthlyCostUsd: 12.6, monthlyRuns: 2000, concurrentRuns: 3, schedulesPerWorkflow: 5, subWorkflowDepth: 8, publishedPortals: 5, backupWorkflows: 100 },
+  team: { monthlyCredits: 10000, monthlyCostUsd: 44, monthlyRuns: 10000, concurrentRuns: 10, schedulesPerWorkflow: 20, subWorkflowDepth: 10, publishedPortals: 25, backupWorkflows: 250 },
 };
 
 export function tierLimits(tier: string): TierLimits {
@@ -2108,4 +2116,48 @@ export async function decryptString(packedB64: string, secretB64: string): Promi
   const cipher = packed.slice(12);
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher);
   return new TextDecoder().decode(plain);
+}
+
+// ── AES-GCM byte encryption, for objects rather than fields ──────────────────
+//
+// Same key, same 12-byte-IV-prefix packing as the two functions above, but bytes
+// in and bytes out. A workflow backup body is a GZIP stream, and pushing that
+// through `encryptString` would mean base64 on the way in and base64 again on the
+// way out - 1.78x the compressed size in R2, on the one path whose whole job is
+// to store things cheaply and forever.
+//
+// The packing is deliberately IDENTICAL, so anything encrypted by one pair is
+// decryptable by the other after a base64 hop. That keeps this an encoding
+// choice rather than a second format.
+
+/** Encrypts raw bytes. The IV is prefixed, as in {@link encryptString}. */
+export async function encryptBytes(
+  plaintext: Uint8Array,
+  secretB64: string,
+): Promise<Uint8Array> {
+  const key = await importAesKey(secretB64);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  const packed = new Uint8Array(iv.length + cipher.byteLength);
+  packed.set(iv, 0);
+  packed.set(new Uint8Array(cipher), iv.length);
+  return packed;
+}
+
+/**
+ * Decrypts what {@link encryptBytes} produced.
+ *
+ * THROWS on a wrong key or a truncated object, exactly as `crypto.subtle.decrypt`
+ * does, rather than answering an empty buffer: a caller handing back a silently
+ * empty backup would be worse than one that failed loudly.
+ */
+export async function decryptBytes(
+  packed: Uint8Array,
+  secretB64: string,
+): Promise<Uint8Array> {
+  const key = await importAesKey(secretB64);
+  const iv = packed.slice(0, 12);
+  const cipher = packed.slice(12);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher);
+  return new Uint8Array(plain);
 }

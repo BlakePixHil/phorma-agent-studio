@@ -23,6 +23,11 @@ import {
   type TriggerPayload,
 } from './deploy/deploy-targets';
 import type { CloudTransport } from './deploy/cloud-transport';
+import {
+  dispatchCloudOperation,
+  type CloudCallResult,
+} from './deploy/cloud-dispatch';
+import type { DeploymentSummary, DeploymentsResponse } from './deployments.model';
 import { AwsDeployConfigService } from './deploy/aws-deploy-config.service';
 import { AwsRequestService } from './deploy/aws-request.service';
 
@@ -68,43 +73,6 @@ function toConnectionMetadata(
 // `PHORMA_CLOUD_DEFAULT_URL` and the retired-host migration live in
 // `phorma-cloud-url.ts`, a leaf module the run path can import without closing
 // the RunController -> ModelTransport -> PhormaCloud -> Cloud DI cycle.
-
-/** An HTTP answer the selected target rejected, with the host's own message. */
-interface CloudCallFailure {
-  ok: false;
-  status: number;
-  /** The host's own `error` message, or null when it sent none. */
-  hostError: string | null;
-  /** `hostError`, or `HTTP <status>` - the message most callers surface. */
-  error: string;
-  /** The parsed failure body, for the caller that reads another field. */
-  detail: unknown;
-}
-
-/**
- * One dispatched endpoint call.
- *
- * `'unsupported'` is a first-class outcome, not an error: the selected target
- * declares no route for the operation, and the caller resolves it to that
- * operation's documented absent value (Requirement 12.6).
- */
-type CloudCallResult<T> =
-  { ok: true; status: number; value: T } | CloudCallFailure | { ok: 'unsupported' };
-
-/** A body parsed leniently, as `response.json().catch(() => null)` does. */
-function parseJsonBody(body: string): unknown {
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-/** The host's own `error` message, or null when the body carries none. */
-function readErrorMessage(detail: unknown): string | null {
-  const value = (detail as { error?: unknown } | null | undefined)?.error;
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
 
 /**
  * Capability findings a host returned alongside a rejection (Requirement 16.8).
@@ -798,6 +766,30 @@ export class CloudService {
   }
 
   /**
+   * Every deployment the CONFIGURED target knows about (Requirement 21.2).
+   *
+   * Deliberately distinct from `DeploymentsService.refresh()`, which pins Phorma
+   * Cloud: this one answers "what is deployed where I deploy TO", which is what a
+   * BYO user's exported `deployments.json` manifest has to describe. Their own
+   * worker binds `PortalIndex` and answers `/api/deployments` for the single
+   * `default` owner, with a null spend figure because it binds no D1.
+   *
+   * Empty on any failure, and empty for a target that declares no route (AWS):
+   * this feeds a durability artifact, so a missing manifest section must not
+   * abort an export of the workflows themselves.
+   */
+  async listDeployments(): Promise<DeploymentSummary[]> {
+    if (!this.configured()) return [];
+    try {
+      const result = await this.call<DeploymentsResponse>('list-deployments', { workflowId: '' });
+      if (result.ok !== true) return [];
+      return Array.isArray(result.value.deployments) ? result.value.deployments : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * One `GET /status` read against `workflowId`'s instance. Writes no signals,
    * so it is safe to call for a workflow that is not the active one (the
    * library-delete path does). `null` means "cannot tell" - unconfigured,
@@ -1267,7 +1259,9 @@ export class CloudService {
     send: async (url, init) => {
       const response = await fetch(url, {
         method: init.method,
-        headers: await this.headers(),
+        // The transport's own headers first, so a route table can never override
+        // the credential by declaring an `Authorization` of its own.
+        headers: { ...init.headers, ...(await this.headers()) },
         body: init.body,
       });
       return { status: response.status, ok: response.ok, body: await response.text() };
@@ -1337,44 +1331,22 @@ export class CloudService {
    * A transport failure and an unparseable body both throw, matching `fetch`
    * and `Response.json()`, so every existing catch block behaves as before.
    */
-  private async call<T>(
+  private call<T>(
     op: CloudOperation,
     ctx: CloudEndpointContext,
     payload?: unknown,
   ): Promise<CloudCallResult<T>> {
-    const endpoint = DEPLOY_TARGETS[this.provider() ?? 'cloudflare'].endpoints[op];
-    if (!endpoint) return { ok: 'unsupported' };
-
-    const base =
-      endpoint.scope === 'instance' ? this.instanceUrl(ctx.workflowId) : this.effectiveWorkerUrl();
-    if (!base) return { ok: 'unsupported' };
-
-    // A declared `body` reshaper is also the marker for "this endpoint sends a
-    // request body": the read routes declare none and send none.
-    const requestBody = endpoint.body?.(payload, ctx);
-    const response = await this.transport().send(`${base}${endpoint.path(ctx)}`, {
-      method: endpoint.method,
-      body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const detail = parseJsonBody(response.body);
-      const hostError = readErrorMessage(detail);
-      return {
-        ok: false,
-        status: response.status,
-        hostError,
-        error: hostError ?? `HTTP ${response.status}`,
-        detail,
-      };
-    }
-
-    const parsed = JSON.parse(response.body) as unknown;
-    return {
-      ok: true,
-      status: response.status,
-      value: (endpoint.unwrap ? endpoint.unwrap(parsed) : parsed) as T,
-    };
+    return dispatchCloudOperation<T>(
+      DEPLOY_TARGETS[this.provider() ?? 'cloudflare'].endpoints,
+      this.transport(),
+      {
+        root: () => this.effectiveWorkerUrl(),
+        instance: workflowId => this.instanceUrl(workflowId),
+      },
+      op,
+      ctx,
+      payload,
+    );
   }
 
   /**

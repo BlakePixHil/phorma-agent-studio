@@ -35,6 +35,7 @@ import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
 import { handleStatusRequest, type StatusEnv } from './status';
 import { handleTelemetryRequest, runTelemetryRetention, type TelemetryEnv } from './telemetry';
+import { runBackupRetention, type BackupRoutesEnv } from './backup-routes';
 import { SecretVault } from './secret-vault';
 import { WorkflowAgent, type Env } from './workflow-agent';
 
@@ -213,5 +214,11 @@ export default {
     ctx: ExecutionContext,
   ): Promise<void> {
     ctx.waitUntil(runTelemetryRetention(env as TelemetryEnv).catch(() => undefined));
+    // Workflow backup tombstones past their 30 day window. Contained the same way
+    // and for the same reason as the pass above: a rejected retention promise must
+    // not surface as a Worker error, and a failed pass has to leave existing rows
+    // in place for the next one. It is a no-op wherever the D1 or R2 binding is
+    // absent, so a BYO worker with a cron never touches it.
+    ctx.waitUntil(runBackupRetention(env as BackupRoutesEnv).catch(() => undefined));
   },
 };

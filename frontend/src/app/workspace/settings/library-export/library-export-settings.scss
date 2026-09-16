@@ -1,0 +1,30 @@
+// "Library export" on the Settings dialog's Cloud page. Structure comes from the
+// shared partial the three sections on this page use.
+
+@use '../section' as settings-section;
+
+@include settings-section.base;
+
+// The one shape the partial does not cover: a label-plus-switch row, which is
+// centred rather than top-aligned and carries no card chrome. It sits directly
+// under the folder row, so a second bordered box would read as a nested setting.
+.phorma-library-export__toggle {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 2px 12px;
+}
+
+// `.settings-section__name` is a `<span>` in the partial; as a `<label>` for the
+// switch it needs its own click affordance.
+label.settings-section__name {
+  display: block;
+  cursor: pointer;
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--p-text-color, #71717a) 8%, transparent);
+  font-size: 0.857rem;
+}

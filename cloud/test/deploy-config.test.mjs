@@ -91,7 +91,15 @@ console.log('Committed wrangler.jsonc: BYO-safe');
   const hosted = committed.env?.hosted;
   check('hosted env exists', !!hosted);
   check('hosted pins the Phorma account id', typeof hosted?.account_id === 'string');
-  check('hosted keeps the RELEASES bucket', hosted?.r2_buckets?.length === 1);
+  // Asserted by BINDING NAME rather than by count: a count told us how many
+  // buckets there were and nothing about which, so adding `BACKUPS` broke it while
+  // dropping `RELEASES` and adding something else would have passed it.
+  const hostedBuckets = (hosted?.r2_buckets ?? []).map((entry) => entry.binding).sort();
+  check(
+    'hosted binds exactly the RELEASES and BACKUPS buckets',
+    hostedBuckets.join(',') === 'BACKUPS,RELEASES',
+    hostedBuckets.join(',') || '(none)',
+  );
   check('hosted keeps D1', hosted?.d1_databases?.length === 1);
   check('hosted keeps KV', hosted?.kv_namespaces?.length === 1);
   check(

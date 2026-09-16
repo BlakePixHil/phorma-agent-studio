@@ -357,6 +357,11 @@ export class SettingsRegistryService {
           keywords: [
             'cloud', 'phorma', 'cloudflare', 'hosted', 'deploy', 'worker',
             'wrangler', 'subscription', 'token', 'monitor',
+            // The Reconciliation_List lives on this page. A user hunting an
+            // unexplained deployment searches for what it is DOING - "cron",
+            // "portal", "spend" - not for the page it happens to live on.
+            'deployments', 'deployed', 'orphan', 'undeploy', 'stop', 'purge',
+            'cron', 'schedule', 'portal', 'spend', 'restore', 'recover',
           ],
         },
       ],

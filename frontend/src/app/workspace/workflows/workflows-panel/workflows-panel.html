@@ -1,4 +1,69 @@
 <div class="phorma-workflows">
+  <!--
+    The restore banner (cloud-workflow-backup Requirement 18).
+
+    INLINE and dismissible, never a modal or a required wizard step: a user who has
+    just signed in on a fresh install must still be able to run something
+    immediately (Requirement 18.2). It appears only when the library is EMPTY and
+    the account has backups, so somebody with work in progress never sees it
+    (Requirement 18.6).
+  -->
+  @if (showRestoreBanner()) {
+    <div class="phorma-workflows__restore" role="status">
+      <div class="phorma-workflows__restore-head">
+        <i class="ti ti-cloud-download" aria-hidden="true"></i>
+        <span class="phorma-workflows__restore-title">
+          {{ restorableCount() }}
+          {{ restorableCount() === 1 ? 'workflow' : 'workflows' }} in your cloud backup
+        </span>
+        <button
+          type="button"
+          class="phorma-workflows__restore-dismiss"
+          aria-label="Dismiss the restore prompt"
+          title="Dismiss. Restore stays available in Settings > Cloud."
+          (click)="dismissRestore()"
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </div>
+      <p class="phorma-workflows__restore-body">
+        This library is empty on this machine. Bring them back, or pick individual ones in
+        Settings &gt; Cloud.
+      </p>
+      <div class="phorma-workflows__restore-actions">
+        <button
+          pButton
+          type="button"
+          class="phorma-workflows__restore-btn phorma-btn-content"
+          size="small"
+          [disabled]="restoring()"
+          (click)="restoreAll()"
+        >
+          <i
+            class="ti"
+            [class.ti-cloud-download]="!restoring()"
+            [class.ti-loader-2]="restoring()"
+            [class.phorma-icon-spin]="restoring()"
+            aria-hidden="true"
+          ></i>
+          <span>{{ restoring() ? 'Restoring' : 'Restore all' }}</span>
+        </button>
+        <button
+          pButton
+          type="button"
+          class="phorma-workflows__restore-btn"
+          severity="secondary"
+          [text]="true"
+          size="small"
+          [disabled]="restoring()"
+          (click)="openBackupSettings()"
+        >
+          <span>Choose</span>
+        </button>
+      </div>
+    </div>
+  }
+
   <!-- Saved workflows (grows to fill, pushing templates to the bottom) -->
   <section class="phorma-workflows__saved-section">
     <div class="phorma-workflows__section-label">Saved</div>

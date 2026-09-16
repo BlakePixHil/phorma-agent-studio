@@ -78,6 +78,8 @@ twins, not shared imports:
 - `engine/src/types.ts` and `frontend/src/app/core/workflow.model.ts`
 - `cloud/src/telemetry-admin.ts` and `admin/src/app/core/models.ts`
 - `cloud/src/billing-admin.ts` and `admin/src/app/core/billing-models.ts`
+- `cloud/src/deployments.ts` and `frontend/src/app/core/deployments.model.ts`
+- `cloud/src/backup-routes.ts` and `frontend/src/app/core/backup.model.ts`
 - `frontend/public/logo.svg` and `PHORMA_MARK_SVG` in `cloud/src/brand-page.ts` - `cloud/` cannot
   import from `frontend/`, so the brand mark is hand-copied. A brand change edits both.
 
@@ -167,8 +169,9 @@ path is "update the app, set up runtime files again, deploy". Mechanism and guar
 
 ## Persistence
 
-- Local: IndexedDB, currently at v10. Stores include runs, `usage`, `chat-threads`,
-  `workflow-versions`, `skills`, `prompts`, `connections`, `connectors`, `workflow-state`. Every
+- Local: IndexedDB, currently at v11. Stores include runs, `usage`, `chat-threads`,
+  `workflow-versions`, `skills`, `prompts`, `connections`, `connectors`, `workflow-state`,
+  `workflow-backup-state`. Every
   workflow-scoped store keys workflows by `workflowKey: workflowId ?? 'draft'`.
   Bumping the schema means bumping the version and adding a migration.
 - Layout and small settings: `localStorage` via `core/layout-storage.ts`
@@ -177,6 +180,36 @@ path is "update the app, set up runtime files again, deploy". Mechanism and guar
   Agents SDK `this.sql` tagged template.
 - Secrets: OS keychain through `llm.rs`. Keychain scopes for MCP are
   `mcp:{nodeId}:{envKey}` (node override) and `mcp:preset:{presetId}:{envKey}` (app default).
+
+## Recovery: deployments and cloud backup
+
+Two independent surfaces, both about a workflow surviving the machine it was built
+on. Spec: `.kiro/specs/cloud-workflow-backup/`.
+
+- **A Durable Object namespace cannot be enumerated.** That is why `PortalIndex` carries a third key
+  space, `deploy:{ownerId}:{workflowId}` (`DEFAULT_DEPLOYMENT_OWNER` is the literal `default` in
+  BYO). It is written by `WorkflowAgent` ALONE - on an accepted `POST /workflow`, on
+  `DELETE /workflow`, in `purgeSelf(true)`, and backfilled from held state on any wake - so the list
+  stays correct for a studio that crashed, was uninstalled or is three versions old. The studio never
+  writes it.
+- **A backup is not a mirror.** A local library delete sends NOTHING to the cloud; it only drops the
+  local `workflow-backup-state` row. An explicit delete sets `deleted_at` (a tombstone whose bodies
+  stay restorable for 30 days). Exactly three paths destroy backup data - the 10-revision prune, an
+  explicit purge of a tombstone, and disable-and-delete-all - and each is named in `backup-routes.ts`
+  so a fourth cannot appear by accident.
+- **Restore preserves identity.** `WorkflowService.restoreSpec` keeps the spec's `id`;
+  `importSpec` still mints a fresh one. An import is a copy, a restore is the same workflow arriving
+  from elsewhere, and restoring under a new id leaves the original deployment as orphaned as before.
+- **Two dispatchers, one route table.** `DeploymentsService` and `WorkflowBackupService` PIN
+  `DEPLOY_TARGETS.phorma`, because a subscriber deploying to AWS still has a hosted account.
+  `CloudService` resolves the chosen target. Both go through `dispatchCloudOperation`
+  (`core/deploy/cloud-dispatch.ts`) so the plumbing exists once. `cloud.service.spec.ts` names the
+  Phorma-pinned operations explicitly and drives every other one, so a new `CloudService` operation
+  cannot compile without coverage.
+- Backup is hosted-only and sits BELOW the `store.enabled` gate; `/api/deployments` sits ABOVE it,
+  because the registry lives in a DO that BYO binds too. A BYO install gets the file-based
+  `LibraryExportService` instead, and that is deliberate: "bring your own everything" means
+  durability without a subscription.
 
 ## Known dependency-injection hazard
 

@@ -63,6 +63,20 @@ const TIER_SCHEDULES_PER_WORKFLOW: Record<string, number> = {
 };
 
 /**
+ * Workflows with a live cloud backup per plan - MUST mirror `backupWorkflows` in
+ * `cloud/src/tenants.ts` TIERS (cloud-workflow-backup, Requirement 10.9).
+ *
+ * The worker enforces it; this map is only so the studio can SAY what the cap is
+ * before a user hits it. A cap the user meets with no warning is how a durability
+ * feature stops covering the workflow they cared about.
+ */
+const TIER_BACKUP_WORKFLOWS: Record<string, number> = {
+  starter: 25,
+  pro: 100,
+  team: 250,
+};
+
+/**
  * Marketing names for tier ids — the raw id is a D1 string (`team`, not
  * "Teams"). Unknown ids (e.g. a custom enterprise tier) title-case through.
  */
@@ -213,6 +227,19 @@ export class PhormaCloudService {
     const profile = this.profile();
     if (profile?.status !== 'active' || !profile.tier) return 1;
     return TIER_SCHEDULES_PER_WORKFLOW[profile.tier] ?? 1;
+  });
+
+  /**
+   * How many workflows this tenant's plan will back up.
+   *
+   * 0 when there is no active plan, because backup is a subscriber capability -
+   * which is also what makes this the honest number to render beside a "backup is
+   * off" state rather than a cap that does not apply.
+   */
+  readonly backupWorkflowCap = computed(() => {
+    const profile = this.profile();
+    if (profile?.status !== 'active' || !profile.tier) return 0;
+    return TIER_BACKUP_WORKFLOWS[profile.tier] ?? TIER_BACKUP_WORKFLOWS['starter'];
   });
 
   /** 0–1 fraction of the monthly run allowance used (null without quota). */

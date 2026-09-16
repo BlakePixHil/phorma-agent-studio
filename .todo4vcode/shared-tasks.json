@@ -42,6 +42,48 @@
         "line": 100,
         "marker": "NOTE"
       }
+    },
+    {
+      "id": "scan-1lenuej",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1072",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:1072"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1789345817295,
+      "order": 4000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 1072,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-17abnuo",
+      "text": "on \"prefix of the submitted value\": the implementation trims before it",
+      "description": "[NOTE] cloud/test/telemetry.test.mjs:605",
+      "tags": [
+        "note",
+        "cloud/test/telemetry.test.mjs",
+        "cloud/test/telemetry.test.mjs:605"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1789345817935,
+      "order": 5000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/telemetry.test.mjs",
+        "line": 605,
+        "marker": "NOTE"
+      }
     }
   ]
 }

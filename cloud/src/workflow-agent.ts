@@ -61,7 +61,9 @@ import {
   type PortalEvent,
 } from './portal-events';
 import {
+  deploymentOwner,
   portalIndex,
+  type DeploymentRecord,
   type PortalRegistryEnv,
   type PublishRecord,
 } from './portal-registry';
@@ -111,7 +113,9 @@ import {
   HttpMcpClient,
   applyConnectionAuth,
   buildHttpToolRequest,
+  canonicalJson,
   createRedactor,
+  fnv1a,
   httpToolDefinition,
   performWebSearch,
   sanitizeToolName,
@@ -332,6 +336,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   /** Called on every DO wake (cold start). Resumes an interrupted run. */
   override async onStart(): Promise<void> {
     this.ensureTables();
+    // Deployments that predate the registry are invisible until something writes
+    // them, and a deployment nobody can name is the whole defect this feature
+    // exists to close. A wake is the one moment we hold that state for free.
+    await this.backfillDeployment();
     const active = this.state.activeRun;
     if (active && !this.handle) {
       // The previous instance died mid-run (eviction). Restart the run with
@@ -618,14 +626,40 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       }
       // Re-arm the schedule-trigger cron (if any) for the new spec.
       await this.rescheduleCron(spec);
+      // Hosted mode: first push stamps ownership; later pushes keep it.
+      const ownerId = this.state.ownerId ?? auth.userId;
       this.setState({
         ...this.state,
         spec,
         savedAt: new Date().toISOString(),
-        // Hosted mode: first push stamps ownership; later pushes keep it.
-        ownerId: this.state.ownerId ?? auth.userId,
+        ownerId,
       });
+      // AFTER the capability gate and the state write, so a rejected push leaves
+      // the registry untouched (Requirement 2.5) and a listed deployment is
+      // always one that is really deployed.
+      await this.syncDeployment(spec, ownerId);
       return json({ ok: true, name: spec.name });
+    }
+
+    // Reads the deployed spec back out (Requirement 4). This is what makes a
+    // deployment itself a recoverable copy: a user whose local library is gone
+    // can download exactly what is running and restore it, with no backup
+    // storage involved at all.
+    //
+    // It needs no redaction. A `WorkflowSpec` never carries a credential by
+    // construction - connection secrets live in the `SecretVault` and provider
+    // keys in worker env or the OS keychain, and a spec references them by NAME
+    // (Requirement 4.5). Authentication and ownership were already enforced at
+    // the top of this method (Requirements 4.2, 4.3).
+    if (request.method === 'GET' && path.endsWith('/workflow')) {
+      const spec = this.state.spec;
+      if (!spec) {
+        return json(
+          { error: 'Nothing is deployed on this instance.', hasWorkflow: false },
+          404,
+        );
+      }
+      return json({ spec, savedAt: this.state.savedAt });
     }
 
     // Removes the deployed spec (studio "Remove from cloud"). The instance
@@ -636,7 +670,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         return json({ error: 'Stop the running run before removing this workflow.' }, 409);
       }
       await this.cancelScheduledRuns();
+      // Resolved BEFORE the spec is cleared: `workflowKey()` reads the spec id
+      // first, so afterwards there is nothing left to name.
+      const workflowId = this.workflowKey();
       this.setState({ ...this.state, spec: null, savedAt: null });
+      await this.removeDeployment(workflowId);
       return json({ ok: true });
     }
 
@@ -960,6 +998,120 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // Intentionally empty — waking the DO is the entire job.
   }
 
+  // ── Deployment registry (cloud-workflow-backup Phase 1) ───────────────────
+  //
+  // The registry is written HERE and nowhere else (Requirement 2.4). A studio
+  // that crashed mid-push, was uninstalled, or is three versions old still
+  // leaves a correct list, because the list is a consequence of the deployment
+  // rather than a second thing a client has to remember to do.
+  //
+  // Every write is non-fatal (Requirement 2.8): a deployment that works but is
+  // not listed is recoverable on the next wake, while refusing a deployment
+  // because a bookkeeping write failed is not.
+
+  /**
+   * Writes this instance's deployment record after an accepted spec push.
+   *
+   * `cronArmed` is read back from the SDK's own schedule table rather than from
+   * the spec, so it reports what was ACTUALLY armed - a hosted tier budget can
+   * silently skip a schedule-trigger node (see `rescheduleCron`), and a list
+   * that claimed otherwise would be worse than no list.
+   */
+  private async syncDeployment(spec: WorkflowSpec, ownerId: string | null | undefined): Promise<void> {
+    // A portal session instance is one visitor's conversation, not a deployment
+    // (Requirement 2.9). Its lifetime is tracked by the session registry.
+    if (this.state.portalSession) return;
+    const now = Date.now();
+    try {
+      const index = portalIndex(this.env);
+      const { record } = await index.statusFor(spec.id);
+      const result = await index.registerDeployment({
+        workflowId: spec.id,
+        ownerId: deploymentOwner(ownerId),
+        workflowName: spec.name,
+        deployedAt: now,
+        updatedAt: now,
+        specHash: fnv1a(canonicalJson(spec)),
+        cronArmed: this.getSchedules().some(schedule => schedule.callback === 'scheduledRun'),
+        portalSlug: record?.slug ?? null,
+      } satisfies DeploymentRecord);
+      if (!result.ok) this.reportSettingsIssue(`${WORKER_HOST_LABEL}: ${result.error}`);
+    } catch (error) {
+      this.reportSettingsIssue(
+        `${WORKER_HOST_LABEL}: this deployment could not be added to your account's ` +
+          `deployment list (${messageOf(error)}). The deployment itself is live; the ` +
+          `list catches up on the next push or wake.`,
+      );
+    }
+  }
+
+  /**
+   * Removes this workflow's deployment record.
+   *
+   * `workflowId` is a PARAMETER rather than a `workflowKey()` call: both callers
+   * clear or reset `state.spec`, and `workflowKey()` reads the spec id first, so
+   * resolving it after the fact would deregister the string `default`.
+   */
+  private async removeDeployment(workflowId: string): Promise<void> {
+    if (this.state.portalSession) return;
+    try {
+      await portalIndex(this.env).deregisterDeployment(
+        deploymentOwner(this.state.ownerId),
+        workflowId,
+      );
+    } catch (error) {
+      console.warn(`removeDeployment: failed for ${workflowId}`, error);
+    }
+  }
+
+  /**
+   * Writes a deployment record for a spec that was deployed before the registry
+   * existed (Requirement 3).
+   *
+   * Runs on every wake, from any cause - cron, a portal request, a run, an
+   * authenticated route - because a deployment that never wakes spends nothing
+   * and a deployment that does wake becomes visible the first time it costs
+   * anything. Requirement 3.1 scopes this to hosted mode; it runs in BOTH here,
+   * because a BYO install needs the same list for its `deployments.json` export
+   * (Requirement 21.2) and the cost is one storage read on an instance that is
+   * already awake.
+   *
+   * An existing record is left ALONE (Requirement 3.5). Held state is older than
+   * whatever the last push wrote, so overwriting would move a live record
+   * backwards.
+   */
+  private async backfillDeployment(): Promise<void> {
+    const spec = this.state.spec;
+    // Both cheap guards first, so an instance with nothing deployed and every
+    // portal session instance pay no storage read at all.
+    if (!spec || this.state.portalSession) return;
+    try {
+      const index = portalIndex(this.env);
+      const ownerId = deploymentOwner(this.state.ownerId);
+      if (await index.getDeployment(ownerId, spec.id)) return;
+      // `savedAt` is the deploy time for a record we are reconstructing
+      // (Requirement 3.2). It is ISO here and epoch ms in the registry.
+      const savedAt = this.state.savedAt ? Date.parse(this.state.savedAt) : Number.NaN;
+      const deployedAt = Number.isFinite(savedAt) ? savedAt : Date.now();
+      const { record } = await index.statusFor(spec.id);
+      await index.registerDeployment({
+        workflowId: spec.id,
+        ownerId,
+        workflowName: spec.name,
+        deployedAt,
+        updatedAt: deployedAt,
+        specHash: fnv1a(canonicalJson(spec)),
+        cronArmed: this.getSchedules().some(schedule => schedule.callback === 'scheduledRun'),
+        portalSlug: record?.slug ?? null,
+      } satisfies DeploymentRecord);
+    } catch (error) {
+      // Silent by design: this runs on every wake, including a portal visitor's
+      // first message, so it must never turn a transient registry failure into a
+      // settings issue the owner sees 200 times.
+      console.warn('backfillDeployment: failed', error);
+    }
+  }
+
   /**
    * Cancels every armed CRON schedule without touching in-flight
    * `waitTimedOut` / `workflowTimedOut` alarms - shared by `rescheduleCron`
@@ -1004,6 +1156,9 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       const index = portalIndex(this.env);
       const workflowId = this.workflowKey();
       await index.unpublish(workflowId);
+      // Same key space, same DO, so this rides along with the unpublish rather
+      // than costing a separate round trip (Requirement 2.3).
+      await this.removeDeployment(workflowId);
       // Forget a session only AFTER its DO is actually purged. The registry is
       // the only reference to a session instance that exists anywhere, so
       // dropping the key on a failed purge would orphan that DO permanently -

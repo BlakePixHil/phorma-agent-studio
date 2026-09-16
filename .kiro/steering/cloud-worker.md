@@ -16,11 +16,13 @@ user's own Cloudflare account and keys).
   bundling fails with "Could not resolve ai" otherwise.
 - Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.
   `check` runs no tests, so it alone is not verification. No Cloudflare account needed.
-  `npm test` = `test:unit`, 23 suites: projection, embed, deploy-config, connections, data-host,
-  workflow-state, portal-cleanup, run-wiring, status, releases, telemetry, tenant-billing,
-  entitlement, stripe, billing-routes, billing-admin, stripe-webhook, provisioning,
-  workspace-migration, plus four
+  `npm test` = `test:unit`, 28 suites: projection, embed, deploy-config, connections, data-host,
+  workflow-state, portal-cleanup, deployment-registry, run-wiring, status, releases, telemetry,
+  tenant-billing, entitlement, stripe, billing-routes, billing-admin, stripe-webhook, provisioning,
+  workspace-migration, backup-store, backup-body, backup-routes, plus four
   Miniflare suites (deploy-validation, connection-secrets, telemetry-ingest, telemetry-admin).
+  `backup-store`, `backup-body` and `backup-routes` are D1/R2-proxy-backed like the billing family
+  and sit at the END of the chain behind a `node test/await-port-drain.mjs` barrier.
   `tenant-billing`, `entitlement`, `billing-routes`, `billing-admin`, `stripe-webhook`,
   `provisioning` and
   `workspace-migration` are also Miniflare-backed but take the D1
@@ -74,6 +76,15 @@ user's own Cloudflare account and keys).
   `POST /approvals {nodeId, approved}`, plus WS `event` and `stop` frames.
 - `GET /usage?since=` serves the usage ledger in both hosted and BYO mode, written in the settle
   finally-block with 366 day / 5000 row retention.
+- `GET /workflow` on the DO reads the deployed spec back, which is what makes a deployment itself a
+  recoverable copy. It needs no redaction: a `WorkflowSpec` references credentials by NAME, and the
+  values live in the `SecretVault` or worker env.
+- `WorkflowAgent` is the ONLY writer of the `deploy:` registry in `PortalIndex` - on an accepted
+  `POST /workflow`, on `DELETE /workflow`, in `purgeSelf(true)`, and backfilled from held state in
+  `onStart()`. Every write is non-fatal (a failed one reports through `settingsIssues` and the
+  deployment still succeeds), a rejected push writes nothing, and a portal SESSION instance
+  (`state.portalSession != null`) is skipped. Resolve the workflow id BEFORE clearing `state.spec` -
+  `workflowKey()` reads the spec id first, so afterwards there is nothing left to name.
 - Hosted mode re-labels `node-usage` `provider` to `phorma-cloud` (hosted inference runs on
   OpenRouter but bills plan credits). BYO deployments keep real provider names.
 - Historical run snapshots store a versioned envelope in the graph column and must still parse
@@ -356,6 +367,36 @@ user's own Cloudflare account and keys).
   `env.hosted` AND `DeployConfigService`'s generated override, which REPLACES the committed config
   on every BYO deploy. `cloud/test/deploy-config.test.mjs` derives the expected class list from
   `src/index.ts`'s export statement and will catch a miss.
+
+## Workflow backup (hosted only)
+
+Spec: `.kiro/specs/cloud-workflow-backup/`. Metadata in D1 (`workflow_backups`, migration
+`0005_workflow_backups.sql`), bodies in the `BACKUPS` R2 bucket (`phorma-backups`) under
+`backup/{tenantId}/{workflowId}/{revision}`. `/api/backups/*` sits BELOW the `store.enabled` gate, so
+the surface is ABSENT on a BYO worker rather than broken.
+
+- Pipeline is `JSON -> gzip -> AES-GCM -> R2`, in that order: ciphertext does not compress, so
+  reversing the two stores every workflow at full size forever. `encryptBytes`/`decryptBytes` in
+  `tenants.ts` exist for this (bytes in, bytes out, same 12-byte-IV packing as `encryptString`) -
+  pushing gzip through the string pair costs 1.78x in base64.
+- No `KEY_ENC_SECRET` REFUSES the upload; a backup is never stored unencrypted. Phorma Labs holds
+  the key, which is disclosed in-product beside the backup state with a one-click
+  disable-and-delete-all. Passphrase E2E is rejected: a forgotten passphrase reproduces the loss.
+- Concurrency is a conditional `UPDATE ... WHERE revision = ?` whose `meta.changes` is the
+  single-winner signal - the same idiom `recordRun` uses, and for the same reason. `If-Match` absent
+  is accepted ONLY for a workflow with no row; absent on an existing row is a 409, because nothing
+  merges two specs. A 409 always carries the CURRENT revision so the loser retries against a truth.
+- WRITES need `active` or `past_due`. READS survive a cancellation for 90 days
+  (`lapseReadAccess`, clocked off `billing_status_at`; a clock of 0 means a hand-run
+  `/api/deactivate` supplied none, and reads then stay allowed with no expiry rather than being
+  destroyed on a value we never recorded). The tier cap (`TierLimits.backupWorkflows`, 25/100/250)
+  bounds NEW workflows only - an existing backup must never go stale because of a limit.
+- Four refusal codes, APPEND-ONLY like the entitlement ones: `no_subscription`, `backup_conflict`,
+  `backup_cap`, `backup_too_large`.
+- `runBackupRetention` rides the hosted `scheduled()` pass. Bodies go BEFORE the metadata row: the
+  row is the only index of which R2 objects belong to a tenant, so the reverse order orphans them.
+- Operator steps this code cannot do for itself: `npx wrangler r2 bucket create phorma-backups` and
+  `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote`.
 
 ## Browser-facing pages (`cloud/src/brand-page.ts`)
 

@@ -17,7 +17,7 @@ like paranoia are the ones that caught something.
 ## The shape of a release
 
 ```text
-release.mjs bumps 12 files ─┬─▶ commit "release: X.Y.Z" ─▶ tag vX.Y.Z
+release.mjs bumps 11 files ─┬─▶ commit "release: X.Y.Z" ─▶ tag vX.Y.Z
                             │
 git push origin main vX.Y.Z ─┼─▶ push to main ──▶ CI workflow      (tests, builds, guards)
                             └─▶ push of tag ──▶ Release workflow  (installers, GitHub Release, R2)
@@ -153,10 +153,10 @@ switches to `npm ci`. Fix it as its own change, never inside a release.
 ```powershell
 node scripts/release.mjs X.Y.Z --dry-run    # lists the 12 targets, writes NOTHING
 node scripts/release.mjs X.Y.Z              # bumps, git add, commit "release: X.Y.Z", tag vX.Y.Z
-git show --stat HEAD                        # expect exactly the 12 files
+git show --stat HEAD                        # expect exactly the 11 files
 ```
 
-The 12 targets: `backend/src-tauri/{tauri.conf.json,Cargo.toml,Cargo.lock}`, the six
+The 11 targets: `backend/src-tauri/{tauri.conf.json,Cargo.toml,Cargo.lock}`, the six
 `*/package.json`, `cloud/src/build-info.ts`, `frontend/src/app/core/app-version.ts`.
 
 **Never bump a version by hand.** A manifest that disagrees with the others breaks the updater, and
@@ -164,8 +164,12 @@ the two source constants (`WORKER_BUILD`, the app version) are literals the scri
 and *throws* if it cannot find - by design, because a missed stamp ships a worker that lies about
 its version.
 
-**Gate.** `git show --stat HEAD` lists 12 files and nothing else. If `Cargo.lock` moved, re-run
+**Gate.** `git show --stat HEAD` lists 11 files and nothing else. If `Cargo.lock` moved, re-run
 `cargo check --locked` before pushing.
+
+**Commit unrelated fixes BEFORE this phase.** `release.mjs` `git add`s only its own 11 targets, so a
+fix still sitting unstaged (a verification failure you just repaired, for instance) is silently left
+out of the tag while every manifest claims the release contains it.
 
 ## Phase 5 - Push both refs
 
@@ -256,6 +260,12 @@ foreach ($p in @('windows-x64','macos-arm64','macos-intel','linux-appimage','lin
   "$p -> $($d.StatusCode) $($d.Headers.Location)"
 }
 ```
+
+**Windows PowerShell 5.1 cannot run the probes as written.** `-SkipHttpErrorCheck` is PowerShell 7+
+only, and `Invoke-WebRequest` without `-UseBasicParsing` blocks on an interactive "Script Execution
+Risk" prompt that silently consumes the whole command timeout. Either run these in `pwsh`, or use a
+`[System.Net.HttpWebRequest]` helper with `AllowAutoRedirect = $false` and read the status code off
+the `WebException`'s response when the answer is a 204 or a 302.
 
 **Two traps in the probes themselves**, both hit while writing this:
 

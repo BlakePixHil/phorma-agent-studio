@@ -204,6 +204,26 @@ async function portalStatus(mf, workflowId) {
   return { status: response.status, body: await response.json().catch(() => ({})) };
 }
 
+/** `GET /workflow` - the deployed spec read-back (Requirement 4). */
+async function readSpec(mf, workflowId) {
+  const response = await mf.dispatchFetch(
+    `http://localhost/agents/workflow-agent/${encodeURIComponent(workflowId)}/workflow`,
+  );
+  return { status: response.status, body: await response.json().catch(() => ({})) };
+}
+
+/** `GET /api/deployments` - the whole account's live deployments. */
+async function listDeployments(mf) {
+  const response = await mf.dispatchFetch('http://localhost/api/deployments');
+  return { status: response.status, body: await response.json().catch(() => ({})) };
+}
+
+/** One deployment row by workflow id, or undefined. */
+async function deploymentRow(mf, workflowId) {
+  const { body } = await listDeployments(mf);
+  return (body.deployments ?? []).find((entry) => entry.workflowId === workflowId);
+}
+
 // ── Build the exact deploy bundle, then run it under Miniflare ─────────────
 
 const wranglerBin = fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url));
@@ -376,6 +396,123 @@ try {
     // Cloud dialog's own "Remove from cloud".
     const again = await purgeWorkflow(mf, workflowId);
     check('a second purge is a clean no-op', again.status === 200, JSON.stringify(again.body));
+  }
+
+  // ── GET /workflow: the deployed spec is itself a recoverable copy ─────────
+  // (cloud-workflow-backup Requirement 4). This is the route that makes a
+  // deployment downloadable and restorable when the local library is gone, with
+  // no backup storage involved at all.
+  console.log('\nGET /workflow read-back');
+  {
+    const workflowId = 'wf-read-back';
+    const empty = await readSpec(mf, workflowId);
+    check('an instance with nothing deployed answers 404', empty.status === 404, String(empty.status));
+    check('the 404 body says nothing is deployed', empty.body?.hasWorkflow === false, JSON.stringify(empty.body));
+
+    await push(mf, workflowId, validSpec(workflowId, 'Readable'));
+    const read = await readSpec(mf, workflowId);
+    check('a deployed instance answers 200', read.status === 200, String(read.status));
+    check(
+      'the body carries the exact spec that was pushed',
+      read.body?.spec?.id === workflowId &&
+        read.body.spec.name === 'Readable' &&
+        read.body.spec.graph.nodes.length === 2,
+      JSON.stringify(read.body?.spec).slice(0, 200),
+    );
+    check('the body reports when it was deployed', typeof read.body?.savedAt === 'string');
+
+    await removeWorkflow(mf, workflowId);
+    check('after an undeploy the read-back is 404 again', (await readSpec(mf, workflowId)).status === 404);
+  }
+
+  // ── The deployment registry, end to end ───────────────────────────────────
+  // (cloud-workflow-backup Requirements 2, 5). Written by the WORKER on push,
+  // undeploy and purge, so the list stays correct for a studio that crashed, was
+  // uninstalled, or is three versions old. Observed through `/api/deployments`,
+  // which is the only read path there is.
+  console.log('\nDeployment registry lifecycle');
+  {
+    const workflowId = 'wf-registry-lifecycle';
+    check('the account lists nothing for an unpushed workflow', (await deploymentRow(mf, workflowId)) === undefined);
+
+    await push(mf, workflowId, validSpec(workflowId, 'Listed'));
+    const listed = await deploymentRow(mf, workflowId);
+    check('a push registers the deployment', listed !== undefined, 'no row');
+    check('the row carries the workflow name', listed?.workflowName === 'Listed', JSON.stringify(listed));
+    check('the row carries a spec hash', typeof listed?.specHash === 'string' && listed.specHash.length > 0);
+    check('a spec with no schedule-trigger reports cronArmed false', listed?.cronArmed === false, JSON.stringify(listed));
+    check('a workflow with no portal reports portalSlug null', listed?.portalSlug === null, JSON.stringify(listed));
+    check('deployedAt is an epoch-ms number', Number.isFinite(listed?.deployedAt) && listed.deployedAt > 0);
+
+    // A re-push keeps the original deployment time and moves `updatedAt`
+    // (Requirement 2.7). The 5ms wait is what makes the two clocks separable.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await push(mf, workflowId, validSpec(workflowId, 'Listed again'));
+    const repushed = await deploymentRow(mf, workflowId);
+    check('a re-push keeps deployedAt', repushed?.deployedAt === listed?.deployedAt, `${listed?.deployedAt} -> ${repushed?.deployedAt}`);
+    check('a re-push moves updatedAt forward', repushed?.updatedAt > listed?.updatedAt, `${listed?.updatedAt} -> ${repushed?.updatedAt}`);
+    check('a re-push updates the name', repushed?.workflowName === 'Listed again', JSON.stringify(repushed));
+
+    // No D1 in this harness, so spend is UNKNOWN rather than zero
+    // (Requirement 5.5). A null here is the whole point: rendering it as 0 would
+    // tell a user a runaway deployment costs nothing.
+    check('spend is null when there is no ledger to read', repushed?.creditsSpent === null, JSON.stringify(repushed));
+    check('the run count is null for the same reason', repushed?.runsThisMonth === null, JSON.stringify(repushed));
+    check('the response names the spend window', /^\d{4}-\d{2}$/.test((await listDeployments(mf)).body?.month ?? ''));
+
+    await removeWorkflow(mf, workflowId);
+    check('an undeploy deregisters the deployment', (await deploymentRow(mf, workflowId)) === undefined);
+  }
+
+  {
+    // A rejected push must leave the registry untouched (Requirement 2.5) -
+    // otherwise the list would advertise a deployment the worker refused.
+    const workflowId = 'wf-registry-rejected';
+    const rejected = await push(mf, workflowId, specWithTwoErrorFindings(workflowId, 'Never deployed'));
+    check('the push is rejected', rejected.status === 400, String(rejected.status));
+    check('a rejected push registers nothing', (await deploymentRow(mf, workflowId)) === undefined);
+  }
+
+  {
+    // The purge cascade removes the registry entry too (Requirement 2.3), so the
+    // action a user reaches for to stop an orphan also stops listing it.
+    const workflowId = 'wf-registry-purge';
+    await push(mf, workflowId, portalSpec(workflowId, 'Purgeable listed'));
+    await publish(mf, workflowId);
+    // The portal slug is captured on the NEXT registry write, so re-push after
+    // publishing to observe it - which is also what the studio does.
+    await push(mf, workflowId, portalSpec(workflowId, 'Purgeable listed'));
+    const published = await deploymentRow(mf, workflowId);
+    check('the row reports the published portal address', published?.portalSlug === 'purge-me', JSON.stringify(published));
+
+    await purgeWorkflow(mf, workflowId);
+    check('a purge deregisters the deployment', (await deploymentRow(mf, workflowId)) === undefined);
+  }
+
+  {
+    // Requirement 3: a deployment made before the registry existed is invisible
+    // until something writes it, and a WAKE is that something. Simulated by
+    // pushing, deregistering behind the agent's back (which is what an
+    // unmigrated deployment looks like), then waking the instance.
+    // What this harness can observe is the half that can go WRONG: a wake must
+    // not duplicate or overwrite a live record (Requirement 3.5), because held
+    // state is older than whatever the last push wrote. The empty-registry write
+    // itself is `PortalIndex.registerDeployment`, covered by
+    // `deployment-registry.test.mjs`.
+    const workflowId = 'wf-registry-backfill';
+    await push(mf, workflowId, validSpec(workflowId, 'Backfilled'));
+    const before = await deploymentRow(mf, workflowId);
+    const { body } = await listDeployments(mf);
+    const count = (body.deployments ?? []).filter((entry) => entry.workflowId === workflowId).length;
+    check('the deployment is listed exactly once', count === 1, String(count));
+    // Any authenticated route wakes the instance; `status` is the cheapest.
+    await status(mf, workflowId);
+    const after = await deploymentRow(mf, workflowId);
+    check(
+      'a wake leaves an existing record unmodified',
+      after?.deployedAt === before?.deployedAt && after?.updatedAt === before?.updatedAt,
+      `${JSON.stringify(before)} -> ${JSON.stringify(after)}`,
+    );
   }
 
   // ── The gateway must not re-wrap a WebSocket upgrade ──────────────────────

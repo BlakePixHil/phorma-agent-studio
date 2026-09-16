@@ -1,6 +1,9 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { ButtonModule } from 'primeng/button';
 
+import { WorkflowBackupService } from '../../../core/cloud/workflow-backup.service';
+import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import { WorkflowVersionsService } from '../../../core/workflow-versions.service';
 import { CloudService } from '../../../core/cloud.service';
@@ -21,7 +24,7 @@ import { VersionHistoryDialogService } from '../version-history-dialog.service';
 @Component({
   selector: 'app-workflows-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, PanelCard],
+  imports: [DatePipe, ButtonModule, PanelCard],
   templateUrl: './workflows-panel.html',
   styleUrl: './workflows-panel.scss',
 })
@@ -39,6 +42,92 @@ export class WorkflowsPanel {
 
   /** Whether the templates section is collapsed. */
   protected readonly templatesCollapsed = signal(false);
+
+  // ── Restore banner (cloud-workflow-backup Requirement 18) ─────────────────
+
+  private readonly backup = inject(WorkflowBackupService);
+  private readonly settingsDialog = inject(SettingsDialogService);
+
+  /** Dismissed for this session. Session state - deliberately not persisted. */
+  private readonly restoreDismissed = signal(false);
+  protected readonly restoring = signal(false);
+
+  /** Backups that could be restored, tombstones included - they still work. */
+  protected readonly restorableCount = computed(
+    () => this.backup.backups().length + this.backup.tombstones().length,
+  );
+
+  /**
+   * Whether to offer restore.
+   *
+   * Only on an EMPTY library (Requirement 18.6): somebody with work in progress does
+   * not need to be told about a backup, and a banner over their workflow list would
+   * be noise. `loaded()` gates it so a slow list read cannot flash the banner at a
+   * user who does have workflows.
+   */
+  protected readonly showRestoreBanner = computed(
+    () =>
+      !this.restoreDismissed() &&
+      this.workflow.libraryLoaded() &&
+      this.workflow.library().length === 0 &&
+      this.backup.loaded() &&
+      this.restorableCount() > 0,
+  );
+
+  /** Dismisses it. Restore stays reachable from Settings > Cloud (18.4). */
+  protected dismissRestore(): void {
+    this.restoreDismissed.set(true);
+  }
+
+  protected openBackupSettings(): void {
+    this.settingsDialog.open('cloud');
+  }
+
+  /**
+   * Restores everything available.
+   *
+   * `replace` rather than `ask`: the library is empty, so there is nothing to
+   * collide with, and N dialogs is not a recovery flow. Reports the counts and
+   * leaves a PARTIAL result in place rather than rolling back what worked
+   * (Requirement 18.5) - a half-recovered library is strictly better than none.
+   */
+  protected async restoreAll(): Promise<void> {
+    this.restoring.set(true);
+    try {
+      const targets = [...this.backup.backups(), ...this.backup.tombstones()];
+      let restored = 0;
+      let failed = 0;
+      const missing = new Set<string>();
+      for (const row of targets) {
+        const result = await this.backup.restore(row.workflowId, { collision: 'replace' });
+        if (result.outcome === 'restored' || result.outcome === 'replaced') restored += 1;
+        else failed += 1;
+        for (const name of result.missingConnections) missing.add(name);
+      }
+
+      const detail = [
+        missing.size > 0 ? `Reconnect ${[...missing].join(', ')} before running them.` : '',
+        'Prompts, skills and connectors are not part of a backup.',
+      ]
+        .filter(part => part.length > 0)
+        .join(' ');
+
+      if (failed === 0) {
+        this.toast.success(
+          `Restored ${restored} ${restored === 1 ? 'workflow' : 'workflows'}`,
+          detail,
+        );
+      } else {
+        this.toast.warning(
+          `Restored ${restored} of ${targets.length}`,
+          `${failed} could not be restored. ${detail}`.trim(),
+        );
+      }
+      this.restoreDismissed.set(true);
+    } finally {
+      this.restoring.set(false);
+    }
+  }
 
   protected open(spec: WorkflowSpec): void {
     this.workflow.openWorkflow(spec.id);

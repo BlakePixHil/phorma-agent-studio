@@ -28,6 +28,27 @@ identically when only `cloud/` changed, so the bump is cheap and it keeps the in
 
 ---
 
+## A job fails in two seconds with no steps, and the reason is the GitHub bill
+
+**Signature.** `publish-r2` is red after ~2s. `gh run view --json jobs` shows `steps: []` and an
+empty `runner_name`. `gh run view --job <id> --log` answers `log not found`. All four installer
+builds are green and the GitHub Release is complete.
+
+**Cause.** The job was never scheduled: "recent account payments have failed or your spending limit
+needs to be increased". The four-platform matrix drains the Actions budget first - macOS bills at
+10x and Windows at 2x - so the cheap sync job at the end is the one that starves.
+
+**Why it hid.** The failure has no log to read, and the workflow-level view says only "failure". It
+is easy to misread as a runner-image problem, except the same `ubuntu-22.04` label succeeded in the
+same run.
+
+**Prevention.** Read a 0-step job through
+`gh api repos/{owner}/{repo}/check-runs/{jobId}/annotations`, which is the only surface carrying the
+message. Fix billing and re-run the job, or republish from a dev machine (Phase 6 recovery). Until
+R2 is synced the release has NOT reached users, no matter how complete the GitHub Release looks.
+
+---
+
 ## The updater manifest points at an old version and clients get 204
 
 **Signature.** `stable/latest.json` in R2 names a version older than the one just released. Every

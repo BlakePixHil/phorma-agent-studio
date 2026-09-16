@@ -233,15 +233,60 @@ const RESPONSE_BODY = JSON.stringify({
 const TARGET_IDS = Object.keys(DEPLOY_TARGETS) as DeployTargetId[];
 
 /**
+ * The operations `CloudService` does NOT dispatch, and must not.
+ *
+ * These belong to `DeploymentsService` and `WorkflowBackupService`, both of which
+ * PIN `DEPLOY_TARGETS.phorma` instead of resolving the chosen deploy target. A
+ * subscriber deploying to AWS still has a Phorma Cloud account, and their
+ * deployment list and their backups live on the hosted worker - so driving these
+ * through `CloudService` would send them to whichever host the user last picked,
+ * or to no route at all.
+ *
+ * Named explicitly rather than filtered by some property, so adding one is a
+ * deliberate edit here with a reason attached.
+ *
+ * `list-deployments` is deliberately NOT in this set: `CloudService` dispatches it
+ * too, against the CONFIGURED target, because a BYO user's exported
+ * `deployments.json` manifest has to describe their own worker rather than a
+ * Phorma Cloud account they may not have. One operation, two dispatchers, two
+ * bases - so it is driven below like every other.
+ */
+type PhormaPinnedOperation =
+  | 'read-spec'
+  | 'undeploy'
+  | 'backup-list'
+  | 'backup-upload'
+  | 'backup-revisions'
+  | 'backup-download'
+  | 'backup-delete'
+  | 'backup-delete-all';
+
+const PHORMA_PINNED_OPERATIONS = new Set<CloudOperation>([
+  'read-spec',
+  'undeploy',
+  'backup-list',
+  'backup-upload',
+  'backup-revisions',
+  'backup-download',
+  'backup-delete',
+  'backup-delete-all',
+]);
+
+/** Everything this suite drives: every operation `CloudService` dispatches. */
+type DispatchedOperation = Exclude<CloudOperation, PhormaPinnedOperation>;
+
+/**
  * Every operation ANY target declares, unioned from the registry rather than
  * copied. An endpoint added to one host without transport coverage enters this
  * enumeration on its own.
  */
-const OPERATIONS: CloudOperation[] = [
-  ...new Set(
-    TARGET_IDS.flatMap(id => Object.keys(DEPLOY_TARGETS[id].endpoints) as CloudOperation[]),
-  ),
-].sort();
+const OPERATIONS: DispatchedOperation[] = (
+  [
+    ...new Set(
+      TARGET_IDS.flatMap(id => Object.keys(DEPLOY_TARGETS[id].endpoints) as CloudOperation[]),
+    ),
+  ].filter(op => !PHORMA_PINNED_OPERATIONS.has(op)) as DispatchedOperation[]
+).sort();
 
 /** The one transport each target's credential model selects. */
 function expectedTransportId(targetId: DeployTargetId): CloudTransport['id'] {
@@ -278,7 +323,21 @@ function contextFor(op: CloudOperation): CloudEndpointContext {
     case 'put-secret':
       return { workflowId: '', connectionId: CONNECTION_ID, secretKey: SECRET_KEY };
     case 'list-secret-names':
+    // Root-scoped too: the account's deployments, not one instance's.
+    case 'list-deployments':
       return { workflowId: '' };
+    // Not reachable: {@link OPERATIONS} filters these out. The cases exist so the
+    // switch stays exhaustive over `CloudOperation` and a genuinely new
+    // `CloudService` operation still fails to compile here.
+    case 'read-spec':
+    case 'undeploy':
+    case 'backup-list':
+    case 'backup-upload':
+    case 'backup-revisions':
+    case 'backup-download':
+    case 'backup-delete':
+    case 'backup-delete-all':
+      throw new Error(`${op} is dispatched by a Phorma-pinned service, not CloudService.`);
   }
 }
 
@@ -339,8 +398,13 @@ const PUSH_DRIVER: OperationDriver = {
   },
 };
 
-/** One public entry point per operation - nothing reaches into `call`. */
-const DRIVERS: Readonly<Record<CloudOperation, OperationDriver>> = {
+/**
+ * One public entry point per operation - nothing reaches into `call`.
+ *
+ * Exhaustive over every operation MINUS the reconciliation set, so a new
+ * `CloudService` operation still fails to compile until it is driven here.
+ */
+const DRIVERS: Readonly<Record<DispatchedOperation, OperationDriver>> = {
   'push-spec': PUSH_DRIVER,
   'push-connections': PUSH_DRIVER,
   'read-connections': PUSH_DRIVER,
@@ -375,6 +439,10 @@ const DRIVERS: Readonly<Record<CloudOperation, OperationDriver>> = {
   'list-secret-names': {
     dispatches: ['list-secret-names'],
     run: harness => harness.cloud.connectionSecretNames(),
+  },
+  'list-deployments': {
+    dispatches: ['list-deployments'],
+    run: harness => harness.cloud.listDeployments(),
   },
 };
 
@@ -768,14 +836,18 @@ describe('Property 21: Transport seam selects by target only', () => {
     // Guards the two ways this enumeration could quietly stop being
     // exhaustive: a target with no coverage, and an operation with no driver.
     expect(TARGET_IDS.length).toBe(3);
-    expect(OPERATIONS.length).toBe(11);
+    // Twelve: the eleven aws-byo-deploy operations plus `list-deployments`.
+    expect(OPERATIONS.length).toBe(12);
     expect(OPERATIONS.every(op => DRIVERS[op] !== undefined)).toBeTrue();
-    // The two operations the AWS host deliberately declares no route for, plus
-    // the one it folds into `push-spec`.
+    // The operations the AWS host deliberately declares no route for, plus the
+    // one it folds into `push-spec`.
     const awsEndpoints = DEPLOY_TARGETS['aws'].endpoints;
     expect(awsEndpoints['status']).toBeUndefined();
     expect(awsEndpoints['list-secret-names']).toBeUndefined();
     expect(awsEndpoints['push-connections']).toBeUndefined();
+    // An AWS deployment is enumerable from the user's own AWS console, so there
+    // is nothing for a deployment registry to recover there.
+    expect(awsEndpoints['list-deployments']).toBeUndefined();
   });
 });
 
@@ -1105,14 +1177,16 @@ describe('Property 22: Deployed URLs come from the registry', () => {
     // Guards the ways this enumeration could quietly stop being exhaustive.
     expect(TARGET_IDS.length).toBe(3);
     expect(WORKFLOW_ID_CASES.length).toBe(6);
-    expect(OPERATIONS.length).toBe(11);
-    expect(TARGET_IDS.length * WORKFLOW_ID_CASES.length * OPERATIONS.length).toBe(198);
+    expect(OPERATIONS.length).toBe(12);
+    expect(TARGET_IDS.length * WORKFLOW_ID_CASES.length * OPERATIONS.length).toBe(216);
     expect(new Set(WORKFLOW_ID_CASES.map(each => each.id)).size).toBe(WORKFLOW_ID_CASES.length);
     // The empty id has to be in the set: it is the only one that exercises the
     // `workflowId || 'default'` rule.
     expect(WORKFLOW_ID_CASES.some(each => each.id === '')).toBeTrue();
     // Both `scope` values are reachable, so neither branch is enumerated alone.
-    expect(ROOT_SCOPED_OPERATIONS.size).toBe(2);
+    // Three root-scoped: the two connection-vault routes plus `list-deployments`,
+    // which addresses the account rather than one instance.
+    expect(ROOT_SCOPED_OPERATIONS.size).toBe(3);
     expect(OPERATIONS.length - ROOT_SCOPED_OPERATIONS.size).toBe(9);
     // No sentinel can be mistaken for a route the registry owns.
     expect(registryOwnedFragmentsIn(`/${REGISTRY_INSTANCE_MARK}(wf/nested)`, '')).toEqual([]);

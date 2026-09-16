@@ -139,3 +139,89 @@
     font-size: 0.857rem;
   }
 }
+
+// ── Restore banner (cloud-workflow-backup Requirement 18) ────────────────────
+//
+// INLINE, above the list, dismissible. Deliberately not a modal: a user who has
+// just signed in on a fresh install must still be able to run something
+// immediately, and a dialog in front of an empty library is the opposite of that.
+//
+// `flex-shrink: 0` because this sits inside the panel's flex column scroll
+// container - without it the banner collapses to its heading height and the body
+// and buttons disappear behind `overflow: auto`.
+
+.phorma-workflows__restore {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0 0 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.5rem;
+  // The primary accent, because this is an offer rather than a warning. A literal
+  // fallback is mandatory: `color-mix` with an undefined custom property is invalid
+  // at computed-value time, and `border-color` then falls back to `currentColor`.
+  border: 1px solid color-mix(in srgb, var(--p-primary-color, #8578f6) 40%, transparent);
+  background: color-mix(in srgb, var(--p-primary-color, #8578f6) 10%, transparent);
+}
+
+.phorma-workflows__restore-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  > i {
+    flex-shrink: 0;
+    color: var(--p-primary-color, #8578f6);
+  }
+}
+
+.phorma-workflows__restore-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.929rem;
+  font-weight: 600;
+}
+
+// A sibling of the title rather than a nested control: never a `<button>` inside a
+// `<button>`, and the banner itself is not clickable.
+.phorma-workflows__restore-dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color, #71717a) 10%, transparent);
+    color: var(--p-text-color);
+  }
+}
+
+.phorma-workflows__restore-body {
+  margin: 0;
+  font-size: 0.857rem;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-workflows__restore-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+// Scoped to `.p-button` so the override wins, and the superseded padding is
+// replaced rather than layered.
+.phorma-workflows__restore-btn.p-button {
+  padding: 4px 10px;
+  gap: 5px;
+  font-size: 0.857rem;
+}

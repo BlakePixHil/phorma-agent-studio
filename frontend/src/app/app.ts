@@ -12,6 +12,8 @@ import { WorkflowService } from './core/workflow.service';
 import { PanelRegistryService } from './core/panel-registry.service';
 import { UpdateService } from './core/update.service';
 import { TelemetryService } from './core/telemetry.service';
+import { LibraryExportService } from './core/library-export.service';
+import { WorkflowBackupService } from './core/cloud/workflow-backup.service';
 import { BottomTerminal } from './layout/terminal/bottom-terminal';
 import { TerminalOutputService } from './core/terminal-output.service';
 import { AgentsPalette } from './workspace/palette/agents-palette/agents-palette';
@@ -104,6 +106,15 @@ export class App {
   private readonly onboarding = inject(OnboardingService);
   private readonly testHarness = inject(TestHarnessService);
   private readonly telemetry = inject(TelemetryService);
+  // Injected here purely to CONSTRUCT it at startup: its rewrite-on-save effect
+  // watches the workflow library, and a service nobody injects has no effect at
+  // all. Without this, "keep the export up to date" would only arm itself after
+  // the user happened to open Settings > Cloud once per session.
+  private readonly libraryExport = inject(LibraryExportService);
+  // Injected for the same reason: its upload effect watches the workflow library,
+  // and a service nobody injects has no effect at all. Backup that only armed once
+  // the user opened Settings would be missing on the day it mattered.
+  private readonly workflowBackup = inject(WorkflowBackupService);
 
   protected readonly title = signal('Phorma Agent Studio');
 

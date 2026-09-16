@@ -43,10 +43,25 @@ export interface CloudTransportResponse {
   body: string;
 }
 
+/**
+ * What a dispatch may add to one request.
+ *
+ * `headers` carries per-ENDPOINT headers only, never the credential: a transport
+ * owns its own `Authorization`, and letting a route table set that would put the
+ * credential model back in the endpoint registry. It exists because optimistic
+ * concurrency on a backup upload travels as `If-Match` (Requirement 16.2), which
+ * is a property of the endpoint rather than of how the bytes get there.
+ */
+export interface CloudTransportInit {
+  method: HttpMethod;
+  body?: string;
+  headers?: Readonly<Record<string, string>>;
+}
+
 /** The seam. One implementation per credential model, never per endpoint. */
 export interface CloudTransport {
   readonly id: 'fetch-bearer' | 'aws-cli';
-  send(url: string, init: { method: HttpMethod; body?: string }): Promise<CloudTransportResponse>;
+  send(url: string, init: CloudTransportInit): Promise<CloudTransportResponse>;
   /**
    * The URL the monitor WebSocket should open for `workflowId`.
    *
