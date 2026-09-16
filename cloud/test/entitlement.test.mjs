@@ -574,8 +574,17 @@ console.log('\n/api/me carries the grant balance as additive quota fields (requi
 // 120 iterations, matching what `stripe-webhook.test.mjs` settled on: each one is
 // several D1 round trips, and the way to keep that affordable is to fold the
 // verification reads into one statement (see `meterOf`), not to lower the count.
+//
+// SEEDED, deliberately. The coverage counters below are assertions, not
+// diagnostics, so an unseeded generator makes them a dice roll: P2's
+// `poolExhausted` bucket came up 5 in 120 locally and 0 in 120 in CI on the same
+// commit, failing the release gate for no defect. A pinned seed makes the buckets
+// a property of the generator rather than of the day, and `fast-check` is an exact
+// pin so the sequence is stable. Set FC_SEED to fuzz for new counterexamples; a
+// seed that fails is a real counterexample, so fix the code or the generator and
+// keep the run reproducible.
 
-const RUNS = { numRuns: 120 };
+const RUNS = { numRuns: 120, seed: Number(process.env.FC_SEED ?? 20260916) };
 const EPS = 1e-9;
 
 /** The counterexample fast-check reports, flattened onto one line. */
