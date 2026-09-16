@@ -1,10 +1,8 @@
-@use '../../../shared/field' as field;
-
 :host {
   display: contents;
 }
 
-/* ── Overlay + card — mirrors .phorma-confirm exactly ────────────────────── */
+// Overlay + card - mirrors .phorma-confirm exactly.
 .phorma-cloud {
   position: fixed;
   inset: 0;
@@ -30,7 +28,7 @@
   color: var(--p-text-color, #f8fafc);
 }
 
-/* ── Header — icon + title + lede, same pattern as confirm ───────────────── */
+// Header - title plus the deploy target line.
 .phorma-cloud__header {
   position: relative;
   display: flex;
@@ -56,49 +54,54 @@
   line-height: 1.55;
 }
 
-/* ── Body — sections stacked with comfortable spacing ────────────────────── */
+// Body - sections stacked with comfortable spacing.
 .phorma-cloud__body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 16px;
   margin-top: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
-/* ── Phorma Cloud account chip ───────────────────────────────────────────── */
-.phorma-cloud__account {
+// ── Target chip in the header ──────────────────────────────────
+.phorma-cloud__target {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--p-border-color, rgba(255, 255, 255, 0.12));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--p-primary-color) 6%, transparent);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 
   > i {
-    margin-top: 1px;
-    font-size: 18px;
-    color: var(--p-primary-color, #878fa3);
-  }
-}
-
-.phorma-cloud__account-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-
-  strong {
-    font-weight: 700;
-  }
-
-  span {
-    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
     font-size: 13px;
   }
 }
 
-.phorma-cloud__account-warn {
-  color: var(--p-orange-400, #fb923c) !important;
+.phorma-cloud__target-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-cloud__target-none {
+  color: var(--phorma-accent-amber, #fbbf24);
+}
+
+// Inline text action inside a note or the header line.
+.phorma-cloud__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--p-primary-color);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .phorma-cloud__note {
@@ -111,6 +114,15 @@
   color: var(--p-text-muted-color, rgba(248, 250, 252, 0.72));
   font-size: 12px;
   line-height: 1.6;
+
+  &--warn {
+    border-color: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 35%, transparent);
+    background: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 10%, transparent);
+
+    > i {
+      color: var(--phorma-accent-amber, #fbbf24);
+    }
+  }
 }
 
 .phorma-cloud__note code,
@@ -145,21 +157,97 @@
   flex-wrap: wrap;
 }
 
-.phorma-cloud__input {
-  @include field.chrome(6px);
-  flex: 1 1 200px;
-  min-width: 0;
-  padding: 7px 10px;
+// ── What goes live ──────────────────────────────────────────────
+.phorma-cloud__facts,
+.phorma-cloud__findings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
+
+  > li {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+  }
+
+  i {
+    flex: 0 0 auto;
+    color: var(--p-text-muted-color);
+  }
 }
 
-/* Label beside a read-only field in a __row (discovered AWS endpoints). */
-.phorma-cloud__field-label {
-  flex: 0 0 96px;
-  color: var(--p-text-muted-color, rgba(248, 250, 252, 0.6));
+.phorma-cloud__fact-note {
+  color: var(--p-text-muted-color);
+}
+
+.phorma-cloud__findings > li[data-severity='error'] i {
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-cloud__findings > li[data-severity='warning'] i {
+  color: var(--phorma-accent-amber, #fbbf24);
+}
+
+// A finding that names a node is clickable straight through to the canvas.
+.phorma-cloud__finding-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--p-primary-color);
+    text-decoration: underline;
+  }
+}
+
+.phorma-cloud__changes {
   font-size: 12px;
-  font-weight: 600;
+
+  > summary {
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+  }
+
+  ul {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    line-height: 1.5;
+  }
+
+  li[data-kind='added'] i {
+    color: var(--phorma-accent-green, #34d399);
+  }
+
+  li[data-kind='removed'] i {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  li[data-kind='changed'] i {
+    color: var(--phorma-accent-amber, #fbbf24);
+  }
+
+  li[data-kind='moved'] i {
+    color: var(--p-primary-color);
+  }
 }
 
 .phorma-cloud__hint {
@@ -193,39 +281,28 @@
   }
 }
 
-/* ── Footer — matches .phorma-confirm__actions ───────────────────────────── */
+// Footer - matches .phorma-confirm__actions.
 .phorma-cloud__actions {
   position: relative;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   margin-top: 20px;
 }
 
-/* PrimeNG button sizing tweak — keep the dialog actions compact. */
+// Pushes Close to the trailing edge past any recovery actions.
+.phorma-cloud__spacer {
+  flex: 1 1 auto;
+}
+
+// PrimeNG button sizing tweak - keep the dialog actions compact.
 :host ::ng-deep .phorma-cloud__btn.p-button {
   min-width: 84px;
 }
 
-/* The icon-only folder button is allowed to shrink below the min-width. */
+// The icon-only buttons are allowed to shrink below the min-width.
 :host ::ng-deep .phorma-cloud__btn--icon.p-button.p-button-icon-only {
   min-width: 0;
   padding: 0.5rem;
-}
-
-/* ── Region_Pin indicator ────────────────────────────────────────────────── */
-.phorma-cloud__region {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--p-primary-color, #8578f6);
-
-  &--none {
-    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
-    color: var(--p-text-muted-color, rgba(248, 250, 252, 0.5));
-  }
 }

@@ -1116,8 +1116,39 @@
                               }
                               <span>Set up runtime files</span>
                             </button>
+                            <!-- Wrapped: a native tooltip does not fire on a disabled button. -->
+                            <span
+                              [pTooltip]="
+                                isDesktop
+                                  ? 'Runs npx wrangler deploy. Output streams to the console.'
+                                  : 'Deploying runs wrangler locally, so it needs the desktop app.'
+                              "
+                              tooltipPosition="top"
+                            >
+                              <button
+                                pButton
+                                type="button"
+                                class="phorma-settings__btn phorma-btn-content"
+                                size="small"
+                                [disabled]="!isDesktop || cloud.deploying() || !cloud.cloudFolder()"
+                                (click)="cloud.deploy()"
+                              >
+                                @if (cloud.deploying()) {
+                                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                                } @else {
+                                  <i class="ti ti-cloud-up" aria-hidden="true"></i>
+                                }
+                                <span>{{ cloud.deploying() ? 'Deploying' : 'Deploy worker' }}</span>
+                              </button>
+                            </span>
                           </div>
-                          @if (deployWorkspace.preparing() === 'cloud') {
+                          @if (cloud.deploying()) {
+                            <p class="phorma-settings__note phorma-settings__note--info">
+                              <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+                              Publishing the worker with wrangler. Output is streaming to the
+                              console.
+                            </p>
+                          } @else if (deployWorkspace.preparing() === 'cloud') {
                             <p class="phorma-settings__note phorma-settings__note--info">
                               <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
                               Unpacking the runtime and installing dependencies. Output is
@@ -1131,8 +1162,10 @@
                             </p>
                           }
                           <p class="phorma-settings__hint">
-                            Run this again after the app updates: it refreshes the worker source so
-                            your next deploy carries the newest portal and runtime.
+                            Set up runtime files again after the app updates: it refreshes the
+                            worker source. Deploy worker then publishes it to your Cloudflare
+                            account with <code>npx wrangler deploy</code>. Both are one-time setup
+                            steps - deploying a workflow afterwards needs neither.
                           </p>
                         </div>
 
@@ -1171,6 +1204,12 @@
                             aria-label="Cloudflare worker URL"
                           />
                         </div>
+                        @if (workerUrlError(); as error) {
+                          <p class="phorma-settings__note phorma-settings__note--warn">
+                            <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                            {{ error }}
+                          </p>
+                        }
                         <div class="phorma-settings__row">
                           <span class="phorma-settings__row-label">
                             Token
@@ -1198,6 +1237,20 @@
                             aria-label="Worker bearer token"
                           />
                         </div>
+                        <div class="phorma-settings__row">
+                          <span class="phorma-settings__row-label">Remember token</span>
+                          <p-toggleswitch
+                            size="small"
+                            [ngModel]="settings.rememberCloudToken()"
+                            (ngModelChange)="onRememberCloudTokenChange($event)"
+                            ariaLabel="Remember the worker token on this machine"
+                          />
+                        </div>
+                        <p class="phorma-settings__hint">
+                          Off by default. The token is kept for this session only, because a
+                          stored copy sits in plain text on disk and is readable by anything
+                          running in the app.
+                        </p>
                         <!-- Connection test -->
                         <div class="phorma-settings__row phorma-settings__row--actions">
                           <p-button

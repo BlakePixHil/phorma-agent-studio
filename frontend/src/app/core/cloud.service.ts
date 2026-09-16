@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
@@ -54,6 +54,9 @@ import type {
 } from './portal.model';
 
 export type CloudConnectionState = 'disconnected' | 'connecting' | 'connected';
+
+/** The step of a push that is currently running. */
+export type PushPhase = 'connections' | 'validating' | 'uploading' | null;
 
 /**
  * Drops the local-only projection fields (`secretsPresent`, `usedByWorkflowIds`)
@@ -123,8 +126,15 @@ export class CloudService {
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
-  /** Bearer token matching the worker's PHORMA_TOKEN secret (optional). */
-  readonly token = signal(loadLayout('cloudToken', ''));
+  /**
+   * Bearer token matching the worker's PHORMA_TOKEN secret (optional).
+   *
+   * Only read back from storage when the user opted into remembering it - see
+   * {@link setToken} and `SettingsService.rememberCloudToken`.
+   */
+  readonly token = signal(
+    loadLayout('rememberCloudToken', false) ? loadLayout('cloudToken', '') : '',
+  );
   /**
    * Absolute path of the runtime folder wrangler deploys from.
    *
@@ -175,6 +185,18 @@ export class CloudService {
   readonly deploying = signal(false);
   readonly connected = computed(() => this.connection() === 'connected');
   /**
+   * True while {@link pushWorkflow} has work in flight. Distinct from
+   * {@link deploying}, which covers provisioning the worker itself.
+   */
+  readonly pushing = signal(false);
+  /** Which step of a push is running, so the button can name it. */
+  readonly pushPhase = signal<PushPhase>(null);
+  /**
+   * Findings from the last push attempt, authoritative over the studio's own
+   * pre-flight because the host validates against an inventory only it can read.
+   */
+  readonly lastPushFindings = signal<CapabilityFinding[]>([]);
+  /**
    * Deployment status of the active workflow on the current provider's
    * instance, for the Cloud dialog's status indicator. `null` means unknown
    * (never checked, or the worker was unreachable) - never read as "not
@@ -205,6 +227,12 @@ export class CloudService {
   constructor() {
     // Persist connection settings across sessions.
     // (Best-effort localStorage writes; see layout-storage.)
+
+    // Toggling the opt-in has to act on the token already held: turning it off
+    // must erase a copy written while it was on.
+    effect(() => {
+      saveLayout('cloudToken', this.settings.rememberCloudToken() ? untracked(this.token) : '');
+    });
   }
 
   setWorkerUrl(url: string): void {
@@ -212,9 +240,14 @@ export class CloudService {
     saveLayout('cloudWorkerUrl', this.workerUrl());
   }
 
+  /**
+   * Sets the worker bearer token, persisting it only when the user asked us to.
+   * Otherwise it is session state and the stored copy is actively cleared, so
+   * turning the option off removes a token written while it was on.
+   */
   setToken(token: string): void {
     this.token.set(token.trim());
-    saveLayout('cloudToken', this.token());
+    saveLayout('cloudToken', this.settings.rememberCloudToken() ? this.token() : '');
   }
 
   setCloudFolder(path: string): void {
@@ -581,17 +614,21 @@ export class CloudService {
   }
 
   /**
-   * Uploads the active spec to its WorkflowAgent instance. Resolves true only
-   * when the worker accepted it - callers that need the outcome (the studio
-   * assistant's deploy action) must not infer success from the absence of a
-   * throw, because every failure path here is a toast.
+   * Uploads a spec to its WorkflowAgent instance. Resolves true only when the
+   * worker accepted it - callers that need the outcome (the studio assistant's
+   * deploy action) must not infer success from the absence of a throw, because
+   * every failure path here is a toast.
+   *
+   * `source` defaults to the active document. A caller passes one explicitly to
+   * redeploy a previous snapshot without rewriting the canvas.
    */
-  async pushWorkflow(): Promise<boolean> {
-    if (this.workflow.activeDoc()?.readOnly) {
+  async pushWorkflow(source?: WorkflowSpec): Promise<boolean> {
+    if (this.pushing()) return false;
+    if (!source && this.workflow.activeDoc()?.readOnly) {
       this.toast.warning('Preview is read-only', 'Restore this version before pushing it to the cloud.');
       return false;
     }
-    const rawSpec = this.workflow.exportActiveSpec();
+    const rawSpec = source ?? this.workflow.exportActiveSpec();
     if (!rawSpec) return false;
     const spec = this.materializeDefaults(rawSpec);
     const base = this.instanceUrl(spec.id);
@@ -612,6 +649,7 @@ export class CloudService {
       this.telemetry.count(counterName('deploy.started', deployTarget));
     }
 
+    this.pushing.set(true);
     try {
       // Requirement 3.6: the host's connection inventory comes ONLY from
       // connection metadata - names, types and auth modes, never a secret
@@ -619,6 +657,7 @@ export class CloudService {
       // the SAME inventory the target host will resolve against. A target that
       // folds this into the spec push declares no separate route, and the
       // metadata travels in the `push-spec` payload below instead.
+      this.pushPhase.set('connections');
       const summaries = await this.connectionStore.list();
       const metadata = summaries.map(toConnectionMetadata);
       await this.pushConnectionMetadata(spec.id, metadata);
@@ -627,6 +666,7 @@ export class CloudService {
       // capability record and the target's connection inventory, after default
       // materialisation and before the deployment request. Any error finding
       // aborts the push. Write all findings to the Problems console either way.
+      this.pushPhase.set('validating');
       const provider = this.settings.cloudProvider();
       const capabilities = provider
         ? DEPLOY_TARGETS[provider].capabilities
@@ -635,6 +675,7 @@ export class CloudService {
       const findings = validateAgainstCapabilities(spec, capabilities, connections);
       // Always write findings to Problems console (Requirement 16.4).
       this.reportCapabilityFindings(findings);
+      this.lastPushFindings.set(findings);
       const errors = findings.filter(finding => finding.severity === 'error');
       if (errors.length > 0) {
         // The spec validation surface: the push is abandoned because the spec
@@ -647,11 +688,12 @@ export class CloudService {
         this.toast.error(
           'Push aborted',
           `${errors.length} problem${errors.length === 1 ? '' : 's'} would prevent this workflow ` +
-            `from running on ${capabilities.label}. See the Problems console.`,
+            `from running on ${capabilities.label}.`,
         );
         return false;
       }
 
+      this.pushPhase.set('uploading');
       const result = await this.call(
         'push-spec',
         { workflowId: spec.id },
@@ -661,7 +703,9 @@ export class CloudService {
       if (result.ok === false) {
         // Requirement 16.8: when the Host_Adapter returns its own findings,
         // treat them as authoritative and write them to the Problems console.
-        this.reportCapabilityFindings(readFindings(result.detail));
+        const hostFindings = readFindings(result.detail);
+        this.reportCapabilityFindings(hostFindings);
+        if (hostFindings.length > 0) this.lastPushFindings.set(hostFindings);
         throw new Error(result.error);
       }
       await this.versions.recordDeploy(rawSpec).catch(() => undefined);
@@ -677,6 +721,9 @@ export class CloudService {
       this.telemetry.recordError('deploy');
       this.toast.error('Push failed', error instanceof Error ? error.message : String(error));
       return false;
+    } finally {
+      this.pushPhase.set(null);
+      this.pushing.set(false);
     }
   }
 

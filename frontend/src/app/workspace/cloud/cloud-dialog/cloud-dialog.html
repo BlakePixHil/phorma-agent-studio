@@ -1,310 +1,189 @@
 @if (dialog.visible()) {
-  <div class="phorma-cloud" role="presentation" (click)="dialog.close()">
+  <div class="phorma-cloud" role="presentation" (click)="onBackdropClick()">
     <section
+      #card
       class="phorma-cloud__card"
       role="dialog"
       aria-modal="true"
-      aria-label="Cloud"
+      tabindex="-1"
+      [attr.aria-labelledby]="titleId"
       (click)="$event.stopPropagation()"
+      (keydown)="onCardKeydown($event)"
     >
       <header class="phorma-cloud__header">
         <div>
-          <h2>{{ provider() === 'phorma' ? 'Phorma Cloud' : provider() === 'aws' ? 'AWS' : 'Cloud' }}</h2>
-          @if (provider() === 'phorma') {
-            <p>Run your agents on Phorma's infrastructure — no setup needed.</p>
-          } @else if (provider() === 'aws') {
-            <p>
-              Deploy to <strong>your</strong> AWS account (ECS Fargate). Phorma hosts nothing.
-              @if (awsRegionLabel(); as region) {
-                <span class="phorma-cloud__region">Region: {{ region }}</span>
-              } @else {
-                <span class="phorma-cloud__region phorma-cloud__region--none">Region not configured</span>
-              }
-            </p>
-          } @else {
-            <p>Deploy to <strong>your</strong> Cloudflare account. Phorma hosts nothing.</p>
-          }
+          <h2 [id]="titleId">Deploy "{{ workflow.activeName() }}"</h2>
+          <p class="phorma-cloud__target">
+            <i class="ti ti-target-arrow" aria-hidden="true"></i>
+            <span>{{ providerLabel() }}</span>
+            @if (targetEndpoint(); as endpoint) {
+              <code class="phorma-cloud__target-url">{{ endpoint }}</code>
+            } @else {
+              <span class="phorma-cloud__target-none">not configured</span>
+            }
+            <button type="button" class="phorma-cloud__link" (click)="openCloudSettings()">
+              Configure
+            </button>
+          </p>
         </div>
-        <p-button
-          styleClass="phorma-cloud__btn phorma-cloud__btn--icon"
-          [text]="true"
-          severity="secondary"
-          size="small"
-          icon="ti ti-settings"
-          pTooltip="Change cloud provider"
-          (onClick)="openCloudSettings()"
-          ariaLabel="Change cloud provider"
-        />
       </header>
 
       <div class="phorma-cloud__body">
-        @if (provider() === 'phorma') {
-          <div class="phorma-cloud__account">
-            <i class="ti ti-user-circle" aria-hidden="true"></i>
-            <div class="phorma-cloud__account-text">
-              @if (phormaCloud.signedIn()) {
-                <strong>{{ phormaCloud.email() ?? 'Phorma account' }}</strong>
-                @if (phormaCloud.profile(); as profile) {
-                  @if (profile.provisioned && profile.status === 'active' && profile.quota) {
-                    <span>
-                      {{ tierLabel(profile.tier) }} plan ·
-                      {{ profile.quota!.runsUsed }}/{{ profile.quota!.runsLimit }} runs ·
-                      {{ profile.quota!.creditsUsed | number }} of
-                      {{ profile.quota!.creditsLimit | number }} credits used
-                    </span>
-                  } @else if (profile.provisioned) {
-                    <span class="phorma-cloud__account-warn">
-                      Subscription {{ profile.status }} — runs are paused.
-                    </span>
+        <!-- What a deploy puts live -->
+        @if (deploySummary(); as summary) {
+          <section class="phorma-cloud__section">
+            <h3 class="phorma-cloud__heading">What goes live</h3>
+            <ul class="phorma-cloud__facts">
+              <li>
+                <i class="ti ti-robot" aria-hidden="true"></i>
+                {{ summary.agents }} {{ summary.agents === 1 ? 'agent' : 'agents' }}
+                @if (summary.subWorkflows > 0) {
+                  <span class="phorma-cloud__fact-note">
+                    including {{ summary.subWorkflows }} embedded
+                    {{ summary.subWorkflows === 1 ? 'workflow' : 'workflows' }}
+                  </span>
+                }
+              </li>
+              @for (schedule of summary.schedules; track schedule.nodeId) {
+                <li>
+                  <i class="ti ti-clock-play" aria-hidden="true"></i>
+                  <strong>{{ schedule.nodeName }}</strong>
+                  <span class="phorma-cloud__fact-note">{{ schedule.description }}</span>
+                </li>
+              }
+              @if (summary.portalSlugs.length > 0) {
+                <li>
+                  <i class="ti ti-world-share" aria-hidden="true"></i>
+                  Public portal
+                  @if (summary.portalSlugs[0]) {
+                    <code>/p/{{ summary.portalSlugs[0] }}</code>
                   } @else {
-                    <span class="phorma-cloud__account-warn">
-                      No subscription yet — activate in Settings.
-                    </span>
+                    <span class="phorma-cloud__fact-note">address assigned on publish</span>
                   }
-                } @else if (phormaCloud.loading()) {
-                  <span>Checking your account…</span>
-                } @else if (phormaCloud.error(); as err) {
-                  <span class="phorma-cloud__account-warn">{{ err }}</span>
-                }
+                </li>
+              }
+              @if (summary.webhooks > 0) {
+                <li>
+                  <i class="ti ti-webhook" aria-hidden="true"></i>
+                  {{ summary.webhooks }} callable HTTP
+                  {{ summary.webhooks === 1 ? 'endpoint' : 'endpoints' }}
+                </li>
+              }
+            </ul>
+
+            @if (deployDiff(); as changes) {
+              @if (changes.length === 0) {
+                <p class="phorma-cloud__hint">
+                  <i class="ti ti-circle-check" aria-hidden="true"></i>
+                  Identical to the version already deployed.
+                </p>
               } @else {
-                <strong>Not signed in</strong>
-                <span>Sign in from Settings → Cloud to publish workflows.</span>
+                <details class="phorma-cloud__changes">
+                  <summary>
+                    {{ changes.length }}
+                    {{ changes.length === 1 ? 'change' : 'changes' }} since the deployed version
+                  </summary>
+                  <ul>
+                    @for (change of changes; track $index) {
+                      <li [attr.data-kind]="change.kind">
+                        <i [class]="change.icon" aria-hidden="true"></i>
+                        <span>{{ change.text }}</span>
+                      </li>
+                    }
+                  </ul>
+                </details>
               }
-            </div>
-          </div>
-        }
-
-        @if (provider() === 'cloudflare') {
-          <p class="phorma-cloud__note">
-            One-time setup: run <code>npx wrangler login</code>, then set provider secrets with
-            <code>npx wrangler secret put ANTHROPIC_API_KEY</code> and optionally
-            <code>npx wrangler secret put PHORMA_TOKEN</code> to protect the endpoints.
-          </p>
-
-          <!-- 1 · Deploy the worker -->
-          <section class="phorma-cloud__section">
-            <h3 class="phorma-cloud__heading">1 · Deploy the worker</h3>
-            <div class="phorma-cloud__row">
-              <input
-                type="text"
-                class="phorma-cloud__input"
-                placeholder="Runtime folder - set it up in Settings › Cloud"
-                [value]="cloud.cloudFolder()"
-                (input)="onFolderInput($event)"
-              />
-              @if (isDesktop) {
-                <p-button
-                  styleClass="phorma-cloud__btn phorma-cloud__btn--icon"
-                  [text]="true"
-                  severity="secondary"
-                  size="small"
-                  icon="ti ti-folder-open"
-                  (onClick)="cloud.pickCloudFolder()"
-                  ariaLabel="Browse for cloud folder"
-                />
-              }
-              <p-button
-                styleClass="phorma-cloud__btn"
-                size="small"
-                [disabled]="cloud.deploying() || !isDesktop"
-                [loading]="cloud.deploying()"
-                [label]="cloud.deploying() ? 'Deploying' : 'Deploy'"
-                [icon]="cloud.deploying() ? 'ti ti-loader-2' : 'ti ti-cloud-up'"
-                (onClick)="cloud.deploy()"
-                [title]="isDesktop ? 'Runs npx wrangler deploy (output streams to the console)' : 'Desktop app only'"
-              />
-            </div>
-            @if (!isDesktop) {
-              <p class="phorma-cloud__hint">Deploying runs wrangler locally — use the desktop app.</p>
-            } @else {
-              <p class="phorma-cloud__hint">Runs <code>npx wrangler deploy</code> — output streams to the console.</p>
-            }
-          </section>
-
-          <!-- 2 · Worker URL & token -->
-          <section class="phorma-cloud__section">
-            <h3 class="phorma-cloud__heading">2 · Worker URL &amp; token</h3>
-            <div class="phorma-cloud__row">
-              <input
-                type="text"
-                class="phorma-cloud__input"
-                placeholder="https://phorma-agent-studio-cloud.you.workers.dev"
-                [value]="cloud.workerUrl()"
-                (input)="onUrlInput($event)"
-              />
-            </div>
-            <div class="phorma-cloud__row">
-              <input
-                type="password"
-                class="phorma-cloud__input"
-                placeholder="PHORMA_TOKEN (leave empty if none set)"
-                [value]="cloud.token()"
-                (input)="onTokenInput($event)"
-                autocomplete="off"
-              />
-            </div>
-          </section>
-        }
-
-        <!--
-          BYO AWS body section. Every class here is one the Cloudflare body
-          already uses (__section, __heading, __row, __input, __hint, __note),
-          so the sheet grows by one label rule rather than a per-control block.
-          The configuration itself is edited in Settings - this surface only
-          plans, deploys, runs doctor and shows what a deploy discovered.
-        -->
-        @if (provider() === 'aws') {
-          <!-- 1 · Plan and deploy -->
-          <section class="phorma-cloud__section">
-            <h3 class="phorma-cloud__heading">1 · Plan and deploy</h3>
-            @if (!isDesktop) {
-              <p class="phorma-cloud__note">
-                <i class="ti ti-device-desktop" aria-hidden="true"></i>
-                Deploying to AWS needs the desktop app.
-              </p>
-            }
-            @if (!awsConfig.valid()) {
-              <p class="phorma-cloud__note">
-                <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-                {{ awsInvalidFieldsLabel() }}. Finish the AWS configuration in Settings.
-              </p>
-            }
-            <div class="phorma-cloud__row">
-              <button
-                pButton
-                type="button"
-                class="phorma-cloud__btn phorma-btn-content"
-                size="small"
-                [disabled]="awsControlsDisabled()"
-                (click)="runAwsPlanAndDeploy()"
-              >
-                @if (awsDeployRunning()) {
-                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
-                } @else {
-                  <i class="ti ti-cloud-up" aria-hidden="true"></i>
-                }
-                <span>Plan and deploy</span>
-              </button>
-              <button
-                pButton
-                type="button"
-                class="phorma-cloud__btn"
-                severity="secondary"
-                [text]="true"
-                size="small"
-                [disabled]="awsControlsDisabled()"
-                (click)="runAwsDoctor()"
-              >
-                @if (awsDoctorRunning()) {
-                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
-                } @else {
-                  <i class="ti ti-stethoscope" aria-hidden="true"></i>
-                }
-                <span>Doctor</span>
-              </button>
-            </div>
-            @if (awsCli.running()) {
-              <!--
-                No Cancel control: the Deploy_Runner exposes no cancellation for
-                a streamed command, and killing a cdk deploy mid-flight is worse
-                than letting it settle. The console link is the affordance.
-              -->
-              <div class="phorma-cloud__row">
-                <span class="phorma-cloud__hint">
-                  <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
-                  Running. Output is streaming to the console.
-                </span>
-                <button
-                  pButton
-                  type="button"
-                  class="phorma-cloud__btn"
-                  severity="secondary"
-                  [text]="true"
-                  size="small"
-                  (click)="openRunConsole()"
-                >
-                  <i class="ti ti-terminal-2" aria-hidden="true"></i>
-                  <span>Open console</span>
-                </button>
-              </div>
             } @else {
               <p class="phorma-cloud__hint">
-                Runs <code>npx phorma-aws plan</code>, then asks before
-                <code>cdk deploy</code>. Output streams to the console.
+                <i class="ti ti-cloud-plus" aria-hidden="true"></i>
+                This workflow has not been deployed before.
               </p>
             }
-          </section>
 
-          <!-- 2 · Discovered endpoints -->
-          <section class="phorma-cloud__section">
-            <h3 class="phorma-cloud__heading">2 · Discovered endpoints</h3>
-            <div class="phorma-cloud__row">
-              <label class="phorma-cloud__field-label" [attr.for]="awsFieldId('triggerApiUrl')">
-                Trigger API
-              </label>
-              <input
-                [id]="awsFieldId('triggerApiUrl')"
-                type="text"
-                class="phorma-cloud__input"
-                placeholder="Written by the deploy"
-                [value]="awsConfig.triggerApiUrl()"
-                readonly
-              />
-            </div>
-            <div class="phorma-cloud__row">
-              <label class="phorma-cloud__field-label" [attr.for]="awsFieldId('monitorApiUrl')">
-                Monitor API
-              </label>
-              <input
-                [id]="awsFieldId('monitorApiUrl')"
-                type="text"
-                class="phorma-cloud__input"
-                placeholder="Written by the deploy"
-                [value]="awsConfig.monitorApiUrl()"
-                readonly
-              />
-            </div>
-            @if (awsEndpointsIncomplete()) {
-              <p class="phorma-cloud__note">
+            @if (hasUnsavedEdits()) {
+              <p class="phorma-cloud__note phorma-cloud__note--warn">
                 <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-                Push, runs and live monitoring stay unavailable until a deploy completes.
+                This tab has unsaved edits. Deploying sends them as they are on the canvas.
+                <button type="button" class="phorma-cloud__link" (click)="saveWorkflow()">
+                  Save now
+                </button>
               </p>
             }
           </section>
         }
 
-        <!-- Push + monitor (both providers) -->
-        <section class="phorma-cloud__section">
+        <!-- Problems found before the push -->
+        @if (findings().length > 0) {
+          <section class="phorma-cloud__section" aria-label="Deployment problems">
+            <h3 class="phorma-cloud__heading">
+              @if (preflightErrors().length > 0) {
+                {{ preflightErrors().length }} blocking
+                {{ preflightErrors().length === 1 ? 'problem' : 'problems' }}
+              } @else {
+                {{ findings().length }} {{ findings().length === 1 ? 'warning' : 'warnings' }}
+              }
+            </h3>
+            <ul class="phorma-cloud__findings">
+              @for (finding of findings(); track $index) {
+                <li [attr.data-severity]="finding.severity">
+                  <i
+                    class="ti"
+                    [class.ti-alert-octagon]="finding.severity === 'error'"
+                    [class.ti-alert-triangle]="finding.severity !== 'error'"
+                    aria-hidden="true"
+                  ></i>
+                  @if (finding.nodeId) {
+                    <button
+                      type="button"
+                      class="phorma-cloud__finding-btn"
+                      (click)="revealFinding(finding)"
+                    >
+                      {{ finding.message }}
+                    </button>
+                  } @else {
+                    <span>{{ finding.message }}</span>
+                  }
+                </li>
+              }
+            </ul>
+          </section>
+        }
+
+        <!-- Deploy + monitor -->
+        <section class="phorma-cloud__section" [attr.aria-busy]="cloud.pushing()">
           <h3 class="phorma-cloud__heading">
-            {{ provider() === 'phorma' ? 'Publish & watch' : '3 · Push & monitor' }}
-            "{{ workflow.activeName() }}"
+            {{ provider() === 'phorma' ? 'Publish & watch' : 'Deploy & monitor' }}
           </h3>
           <div class="phorma-cloud__row">
             <p-button
               styleClass="phorma-cloud__btn"
-              [outlined]="true"
               size="small"
-              icon="ti ti-upload"
-              [label]="provider() === 'phorma' ? 'Publish workflow' : 'Push workflow'"
-              (onClick)="cloud.pushWorkflow()"
+              icon="ti ti-cloud-up"
+              [label]="deployLabel()"
+              [loading]="cloud.pushing()"
+              [disabled]="deployBlockedReason() !== null"
+              (onClick)="deploy()"
             />
-            @if (!cloud.connected()) {
+            @if (cloud.connected()) {
               <p-button
                 styleClass="phorma-cloud__btn"
+                [text]="true"
+                severity="secondary"
                 size="small"
-                icon="ti ti-plug-connected"
-                [label]="provider() === 'phorma' ? 'Watch live' : 'Connect monitor'"
-                (onClick)="cloud.connect()"
+                icon="ti ti-plug-connected-x"
+                label="Stop watching"
+                (onClick)="cloud.disconnect()"
               />
             } @else {
               <p-button
                 styleClass="phorma-cloud__btn"
+                [text]="true"
+                severity="secondary"
                 size="small"
-                severity="danger"
-                [outlined]="true"
-                icon="ti ti-plug-connected-x"
-                label="Disconnect"
-                (onClick)="cloud.disconnect()"
+                icon="ti ti-plug-connected"
+                [label]="cloud.connection() === 'connecting' ? 'Connecting' : 'Watch live'"
+                [loading]="cloud.connection() === 'connecting'"
+                (onClick)="cloud.connect()"
               />
             }
             <span class="phorma-cloud__status" [class.phorma-cloud__status--on]="cloud.connected()">
@@ -312,19 +191,25 @@
               {{ cloud.connection() }}
             </span>
           </div>
+
+          @if (deployBlockedMessage(); as blocked) {
+            <p class="phorma-cloud__note phorma-cloud__note--warn" role="status">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              {{ blocked }}
+              @if (deployBlockedAction() === 'settings') {
+                <button type="button" class="phorma-cloud__link" (click)="openCloudSettings()">
+                  Open Settings
+                </button>
+              } @else if (deployBlockedAction() === 'save') {
+                <button type="button" class="phorma-cloud__link" (click)="saveWorkflow()">
+                  Save workflow
+                </button>
+              }
+            </p>
+          }
+
           <div class="phorma-cloud__row">
             @if (deployedStatus(); as deployStatus) {
-              @if (deployStatus.hasWorkflow) {
-                <p-button
-                  styleClass="phorma-cloud__btn"
-                  [text]="true"
-                  severity="danger"
-                  size="small"
-                  icon="ti ti-cloud-off"
-                  label="Remove from cloud"
-                  (onClick)="removeFromCloud()"
-                />
-              }
               <span
                 class="phorma-cloud__status"
                 [class.phorma-cloud__status--on]="deployStatus.hasWorkflow"
@@ -337,30 +222,69 @@
                 }
               </span>
             } @else if (cloud.statusLoading()) {
-              <span class="phorma-cloud__hint">Checking deployment status…</span>
+              <span class="phorma-cloud__hint">Checking deployment status...</span>
+            } @else {
+              <span class="phorma-cloud__hint">Deployment status unknown.</span>
             }
+            <p-button
+              styleClass="phorma-cloud__btn phorma-cloud__btn--icon"
+              [text]="true"
+              severity="secondary"
+              size="small"
+              icon="ti ti-refresh"
+              [loading]="cloud.statusLoading()"
+              ariaLabel="Refresh deployment status"
+              (onClick)="refreshStatus()"
+            />
           </div>
+
           @if (provider() === 'phorma') {
             <p class="phorma-cloud__hint">
-              While watching, Run in the Runs panel starts your agents in Phorma Cloud and
-              the canvas animates everything live — exactly like running locally.
+              While watching, Run in the Runs panel starts your agents in Phorma Cloud and the
+              canvas animates everything live, exactly like running locally.
             </p>
           } @else {
             <p class="phorma-cloud__hint">
-              While connected, Run in the Runs panel triggers the cloud instance and the
-              canvas animates its events live — identical to a local run.
+              While connected, Run in the Runs panel triggers the cloud instance and the canvas
+              animates its events live, identical to a local run.
             </p>
           }
         </section>
       </div>
 
       <footer class="phorma-cloud__actions">
+        @if (previousDeployed()) {
+          <p-button
+            styleClass="phorma-cloud__btn"
+            [text]="true"
+            severity="secondary"
+            size="small"
+            icon="ti ti-history"
+            label="Redeploy previous"
+            [disabled]="cloud.pushing()"
+            (onClick)="redeployPrevious()"
+          />
+        }
+        @if (deployedStatus()?.hasWorkflow) {
+          <p-button
+            styleClass="phorma-cloud__btn"
+            [text]="true"
+            severity="danger"
+            size="small"
+            icon="ti ti-cloud-off"
+            label="Remove from cloud"
+            [disabled]="cloud.pushing()"
+            (onClick)="removeFromCloud()"
+          />
+        }
+        <span class="phorma-cloud__spacer"></span>
         <p-button
           styleClass="phorma-cloud__btn"
           [text]="true"
           severity="secondary"
           size="small"
           label="Close"
+          [disabled]="cloud.pushing()"
           (onClick)="dialog.close()"
         />
       </footer>

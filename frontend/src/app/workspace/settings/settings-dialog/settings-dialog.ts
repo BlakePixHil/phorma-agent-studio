@@ -827,8 +827,27 @@ export class SettingsDialog {
     this.cloud.setWorkerUrl((event.target as HTMLInputElement | null)?.value ?? '');
   }
 
+  /** What is wrong with the entered worker URL, or null. */
+  protected readonly workerUrlError = computed(() => {
+    const value = this.cloud.workerUrl();
+    if (!value) return null;
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return 'That is not a valid URL. It should look like https://my-worker.you.workers.dev';
+    }
+    return url.protocol === 'https:' ? null : 'The worker URL must use https.';
+  });
+
   protected onCloudTokenInput(event: Event): void {
     this.cloud.setToken((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  /** Re-writes the token through the setter so the new choice takes effect now. */
+  protected onRememberCloudTokenChange(remember: boolean): void {
+    this.settings.rememberCloudToken.set(remember);
+    this.cloud.setToken(this.cloud.token());
   }
 
   protected onCloudFolderInput(event: Event): void {

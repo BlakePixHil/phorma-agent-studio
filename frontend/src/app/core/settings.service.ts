@@ -136,6 +136,15 @@ export class SettingsService {
     loadLayout<CloudProviderChoice>('cloudProvider', null),
   );
 
+  /**
+   * Whether the worker bearer token is written to localStorage.
+   *
+   * Off by default: a `PHORMA_TOKEN` in localStorage is readable by anything
+   * that reaches the renderer and survives on disk in plain text. Left off, the
+   * token lives in memory for the session only and is re-entered next launch.
+   */
+  readonly rememberCloudToken = signal(loadLayout('rememberCloudToken', false));
+
   // ── Library export (cloud-workflow-backup, Requirement 21) ──────────────
 
   /**
@@ -177,6 +186,7 @@ export class SettingsService {
     effect(() => saveLayout('gridSnapSize', this.gridSnapSize()));
     effect(() => saveLayout('autoUpdate', this.autoUpdate()));
     effect(() => saveLayout('cloudProvider', this.cloudProvider()));
+    effect(() => saveLayout('rememberCloudToken', this.rememberCloudToken()));
     effect(() => saveLayout('libraryExportOnSave', this.libraryExportOnSave()));
   }
 
