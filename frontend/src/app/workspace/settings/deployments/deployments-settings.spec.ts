@@ -12,6 +12,11 @@
  * - Losing the orphan badge, which is the only signal that a row cannot be
  *   opened, edited or deleted locally (Requirement 6.3).
  * - Firing Stop or Delete without a confirmation (Requirement 7.3).
+ *
+ * The list is a collapsed disclosure by default, so most specs here expand it
+ * first. `expand()` drives the native element and dispatches `toggle`, which is
+ * what a click does - setting the signal directly would pass even if the summary
+ * were unreachable.
  */
 
 import { signal } from '@angular/core';
@@ -115,6 +120,22 @@ describe('DeploymentsSettings', () => {
     return (fixture.nativeElement as HTMLElement).textContent ?? '';
   }
 
+  /** Opens the disclosure the way a click on its summary does. */
+  function expand(): void {
+    const details = (fixture.nativeElement as HTMLElement).querySelector('details');
+    if (!details) throw new Error('No disclosure in the deployments section.');
+    details.open = true;
+    details.dispatchEvent(new Event('toggle'));
+    fixture.detectChanges();
+  }
+
+  function summary(): string {
+    const status = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
+      '.settings-section__status',
+    );
+    return (status?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  }
+
   function buttonLabelled(label: string): HTMLButtonElement | undefined {
     return [...(fixture.nativeElement as HTMLElement).querySelectorAll('button')].find(
       button => (button.textContent ?? '').trim() === label,
@@ -166,6 +187,42 @@ describe('DeploymentsSettings', () => {
 
     expect((local.nativeElement as HTMLElement).textContent?.trim()).toBe('');
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  // ── Disclosure ────────────────────────────────────────────────────────────
+
+  function details(): HTMLDetailsElement {
+    return (fixture.nativeElement as HTMLElement).querySelector('details')!;
+  }
+
+  it('starts collapsed, and says what it is hiding', () => {
+    rows.set([row(), row({ workflowId: 'wf-two', creditsSpent: 30 })]);
+    fixture.detectChanges();
+
+    expect(details().open).toBeFalse();
+    expect(summary()).toBe('2 deployments · 42 credits this month');
+  });
+
+  it('opens itself for a deployment with no local copy', () => {
+    rows.set([row({ orphan: true })]);
+    fixture.detectChanges();
+
+    expect(details().open).toBeTrue();
+    expect(summary()).toContain('1 with no local copy');
+  });
+
+  it('opens itself when the read failed, so the failure is not hidden', () => {
+    error.set('Control plane unavailable.');
+    fixture.detectChanges();
+
+    expect(details().open).toBeTrue();
+  });
+
+  it('claims no credit total when a deployment cannot report its spend (5.5)', () => {
+    rows.set([row({ creditsSpent: 12 }), row({ workflowId: 'wf-two', creditsSpent: null })]);
+    fixture.detectChanges();
+
+    expect(summary()).toBe('2 deployments');
   });
 
   // ── Rows ──────────────────────────────────────────────────────────────────
@@ -252,6 +309,7 @@ describe('DeploymentsSettings', () => {
   it('confirms before stopping a deployment (7.3)', async () => {
     rows.set([row()]);
     fixture.detectChanges();
+    expand();
 
     buttonLabelled('Stop')!.click();
     await fixture.whenStable();
@@ -264,6 +322,7 @@ describe('DeploymentsSettings', () => {
   it('does not stop a deployment when the confirmation is declined', async () => {
     rows.set([row()]);
     fixture.detectChanges();
+    expand();
     confirmResult = false;
 
     buttonLabelled('Stop')!.click();
@@ -275,6 +334,7 @@ describe('DeploymentsSettings', () => {
   it('confirms before deleting, and says it cannot be undone (7.3)', async () => {
     rows.set([row()]);
     fixture.detectChanges();
+    expand();
 
     buttonLabelled('Delete')!.click();
     await fixture.whenStable();
@@ -286,6 +346,7 @@ describe('DeploymentsSettings', () => {
   it('warns that an orphan has no local copy before destroying it', async () => {
     rows.set([row({ orphan: true })]);
     fixture.detectChanges();
+    expand();
 
     buttonLabelled('Delete')!.click();
     await fixture.whenStable();
@@ -296,6 +357,7 @@ describe('DeploymentsSettings', () => {
   it('tells a user with a local copy that it is not touched', async () => {
     rows.set([row({ orphan: false })]);
     fixture.detectChanges();
+    expand();
 
     buttonLabelled('Delete')!.click();
     await fixture.whenStable();
@@ -313,6 +375,7 @@ describe('DeploymentsSettings', () => {
       row({ orphan: true, cronArmed: true, portalSlug: 'invoices', localName: 'Renamed' }),
     ]);
     fixture.detectChanges();
+    expand();
 
     const element = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
       '.settings-section__row',
@@ -331,6 +394,7 @@ describe('DeploymentsSettings', () => {
       }),
     ]);
     fixture.detectChanges();
+    expand();
 
     const rowElement = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
       '.settings-section__row',
@@ -348,6 +412,7 @@ describe('DeploymentsSettings', () => {
   it('renders every action label at a legible size', () => {
     rows.set([row()]);
     fixture.detectChanges();
+    expand();
 
     for (const label of ['Download', 'Restore', 'Stop', 'Delete']) {
       const button = buttonLabelled(label)!;
@@ -373,6 +438,7 @@ describe('DeploymentsSettings', () => {
   it('restores through the service, with no confirmation (a restore adds)', async () => {
     rows.set([row({ orphan: true })]);
     fixture.detectChanges();
+    expand();
 
     buttonLabelled('Restore')!.click();
     await fixture.whenStable();

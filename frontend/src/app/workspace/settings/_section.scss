@@ -36,6 +36,95 @@
     display: flex;
     align-items: center;
     gap: 8px;
+
+    // The heading below grows; without this the trailing actions shrink with it.
+    > button {
+      flex: 0 0 auto;
+    }
+  }
+
+  /* ── Disclosure ────────────────────────────────────────────────────────── */
+  // Same shape as the Integrations page's expanders, so the two read alike.
+  .settings-section__disclosure {
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--phorma-overlay-border, rgb(113 113 122 / 22%));
+    background: color-mix(in srgb, var(--p-text-color, #71717a) 2%, transparent);
+  }
+
+  // Also the `.settings-section__head` flex row, so `display: flex` is what
+  // suppresses the native marker; the two rules below cover the rest.
+  .settings-section__summary {
+    padding: 10px 12px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    &:hover {
+      background: color-mix(in srgb, var(--p-text-color, #71717a) 4%, transparent);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--p-primary-color, #8578f6);
+      outline-offset: -2px;
+    }
+  }
+
+  .settings-section__caret {
+    flex: 0 0 auto;
+    font-size: 14px;
+    color: var(--p-text-muted-color);
+    transition: transform 0.18s ease;
+
+    details[open] > summary > & {
+      transform: rotate(90deg);
+    }
+  }
+
+  // What the section says about itself while collapsed.
+  .settings-section__status {
+    // Shrinks to an ellipsis rather than pushing the actions off the row.
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 0.857rem;
+    font-weight: 500;
+    color: var(--p-text-muted-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-section__body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2px 12px 12px;
+  }
+
+  /* ── Label-plus-switch row ─────────────────────────────────────────────── */
+  // Centred rather than top-aligned and with no card chrome, so it does not read
+  // as a nested setting under the heading above it.
+  .settings-section__switch-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    // Flex shrink is weighted by flex-basis, and the description's basis dwarfs
+    // the track's - without this the switch collapses into a circle.
+    p-toggleswitch {
+      flex: 0 0 auto;
+    }
+  }
+
+  // `.settings-section__name` is a `<span>` below; as a `<label>` for a switch it
+  // needs its own click affordance.
+  label.settings-section__name {
+    display: block;
+    cursor: pointer;
   }
 
   // `margin-left: auto` on the trailing action rather than a float: a float lets

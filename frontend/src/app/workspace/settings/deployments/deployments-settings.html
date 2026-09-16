@@ -5,193 +5,201 @@
   needs to stop a cron deployment they are still paying for.
 -->
 @if (signedIn()) {
-  <div class="settings-section__head">
-    <h4 class="settings-section__heading">Deployed in your account</h4>
-    <button
-      pButton
-      type="button"
-      class="phorma-panel-icon-btn"
-      severity="secondary"
-      [text]="true"
-      size="small"
-      [disabled]="deployments.loading()"
-      aria-label="Refresh the deployment list"
-      (click)="refresh()"
-    >
-      <i
-        class="ti ti-refresh"
-        [class.phorma-icon-spin]="deployments.loading()"
-        aria-hidden="true"
-      ></i>
-    </button>
-  </div>
+  <details class="settings-section__disclosure" [open]="open()" (toggle)="onToggle($event)">
+    <summary class="settings-section__head settings-section__summary">
+      <i class="ti ti-chevron-right settings-section__caret" aria-hidden="true"></i>
+      <h4 class="settings-section__heading">Deployed in your account</h4>
+      @if (summary(); as status) {
+        <span class="settings-section__status">{{ status }}</span>
+      }
+      <button
+        pButton
+        type="button"
+        class="phorma-panel-icon-btn"
+        severity="secondary"
+        [text]="true"
+        size="small"
+        [disabled]="deployments.loading()"
+        aria-label="Refresh the deployment list"
+        (click)="$event.stopPropagation(); refresh()"
+      >
+        <i
+          class="ti ti-refresh"
+          [class.phorma-icon-spin]="deployments.loading()"
+          aria-hidden="true"
+        ></i>
+      </button>
+    </summary>
 
-  <p class="settings-section__desc">
-    Everything Phorma Cloud is running for you right now, whether or not there is a copy in
-    your local library. Deployments keep running - and keep spending credits - until you stop
-    them here.
-  </p>
+    <div class="settings-section__body">
+      <p class="settings-section__desc">
+        Everything Phorma Cloud is running for you right now, whether or not there is a copy in
+        your local library. Deployments keep running - and keep spending credits - until you stop
+        them here.
+      </p>
 
-  @if (deployments.error(); as message) {
-    <!--
-      A failed read keeps whatever rows we already had on screen. Reporting the
-      failure and leaving Retry available is the whole handling: an empty list
-      would read as "nothing is deployed", which is the one answer that stops
-      somebody looking for spend they cannot explain.
-    -->
-    <p class="settings-section__note settings-section__note--warn">
-      <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-      <span>
-        Could not read your deployments: {{ message }}
-        @if (rows().length > 0) {
-          The list below is the last one we were able to load.
-        }
-      </span>
-    </p>
-  }
-
-  @if (deployments.orphanCount() > 0) {
-    <p class="settings-section__note settings-section__note--warn">
-      <i class="ti ti-cloud-question" aria-hidden="true"></i>
-      <span>
-        {{ deployments.orphanCount() }}
-        {{ deployments.orphanCount() === 1 ? 'deployment has' : 'deployments have' }}
-        no copy in your library. That happens after a reinstall, or on another machine.
-        Restore to get {{ deployments.orphanCount() === 1 ? 'it' : 'them' }} back, or stop
-        {{ deployments.orphanCount() === 1 ? 'it' : 'them' }} to stop the spend.
-      </span>
-    </p>
-  }
-
-  @if (showEmpty()) {
-    <p class="settings-section__note">
-      <i class="ti ti-cloud-off" aria-hidden="true"></i>
-      <span>Nothing is deployed in your account.</span>
-    </p>
-  }
-
-  @for (row of rows(); track row.workflowId) {
-    <div class="settings-section__row" [class.settings-section__row--busy]="busy(row)">
-      <div class="settings-section__row-main">
-        <div class="settings-section__row-title">
-          <i class="ti ti-topology-star-3" aria-hidden="true"></i>
-          <span class="settings-section__name">{{ row.workflowName }}</span>
-          @if (row.orphan) {
-            <span
-              class="settings-section__badge phorma-deployments__badge--orphan"
-              title="No copy of this workflow exists in your local library"
-            >
-              <i class="ti ti-cloud-question" aria-hidden="true"></i>
-              No local copy
-            </span>
-          }
-          @if (row.cronArmed) {
-            <span
-              class="settings-section__badge"
-              title="A schedule is armed, so this runs on its own"
-            >
-              <i class="ti ti-clock-play" aria-hidden="true"></i>
-              Scheduled
-            </span>
-          }
-          @if (row.portalSlug) {
-            <button
-              type="button"
-              class="settings-section__badge settings-section__badge--link"
-              [title]="portalUrl(row)"
-              (click)="openPortal(row)"
-            >
-              <i class="ti ti-world" aria-hidden="true"></i>
-              /p/{{ row.portalSlug }}
-            </button>
-          }
-        </div>
-        <p class="settings-section__meta">
-          Deployed {{ row.deployedAt | date: 'MMM d, y' }}
-          @if (row.updatedAt > row.deployedAt) {
-            · updated {{ row.updatedAt | date: 'MMM d, h:mm a' }}
-          }
-          <!--
-            Credits, never dollars. A null is NOT a zero: it means this worker
-            binds no ledger, and rendering it as "0 credits" would tell somebody a
-            runaway deployment is free.
-          -->
-          @if (row.creditsSpent !== null) {
-            · {{ row.creditsSpent }} {{ row.creditsSpent === 1 ? 'credit' : 'credits' }} this
-            month
-          } @else {
-            · spend unavailable
-          }
-          @if (row.runsThisMonth) {
-            · {{ row.runsThisMonth }} {{ row.runsThisMonth === 1 ? 'run' : 'runs' }}
-          }
-          @if (row.localName) {
-            · saved locally as "{{ row.localName }}"
-          }
+      @if (deployments.error(); as message) {
+        <!--
+          A failed read keeps whatever rows we already had on screen. Reporting the
+          failure and leaving Retry available is the whole handling: an empty list
+          would read as "nothing is deployed", which is the one answer that stops
+          somebody looking for spend they cannot explain.
+        -->
+        <p class="settings-section__note settings-section__note--warn">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          <span>
+            Could not read your deployments: {{ message }}
+            @if (rows().length > 0) {
+              The list below is the last one we were able to load.
+            }
+          </span>
         </p>
-      </div>
+      }
 
-      <div class="settings-section__actions">
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row)"
-          (click)="download(row)"
-        >
-          <i class="ti ti-download" aria-hidden="true"></i>
-          <span>Download</span>
-        </button>
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row)"
-          (click)="restore(row)"
-        >
-          <i class="ti ti-library-plus" aria-hidden="true"></i>
-          <span>Restore</span>
-        </button>
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn settings-section__btn--danger"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row)"
-          (click)="stop(row)"
-        >
-          <i class="ti ti-player-stop" aria-hidden="true"></i>
-          <span>Stop</span>
-        </button>
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn settings-section__btn--danger"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row)"
-          (click)="purge(row)"
-        >
-          <i class="ti ti-trash" aria-hidden="true"></i>
-          <span>Delete</span>
-        </button>
-      </div>
+      @if (deployments.orphanCount() > 0) {
+        <p class="settings-section__note settings-section__note--warn">
+          <i class="ti ti-cloud-question" aria-hidden="true"></i>
+          <span>
+            {{ deployments.orphanCount() }}
+            {{ deployments.orphanCount() === 1 ? 'deployment has' : 'deployments have' }}
+            no copy in your library. That happens after a reinstall, or on another machine.
+            Restore to get {{ deployments.orphanCount() === 1 ? 'it' : 'them' }} back, or stop
+            {{ deployments.orphanCount() === 1 ? 'it' : 'them' }} to stop the spend.
+          </span>
+        </p>
+      }
+
+      @if (showEmpty()) {
+        <p class="settings-section__note">
+          <i class="ti ti-cloud-off" aria-hidden="true"></i>
+          <span>Nothing is deployed in your account.</span>
+        </p>
+      }
+
+      @for (row of rows(); track row.workflowId) {
+        <div class="settings-section__row" [class.settings-section__row--busy]="busy(row)">
+          <div class="settings-section__row-main">
+            <div class="settings-section__row-title">
+              <i class="ti ti-topology-star-3" aria-hidden="true"></i>
+              <span class="settings-section__name">{{ row.workflowName }}</span>
+              @if (row.orphan) {
+                <span
+                  class="settings-section__badge phorma-deployments__badge--orphan"
+                  title="No copy of this workflow exists in your local library"
+                >
+                  <i class="ti ti-cloud-question" aria-hidden="true"></i>
+                  No local copy
+                </span>
+              }
+              @if (row.cronArmed) {
+                <span
+                  class="settings-section__badge"
+                  title="A schedule is armed, so this runs on its own"
+                >
+                  <i class="ti ti-clock-play" aria-hidden="true"></i>
+                  Scheduled
+                </span>
+              }
+              @if (row.portalSlug) {
+                <button
+                  type="button"
+                  class="settings-section__badge settings-section__badge--link"
+                  [title]="portalUrl(row)"
+                  (click)="openPortal(row)"
+                >
+                  <i class="ti ti-world" aria-hidden="true"></i>
+                  /p/{{ row.portalSlug }}
+                </button>
+              }
+            </div>
+            <p class="settings-section__meta">
+              Deployed {{ row.deployedAt | date: 'MMM d, y' }}
+              @if (row.updatedAt > row.deployedAt) {
+                · updated {{ row.updatedAt | date: 'MMM d, h:mm a' }}
+              }
+              <!--
+                Credits, never dollars. A null is NOT a zero: it means this worker
+                binds no ledger, and rendering it as "0 credits" would tell somebody a
+                runaway deployment is free.
+              -->
+              @if (row.creditsSpent !== null) {
+                · {{ row.creditsSpent }} {{ row.creditsSpent === 1 ? 'credit' : 'credits' }} this
+                month
+              } @else {
+                · spend unavailable
+              }
+              @if (row.runsThisMonth) {
+                · {{ row.runsThisMonth }} {{ row.runsThisMonth === 1 ? 'run' : 'runs' }}
+              }
+              @if (row.localName) {
+                · saved locally as "{{ row.localName }}"
+              }
+            </p>
+          </div>
+
+          <div class="settings-section__actions">
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row)"
+              (click)="download(row)"
+            >
+              <i class="ti ti-download" aria-hidden="true"></i>
+              <span>Download</span>
+            </button>
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row)"
+              (click)="restore(row)"
+            >
+              <i class="ti ti-library-plus" aria-hidden="true"></i>
+              <span>Restore</span>
+            </button>
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn settings-section__btn--danger"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row)"
+              (click)="stop(row)"
+            >
+              <i class="ti ti-player-stop" aria-hidden="true"></i>
+              <span>Stop</span>
+            </button>
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn settings-section__btn--danger"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row)"
+              (click)="purge(row)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (deployments.loading() && rows().length === 0) {
+        <p class="settings-section__note">
+          <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+          <span>Reading your deployments.</span>
+        </p>
+      }
     </div>
-  }
-
-  @if (deployments.loading() && rows().length === 0) {
-    <p class="settings-section__note">
-      <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
-      <span>Reading your deployments.</span>
-    </p>
-  }
+  </details>
 }

@@ -4,6 +4,7 @@ import {
   computed,
   effect,
   inject,
+  linkedSignal,
   signal,
   untracked,
 } from '@angular/core';
@@ -93,6 +94,31 @@ export class DeploymentsSettings {
       this.rows().length === 0,
   );
 
+  /** A deployment with no local copy, or a failed read: both need a decision. */
+  private readonly needsAttention = computed(
+    () => this.deployments.orphanCount() > 0 || this.deployments.error() !== null,
+  );
+
+  /** Collapsed by default, and re-opened by the component when that changes. */
+  protected readonly open = linkedSignal(() => this.needsAttention());
+
+  /** What the section says about itself while collapsed. */
+  protected readonly summary = computed(() => {
+    if (!this.deployments.loaded()) return '';
+    const rows = this.rows();
+    if (rows.length === 0) return 'Nothing deployed';
+
+    const parts = [`${rows.length} ${rows.length === 1 ? 'deployment' : 'deployments'}`];
+    // A null is "no ledger to read", not zero, so one null makes the total a lie.
+    if (rows.every(row => row.creditsSpent !== null)) {
+      const credits = rows.reduce((sum, row) => sum + (row.creditsSpent ?? 0), 0);
+      parts.push(`${credits} ${credits === 1 ? 'credit' : 'credits'} this month`);
+    }
+    const orphans = this.deployments.orphanCount();
+    if (orphans > 0) parts.push(`${orphans} with no local copy`);
+    return parts.join(' · ');
+  });
+
   constructor() {
     // One refresh, the first time this component exists with an account signed
     // in. It lives here rather than in the service so a user who never opens the
@@ -114,6 +140,10 @@ export class DeploymentsSettings {
   protected refresh(): void {
     this.attempted.set(true);
     void this.deployments.refresh();
+  }
+
+  protected onToggle(event: Event): void {
+    this.open.set((event.target as HTMLDetailsElement).open);
   }
 
   protected busy(row: DeploymentRow): boolean {

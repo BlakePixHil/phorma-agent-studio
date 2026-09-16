@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   inject,
+  linkedSignal,
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -63,9 +64,26 @@ export class LibraryExportSettings {
 
   protected readonly folder = this.settings.libraryExportFolder;
 
+  /** Collapsed by default; an empty library is the one state worth surfacing. */
+  protected readonly open = linkedSignal(() => this.count() === 0);
+
+  /** What the section says about itself while collapsed. */
+  protected readonly summary = computed(() => {
+    const count = this.count();
+    if (count === 0) return 'Nothing to export';
+    const label = `${count} ${count === 1 ? 'workflow' : 'workflows'}`;
+    if (!this.tauri.isDesktop) return label;
+    if (!this.folder()) return `${label} · no folder chosen`;
+    return this.settings.libraryExportOnSave() ? `${label} · kept up to date` : label;
+  });
+
   /** Scoped element id, e.g. `library-export-1-on-save`. */
   protected id(suffix: string): string {
     return `${this.scope}-${suffix}`;
+  }
+
+  protected onToggle(event: Event): void {
+    this.open.set((event.target as HTMLDetailsElement).open);
   }
 
   protected async pickFolder(): Promise<void> {

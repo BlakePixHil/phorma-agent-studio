@@ -4,6 +4,7 @@ import {
   computed,
   effect,
   inject,
+  linkedSignal,
   signal,
   untracked,
 } from '@angular/core';
@@ -115,6 +116,33 @@ export class BackupSettings {
     return this.workflow.library().filter(spec => !backed.has(spec.id)).length;
   });
 
+  /** Every state where leaving the section collapsed would hide a decision. */
+  private readonly needsAttention = computed(
+    () =>
+      this.backup.error() !== null ||
+      this.needsPlan() ||
+      this.optedOut() ||
+      !this.backup.writable() ||
+      this.backup.conflicts().size > 0,
+  );
+
+  /** Collapsed by default, and re-opened by the component when that changes. */
+  protected readonly open = linkedSignal(() => this.needsAttention());
+
+  /** What the section says about itself while collapsed. */
+  protected readonly summary = computed(() => {
+    if (this.needsPlan()) return 'Needs a plan';
+    if (this.optedOut()) return 'Off';
+
+    const parts = ['On'];
+    if (this.backup.loaded()) {
+      parts.push(`${this.backup.backups().length} of ${this.backup.cap()}`);
+      if (this.totalBytes() > 0) parts.push(this.size(this.totalBytes()));
+    }
+    if (!this.backup.writable()) parts.push('read-only');
+    return parts.join(' · ');
+  });
+
   constructor() {
     // One list read the first time this page renders with an account signed in.
     // Only `signedIn()` is tracked; the write is inside `untracked` because an
@@ -136,6 +164,10 @@ export class BackupSettings {
   protected refresh(): void {
     this.attempted.set(true);
     void this.backup.refresh();
+  }
+
+  protected onToggle(event: Event): void {
+    this.open.set((event.target as HTMLDetailsElement).open);
   }
 
   protected busy(row: BackupSummary): boolean {

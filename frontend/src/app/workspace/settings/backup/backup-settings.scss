@@ -5,22 +5,6 @@
 
 @include settings-section.base;
 
-// The label-plus-switch row: centred rather than top-aligned, and no card chrome,
-// so it does not read as a nested setting under the heading above it.
-.phorma-backup__toggle {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 2px 12px;
-}
-
-// `.settings-section__name` is a `<span>` in the partial; as a `<label>` for the
-// switch it needs its own click affordance.
-label.settings-section__name {
-  display: block;
-  cursor: pointer;
-}
-
 // The destructive footer sits on its own line, right-aligned, away from the rows
 // it acts on - a full-width destructive button flush under the last row reads as
 // belonging to that row.

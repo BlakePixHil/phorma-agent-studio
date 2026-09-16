@@ -715,19 +715,27 @@ body::-webkit-scrollbar {
 }
 
 /* Sleek, minimal scrollbars for interior scroll areas (sidebars, menus). */
+/* `.phorma-settings__content` is listed by name: it is a component-scoped class,
+   and the component sheet is at its style budget. */
 .overflow-y-auto,
 .overflow-auto,
 .overflow-x-auto,
 .p-scroller,
-.p-overlay {
+.p-overlay,
+.phorma-settings__content {
   scrollbar-width: thin;
   scrollbar-color: rgba(140, 145, 160, 0.35) transparent;
+}
+/* Reserved so trailing controls never sit under the bar on a page that scrolls. */
+.phorma-settings__content {
+  scrollbar-gutter: stable;
 }
 .overflow-y-auto::-webkit-scrollbar,
 .overflow-auto::-webkit-scrollbar,
 .overflow-x-auto::-webkit-scrollbar,
 .p-scroller::-webkit-scrollbar,
-.p-overlay::-webkit-scrollbar {
+.p-overlay::-webkit-scrollbar,
+.phorma-settings__content::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
@@ -735,7 +743,8 @@ body::-webkit-scrollbar {
 .overflow-auto::-webkit-scrollbar-thumb,
 .overflow-x-auto::-webkit-scrollbar-thumb,
 .p-scroller::-webkit-scrollbar-thumb,
-.p-overlay::-webkit-scrollbar-thumb {
+.p-overlay::-webkit-scrollbar-thumb,
+.phorma-settings__content::-webkit-scrollbar-thumb {
   background: rgba(140, 145, 160, 0.3);
   border-radius: 9999px;
   border: 2px solid transparent;

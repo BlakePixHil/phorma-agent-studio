@@ -4,290 +4,296 @@
   than broken and the library export section below is the durability answer there.
 -->
 @if (visible()) {
-  <div class="settings-section__head">
-    <h4 class="settings-section__heading">Cloud backup</h4>
-    @if (running()) {
+  <details class="settings-section__disclosure" [open]="open()" (toggle)="onToggle($event)">
+    <summary class="settings-section__head settings-section__summary">
+      <i class="ti ti-chevron-right settings-section__caret" aria-hidden="true"></i>
+      <h4 class="settings-section__heading">Cloud backup</h4>
+      <span class="settings-section__status">{{ summary() }}</span>
+      @if (running()) {
+        <button
+          pButton
+          type="button"
+          class="settings-section__btn"
+          severity="secondary"
+          [outlined]="true"
+          size="small"
+          [disabled]="backup.uploading() || !backup.writable()"
+          (click)="$event.stopPropagation(); backUpNow()"
+        >
+          <i
+            class="ti"
+            [class.ti-cloud-up]="!backup.uploading()"
+            [class.ti-loader-2]="backup.uploading()"
+            [class.phorma-icon-spin]="backup.uploading()"
+            aria-hidden="true"
+          ></i>
+          <span>Back up now</span>
+        </button>
+      }
       <button
         pButton
         type="button"
-        class="settings-section__btn"
+        class="phorma-panel-icon-btn"
         severity="secondary"
-        [outlined]="true"
+        [text]="true"
         size="small"
-        [disabled]="backup.uploading() || !backup.writable()"
-        (click)="backUpNow()"
+        [disabled]="backup.loading()"
+        aria-label="Refresh the backup list"
+        (click)="$event.stopPropagation(); refresh()"
       >
-        <i
-          class="ti"
-          [class.ti-cloud-up]="!backup.uploading()"
-          [class.ti-loader-2]="backup.uploading()"
-          [class.phorma-icon-spin]="backup.uploading()"
-          aria-hidden="true"
-        ></i>
-        <span>Back up now</span>
+        <i class="ti ti-refresh" [class.phorma-icon-spin]="backup.loading()" aria-hidden="true"></i>
       </button>
-    }
-    <button
-      pButton
-      type="button"
-      class="phorma-panel-icon-btn"
-      severity="secondary"
-      [text]="true"
-      size="small"
-      [disabled]="backup.loading()"
-      aria-label="Refresh the backup list"
-      (click)="refresh()"
-    >
-      <i class="ti ti-refresh" [class.phorma-icon-spin]="backup.loading()" aria-hidden="true"></i>
-    </button>
-  </div>
+    </summary>
 
-  <!-- The switch. On by default for a subscriber: durability a user has to find
-       and enable is durability most people will not have on the day they need it. -->
-  <div class="phorma-backup__toggle">
-    <div class="settings-section__row-main">
-      <label class="settings-section__name" [attr.for]="id('enabled')">
-        Keep a copy of every workflow in the cloud
-      </label>
-      <p class="settings-section__meta">
-        Each save uploads the workflow to your Phorma Cloud account, separately from
-        anything you deploy. A reinstall, a lost laptop or a wiped browser is recoverable.
-      </p>
-    </div>
-    <p-toggleswitch
-      [inputId]="id('enabled')"
-      size="small"
-      ariaLabel="Keep a copy of every workflow in the cloud"
-      [disabled]="needsPlan()"
-      [ngModel]="running()"
-      (ngModelChange)="onEnabledChange($event)"
-    />
-  </div>
-
-  @if (needsPlan()) {
-    <!-- No button here on purpose: the plan cards are on this same page, a few
-         inches up. A second Subscribe CTA beside them would be noise. -->
-    <p class="settings-section__note settings-section__note--info">
-      <i class="ti ti-cloud-lock" aria-hidden="true"></i>
-      <span>
-        Cloud backup comes with a Phorma Cloud plan. Pick one above and every workflow you
-        save starts backing itself up, with no other setup.
-      </span>
-    </p>
-  } @else if (optedOut()) {
-    <p class="settings-section__note">
-      <i class="ti ti-cloud-off" aria-hidden="true"></i>
-      <span>
-        Cloud backup is off. Your workflows live only on this machine, so a reinstall would
-        lose them. The library export below writes a copy to disk instead.
-      </span>
-    </p>
-  } @else {
-    <!--
-      THE DISCLOSURE (Requirement 11.3, 11.4). Inline, beside the state, never behind
-      a dialog: Phorma Labs holds the encryption key, and a user cannot make an
-      informed choice about that if they have to go looking for it.
-    -->
-    <p class="settings-section__note">
-      <i class="ti ti-shield-lock" aria-hidden="true"></i>
-      <span>
-        Backups are compressed and encrypted before they are stored. Phorma Labs holds the
-        encryption key, which means we can technically read a backup - that is what lets
-        support help you recover one. Prompts, skills, connectors and connection secrets are
-        never included; a backup carries the workflow and the names of the connections it
-        uses.
-      </span>
-    </p>
-  }
-
-  @if (!backup.writable() && !needsPlan() && !optedOut()) {
-    <!-- Requirement 20.5. The window is stated, because "read-only" with no date
-         reads as permanent and would send somebody looking for a lost backup. -->
-    <p class="settings-section__note settings-section__note--warn">
-      <i class="ti ti-lock" aria-hidden="true"></i>
-      <span>
-        Your backups are read-only while the subscription is lapsed. You can still download
-        and restore them
-        @if (backup.readOnlyDaysRemaining() !== null) {
-          for another {{ backup.readOnlyDaysRemaining() }}
-          {{ backup.readOnlyDaysRemaining() === 1 ? 'day' : 'days' }}
-        }
-        . Renewing starts backups again with nothing else to do.
-      </span>
-    </p>
-  }
-
-  @if (backup.error(); as message) {
-    <p class="settings-section__note settings-section__note--warn">
-      <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-      <span>Could not read your backups: {{ message }}</span>
-    </p>
-  }
-
-  @if (running() && backup.loaded()) {
-    <p class="settings-section__desc">
-      {{ backup.backups().length }} of {{ backup.cap() }}
-      {{ backup.cap() === 1 ? 'workflow' : 'workflows' }} backed up
-      @if (totalBytes() > 0) {
-        · {{ size(totalBytes()) }}
-      }
-      · up to {{ backup.revisionsKept() }} versions kept for each
-      @if (notYetBackedUp() > 0) {
-        · {{ notYetBackedUp() }} waiting for the next save
-      }
-    </p>
-  }
-
-  <!-- Live backups. -->
-  @for (row of backup.backups(); track row.workflowId) {
-    <div class="settings-section__row" [class.settings-section__row--busy]="busy(row)">
-      <div class="settings-section__row-main">
-        <div class="settings-section__row-title">
-          <i class="ti ti-cloud-check" aria-hidden="true"></i>
-          <span class="settings-section__name">{{ row.name }}</span>
-          @if (hasConflict(row)) {
-            <span
-              class="settings-section__badge settings-section__badge--warn"
-              title="This workflow changed in the cloud since this machine last uploaded"
-            >
-              <i class="ti ti-git-compare" aria-hidden="true"></i>
-              Conflict
-            </span>
-          }
+    <div class="settings-section__body">
+      <!-- The switch. On by default for a subscriber: durability a user has to find
+           and enable is durability most people will not have on the day they need it. -->
+      <div class="settings-section__switch-row">
+        <div class="settings-section__row-main">
+          <label class="settings-section__name" [attr.for]="id('enabled')">
+            Keep a copy of every workflow in the cloud
+          </label>
+          <p class="settings-section__meta">
+            Each save uploads the workflow to your Phorma Cloud account, separately from
+            anything you deploy. A reinstall, a lost laptop or a wiped browser is recoverable.
+          </p>
         </div>
-        <p class="settings-section__meta">
-          Version {{ row.revision }} · {{ size(row.sizeBytes) }} · saved
-          {{ row.savedAt | date: 'MMM d, h:mm a' }}
-        </p>
+        <p-toggleswitch
+          [inputId]="id('enabled')"
+          size="small"
+          ariaLabel="Keep a copy of every workflow in the cloud"
+          [disabled]="needsPlan()"
+          [ngModel]="running()"
+          (ngModelChange)="onEnabledChange($event)"
+        />
       </div>
-      <div class="settings-section__actions">
-        @if (hasConflict(row)) {
+
+      @if (needsPlan()) {
+        <!-- No button here on purpose: the plan cards are on this same page, a few
+             inches up. A second Subscribe CTA beside them would be noise. -->
+        <p class="settings-section__note settings-section__note--info">
+          <i class="ti ti-cloud-lock" aria-hidden="true"></i>
+          <span>
+            Cloud backup comes with a Phorma Cloud plan. Pick one above and every workflow you
+            save starts backing itself up, with no other setup.
+          </span>
+        </p>
+      } @else if (optedOut()) {
+        <p class="settings-section__note">
+          <i class="ti ti-cloud-off" aria-hidden="true"></i>
+          <span>
+            Cloud backup is off. Your workflows live only on this machine, so a reinstall would
+            lose them. The library export below writes a copy to disk instead.
+          </span>
+        </p>
+      } @else {
+        <!--
+          THE DISCLOSURE (Requirement 11.3, 11.4). Inline, beside the state, never behind
+          a dialog: Phorma Labs holds the encryption key, and a user cannot make an
+          informed choice about that if they have to go looking for it.
+        -->
+        <p class="settings-section__note">
+          <i class="ti ti-shield-lock" aria-hidden="true"></i>
+          <span>
+            Backups are compressed and encrypted before they are stored. Phorma Labs holds the
+            encryption key, which means we can technically read a backup - that is what lets
+            support help you recover one. Prompts, skills, connectors and connection secrets are
+            never included; a backup carries the workflow and the names of the connections it
+            uses.
+          </span>
+        </p>
+      }
+
+      @if (!backup.writable() && !needsPlan() && !optedOut()) {
+        <!-- Requirement 20.5. The window is stated, because "read-only" with no date
+             reads as permanent and would send somebody looking for a lost backup. -->
+        <p class="settings-section__note settings-section__note--warn">
+          <i class="ti ti-lock" aria-hidden="true"></i>
+          <span>
+            Your backups are read-only while the subscription is lapsed. You can still download
+            and restore them
+            @if (backup.readOnlyDaysRemaining() !== null) {
+              for another {{ backup.readOnlyDaysRemaining() }}
+              {{ backup.readOnlyDaysRemaining() === 1 ? 'day' : 'days' }}
+            }
+            . Renewing starts backups again with nothing else to do.
+          </span>
+        </p>
+      }
+
+      @if (backup.error(); as message) {
+        <p class="settings-section__note settings-section__note--warn">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          <span>Could not read your backups: {{ message }}</span>
+        </p>
+      }
+
+      @if (running() && backup.loaded()) {
+        <p class="settings-section__desc">
+          {{ backup.backups().length }} of {{ backup.cap() }}
+          {{ backup.cap() === 1 ? 'workflow' : 'workflows' }} backed up
+          @if (totalBytes() > 0) {
+            · {{ size(totalBytes()) }}
+          }
+          · up to {{ backup.revisionsKept() }} versions kept for each
+          @if (notYetBackedUp() > 0) {
+            · {{ notYetBackedUp() }} waiting for the next save
+          }
+        </p>
+      }
+
+      <!-- Live backups. -->
+      @for (row of backup.backups(); track row.workflowId) {
+        <div class="settings-section__row" [class.settings-section__row--busy]="busy(row)">
+          <div class="settings-section__row-main">
+            <div class="settings-section__row-title">
+              <i class="ti ti-cloud-check" aria-hidden="true"></i>
+              <span class="settings-section__name">{{ row.name }}</span>
+              @if (hasConflict(row)) {
+                <span
+                  class="settings-section__badge settings-section__badge--warn"
+                  title="This workflow changed in the cloud since this machine last uploaded"
+                >
+                  <i class="ti ti-git-compare" aria-hidden="true"></i>
+                  Conflict
+                </span>
+              }
+            </div>
+            <p class="settings-section__meta">
+              Version {{ row.revision }} · {{ size(row.sizeBytes) }} · saved
+              {{ row.savedAt | date: 'MMM d, h:mm a' }}
+            </p>
+          </div>
+          <div class="settings-section__actions">
+            @if (hasConflict(row)) {
+              <button
+                pButton
+                type="button"
+                class="settings-section__btn"
+                severity="secondary"
+                [text]="true"
+                size="small"
+                [disabled]="busy(row)"
+                (click)="compare(row)"
+              >
+                <i class="ti ti-git-compare" aria-hidden="true"></i>
+                <span>Compare</span>
+              </button>
+            }
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row)"
+              (click)="restore(row)"
+            >
+              <i class="ti ti-library-plus" aria-hidden="true"></i>
+              <span>Restore</span>
+            </button>
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn settings-section__btn--danger"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row) || !backup.writable()"
+              (click)="delete(row)"
+            >
+              <i class="ti ti-trash" aria-hidden="true"></i>
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- Tombstones: deleted, still restorable, with the countdown that says for how
+           long (Requirement 17.9). -->
+      @if (backup.tombstones().length > 0) {
+        <p class="settings-section__desc">Deleted backups</p>
+      }
+      @for (row of backup.tombstones(); track row.workflowId) {
+        <div class="settings-section__row" [class.settings-section__row--busy]="busy(row)">
+          <div class="settings-section__row-main">
+            <div class="settings-section__row-title">
+              <i class="ti ti-trash" aria-hidden="true"></i>
+              <span class="settings-section__name">{{ row.name }}</span>
+              <span
+                class="settings-section__badge settings-section__badge--warn"
+                title="Still restorable until the countdown runs out"
+              >
+                <i class="ti ti-clock" aria-hidden="true"></i>
+                {{ row.daysRemaining }}
+                {{ row.daysRemaining === 1 ? 'day left' : 'days left' }}
+              </span>
+            </div>
+            <p class="settings-section__meta">
+              Version {{ row.revision }} · {{ size(row.sizeBytes) }} · still restorable until it is
+              removed
+            </p>
+          </div>
+          <div class="settings-section__actions">
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row)"
+              (click)="restore(row)"
+            >
+              <i class="ti ti-restore" aria-hidden="true"></i>
+              <span>Restore</span>
+            </button>
+            <button
+              pButton
+              type="button"
+              class="settings-section__btn settings-section__btn--danger"
+              severity="secondary"
+              [text]="true"
+              size="small"
+              [disabled]="busy(row) || !backup.writable()"
+              (click)="purge(row)"
+            >
+              <i class="ti ti-flame" aria-hidden="true"></i>
+              <span>Delete now</span>
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (running() && backup.loaded() && !backup.hasAnyBackup()) {
+        <p class="settings-section__note">
+          <i class="ti ti-cloud-upload" aria-hidden="true"></i>
+          <span>
+            Nothing is backed up yet. The next time you save a workflow it uploads
+            automatically.
+          </span>
+        </p>
+      }
+
+      @if (running() || backup.hasAnyBackup()) {
+        <!-- One control, not two: an "off" switch that left the data behind would make
+             the disclosure above it meaningless (Requirement 11.5). -->
+        <div class="settings-section__actions phorma-backup__footer">
           <button
             pButton
             type="button"
-            class="settings-section__btn"
+            class="settings-section__btn settings-section__btn--danger"
             severity="secondary"
-            [text]="true"
+            [outlined]="true"
             size="small"
-            [disabled]="busy(row)"
-            (click)="compare(row)"
+            (click)="disableAndDeleteAll()"
           >
-            <i class="ti ti-git-compare" aria-hidden="true"></i>
-            <span>Compare</span>
+            <i class="ti ti-cloud-x" aria-hidden="true"></i>
+            <span>Turn off and delete every copy</span>
           </button>
-        }
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row)"
-          (click)="restore(row)"
-        >
-          <i class="ti ti-library-plus" aria-hidden="true"></i>
-          <span>Restore</span>
-        </button>
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn settings-section__btn--danger"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row) || !backup.writable()"
-          (click)="delete(row)"
-        >
-          <i class="ti ti-trash" aria-hidden="true"></i>
-          <span>Delete</span>
-        </button>
-      </div>
-    </div>
-  }
-
-  <!-- Tombstones: deleted, still restorable, with the countdown that says for how
-       long (Requirement 17.9). -->
-  @if (backup.tombstones().length > 0) {
-    <p class="settings-section__desc">Deleted backups</p>
-  }
-  @for (row of backup.tombstones(); track row.workflowId) {
-    <div class="settings-section__row" [class.settings-section__row--busy]="busy(row)">
-      <div class="settings-section__row-main">
-        <div class="settings-section__row-title">
-          <i class="ti ti-trash" aria-hidden="true"></i>
-          <span class="settings-section__name">{{ row.name }}</span>
-          <span
-            class="settings-section__badge settings-section__badge--warn"
-            title="Still restorable until the countdown runs out"
-          >
-            <i class="ti ti-clock" aria-hidden="true"></i>
-            {{ row.daysRemaining }}
-            {{ row.daysRemaining === 1 ? 'day left' : 'days left' }}
-          </span>
         </div>
-        <p class="settings-section__meta">
-          Version {{ row.revision }} · {{ size(row.sizeBytes) }} · still restorable until it is
-          removed
-        </p>
-      </div>
-      <div class="settings-section__actions">
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row)"
-          (click)="restore(row)"
-        >
-          <i class="ti ti-restore" aria-hidden="true"></i>
-          <span>Restore</span>
-        </button>
-        <button
-          pButton
-          type="button"
-          class="settings-section__btn settings-section__btn--danger"
-          severity="secondary"
-          [text]="true"
-          size="small"
-          [disabled]="busy(row) || !backup.writable()"
-          (click)="purge(row)"
-        >
-          <i class="ti ti-flame" aria-hidden="true"></i>
-          <span>Delete now</span>
-        </button>
-      </div>
+      }
     </div>
-  }
-
-  @if (running() && backup.loaded() && !backup.hasAnyBackup()) {
-    <p class="settings-section__note">
-      <i class="ti ti-cloud-upload" aria-hidden="true"></i>
-      <span>
-        Nothing is backed up yet. The next time you save a workflow it uploads
-        automatically.
-      </span>
-    </p>
-  }
-
-  @if (running() || backup.hasAnyBackup()) {
-    <!-- One control, not two: an "off" switch that left the data behind would make
-         the disclosure above it meaningless (Requirement 11.5). -->
-    <div class="settings-section__actions phorma-backup__footer">
-      <button
-        pButton
-        type="button"
-        class="settings-section__btn settings-section__btn--danger"
-        severity="secondary"
-        [outlined]="true"
-        size="small"
-        (click)="disableAndDeleteAll()"
-      >
-        <i class="ti ti-cloud-x" aria-hidden="true"></i>
-        <span>Turn off and delete every copy</span>
-      </button>
-    </div>
-  }
+  </details>
 }

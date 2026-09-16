@@ -169,6 +169,8 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
 }
 
 /* ── Content pane ────────────────────────────────────────────────────────── */
+/* The scrollbar chrome and its reserved gutter come from `styles.scss`: this
+   sheet is at its `anyComponentStyle` budget. */
 .phorma-settings__content {
   flex: 1 1 auto;
   min-width: 0;
@@ -843,6 +845,7 @@ $settings-row-indent: $settings-row-label-w + $settings-row-gap;
 
   > div {
     flex: 1 1 auto;
+    min-width: 0;
   }
 
   h5 {
