@@ -9,4 +9,4 @@
  * Used to compare against a deployed BYO worker's build stamp, so the studio can
  * tell the owner when their worker is running older code than the app.
  */
-export const APP_VERSION = '1.0.0-beta.2';
+export const APP_VERSION = '1.0.0-beta.3';
