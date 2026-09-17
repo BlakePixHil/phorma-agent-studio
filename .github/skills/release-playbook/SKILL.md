@@ -134,8 +134,20 @@ literals, so a prefix grep passes on a bundle that was never replaced.
 ```powershell
 # frontend: expect the pk_live_ body, and NO dev body
 Select-String -Path frontend/dist/phorma/browser/*.js -Pattern 'Y2xlcmsucGhvcm1hLWxhYnMuY29tJA' | Select-Object -First 1
-Select-String -Path frontend/dist/phorma/browser/*.js -Pattern 'Zmxvd2luZy1zZWFob3JzZS03Mg'     # expect: NOTHING
+Select-String -Path frontend/dist/phorma/browser/*.js -Pattern 'Zmxvd2luZy1zZWFob3JzZS03Mi'     # expect: NOTHING
+
+# admin: same two checks against its own bundle
+Select-String -Path admin/dist/admin/browser/*.js -Pattern 'Y2xlcmsucGhvcm1hLWxhYnMuY29tJA' | Select-Object -First 1
+Select-String -Path admin/dist/admin/browser/*.js -Pattern 'Zmxvd2luZy1zZWFob3JzZS03Mi'        # expect: NOTHING
 ```
+
+**The dev-body pattern ends `...ZS03Mi`, not `...ZS03Mg`.** It was written as `Mg` until
+`1.0.0-beta.3` and that made the whole negative check VACUOUS: `Zmxvd2luZy1zZWFob3JzZS03Mg` is
+base64 for the bare string `flowing-seahorse-72`, but the real key encodes
+`flowing-seahorse-72.clerk.accounts.dev$`, and base64 alignment makes the 25th character `i` rather
+than `g`. The pattern therefore could not match even a bundle that really did ship the development
+key - the one failure this step exists to catch. If you change a pattern here, verify it FAILS on a
+development build before trusting it on a production one.
 
 The swap is a `fileReplacements` entry on the `build` target's `production` config only
 (`clerk.ts` -> `clerk.prod.ts` in `frontend`, `environment.ts` -> `environment.prod.ts` in `admin`).

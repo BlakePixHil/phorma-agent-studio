@@ -6,7 +6,7 @@ inclusion: always
 
 Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud`, `cloud-aws`,
 `engine` and `admin`, plus `backend/src-tauri/Cargo.toml`. All six packages share ONE version number
-(currently `0.2.0-beta.21`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
+(currently `1.0.0-beta.3`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
 `release.md` steering.
 
 ## Stack
@@ -50,7 +50,7 @@ or start them as a background process.
 
 ```powershell
 cd frontend; npm run build                       # production build: the ONLY thing that checks Angular budgets
-cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1407 specs, ~25s
+cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1411 specs, ~25s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
 cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
 cd cloud;    npm run test:unit                   # 29 worker suites (`test` is the same; the portal e2e is manual)
@@ -82,7 +82,7 @@ manually started `wrangler dev` and a local model.
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
-  warning / 26kB error. `initial` currently sits at 2.81MB, so the warning is expected and only the
+  warning / 26kB error. `initial` currently sits at 2.87MB, so the warning is expected and only the
   3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
   791kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
   (chart.js) behind `@defer (on immediate)`.
