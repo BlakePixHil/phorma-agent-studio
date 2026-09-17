@@ -68,6 +68,18 @@ import {
   type PublishRecord,
 } from './portal-registry';
 import { mintPortalToken, type PortalTokenRecord } from './portal-auth';
+// The notification CONTRACT and every pure decision behind it live in one
+// dependency-free module, exactly as `run-wiring.ts` owns the decisions about a
+// pushed spec; this file owns the effects they describe (the SQL and the maps).
+import {
+  NOTICE_RUNS_PER_DEPLOYMENT,
+  payloadIsSubstantive,
+  projectSettledRun,
+  type DeploymentNoticePayload,
+  type NoticePending,
+  type NoticeRun,
+  type PendingGateMeta,
+} from './notifications';
 import { WORKER_BUILD } from './build-info';
 // The SSRF guard is shared with the data path (`createWorkerDataFetcher`), so
 // hosted tool egress and hosted data egress can never drift apart.
@@ -301,6 +313,25 @@ type ControlFrame =
   | { type: 'question'; requestId: string; response: string }
   | { type: 'trigger'; input?: string }
   | { type: 'stop' };
+
+/** A pending approval: the engine's resolver plus what it is waiting for. */
+interface PendingApprovalEntry {
+  resolve: (approved: boolean) => void;
+  meta: PendingGateMeta;
+}
+
+/** A pending Ask-User question: the engine's resolver plus its metadata. */
+interface PendingQuestionEntry {
+  resolve: (response: string) => void;
+  meta: PendingGateMeta;
+}
+
+/** A suspended Wait-for-Event node: both settlers plus its metadata. */
+interface PendingWaitEntry {
+  resolve: (payload: string) => void;
+  reject: (error: Error) => void;
+  meta: PendingGateMeta;
+}
 
 const PROVIDER_ENV_KEYS: Record<ModelProviderId, keyof Env | null> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -554,21 +585,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
   private handle: RunHandle | null = null;
   private runCounter = 0;
-  /** Pending approval resolvers, keyed by exact engine request id. */
-  private readonly approvals = new Map<string, (approved: boolean) => void>();
-  /** Pending Ask-User resolvers, keyed by exact engine request id. */
-  private readonly questions = new Map<string, (response: string) => void>();
+  /** Pending approvals, keyed by exact engine request id. */
+  private readonly approvals = new Map<string, PendingApprovalEntry>();
+  /** Pending Ask-User gates, keyed by exact engine request id. */
+  private readonly questions = new Map<string, PendingQuestionEntry>();
   /**
-   * Suspended Wait-for-Event resolvers, keyed by correlation key. The run
+   * Suspended Wait-for-Event gates, keyed by correlation key. The run
    * itself survives eviction via the journal + activeRun resume path; these
    * resolvers re-register when the resumed run reaches the wait again.
    * Events arriving with no waiter are buffered briefly so webhook races
    * don't drop deliveries.
    */
-  private readonly waits = new Map<
-    string,
-    { resolve: (payload: string) => void; reject: (error: Error) => void }
-  >();
+  private readonly waits = new Map<string, PendingWaitEntry>();
   /** Events that arrived before their waiter registered (key → payload). */
   private readonly earlyEvents = new Map<string, string>();
   /** Ring buffer of this run's events, replayed to late-joining monitors. */
@@ -751,10 +779,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         approved?: boolean;
       };
       if (!body.requestId) return json({ error: 'requestId is required.' }, 400);
-      const resolve = this.approvals.get(body.requestId);
-      if (!resolve) return json({ ok: true, delivered: false });
+      const pending = this.approvals.get(body.requestId);
+      if (!pending) return json({ ok: true, delivered: false });
       this.approvals.delete(body.requestId);
-      resolve(body.approved === true);
+      pending.resolve(body.approved === true);
       return json({ ok: true, delivered: true });
     }
 
@@ -764,10 +792,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         response?: string;
       };
       if (!body.requestId) return json({ error: 'requestId is required.' }, 400);
-      const resolve = this.questions.get(body.requestId);
-      if (!resolve) return json({ ok: true, delivered: false });
+      const pending = this.questions.get(body.requestId);
+      if (!pending) return json({ ok: true, delivered: false });
       this.questions.delete(body.requestId);
-      resolve(typeof body.response === 'string' ? body.response : '');
+      pending.resolve(typeof body.response === 'string' ? body.response : '');
       return json({ ok: true, delivered: true });
     }
 
@@ -909,18 +937,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
 
     switch (frame.type) {
       case 'approval': {
-        const resolve = this.approvals.get(frame.requestId);
-        if (resolve) {
+        const pending = this.approvals.get(frame.requestId);
+        if (pending) {
           this.approvals.delete(frame.requestId);
-          resolve(frame.approved);
+          pending.resolve(frame.approved);
         }
         break;
       }
       case 'question': {
-        const resolve = this.questions.get(frame.requestId);
-        if (resolve) {
+        const pending = this.questions.get(frame.requestId);
+        if (pending) {
           this.questions.delete(frame.requestId);
-          resolve(frame.response ?? '');
+          pending.resolve(frame.response ?? '');
         }
         break;
       }
@@ -954,12 +982,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         // A run suspended on an approval, question, or external event is
         // awaiting a host promise, not the gate — unblock those so the run
         // can unwind (RunStoppedError is thrown at the next gate check).
-        for (const resolve of this.approvals.values()) resolve(false);
-        this.approvals.clear();
-        for (const resolve of this.questions.values()) resolve('');
-        this.questions.clear();
-        for (const waiter of this.waits.values()) waiter.resolve('');
-        this.waits.clear();
+        this.drainPendingGates();
         break;
     }
   }
@@ -978,10 +1001,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    * delivered, or run gone) is a no-op.
    */
   async waitTimedOut(correlationKey: string): Promise<void> {
-    const waiter = this.waits.get(correlationKey);
-    if (!waiter) return;
+    const pending = this.waits.get(correlationKey);
+    if (!pending) return;
     this.waits.delete(correlationKey);
-    waiter.reject(
+    pending.reject(
       new Error(`Timed out waiting for external event "${correlationKey}".`),
     );
   }
@@ -1539,15 +1562,25 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         // own event stream (Requirements 13.7, 13.10).
         this.notifyOnRunEvent(event, spec, { connections, dataFetch, redactor });
       },
-      requestApproval: (_nodeId, _message, _payload, requestId) =>
+      // The three human-in-the-loop gates. Every argument the engine supplies is
+      // CAPTURED here rather than discarded, because a gate nobody can name is a
+      // gate nobody can act on from anywhere but a live monitor - see
+      // {@link PendingGateMeta}.
+      requestApproval: (nodeId, message, payload, requestId) =>
         new Promise<boolean>(resolve => {
-          this.approvals.set(requestId, resolve);
+          this.approvals.set(requestId, {
+            resolve,
+            meta: this.gateMeta(spec, nodeId, message, payload, runId),
+          });
         }),
-      requestInput: (_nodeId, _question, _payload, requestId) =>
+      requestInput: (nodeId, question, payload, requestId) =>
         new Promise<string>(resolve => {
-          this.questions.set(requestId, resolve);
+          this.questions.set(requestId, {
+            resolve,
+            meta: this.gateMeta(spec, nodeId, question, payload, runId),
+          });
         }),
-      waitForEvent: (_nodeId, correlationKey, _message, _payload, timeoutMs) =>
+      waitForEvent: (nodeId, correlationKey, message, payload, timeoutMs) =>
         new Promise<string>((resolve, reject) => {
           // An event may have raced ahead of the waiter (webhook fired while
           // the previous node was still streaming) — consume it immediately.
@@ -1557,7 +1590,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
             resolve(early);
             return;
           }
-          this.waits.set(correlationKey, { resolve, reject });
+          this.waits.set(correlationKey, {
+            resolve,
+            reject,
+            meta: this.gateMeta(spec, nodeId, message, payload, runId),
+          });
           // Durable timeout: an Agents-SDK alarm survives eviction, so a
           // multi-day expiry fires even across DO restarts. The clock
           // restarts when a resumed run re-registers this wait.
@@ -1578,12 +1615,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     void handle.done.finally(() => {
       if (this.handle === handle) this.handle = null;
       // Reject anything still waiting so promises don't dangle.
-      for (const resolve of this.approvals.values()) resolve(false);
-      this.approvals.clear();
-      for (const resolve of this.questions.values()) resolve('');
-      this.questions.clear();
-      for (const waiter of this.waits.values()) waiter.resolve('');
-      this.waits.clear();
+      this.drainPendingGates();
       this.earlyEvents.clear();
       // The run settled — drop the resume marker, its journal rows, and any
       // pending workflow-timeout wake alarm.
@@ -2041,11 +2073,71 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    * true when a waiter consumed it; false buffers it for a short race window
    * (an event that beats its waiter is consumed on registration).
    */
+  /**
+   * Describes one suspended gate for the notification projection.
+   *
+   * The name is resolved against the AUTHORED spec rather than the graph handed
+   * to the engine, for the same reason the recorder snapshots the authored graph:
+   * hosted mode rewrites every agent node's provider onto OpenRouter, and that
+   * is an execution detail nobody should read in a notification. A node inside a
+   * sub-workflow is not in the root graph at all, so the id is the fallback -
+   * never an empty string, which would render as a blank row.
+   */
+  private gateMeta(
+    spec: WorkflowSpec,
+    nodeId: string,
+    message: string,
+    payload: string,
+    runId: string,
+  ): PendingGateMeta {
+    return {
+      nodeId,
+      nodeName: this.nodeNameFor(spec, nodeId),
+      message,
+      hasPayload: payloadIsSubstantive(payload),
+      runId,
+      since: Date.now(),
+    };
+  }
+
+  /** An authored node name from the root graph or any embedded sub-workflow. */
+  private nodeNameFor(spec: WorkflowSpec, nodeId: string): string {
+    const fromRoot = spec.graph.nodes.find(node => node.id === nodeId);
+    if (fromRoot?.name) return fromRoot.name;
+    for (const embedded of Object.values(spec.subWorkflows ?? {})) {
+      const match = embedded.graph.nodes.find(node => node.id === nodeId);
+      if (match?.name) return match.name;
+    }
+    return nodeId;
+  }
+
+  /**
+   * Settles and forgets every suspended gate, so no engine promise dangles.
+   *
+   * Called from the two places a run stops being resumable: the `stop` control
+   * frame and the settle `finally`. They used to carry a hand-copied pair of
+   * loops each, which is six lines to keep in step across three gate kinds -
+   * and adding the metadata map made that copy a place where one of them could
+   * quietly keep resolving the raw function it no longer holds.
+   *
+   * An approval settles as REFUSED and a question as empty, which is what makes
+   * the run re-enter the gate and throw `RunStoppedError` rather than proceed on
+   * a decision no human made.
+   */
+  private drainPendingGates(): void {
+    for (const pending of this.approvals.values()) pending.resolve(false);
+    this.approvals.clear();
+    for (const pending of this.questions.values()) pending.resolve('');
+    this.questions.clear();
+    for (const pending of this.waits.values()) pending.resolve('');
+    this.waits.clear();
+  }
+
   private deliverEvent(correlationKey: string, payload: string): boolean {
-    const waiter = this.waits.get(correlationKey);
-    if (waiter) {
+    const pending = this.waits.get(correlationKey);
+    if (pending) {
       this.waits.delete(correlationKey);
-      waiter.resolve(payload);
+      pending.resolve(payload);
       return true;
     }
     // No waiter yet — keep it for a run that is about to reach the node.
@@ -2319,12 +2411,133 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     return result;
   }
 
+  /**
+   * This deployment's notification projection: what settled since `cursor`, what
+   * is waiting on a human right now, and what this instance is complaining about.
+   *
+   * RPC rather than an HTTP route, which is the whole reason it is cheap: the
+   * aggregator (`GET /api/notifications`) has already verified the caller and
+   * resolved this instance's name out of the owner-scoped registry prefix, and a
+   * worker-to-DO `stub.fetch()` would carry no bearer for `authorized()` to
+   * check. Same pattern as `purgeSelf` and `startPortalTurn`.
+   *
+   * Identity is deliberately absent from the return value - see
+   * {@link DeploymentNoticePayload}.
+   */
+  async notificationsSince(ownerId: string, cursor: number): Promise<DeploymentNoticePayload> {
+    // Ownership, mirroring `enforceOwnership`: once an instance is owned, only
+    // its owner may read it. Defence in depth - the caller resolved this name
+    // from an owner-scoped prefix, so reaching here with a foreign owner means
+    // the aggregator has a bug. BYO never denies (single-tenant).
+    if (this.hosted) {
+      const owner = this.state.ownerId;
+      if (owner && owner !== ownerId) {
+        throw new Error('Forbidden: this workflow belongs to another account.');
+      }
+    }
+    // A portal session instance serves ONE visitor conversation, is not in the
+    // deployment registry, and its runs belong to that conversation rather than
+    // to the owner's account-wide feed. The aggregator never asks for one, but an
+    // RPC is reachable by name, so refusing here is the structural guarantee.
+    if (this.state.portalSession) return { runs: [], pending: [], issues: [] };
+
+    // Reachable on a cold instance, so the tables may not exist yet.
+    this.ensureTables();
+
+    return {
+      runs: this.settledRunsSince(cursor),
+      pending: this.pendingGates(),
+      issues: [...this.settingsIssues],
+    };
+  }
+
+  /**
+   * Runs that ENDED after `cursor`, newest-ended first.
+   *
+   * Filtered on `endedAt` and not on the `started_at` column, which is the whole
+   * subtlety here: a run that began before the cursor and failed after it is
+   * exactly the notification somebody is waiting for, and a `started_at > cursor`
+   * query drops it silently. The table is bounded by run retention, so reading it
+   * whole and filtering in memory costs less than a second index would.
+   *
+   * A `running` row is skipped rather than reported. It means either a live run -
+   * not an outcome - or an instance evicted mid-run that never resumed, and
+   * announcing that as news every tick forever is worse than saying nothing.
+   */
+  private settledRunsSince(cursor: number): NoticeRun[] {
+    const runs: NoticeRun[] = [];
+    for (const summary of this.listRunSummaries()) {
+      const projected = projectSettledRun(summary, cursor);
+      if (!projected) continue;
+      runs.push(
+        projected.status === 'failed'
+          ? { ...projected, ...this.refusalCodeFor(projected.runId) }
+          : projected,
+      );
+    }
+    runs.sort((a, b) => b.endedAt - a.endedAt);
+    return runs.slice(0, NOTICE_RUNS_PER_DEPLOYMENT);
+  }
+
+  /**
+   * The entitlement refusal token from a failed run's terminal event, if it had
+   * one - so the studio can offer the right billing remedy without matching prose.
+   *
+   * Reads the LAST five events rather than the whole log. `run-failed` is the
+   * terminal event by construction and `sync-summary` is the only thing the
+   * engine emits immediately before it, so five is a generous window, and the
+   * alternative (scanning a 500-event log per failed run, per tick) is not worth
+   * a field that is absent on most failures anyway.
+   *
+   * Returns a spreadable object so the caller can add the key only when there is
+   * one: an explicit `code: undefined` would serialize as a present-but-null
+   * field, and the studio's remedy lookup treats an ABSENT code (ask the prose)
+   * differently from an unrecognised one (refuse to guess).
+   */
+  private refusalCodeFor(runId: string): { code?: string } {
+    for (const row of this.sql<{ event: string }>`
+      SELECT event FROM run_events WHERE run_id = ${runId} ORDER BY seq DESC LIMIT 5
+    `) {
+      try {
+        const event = JSON.parse(row.event) as { type?: string; code?: unknown };
+        if (event.type === 'run-failed' && typeof event.code === 'string' && event.code) {
+          return { code: event.code };
+        }
+      } catch {
+        // Corrupt row — the code is optional, so skip rather than fail the read.
+      }
+    }
+    return {};
+  }
+
+  /**
+   * Every gate currently waiting on a human, longest-waiting first.
+   *
+   * Oldest first because that ordering IS the priority: an approval somebody has
+   * been sitting on since yesterday is more urgent than one raised a second ago,
+   * and this is the only list in the product where that is true.
+   */
+  private pendingGates(): NoticePending[] {
+    const pending: NoticePending[] = [];
+    for (const [id, entry] of this.approvals) {
+      pending.push({ kind: 'approval', id, ...entry.meta });
+    }
+    for (const [id, entry] of this.questions) {
+      pending.push({ kind: 'question', id, ...entry.meta });
+    }
+    for (const [id, entry] of this.waits) {
+      pending.push({ kind: 'wait', id, ...entry.meta });
+    }
+    pending.sort((a, b) => a.since - b.since);
+    return pending;
+  }
+
   /** Answers a pending Ask User node from the portal page. */
   async answerPortalQuestion(requestId: string, response: string): Promise<{ delivered: boolean }> {
-    const resolve = this.questions.get(requestId);
-    if (!resolve) return { delivered: false };
+    const pending = this.questions.get(requestId);
+    if (!pending) return { delivered: false };
     this.questions.delete(requestId);
-    resolve(response);
+    pending.resolve(response);
     return { delivered: true };
   }
 

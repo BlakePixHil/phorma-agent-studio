@@ -144,6 +144,19 @@
     />
     <span class="phorma-toolbar-divider"></span>
     <!--
+      Notification centre. UNCONDITIONAL, and that is the decision rather than an
+      oversight: a local run finishing while the user looks at another workflow is
+      the bell's content for a signed-out install too, and a browser-parity user
+      with no account runs workflows all day. Only the DEPLOYED feed is gated, by
+      the poll's own `subscribed()` check.
+
+      This shipped gated on `isSignedIn()` for one revision and was wrong: the
+      whole feature was invisible to anyone who had not signed in, including every
+      `ng serve` session.
+    -->
+    <app-notification-bell />
+    <span class="phorma-toolbar-divider"></span>
+    <!--
       Account control (far right). Three states, not two, because the desktop
       build signs in through the browser handoff and Clerk never loads a user
       there - so `<clerk-user-button>` would render an empty box for an account

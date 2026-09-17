@@ -83,6 +83,24 @@ describe('DeploymentsService', () => {
     library = specs;
   }
 
+  /**
+   * The one request this spec is about, found by method rather than by position.
+   *
+   * `log[0]` used to be read directly, and that quietly assumed no OTHER service in
+   * the root injector issues a request in the same window - which nothing sharing an
+   * injector can promise. It made these two specs FLAKY and, worse, made them blame
+   * `DeploymentsService` for a stray request from elsewhere in the suite. Asserting
+   * that exactly one request of this method happened is strictly stronger than
+   * asserting the first one was it.
+   */
+  function only(method: string): Recorded {
+    const matching = log.filter(entry => entry.method === method);
+    expect(matching.length)
+      .withContext(`expected exactly one ${method}, saw: ${log.map(e => `${e.method} ${e.url}`).join(', ')}`)
+      .toBe(1);
+    return matching[0];
+  }
+
   beforeEach(() => {
     library = [];
     log = [];
@@ -313,8 +331,9 @@ describe('DeploymentsService', () => {
     responses = [{ status: 200, body: { ok: true } }];
     expect(await service.undeploy('wf-one')).toBeTrue();
 
-    expect(log[0].method).toBe('DELETE');
-    expect(log[0].url).toBe(`${PHORMA_CLOUD_DEFAULT_URL}/agents/workflow-agent/wf-one/workflow`);
+    expect(only('DELETE').url).toBe(
+      `${PHORMA_CLOUD_DEFAULT_URL}/agents/workflow-agent/wf-one/workflow`,
+    );
     expect(service.deployments()).toEqual([]);
     expect(toastSuccess).toHaveBeenCalled();
   });
@@ -327,7 +346,7 @@ describe('DeploymentsService', () => {
     responses = [{ status: 200, body: { ok: true, purged: true } }];
     expect(await service.purge('wf-one')).toBeTrue();
 
-    expect(log[0].url).toBe(
+    expect(only('DELETE').url).toBe(
       `${PHORMA_CLOUD_DEFAULT_URL}/agents/workflow-agent/wf-one/workflow/purge`,
     );
     expect(service.deployments()).toEqual([]);

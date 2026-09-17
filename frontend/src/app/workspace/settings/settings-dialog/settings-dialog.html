@@ -1018,6 +1018,32 @@
                               label="Sign in to Phorma Cloud"
                               (onClick)="phormaCloud.signIn()"
                             />
+                            <!--
+                              A NON-DEFAULT endpoint, named, with the reset beside it.
+                              `resetPhormaCloudUrl()` existed for exactly this failure
+                              and was never rendered anywhere, so a stale override -
+                              a local `wrangler dev` URL, a retired host - pointed
+                              sign-in at a dead address with nothing on screen saying
+                              so and no way back. Shown only when it differs from the
+                              default, because for everyone else it is noise.
+                            -->
+                            @if (phormaCloudEndpointOverridden()) {
+                              <p class="phorma-settings__note phorma-settings__note--warn">
+                                <i class="ti ti-plug-connected-x" aria-hidden="true"></i>
+                                Sign-in is pointed at
+                                <code>{{ cloud.phormaCloudUrl() }}</code>
+                                rather than the built-in address. If it does not answer,
+                                reset it.
+                              </p>
+                              <p-button
+                                styleClass="phorma-settings__btn"
+                                size="small"
+                                [outlined]="true"
+                                icon="ti ti-rotate"
+                                label="Reset the Phorma Cloud address"
+                                (onClick)="resetPhormaCloudUrl()"
+                              />
+                            }
                           }
                         }
                       }
@@ -2094,6 +2120,14 @@
                       gates itself on being signed in.
                     -->
                     <app-deployments-settings />
+
+                    <!--
+                      What the toolbar bell may report. Beside the deployment list
+                      because that is where most of what it reports comes from.
+                      Gates itself on being signed in, not on a subscription: the
+                      bell reaches every account, so its settings must too.
+                    -->
+                    <app-notification-settings />
 
                     <!--
                       Cloud backup. Gates itself on being signed in AND the

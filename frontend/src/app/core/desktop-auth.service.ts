@@ -88,6 +88,21 @@ export type DesktopAuthFailure =
   /** The worker could not be reached at all. */
   | 'unreachable';
 
+/**
+ * How the sign-in URL got in front of the user.
+ *
+ * `browser` is the happy path. `manual` means the system browser could not be
+ * launched and the URL is being offered for the user to open themselves - which is
+ * a WORKING sign-in, not a failure, so it is deliberately not a
+ * {@link DesktopAuthFailure}.
+ *
+ * This distinction exists because the two were previously collapsed into
+ * `'unreachable'`, which told a user to "check your connection" when the network
+ * was fine and only `openUrl` had failed - and then abandoned a perfectly valid
+ * one-time code instead of letting them paste the URL into a browser.
+ */
+export type DesktopAuthHandoff = 'browser' | 'manual';
+
 @Injectable({ providedIn: 'root' })
 export class DesktopAuthService {
   private readonly tauri = inject(TauriService);
@@ -109,6 +124,26 @@ export class DesktopAuthService {
   readonly email = this.emailSignal.asReadonly();
   /** True once a credential is held. */
   readonly signedIn = computed(() => this.stateSignal() === 'signed-in');
+
+  /**
+   * The sign-in URL of the attempt in flight, and how it was delivered.
+   *
+   * Kept so a launch failure has a recovery path instead of a dead end - the same
+   * reason `BillingService.lastUrl` exists, and the reason
+   * `McpOAuthService.openExternal`'s own comment says a caller that needs one
+   * should hold the URL. Null between attempts.
+   */
+  readonly pendingUrl = signal<string | null>(null);
+  readonly handoff = signal<DesktopAuthHandoff>('browser');
+
+  /**
+   * Why the last launch or request failed, verbatim.
+   *
+   * Both failure paths used to `catch {}` and discard the error, which is why
+   * "Could not reach Phorma Cloud" was shown for a `plugin-opener` permission
+   * problem. This is display-and-log detail, never a control-flow signal.
+   */
+  readonly lastErrorDetail = signal<string | null>(null);
 
   /**
    * In-memory copy of the token.
@@ -143,11 +178,14 @@ export class DesktopAuthService {
    * first, so a user who clicks twice gets one live poll loop rather than two
    * racing ones.
    */
-  async begin(): Promise<boolean> {
+  async begin(onManualHandoff?: (url: string) => void): Promise<boolean> {
     if (!this.tauri.isDesktop) return false;
     this.cancel();
     this.cancelled = false;
     this.failureSignal.set(null);
+    this.lastErrorDetail.set(null);
+    this.handoff.set('browser');
+    this.pendingUrl.set(null);
     this.stateSignal.set('pending');
 
     const base = loadPhormaCloudUrl().replace(/\/$/, '');
@@ -160,15 +198,34 @@ export class DesktopAuthService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ codeHash: await sha256Hex(code) }),
       });
-    } catch {
+    } catch (error) {
+      // A THROWN fetch here really is a network or CORS problem: the request never
+      // got an answer. Recorded rather than swallowed, because the previous version
+      // reported it identically to a failed browser launch.
+      this.lastErrorDetail.set(`${base}/api/auth/device/start: ${messageOf(error)}`);
       return this.fail('unreachable');
     }
-    if (!started.ok) return this.fail('refused');
+    if (!started.ok) {
+      this.lastErrorDetail.set(`${base}/api/auth/device/start answered HTTP ${started.status}`);
+      return this.fail('refused');
+    }
+
+    const signInUrl = `${base}/auth/device?c=${encodeURIComponent(code)}`;
+    // Published BEFORE the launch attempt, so a failure has something to offer.
+    this.pendingUrl.set(signInUrl);
 
     try {
-      await this.links.openExternal(`${base}/auth/device?c=${encodeURIComponent(code)}`);
-    } catch {
-      return this.fail('unreachable');
+      await this.links.openExternal(signInUrl);
+    } catch (error) {
+      // The code is minted, registered and valid for its full window, so a launch
+      // failure is NOT a reason to abandon the attempt - it is a reason to let the
+      // user open the URL themselves. Previously this returned `unreachable` and
+      // threw away a working sign-in over a `plugin-opener` problem.
+      this.lastErrorDetail.set(`Could not open the browser: ${messageOf(error)}`);
+      this.handoff.set('manual');
+      // Told to the caller NOW rather than on return: the poll below runs for two
+      // minutes, and a URL handed over after the code expires is no use to anybody.
+      onManualHandoff?.(signInUrl);
     }
 
     return await this.pollForToken(base, code);
@@ -297,8 +354,14 @@ export class DesktopAuthService {
   private fail(reason: DesktopAuthFailure): false {
     this.failureSignal.set(reason);
     this.stateSignal.set(this.cachedToken ? 'signed-in' : 'signed-out');
+    this.pendingUrl.set(null);
     return false;
   }
+}
+
+/** An error's message, without leaking a non-Error's internals. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Keychain entry name. Must match `DEVICE_TOKEN_KEY` in `llm.rs`. */

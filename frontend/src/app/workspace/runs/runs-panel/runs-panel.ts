@@ -6,6 +6,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
   viewChildren,
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
@@ -131,6 +132,23 @@ export class RunsPanel {
       if (!box) return;
       box.nativeElement.focus();
       this.runController.focusQuestionId.set(null);
+    });
+
+    // A notification deep link asks this panel to open one run. Consumed once the
+    // row exists - a cloud run arrives with `refreshHistory`, so the request has to
+    // survive until the list lands rather than being dropped on the first miss.
+    effect(() => {
+      const runId = this.runController.focusRunId();
+      if (!runId) return;
+      const row = this.historyRows().find(candidate => candidate.summary.id === runId);
+      if (!row) return;
+      // `untracked` because `openRun` reads and writes signals this effect would
+      // otherwise re-enter: the effect hazard that has already OOM'd the renderer
+      // in the settings dialog, the properties panel and the command palette.
+      untracked(() => {
+        this.runController.focusRunId.set(null);
+        void this.openRun(row);
+      });
     });
   }
 

@@ -29,6 +29,7 @@ import { CommandPaletteService } from '../../core/command-palette.service';
 import { UpdateService } from '../../core/update.service';
 import { ToastService } from '../../shared/toast/toast.service';
 import { VersionHistoryDialogService } from '../../workspace/workflows/version-history-dialog.service';
+import { NotificationBell } from './notification-bell/notification-bell';
 
 /**
  * Sleek top application toolbar.
@@ -39,7 +40,14 @@ import { VersionHistoryDialogService } from '../../workspace/workflows/version-h
  */
 @Component({
   selector: 'app-toolbar',
-  imports: [MenubarModule, ButtonModule, MenuModule, TooltipModule, ClerkUserButtonComponent],
+  imports: [
+    MenubarModule,
+    ButtonModule,
+    MenuModule,
+    TooltipModule,
+    ClerkUserButtonComponent,
+    NotificationBell,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './toolbar.html',
   styleUrl: './toolbar.scss',

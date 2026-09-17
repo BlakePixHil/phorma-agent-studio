@@ -50,10 +50,10 @@ or start them as a background process.
 
 ```powershell
 cd frontend; npm run build                       # production build: the ONLY thing that checks Angular budgets
-cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1255 specs, ~20s
+cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1407 specs, ~25s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
 cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
-cd cloud;    npm run test:unit                   # 28 worker suites (`test` is the same; the portal e2e is manual)
+cd cloud;    npm run test:unit                   # 29 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
 cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)

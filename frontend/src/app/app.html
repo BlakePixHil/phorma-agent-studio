@@ -203,7 +203,12 @@
   <!-- ── AI edit review bar (Revert / Keep after an AI build) ── -->
   <app-ai-review-bar />
 
-  <!-- ── Toast notifications (frosted glass, top-right) ── -->
+  <!--
+    ── Transient alerts (frosted glass, BOTTOM-right) ──
+    The comment said top-right; the stylesheet has always said `bottom: 2rem`.
+    These are the ephemeral twin of the toolbar bell: a toast is the moment
+    something happens, the bell is the record of it.
+  -->
   <app-toast />
 
   <!-- ── Status bar ── -->

@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { ToastService } from '../shared/toast/toast.service';
 import { DesktopAuthService } from './desktop-auth.service';
+import { TerminalOutputService } from './terminal-output.service';
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
 import { TauriService } from './tauri.service';
 import { TelemetryService } from './telemetry.service';
@@ -142,6 +143,10 @@ export class PhormaCloudService {
   // The desktop credential. A DI LEAF (`TauriService` + `McpOAuthService` only), so
   // injecting it here does not close the NG0200 cycle this service sits on.
   private readonly desktopAuth = inject(DesktopAuthService);
+  // Also safe on that cycle: `TerminalOutputService` injects NOTHING at all. It is
+  // here so a sign-in failure leaves its real cause somewhere a user can read it -
+  // a toast cannot carry a URL or an exception message usefully.
+  private readonly terminal = inject(TerminalOutputService);
 
   /**
    * Current Clerk user. Always null on desktop, and that is not a bug: the webview
@@ -376,7 +381,7 @@ export class PhormaCloudService {
    * all - it is what an abandoned sign-in looks like.
    */
   private async beginDesktopSignIn(): Promise<void> {
-    const signedIn = await this.desktopAuth.begin();
+    const signedIn = await this.desktopAuth.begin(url => this.offerManualSignIn(url));
     if (signedIn) {
       await this.refresh();
       this.toast.success('Signed in', this.email() ?? undefined);
@@ -392,17 +397,61 @@ export class PhormaCloudService {
         );
         return;
       case 'unreachable':
+        // This now means ONLY that the request never got an answer - a failed
+        // browser launch no longer lands here, so "check your connection" is
+        // finally true whenever it is shown.
+        //
+        // The ADDRESS is named, because "check your connection" is the wrong advice
+        // about as often as it is the right one: the endpoint is an OVERRIDABLE
+        // per-origin setting, so a stale `wrangler dev` URL or a retired host
+        // produces exactly this failure on one machine while another signs in fine.
+        // Seeing the host is what tells those two apart without a console.
+        this.reportSignInDetail();
         this.toast.error(
           'Could not reach Phorma Cloud',
-          'Check your connection and try again. Nothing was changed.',
+          `No answer from ${loadPhormaCloudUrl()}. Nothing was changed. If that is not the address you expect, reset it in Settings > Cloud; otherwise check your connection and try again.`,
         );
         return;
       default:
+        this.reportSignInDetail();
         this.toast.error(
           'Sign-in was refused',
           'Phorma Cloud would not authorize this device. Try again, or contact support if it keeps happening.',
         );
     }
+  }
+
+  /**
+   * The recovery path when the system browser could not be launched.
+   *
+   * This is NOT a failure: the one-time code is minted, registered, and the poll is
+   * about to start, so a user who opens the URL themselves signs in normally. The
+   * previous version discarded all of that and told them to check their connection.
+   *
+   * The URL goes to the console as well as the toast, because it is long, the toast
+   * has a copy button but the console is where somebody will look for it a minute
+   * later, and a two-minute window is not long enough to lose it in.
+   */
+  private offerManualSignIn(url: string): void {
+    this.reportSignInDetail();
+    this.terminal.append('problems', 'warning', `Open this page to sign in: ${url}`);
+    this.toast.warning(
+      'Open the sign-in page yourself',
+      `This app could not launch your browser, but the sign-in is still valid for two minutes. Open: ${url}`,
+    );
+  }
+
+  /**
+   * Puts the real cause in the Problems console.
+   *
+   * Both failure paths in `DesktopAuthService` used to `catch {}` and discard the
+   * error, so a `plugin-opener` permission problem and a dead network produced the
+   * identical "check your connection" toast and left nothing behind to tell them
+   * apart. A toast cannot carry a stack trace; the console can.
+   */
+  private reportSignInDetail(): void {
+    const detail = this.desktopAuth.lastErrorDetail();
+    if (detail) this.terminal.append('problems', 'error', `Desktop sign-in: ${detail}`);
   }
 
   /**

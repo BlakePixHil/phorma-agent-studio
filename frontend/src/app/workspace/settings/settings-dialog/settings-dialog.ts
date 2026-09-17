@@ -72,6 +72,7 @@ import { InfoPopover } from '../../../shared/info-popover/info-popover';
 import { PlanCards } from '../../cloud/plan-cards/plan-cards';
 import { PrivacySettings } from '../privacy/privacy-settings';
 import { DeploymentsSettings } from '../deployments/deployments-settings';
+import { NotificationSettings } from '../notifications/notification-settings';
 import { LibraryExportSettings } from '../library-export/library-export-settings';
 import { BackupSettings } from '../backup/backup-settings';
 import {
@@ -108,7 +109,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, CheckoutFallback, PastDueNotice, InfoPopover, PlanCards, PrivacySettings, DeploymentsSettings, LibraryExportSettings, BackupSettings],
+  imports: [FormsModule, CurrencyPipe, DecimalPipe, ButtonModule, SelectModule, SliderModule, ToggleSwitchModule, TooltipModule, PhormaCloudIcon, CheckoutFallback, PastDueNotice, InfoPopover, PlanCards, PrivacySettings, DeploymentsSettings, NotificationSettings, LibraryExportSettings, BackupSettings],
   templateUrl: './settings-dialog.html',
   styleUrl: './settings-dialog.scss',
 })
@@ -821,6 +822,21 @@ export class SettingsDialog {
   protected resetPhormaCloudUrl(): void {
     this.cloud.setPhormaCloudUrl(PHORMA_CLOUD_DEFAULT_URL);
     void this.phormaCloud.refresh();
+  }
+
+  /**
+   * True when this install talks to a hand-set Phorma Cloud address.
+   *
+   * The override is per-ORIGIN localStorage, so a dev build (`http://localhost:7322`)
+   * and a packaged one (`http://tauri.localhost`) keep separate values - which is how
+   * one machine signs in perfectly while another, or the same machine in dev mode,
+   * fails with a connection error nobody can explain. Naming the address is the
+   * whole remedy; {@link resetPhormaCloudUrl} was written for this and had no
+   * caller, so nothing ever showed it.
+   */
+  protected phormaCloudEndpointOverridden(): boolean {
+    const current = this.cloud.phormaCloudUrl().trim().replace(/\/$/, '');
+    return current.length > 0 && current !== PHORMA_CLOUD_DEFAULT_URL;
   }
 
   protected onWorkerUrlInput(event: Event): void {

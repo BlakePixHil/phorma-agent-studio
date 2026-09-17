@@ -235,12 +235,13 @@ const TARGET_IDS = Object.keys(DEPLOY_TARGETS) as DeployTargetId[];
 /**
  * The operations `CloudService` does NOT dispatch, and must not.
  *
- * These belong to `DeploymentsService` and `WorkflowBackupService`, both of which
- * PIN `DEPLOY_TARGETS.phorma` instead of resolving the chosen deploy target. A
- * subscriber deploying to AWS still has a Phorma Cloud account, and their
- * deployment list and their backups live on the hosted worker - so driving these
- * through `CloudService` would send them to whichever host the user last picked,
- * or to no route at all.
+ * These belong to `DeploymentsService`, `WorkflowBackupService` and
+ * `DeployedNotificationsService`, all of which PIN `DEPLOY_TARGETS.phorma` instead
+ * of resolving the chosen deploy target. A subscriber deploying to AWS still has a
+ * Phorma Cloud account, and their deployment list, their backups and their
+ * notification feed live on the hosted worker - so driving these through
+ * `CloudService` would send them to whichever host the user last picked, or to no
+ * route at all.
  *
  * Named explicitly rather than filtered by some property, so adding one is a
  * deliberate edit here with a reason attached.
@@ -250,6 +251,13 @@ const TARGET_IDS = Object.keys(DEPLOY_TARGETS) as DeployTargetId[];
  * `deployments.json` manifest has to describe their own worker rather than a
  * Phorma Cloud account they may not have. One operation, two dispatchers, two
  * bases - so it is driven below like every other.
+ *
+ * `approve` is pinned even though it addresses ONE workflow instance rather than
+ * the account. The only caller is the notification bell, which answers a gate on a
+ * workflow the user may not have open and whose deploy target is therefore not the
+ * one `settings.cloudProvider()` names. `CloudService` still resolves approvals
+ * for the workflow being MONITORED - over the socket, as `approveRemote` - so
+ * there is no second HTTP copy of that path to keep in step.
  */
 type PhormaPinnedOperation =
   | 'read-spec'
@@ -259,7 +267,9 @@ type PhormaPinnedOperation =
   | 'backup-revisions'
   | 'backup-download'
   | 'backup-delete'
-  | 'backup-delete-all';
+  | 'backup-delete-all'
+  | 'list-notifications'
+  | 'approve';
 
 const PHORMA_PINNED_OPERATIONS = new Set<CloudOperation>([
   'read-spec',
@@ -270,6 +280,8 @@ const PHORMA_PINNED_OPERATIONS = new Set<CloudOperation>([
   'backup-download',
   'backup-delete',
   'backup-delete-all',
+  'list-notifications',
+  'approve',
 ]);
 
 /** Everything this suite drives: every operation `CloudService` dispatches. */
@@ -337,6 +349,8 @@ function contextFor(op: CloudOperation): CloudEndpointContext {
     case 'backup-download':
     case 'backup-delete':
     case 'backup-delete-all':
+    case 'list-notifications':
+    case 'approve':
       throw new Error(`${op} is dispatched by a Phorma-pinned service, not CloudService.`);
   }
 }

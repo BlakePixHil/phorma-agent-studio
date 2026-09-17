@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { CdkDropListGroup } from '@angular/cdk/drag-drop';
 
 import { Toolbar } from './layout/toolbar/toolbar';
@@ -14,6 +14,11 @@ import { UpdateService } from './core/update.service';
 import { TelemetryService } from './core/telemetry.service';
 import { LibraryExportService } from './core/library-export.service';
 import { WorkflowBackupService } from './core/cloud/workflow-backup.service';
+import { NotificationCenterService } from './core/notification-center.service';
+import { DeployedNotificationsService } from './core/deployed-notifications.service';
+import { CloudService } from './core/cloud.service';
+import { RunControllerService } from './core/run-controller.service';
+import { PhormaCloudService } from './core/phorma-cloud.service';
 import { BottomTerminal } from './layout/terminal/bottom-terminal';
 import { TerminalOutputService } from './core/terminal-output.service';
 import { AgentsPalette } from './workspace/palette/agents-palette/agents-palette';
@@ -115,6 +120,15 @@ export class App {
   // and a service nobody injects has no effect at all. Backup that only armed once
   // the user opened Settings would be missing on the day it mattered.
   private readonly workflowBackup = inject(WorkflowBackupService);
+  // The notification centre's three collaborators, wired together HERE because the
+  // shell is the only place that may hold all of them: `NotificationCenterService`
+  // must not inject `CloudService` (that closes the known NG0200 cycle), and
+  // `DeployedNotificationsService` must not decide when it is allowed to run.
+  private readonly notificationCentre = inject(NotificationCenterService);
+  private readonly deployedNotifications = inject(DeployedNotificationsService);
+  private readonly cloud = inject(CloudService);
+  private readonly runController = inject(RunControllerService);
+  private readonly phormaCloud = inject(PhormaCloudService);
 
   protected readonly title = signal('Phorma Agent Studio');
 
@@ -132,6 +146,48 @@ export class App {
     // onto an idle callback, so it never sits on the first-paint path (4.9), and
     // it swallows every failure so startup continues without it (5.7).
     this.telemetry.bootstrap();
+    this.wireNotifications();
+  }
+
+  /**
+   * Connects the notification centre to the things it deliberately cannot reach.
+   *
+   * Two jobs. First, install the deep-link handler: navigating to a run needs
+   * `CloudService` to attach the monitor, and `NotificationCenterService` must not
+   * inject it - the same settable-seam arrangement as
+   * `RunControllerService.remoteApprovalSender`. Second, own the poll's lifecycle,
+   * because "may this account read the feed" is an entitlement question the poll
+   * should answer to rather than ask.
+   */
+  private wireNotifications(): void {
+    this.notificationCentre.deepLinkHandler = target => {
+      if (target.workflowId) this.workflow.openWorkflow(target.workflowId);
+      // Reveal the Runs panel, auto-showing the tab when the user has hidden it -
+      // `setActive` handles that, so a hidden Runs tab cannot swallow the link.
+      this.panels.setActive(this.runsPanelSide(), 'runs');
+      // A deployed run's events come over the monitor socket, and the Durable
+      // Object replays the in-flight run - so this is also what makes the canvas
+      // animate for a run the studio did not start.
+      if (target.deployed && target.workflowId) {
+        void this.cloud.connect(target.workflowId);
+      }
+      // Consumed by the Runs panel once its history has loaded, which for a cloud
+      // run is one request later.
+      if (target.runId) this.runController.focusRunId.set(target.runId);
+    };
+
+    // Start and stop with entitlement. `start()` is idempotent and resets the
+    // backoff, so re-running it on a subscription change is also the recovery path
+    // for a user who just subscribed and should not wait out a failed poll's timer.
+    effect(() => {
+      if (this.phormaCloud.subscribed()) this.deployedNotifications.start();
+      else this.deployedNotifications.stop();
+    });
+  }
+
+  /** Whichever side the user keeps the Runs panel on. */
+  private runsPanelSide(): 'left' | 'right' {
+    return this.panels.tabs().find(tab => tab.id === 'runs')?.side ?? 'left';
   }
 
   /** Toolbar height (px) — the tab bar sits directly below it. */

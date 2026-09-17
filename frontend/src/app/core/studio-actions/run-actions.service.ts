@@ -1,5 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 
+import { NotificationCenterService } from '../notification-center.service';
+import { NotificationsService } from '../notifications.service';
 import { RunControllerService } from '../run-controller.service';
 import { RunHistoryService } from '../run-history.service';
 import { WorkflowService } from '../workflow.service';
@@ -31,6 +33,12 @@ export class RunActionsService {
   private readonly runs = inject(RunControllerService);
   private readonly history = inject(RunHistoryService);
   private readonly workflow = inject(WorkflowService);
+  // The account-wide view. Safe here: the registry sits DOWNSTREAM of the builder
+  // and the chat, and `NotificationCenterService` reaches neither - it injects the
+  // run controller, the poll, the deployment list and the toast, all of which this
+  // service or its siblings already sit beside.
+  private readonly centre = inject(NotificationCenterService);
+  private readonly notifications = inject(NotificationsService);
 
   actions(): StudioAction[] {
     return [
@@ -197,6 +205,54 @@ export class RunActionsService {
         activity: () => 'Loading a past run onto the canvas',
         run: args => this.loadHistorical(args),
       },
+      // ── The notification centre ──────────────────────────────────────────
+      //
+      // On the `runs` surface rather than a new one, because everything the bell
+      // reports is a run outcome or a gate on a run - and revealing the Runs panel
+      // is the right reveal for both. A `notifications` surface would need its own
+      // panel mapping for a surface that is a dropdown.
+      //
+      // Read ON DEMAND, never embedded in a prompt: the feed grows and a system
+      // prompt that carried it would grow with it.
+      {
+        id: 'notifications_read',
+        label: 'Read notifications',
+        description:
+          'Returns everything waiting on a human across every workflow - approval gates, questions and suspended waits - plus recent run outcomes from deployed and local runs. Use this to answer "is anything wrong" or "what needs me".',
+        surface: 'runs',
+        access: 'read',
+        risk: 'silent',
+        activity: () => 'Reading notifications',
+        run: () => this.readNotifications(),
+      },
+      {
+        id: 'notifications_resolve_approval',
+        label: 'Resolve an approval anywhere',
+        description:
+          'Approves or rejects an approval gate on ANY workflow, including one deployed to the cloud that is not open locally. Read the gates with notifications_read first. Use run_resolve_approval only for the workflow on screen.',
+        surface: 'runs',
+        access: 'write',
+        // Confirm-tier, and it must stay so: this releases a decision on a run the
+        // user may not be looking at, in a workflow they may not have open, with
+        // effects (a payment, an email, a filing) the studio cannot undo.
+        risk: 'confirm',
+        params: {
+          requestId: {
+            type: 'string',
+            description: 'Gate id, from notifications_read.',
+            required: true,
+          },
+          approved: {
+            type: 'boolean',
+            description: 'True to approve, false to reject.',
+            required: true,
+          },
+        },
+        confirmSummary: args => this.confirmNotificationApproval(args),
+        activity: args =>
+          `${argBool(args, 'approved') ? 'Approving' : 'Rejecting'} a gate from notifications`,
+        run: args => this.resolveNotificationApproval(args),
+      },
     ];
   }
 
@@ -266,6 +322,90 @@ export class RunActionsService {
     }
     this.runs.resolveApproval(requestId, approved);
     return actionOk({ requestId, approved }, { revertable: false });
+  }
+
+  /**
+   * The bell's contents, as data.
+   *
+   * `run_read_state` already reports the gates on the OPEN workflow's live run.
+   * This is the account-wide answer: gates on any deployment, plus the recent
+   * outcome feed. The two overlap on purpose - the model should be able to answer
+   * "what needs me" without first working out which workflow is on screen.
+   */
+  private readNotifications(): ActionResult {
+    return actionOk({
+      pending: this.centre.pendingActions().map(row => ({
+        requestId: row.id,
+        kind: row.kind,
+        nodeName: row.nodeName,
+        message: row.message,
+        workflowId: row.workflowId,
+        workflowName: row.workflowName,
+        runId: row.runId,
+        waitingSince: new Date(row.since).toISOString(),
+        origin: row.origin,
+        // So the model can tell the user whether this is a yes/no it can settle or
+        // something needing the run opened.
+        resolvableInline: row.resolvableInline,
+      })),
+      recent: this.centre.recent().map(entry => ({
+        kind: entry.kind,
+        title: entry.title,
+        detail: entry.detail,
+        workflowId: entry.workflowId,
+        workflowName: entry.workflowName,
+        runId: entry.runId,
+        at: new Date(entry.at).toISOString(),
+        origin: entry.origin,
+        remedy: entry.remedy,
+      })),
+      unread: this.notifications.unreadCount(),
+      // Partial answers are reported rather than smoothed over: a model that says
+      // "nothing is wrong" while two deployments could not be reached is worse
+      // than one that says it could not check.
+      deploymentsUnreachable: this.centre.unreachable(),
+      truncated: this.centre.truncated(),
+    });
+  }
+
+  /** Confirm copy for an account-wide approval. Names the workflow, not just the gate. */
+  private confirmNotificationApproval(args: ActionArgs): string {
+    const requestId = argStr(args, 'requestId');
+    const row = this.centre.pendingActions().find(entry => entry.id === requestId);
+    const verb = argBool(args, 'approved') ? 'Approve' : 'Reject';
+    if (!row) return `${verb} approval gate '${requestId ?? 'unknown'}'?`;
+    const where = row.origin === 'deployed' ? 'running in the cloud' : 'running locally';
+    return (
+      `${verb} "${row.nodeName}" in "${row.workflowName}" (${where})?\n\n${row.message}` +
+      (row.hasPayload
+        ? '\n\nThis gate carries a payload. Open the run to read it before deciding.'
+        : '')
+    );
+  }
+
+  private async resolveNotificationApproval(args: ActionArgs): Promise<ActionResult> {
+    const requestId = argStr(args, 'requestId');
+    const approved = argBool(args, 'approved');
+    if (!requestId) return actionFail('Missing the approval request id.');
+    if (approved === undefined) return actionFail("Missing 'approved'.");
+    const row = this.centre.pendingActions().find(entry => entry.id === requestId);
+    if (!row) {
+      return actionFail(
+        `Nothing is waiting for gate '${requestId}'. Read notifications_read again - it may have been answered elsewhere.`,
+      );
+    }
+    if (row.kind !== 'approval') {
+      return actionFail(
+        `Gate '${requestId}' is a ${row.kind}, not an approval. Open the run to answer it.`,
+      );
+    }
+    const delivered = await this.centre.resolve(row, approved);
+    if (!delivered) {
+      return actionFail(
+        `The decision could not be delivered - "${row.nodeName}" is no longer waiting.`,
+      );
+    }
+    return actionOk({ requestId, approved, workflowId: row.workflowId }, { revertable: false });
   }
 
   private resolveQuestion(args: ActionArgs): ActionResult {

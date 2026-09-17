@@ -41,6 +41,8 @@ import { DataFetchService } from './data-fetch.service';
 import { FixtureStoreService } from './fixture-store.service';
 import { ModelTransportService } from './model-transport.service';
 import { ModelPricingService } from './model-pricing.service';
+import { notificationFromLocalRun } from './notification-projection';
+import { NotificationsService } from './notifications.service';
 import { PanelRegistryService } from './panel-registry.service';
 import { RUN_HISTORY_LIMIT, RunHistoryService } from './run-history.service';
 import { SettingsService } from './settings.service';
@@ -100,8 +102,24 @@ export interface TraceEntry {
   scope?: RunEvent['scope'];
 }
 
+/**
+ * Fields every pending gate carries so a surface OTHER than the Runs panel can
+ * describe it - specifically the notification centre, which lists gates from
+ * every workflow and therefore needs to say which run and how long.
+ *
+ * `since` is when the gate started waiting, and it is the ordering key in the
+ * bell: the thing somebody has been sitting on longest is the most urgent, which
+ * is true here and almost nowhere else in the product.
+ */
+interface PendingGateFields {
+  /** The run this gate belongs to, so a notification can deep-link to it. */
+  runId: string;
+  /** Epoch ms the gate started waiting. */
+  since: number;
+}
+
 /** A pending human approval, surfaced in the Runs panel. */
-export interface PendingApproval {
+export interface PendingApproval extends PendingGateFields {
   /** Engine identity for this exact gate occurrence. */
   requestId: string;
   nodeId: string;
@@ -112,7 +130,7 @@ export interface PendingApproval {
 }
 
 /** A suspended Wait-for-Event node, surfaced in the Runs panel. */
-export interface PendingWait {
+export interface PendingWait extends PendingGateFields {
   nodeId: string;
   nodeName: string;
   correlationKey: string;
@@ -123,7 +141,7 @@ export interface PendingWait {
 }
 
 /** A suspended Ask-User node, surfaced in the Runs panel. */
-export interface PendingQuestion {
+export interface PendingQuestion extends PendingGateFields {
   /** Engine identity for this exact ask occurrence. */
   requestId: string;
   nodeId: string;
@@ -172,6 +190,12 @@ export class RunControllerService {
   private readonly billingCta = inject(BillingCtaService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
+  // Safe DI direction, and the reason `NotificationsService` is a bare signal
+  // store: it injects nothing at all, so this edge cannot reach back into
+  // `ModelTransportService`, `PhormaCloudService` or `CloudService` and close the
+  // known NG0200 cycle. Everything the notification centre needs that DOES touch
+  // those lives in `NotificationCenterService`, which only components inject.
+  private readonly notifications = inject(NotificationsService);
   private readonly pricing = inject(ModelPricingService);
   private readonly tauri = inject(TauriService);
   private readonly connectionStore = inject(ConnectionStoreService);
@@ -188,6 +212,15 @@ export class RunControllerService {
   private handle: RunHandle | null = null;
   private traceCounter = 0;
   private runCounter = 0;
+  /**
+   * Identity of the LOCAL run in flight, for the notification its outcome raises.
+   *
+   * Null between runs. Set at start and cleared when the run settles, so a
+   * terminal event from the cloud monitor - which arrives on this same `apply()`
+   * path - cannot be attributed to a local run that is not happening.
+   */
+  private activeLocalRun: { runId: string; workflowId: string | null; workflowName: string } | null =
+    null;
   private readonly edgeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Toast ids raised for pending questions, so they can be dismissed on answer. */
   private readonly questionToasts = new Map<string, number>();
@@ -220,6 +253,17 @@ export class RunControllerService {
    * "Answer" toast action. The panel clears it once focus lands.
    */
   readonly focusQuestionId = signal<string | null>(null);
+
+  /**
+   * Run id the Runs panel should open, set by a notification deep link.
+   *
+   * The same one-shot seam as {@link focusQuestionId}, and here for the same
+   * reason: the panel owns its own detail selection, and the surface asking for it
+   * (the notification bell, via the app shell) has no business reaching into a
+   * component. The panel consumes it once its history has loaded and clears it,
+   * because the run may be a cloud one whose list arrives asynchronously.
+   */
+  readonly focusRunId = signal<string | null>(null);
   /** Task input used for the next run (bound to the Runs panel textarea). */
   readonly runInput = signal('');
   /** Total streamed characters this run (cheap progress proxy). */
@@ -424,6 +468,18 @@ export class RunControllerService {
       retention,
     });
 
+    // Identity for the notification this run's outcome may raise. Captured HERE
+    // because a terminal RunEvent carries only `runId`, and the workflow's name is
+    // a thing the user can rename mid-run. Keyed on `runId` so a cloud event
+    // arriving on the same `apply()` path can never be mistaken for this run - the
+    // deployed feed already reports those, and reporting them twice is a duplicate
+    // row rather than a missing one.
+    this.activeLocalRun = {
+      runId,
+      workflowId: doc?.workflowId ?? null,
+      workflowName: doc?.name ?? 'Untitled Workflow',
+    };
+
     const notificationPolicy = settings?.notifications;
 
     const handle = startRun({
@@ -489,7 +545,7 @@ export class RunControllerService {
             graphSnapshot.nodes.find(node => node.id === nodeId)?.name ?? scopedNode?.name ?? nodeId;
           this.pendingApprovals.update(list => [
             ...list,
-            { requestId, nodeId, nodeName, message, payload, resolve },
+            { requestId, nodeId, nodeName, message, payload, resolve, runId, since: Date.now() },
           ]);
         }),
       waitForEvent: (nodeId, correlationKey, message, payload, timeoutMs) =>
@@ -522,6 +578,8 @@ export class RunControllerService {
               message,
               payload,
               resolve: eventPayload => settle(() => resolve(eventPayload)),
+              runId,
+              since: Date.now(),
             },
           ]);
         }),
@@ -536,7 +594,7 @@ export class RunControllerService {
             nodeId;
           this.pendingQuestions.update(list => [
             ...list,
-            { requestId, nodeId, nodeName, question, payload, resolve },
+            { requestId, nodeId, nodeName, question, payload, resolve, runId, since: Date.now() },
           ]);
         }),
     });
@@ -940,6 +998,11 @@ export class RunControllerService {
               message: event.message,
               payload: event.payload,
               resolve: approved => send(event.requestId, approved),
+              // The event's own clock, not ours: a monitor that connects late gets
+              // the gate replayed, and dating it "now" would make an approval
+              // somebody has ignored for an hour look like it just arrived.
+              runId: event.runId,
+              since: event.at,
             },
           ]);
         }
@@ -995,6 +1058,8 @@ export class RunControllerService {
               message: event.message,
               payload: event.payload,
               resolve: payload => send(event.correlationKey, payload),
+              runId: event.runId,
+              since: event.at,
             },
           ]);
         }
@@ -1028,6 +1093,8 @@ export class RunControllerService {
               question: event.question,
               payload: event.payload,
               resolve: response => send(event.requestId, response),
+              runId: event.runId,
+              since: event.at,
             },
           ]);
         }
@@ -1079,6 +1146,7 @@ export class RunControllerService {
         this.telemetry.count(counterName('run.completed'));
         this.terminal.setPhase('completed');
         this.console('run', 'success', 'Run completed.');
+        this.notifyLocalOutcome(event.runId, 'completed', event.at);
         this.finishRun();
         break;
 
@@ -1096,12 +1164,14 @@ export class RunControllerService {
         // this handler always matched (requirement 20). Other failures keep the
         // existing console/trace-only behaviour, with no generic toast.
         this.raiseBillingToast(event.error, event.code);
+        this.notifyLocalOutcome(event.runId, 'failed', event.at, event.error, event.code);
         this.finishRun();
         break;
 
       case 'run-stopped':
         this.terminal.setPhase('stopped');
         this.console('run', 'warning', 'Run stopped.');
+        this.notifyLocalOutcome(event.runId, 'stopped', event.at);
         this.finishRun();
         break;
     }
@@ -1407,8 +1477,72 @@ export class RunControllerService {
     this.terminal.clearAll();
   }
 
+  /**
+   * Raises the notification a settled LOCAL run earns, if any.
+   *
+   * Three filters, and each one exists to stop the bell being noise:
+   *
+   *  - the event's `runId` must match the run this controller started. Cloud
+   *    events reach `apply()` too, and the deployed poll already reports those; a
+   *    second row for the same run is worse than none.
+   *  - the projection drops what is not news (an eval case, for instance) - see
+   *    `notification-projection.ts`.
+   *  - a run the user is WATCHING earns nothing. There is no value in telling
+   *    somebody a thing they are looking at just happened, and a toast already
+   *    covers the moment it lands.
+   */
+  private notifyLocalOutcome(
+    runId: string,
+    status: 'completed' | 'failed' | 'stopped',
+    endedAt: number,
+    error?: string,
+    code?: string,
+  ): void {
+    const run = this.activeLocalRun;
+    if (!run || run.runId !== runId) return;
+    if (this.isWatchingRunsPanelFor(run.workflowId)) return;
+
+    const notification = notificationFromLocalRun({
+      runId: run.runId,
+      status,
+      // Local runs are always manually triggered today - the studio has no local
+      // scheduler and eval cases build their own recorders. Stated rather than
+      // threaded through, so a future local trigger source has one place to change.
+      source: 'manual',
+      workflowId: run.workflowId,
+      workflowName: run.workflowName,
+      endedAt,
+      error,
+      code,
+    });
+    if (notification) this.notifications.addOne(notification);
+  }
+
+  /**
+   * True when the Runs panel for this workflow is on screen right now.
+   *
+   * All three conditions are needed: the panel has to be the ACTIVE tab on its
+   * side (tabs share one pane), that side must not be collapsed, and the workflow
+   * that ran has to be the one on screen - a run of workflow A finishing while the
+   * user reads workflow B's Runs panel is exactly the case the bell exists for.
+   *
+   * The tab's side is read from the registry rather than assumed to be `left`,
+   * because a user can move it.
+   */
+  private isWatchingRunsPanelFor(workflowId: string | null): boolean {
+    const tab = this.panels.tabs().find(entry => entry.id === 'runs');
+    if (!tab || !tab.visible) return false;
+    const active = tab.side === 'left' ? this.panels.activeLeft() : this.panels.activeRight();
+    if (active !== 'runs') return false;
+    const collapsed =
+      tab.side === 'left' ? this.panels.collapsedLeft() : this.panels.collapsedRight();
+    if (collapsed) return false;
+    return (this.workflow.activeDoc()?.workflowId ?? null) === workflowId;
+  }
+
   /** Clears transient glow state a beat after the run ends (rings persist). */
   private finishRun(): void {
+    this.activeLocalRun = null;
     this.agentStream.clearAll();
     for (const approval of this.pendingApprovals()) approval.resolve(false);
     this.pendingApprovals.set([]);

@@ -1,4 +1,9 @@
-<div class="phorma-toast-region" role="region" aria-live="polite" aria-label="Notifications">
+<!--
+  Labelled "Alerts", not "Notifications". The toolbar bell is now a real
+  Notifications surface with its own accessible name, and two landmarks answering
+  to the same word is a landmark list a screen reader user cannot navigate.
+-->
+<div class="phorma-toast-region" role="region" aria-live="polite" aria-label="Alerts">
   @for (t of entries(); track t.id) {
     <div
       class="phorma-toast"
@@ -7,11 +12,18 @@
       [class.phorma-toast--error]="t.severity === 'error'"
       role="alert"
     >
+      <!--
+        Tabler, not PrimeIcons. This carried `pi pi-check-circle` and friends,
+        which rendered as EMPTY BOXES: `primeicons` is uninstalled, so the three
+        `pi-*` classes matched no font glyph. The dismiss and copy buttons beside
+        it were already `ti`, which is why nobody noticed the severity icon was a
+        blank square in every toast the app has ever shown.
+      -->
       <i
-        class="pi phorma-toast__icon"
-        [class.pi-check-circle]="t.severity === 'success'"
-        [class.pi-exclamation-triangle]="t.severity === 'warning'"
-        [class.pi-times-circle]="t.severity === 'error'"
+        class="ti phorma-toast__icon"
+        [class.ti-circle-check]="t.severity === 'success'"
+        [class.ti-alert-triangle]="t.severity === 'warning'"
+        [class.ti-circle-x]="t.severity === 'error'"
         aria-hidden="true"
       ></i>
       <div class="phorma-toast__body">

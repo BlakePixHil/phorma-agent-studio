@@ -16,8 +16,8 @@ user's own Cloudflare account and keys).
   bundling fails with "Could not resolve ai" otherwise.
 - Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.
   `check` runs no tests, so it alone is not verification. No Cloudflare account needed.
-  `npm test` = `test:unit`, 28 suites: projection, embed, deploy-config, connections, data-host,
-  workflow-state, portal-cleanup, deployment-registry, run-wiring, status, releases, telemetry,
+  `npm test` = `test:unit`, 29 suites: projection, embed, deploy-config, connections, data-host,
+  workflow-state, portal-cleanup, deployment-registry, notifications, run-wiring, status, releases, telemetry,
   tenant-billing, entitlement, stripe, billing-routes, billing-admin, stripe-webhook, provisioning,
   workspace-migration, backup-store, backup-body, backup-routes, plus four
   Miniflare suites (deploy-validation, connection-secrets, telemetry-ingest, telemetry-admin).
@@ -74,6 +74,17 @@ user's own Cloudflare account and keys).
   registers.
 - Suspension endpoints on the DO: `POST /events {correlationKey, payload}`,
   `POST /approvals {nodeId, approved}`, plus WS `event` and `stop` frames.
+- Every suspended gate carries a `meta` (`PendingGateMeta`) alongside its resolver, filled from the
+  arguments the engine passes `requestApproval` / `requestInput` / `waitForEvent`. Without it a
+  pending gate is describable only to a live monitor, which is why `GET /status` could report
+  correlation KEYS and nothing else. `drainPendingGates()` is the ONE place all three maps are
+  settled and cleared - the `stop` frame and the settle `finally` both call it.
+- `WorkflowAgent.notificationsSince(ownerId, cursor)` is the RPC behind
+  `GET /api/notifications`: settled runs from the instance's own `runs` table filtered on `endedAt`
+  (never `started_at`), its live pending gates, and `settingsIssues`. RPC and not an HTTP route,
+  because a worker-to-DO `stub.fetch()` carries no bearer for `authorized()` to check - same reason
+  `purgeSelf` and `startPortalTurn` are RPC. It re-checks `ownerId` and returns empty for a portal
+  session instance.
 - `GET /usage?since=` serves the usage ledger in both hosted and BYO mode, written in the settle
   finally-block with 366 day / 5000 row retention.
 - `GET /workflow` on the DO reads the deployed spec back, which is what makes a deployment itself a

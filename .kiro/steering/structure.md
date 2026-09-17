@@ -80,6 +80,9 @@ twins, not shared imports:
 - `cloud/src/billing-admin.ts` and `admin/src/app/core/billing-models.ts`
 - `cloud/src/deployments.ts` and `frontend/src/app/core/deployments.model.ts`
 - `cloud/src/backup-routes.ts` and `frontend/src/app/core/backup.model.ts`
+- `cloud/src/notifications.ts` and `frontend/src/app/core/notifications.model.ts` - the WIRE half
+  only. Everything below `NotificationsResponse` in the studio file (`StudioNotification`,
+  `NotificationKind`, `PendingActionRow`) is studio-only and has no worker counterpart by design.
 - `frontend/public/logo.svg` and `PHORMA_MARK_SVG` in `cloud/src/brand-page.ts` - `cloud/` cannot
   import from `frontend/`, so the brand mark is hand-copied. A brand change edits both.
 
@@ -210,6 +213,35 @@ on. Spec: `.kiro/specs/cloud-workflow-backup/`.
   because the registry lives in a DO that BYO binds too. A BYO install gets the file-based
   `LibraryExportService` instead, and that is deliberate: "bring your own everything" means
   durability without a subscription.
+
+## The notification centre
+
+The toolbar bell, left of the account control. Present for every SIGNED-IN account;
+only the deployed feed is subscription-gated.
+
+- **Poll, not push.** `GET /api/notifications?since=` (`cloud/src/notifications.ts`) reads the
+  `deploy:` registry then fans out over each deployment by **RPC** (`WorkflowAgent.notificationsSince`),
+  capped at `NOTIFY_FANOUT_MAX`. RPC and not `stub.fetch()`, because a worker-to-DO fetch carries no
+  `Authorization` header and would trip `authorized()`. D1 cannot serve this at all: `usage` has no
+  run-outcome column.
+- **Four services, and the split is a DI constraint.** `NotificationsService` is a bare signal store
+  because `RunControllerService` injects it, so it must reach nothing on the transport path.
+  `DeployedNotificationsService` owns the poll and copies `DeploymentsService`'s shape exactly (pins
+  `DEPLOY_TARGETS.phorma`, `loadPhormaCloudUrl()`, `dispatchCloudOperation`, no `CloudService`).
+  `NotificationCenterService` merges them and is injected only by components and the action registry.
+  `notification-projection.ts` holds every pure decision.
+- **Notifications ACCUMULATE, pending actions are REPLACED.** A settled run is history: merged
+  idempotently on `{workflowId}:{runId}:{kind}`, which is what lets the deployed feed be re-derived
+  instead of persisted. A pending gate is live Durable Object memory: replaced wholesale per poll,
+  because a merged list leaves a phantom "needs your approval" row that resolves to nothing.
+- **The read marker IS the poll cursor.** `markAllRead()` is the only thing that advances it, and it
+  is the `?since=` value - so an unread notification survives a restart with nothing persisted but a
+  number, and no IndexedDB store. `add()` PINS `at` on a re-merge, or a timestamp-less kind
+  (a deployment's `settingsIssues`) goes unread again on every tick.
+- **A failed poll replaces nothing.** Going offline must not read as "everything got resolved".
+- Deep-linking is a settable seam (`deepLinkHandler`, installed by `App`), because it needs
+  `CloudService` and the centre must not inject it. Same idiom as
+  `RunControllerService.remoteApprovalSender`.
 
 ## Known dependency-injection hazard
 

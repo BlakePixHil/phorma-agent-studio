@@ -1,0 +1,324 @@
+:host {
+  display: inline-flex;
+}
+
+// ── The trigger ─────────────────────────────────────────────────────────────
+//
+// Sized to match the sibling icon buttons exactly, so adding the bell does not
+// shift the toolbar's right edge. `overflow: visible` is required: the count pill
+// deliberately overhangs the glyph, and PrimeNG's button clips by default.
+:host ::ng-deep .phorma-bell__trigger.p-button {
+  position: relative;
+  overflow: visible;
+  padding: 0.25rem;
+}
+
+.phorma-bell__glyph {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+
+  i {
+    font-size: 1rem;
+  }
+}
+
+// The count. Follows the pill recipe used by the version-history and prompt
+// dialogs rather than inventing a third one; `--problem` swaps to the error tint
+// so a failure is visible without opening the panel.
+.phorma-bell__count {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.45rem;
+  min-width: 0.95rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 0.95rem;
+  text-align: center;
+  // The toolbar is frosted glass and the canvas bleeds through it, so the pill
+  // needs a hairline to stay legible over a dark node.
+  box-shadow: 0 0 0 1px var(--phorma-chrome-bg);
+}
+
+.phorma-bell__count--problem {
+  background: var(--phorma-accent-red, #ef4444);
+  color: #ffffff;
+}
+
+// ── The panel ───────────────────────────────────────────────────────────────
+
+:host ::ng-deep .phorma-bell__panel .p-popover-content {
+  padding: 0;
+}
+
+.phorma-bell {
+  display: flex;
+  flex-direction: column;
+  width: 24rem;
+  // A ceiling rather than a fixed height: a bell with two rows should be two rows
+  // tall. The BODY scrolls, never this container - a scrolling shell lets the body
+  // shrink and spill over the footer on a short viewport, which is the same trap
+  // the dialog card rule exists to avoid.
+  max-height: min(30rem, 70vh);
+  overflow: hidden;
+  font-size: 0.857rem; // 12px against the 14px root
+}
+
+.phorma-bell__header,
+.phorma-bell__footer {
+  flex-shrink: 0;
+}
+
+.phorma-bell__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--phorma-overlay-border);
+}
+
+.phorma-bell__title {
+  font-size: 0.928rem; // 13px
+  font-weight: 600;
+  color: var(--phorma-text);
+}
+
+.phorma-bell__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+:host ::ng-deep .phorma-bell__mark-read.p-button {
+  padding: 0.15rem 0.4rem;
+  color: var(--p-text-muted-color);
+
+  &:hover:not(:disabled) {
+    color: var(--p-primary-color);
+  }
+}
+
+.phorma-bell__body {
+  // Grow, never shrink: a plain `flex: 1` resolves to `1 1 0%` and lets trailing
+  // content overflow into the footer.
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+}
+
+.phorma-bell__section + .phorma-bell__section {
+  border-top: 1px solid var(--phorma-overlay-border);
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+}
+
+.phorma-bell__section-title {
+  margin: 0;
+  padding: 0.35rem 0.75rem 0.25rem;
+  font-size: 0.714rem; // 10px
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-bell__empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
+// ── Rows ────────────────────────────────────────────────────────────────────
+//
+// Each row is a flex WRAPPER holding a button plus its actions as siblings. Never
+// a button inside a button - that is invalid markup and swallows the inner click.
+
+.phorma-bell__action,
+.phorma-bell__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+
+  &:hover {
+    background: var(--phorma-hover-bg);
+  }
+}
+
+.phorma-bell__action-main,
+.phorma-bell__row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  // `min-width: 0` is what lets the text truncate instead of forcing the row
+  // wider than the panel.
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phorma-bell__action-icon,
+.phorma-bell__row-icon {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-bell__action-text,
+.phorma-bell__row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.phorma-bell__action-title,
+.phorma-bell__row-title {
+  font-weight: 600;
+  color: var(--phorma-text);
+  // One line: the title is a label, and a wrapped title pushes the meta line out
+  // of a 24rem panel.
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-bell__action-hint,
+.phorma-bell__row-detail {
+  color: var(--p-text-muted-color);
+  // Two lines of context, then clipped. The detail is already capped at
+  // NOTIFICATION_DETAIL_CHARS; this bounds the SHAPE as well as the length.
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.phorma-bell__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.714rem;
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-bell__cloud {
+  font-size: 0.714rem;
+  color: var(--phorma-accent-green);
+}
+
+// Tone tints the ICON only. A tinted row background for every failure turns the
+// panel into a wall of red, which is the same reason a panel of
+// `severity="danger"` buttons was rejected elsewhere.
+.phorma-bell__row--error .phorma-bell__row-icon {
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-bell__row--warning .phorma-bell__row-icon {
+  color: var(--phorma-accent-amber);
+}
+
+.phorma-bell__row--success .phorma-bell__row-icon {
+  color: var(--phorma-accent-green);
+}
+
+// ── Row actions ─────────────────────────────────────────────────────────────
+
+.phorma-bell__decide {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+:host ::ng-deep .phorma-bell__decide .p-button,
+:host ::ng-deep .phorma-bell__review.p-button,
+:host ::ng-deep .phorma-bell__remedy.p-button {
+  padding: 0.2rem 0.5rem;
+  flex-shrink: 0;
+}
+
+// Destructive-adjacent, so secondary + outlined with a red hover rather than
+// `severity="danger"`: Reject sits beside Approve and must not shout louder.
+:host ::ng-deep .phorma-bell__reject.p-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 50%, transparent);
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+// Revealed on row hover only, so the row title keeps its full width at rest.
+// `opacity: 0` alone still occupies layout and truncates the title early.
+.phorma-bell__row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: opacity 0.12s ease;
+}
+
+.phorma-bell__row:hover .phorma-bell__row-actions,
+.phorma-bell__row:focus-within .phorma-bell__row-actions {
+  width: auto;
+  opacity: 1;
+}
+
+// ── Footer notes ────────────────────────────────────────────────────────────
+
+.phorma-bell__footer {
+  border-top: 1px solid var(--phorma-overlay-border);
+
+  // Nothing to say, no chrome to draw.
+  &:empty {
+    display: none;
+  }
+}
+
+.phorma-bell__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.714rem;
+  color: var(--p-text-muted-color);
+
+  i {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+}
+
+.phorma-bell__note--warning {
+  color: var(--phorma-accent-amber);
+}
+
+.phorma-bell__link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--p-primary-color);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

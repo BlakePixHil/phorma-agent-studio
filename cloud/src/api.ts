@@ -40,6 +40,7 @@ import {
 } from './stripe';
 import { handleDeviceAuthApi, type DeviceAuthEnv } from './device-auth-routes';
 import { handleDeploymentsRequest, type DeploymentsEnv } from './deployments';
+import { handleNotificationsRequest, type NotificationsEnv } from './notifications';
 import { handleBackupRequest, type BackupRoutesEnv } from './backup-routes';
 import { handleStripeWebhookRequest } from './stripe-webhook';
 import {
@@ -88,6 +89,7 @@ export type ApiEnv = AuthEnv &
   StripeEnv &
   DeviceAuthEnv &
   DeploymentsEnv &
+  NotificationsEnv &
   BackupRoutesEnv;
 
 /** JSON responder bound to the current request's CORS headers. */
@@ -672,6 +674,21 @@ async function routeApiRequest(
   // subscriber is exactly who needs to stop a cron deployment.
   const deployments = await handleDeploymentsRequest(request, env, url, respond);
   if (deployments) return deployments;
+
+  // ── GET /api/notifications - what happened, and what is waiting ────────────
+  //
+  // Beside `/api/deployments` and ABOVE the `store.enabled` gate for the same
+  // reason, plus one of its own: this route reads the deployment registry and
+  // then the Durable Objects themselves, and touches no D1 at all. It could not
+  // use D1 even if it wanted to - the `usage` table records cost and tokens and
+  // has no run OUTCOME column, so a failure is not derivable from it.
+  //
+  // Not subscription-gated here either. The STUDIO gates polling on an active
+  // subscription, which is where that product decision belongs; refusing at the
+  // worker would also hide a cron deployment's failures from a lapsed subscriber
+  // who is still paying for the runs.
+  const notifications = await handleNotificationsRequest(request, env, url, respond);
+  if (notifications) return notifications;
 
   // ── /api/admin/telemetry/* — owner-only telemetry aggregates (9.1) ─────────
   // Also deliberately ABOVE the hosted-bindings gate: this surface carries its

@@ -1,0 +1,59 @@
+<!--
+  "Notifications" - what the toolbar bell may tell you about.
+
+  Ungated, matching the bell itself: local run outcomes reach an install with no
+  account, so gating this would leave somebody unable to quieten a bell they have.
+-->
+<details class="settings-section__disclosure" [open]="open()" (toggle)="onToggle($event)">
+  <summary class="settings-section__head settings-section__summary">
+    <i class="ti ti-chevron-right settings-section__caret" aria-hidden="true"></i>
+    <h4 class="settings-section__heading">Notifications</h4>
+  </summary>
+
+  <div class="settings-section__body">
+    <p class="settings-section__desc">
+      The bell in the toolbar collects run outcomes and anything waiting on you.
+      @if (subscribed()) {
+        It checks your deployed workflows every few seconds, so a scheduled run
+        that failed overnight is waiting for you the next time you open the app.
+      } @else if (signedIn()) {
+        It reports local runs today. A Phorma Cloud plan adds every deployed
+        workflow.
+      } @else {
+        It reports local runs. Sign in to include your deployed workflows.
+      }
+    </p>
+
+    <!--
+      Failures and deployment problems are deliberately absent from this list -
+      see MUTABLE_NOTIFICATION_KINDS. Stated in the copy so their absence reads
+      as a decision rather than as a missing row.
+    -->
+    <p class="settings-section__note">
+      <i class="ti ti-info-circle" aria-hidden="true"></i>
+      <span>
+        Failed runs and deployment problems are always reported and cannot be
+        switched off.
+      </span>
+    </p>
+
+    @for (entry of kinds; track entry.kind) {
+      <div class="settings-section__row">
+        <div class="settings-section__row-main">
+          <label class="phorma-notify__label" [attr.for]="id(entry.kind)">
+            {{ entry.label }}
+          </label>
+        </div>
+        <div class="settings-section__actions">
+          <p-checkbox
+            size="small"
+            [binary]="true"
+            [inputId]="id(entry.kind)"
+            [ngModel]="enabled(entry.kind)"
+            (ngModelChange)="onCheckbox(entry.kind, $event)"
+          />
+        </div>
+      </div>
+    }
+  </div>
+</details>

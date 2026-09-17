@@ -68,6 +68,11 @@ export type CloudOperation =
   | 'list-deployments'
   | 'read-spec'
   | 'undeploy'
+  // The notification centre. `list-notifications` is the account-wide poll;
+  // `approve` settles one pending gate over HTTP, which is what makes an inline
+  // Approve possible without a monitor socket attached to that workflow.
+  | 'list-notifications'
+  | 'approve'
   // cloud-workflow-backup Phase 2: hosted backup. Phorma Cloud only - a BYO
   // worker binds no D1 or R2 and gets the file-based library export instead.
   | 'backup-list'
@@ -128,6 +133,19 @@ export interface TriggerPayload {
  */
 export interface SecretWritePayload {
   value: string;
+}
+
+/**
+ * Logical payload for `approve`.
+ *
+ * `requestId` is in the payload rather than the context because it is the
+ * engine's identity for one gate OCCURRENCE, not a path segment - the worker
+ * route reads it from the body, and a map keyed by `nodeId` would collide across
+ * repeated or parallel child frames.
+ */
+export interface ApprovalPayload {
+  requestId: string;
+  approved: boolean;
 }
 
 export interface CloudEndpointSpec {
@@ -351,6 +369,46 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
     scope: 'instance',
     path: () => '/workflow',
   },
+  // ── The notification centre ────────────────────────────────────────────────
+  //
+  // Root-scoped for the same reason `list-deployments` is: a Durable Object
+  // namespace cannot be enumerated, so the answer comes from a control-plane
+  // route that reads the registry and fans out, never from the studio asking each
+  // instance in turn.
+  'list-notifications': {
+    method: 'GET',
+    scope: 'root',
+    // The worker reads `since` as epoch milliseconds, defaulting to 0 - which
+    // asks for everything it still retains, and is the right default for a first
+    // poll or a client whose cursor was lost.
+    path: (ctx) => `/api/notifications${query([['since', ctx.since ?? '0']])}`,
+    // Normalized defensively so a partial body renders as "nothing to report"
+    // rather than throwing inside a template. `truncated` and `unreachable` are
+    // read as their SAFE values: not capped, nothing unreachable.
+    unwrap: (parsed) => ({
+      at: numberField(parsed, 'at') ?? 0,
+      unreachable: (arrayField(parsed, 'unreachable') ?? []).filter(
+        (entry): entry is string => typeof entry === 'string',
+      ),
+      truncated: asRecord(parsed)?.['truncated'] === true,
+      deployments: arrayField(parsed, 'deployments') ?? [],
+    }),
+  },
+  // Settles one pending approval. Instance-scoped, because a gate belongs to the
+  // run inside one deployment - this is the SAME route the monitor socket's
+  // `approval` control frame lands on, reached over HTTP so the bell can answer a
+  // workflow the user does not have open.
+  approve: {
+    method: 'POST',
+    scope: 'instance',
+    path: () => '/approvals',
+    // {@link ApprovalPayload}. `approved` is compared strictly: a missing field
+    // must read as a refusal, never as an approval.
+    body: (payload) => ({
+      requestId: stringField(payload, 'requestId') ?? '',
+      approved: asRecord(payload)?.['approved'] === true,
+    }),
+  },
   // ── cloud-workflow-backup Phase 2 ──────────────────────────────────────────
   //
   // All root-scoped: a backup belongs to the ACCOUNT, not to a deployed instance,
@@ -443,6 +501,13 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
  *   a Phorma Cloud control-plane concern, and `DeploymentsService` pins the
  *   `phorma` table for exactly that reason. An AWS deployment is enumerable from
  *   the user's own AWS console, so there is nothing to recover here.
+ * - `list-notifications`, `approve` - the notification centre is a Phorma Cloud
+ *   control-plane concern for the same reason, and
+ *   `DeployedNotificationsService` pins the `phorma` table the same way. The AWS
+ *   host has no registry to enumerate and no equivalent aggregate route, so the
+ *   feed is empty there rather than half-populated from one workflow; a pending
+ *   approval on an AWS deployment is still answerable from the monitor socket and
+ *   the Runs panel, exactly as before.
  *
  * `push-connections` is absent too, but for a different reason: it is FOLDED
  * into `push-spec`, whose body carries `{ workflowId, spec, connections }` -

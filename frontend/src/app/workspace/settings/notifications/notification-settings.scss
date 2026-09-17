@@ -1,0 +1,18 @@
+// "Notifications" - on the Settings dialog's Cloud page, beside the deployment
+// list.
+//
+// Everything structural comes from the shared partial the sibling sections use.
+// A separate component (rather than more markup in `settings-dialog.html`) for the
+// same reason `DeploymentsSettings` is one: that sheet compiles to ~21.8kB against
+// a 22kB `anyComponentStyle` warning, and Angular gives this its own budget.
+
+@use '../section' as settings-section;
+
+@include settings-section.base;
+
+// The row label is the whole clickable target, so it carries the cursor rather
+// than leaving the checkbox as the only hit area.
+.phorma-notify__label {
+  cursor: pointer;
+  color: var(--phorma-text);
+}

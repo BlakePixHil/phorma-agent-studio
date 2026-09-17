@@ -1,0 +1,261 @@
+<!--
+  The trigger. Content is PROJECTED rather than passed as `icon`, so the count
+  pill can be positioned against the glyph - see the component header.
+-->
+<p-button
+  [text]="true"
+  severity="secondary"
+  size="small"
+  styleClass="phorma-bell__trigger"
+  [pTooltip]="tooltip()"
+  tooltipPosition="bottom"
+  ariaLabel="Notifications"
+  [pt]="triggerPt()"
+  (onClick)="toggle($event)"
+>
+  <span class="phorma-bell__glyph">
+    <i class="{{ bellIcon() }}" aria-hidden="true"></i>
+    @if (centre.badgeCount() > 0) {
+      <span
+        class="phorma-bell__count"
+        [class.phorma-bell__count--problem]="centre.hasProblem()"
+        aria-hidden="true"
+        >{{ badgeLabel() }}</span
+      >
+    }
+  </span>
+</p-button>
+
+<!--
+  The panel. `appendTo="body"` escapes the toolbar's z-index:50 stacking context
+  and its drag region; `dismissable` is left ON so PrimeNG owns outside-click and
+  Escape. It carries `role="menu"` and NEVER `role="dialog"` - `Toolbar.anyOverlayOpen()`
+  probes for that attribute to decide whether Escape deselects canvas nodes.
+-->
+<p-popover
+  #pop
+  styleClass="phorma-bell__panel"
+  appendTo="body"
+  [showTransitionOptions]="'0.12s ease-out'"
+  [pt]="POPOVER_PT"
+  (onHide)="onHide()"
+>
+  <div class="phorma-bell">
+    <header class="phorma-bell__header">
+      <span class="phorma-bell__title">Notifications</span>
+      <span class="phorma-bell__header-actions">
+        <p-button
+          [text]="true"
+          severity="secondary"
+          size="small"
+          styleClass="phorma-panel-icon-btn"
+          pTooltip="Check now"
+          tooltipPosition="bottom"
+          ariaLabel="Check for new notifications"
+          [disabled]="centre.refreshing()"
+          (onClick)="refresh()"
+        >
+          <i
+            class="ti ti-refresh"
+            [class.phorma-icon-spin]="centre.refreshing()"
+            aria-hidden="true"
+          ></i>
+        </p-button>
+        @if (store.unreadCount() > 0) {
+          <p-button
+            [text]="true"
+            severity="secondary"
+            size="small"
+            styleClass="phorma-bell__mark-read"
+            (onClick)="markAllRead()"
+          >
+            <span>Mark all read</span>
+          </p-button>
+        }
+      </span>
+    </header>
+
+    <div class="phorma-bell__body">
+      <!--
+        Needs your attention, always first and never dismissible. Dismissing
+        "this run needs your approval" would leave the run suspended forever with
+        nothing on screen to say so.
+      -->
+      @if (centre.pendingActions().length > 0) {
+        <section class="phorma-bell__section" aria-live="polite">
+          <h3 class="phorma-bell__section-title">Needs your attention</h3>
+          @for (row of centre.pendingActions(); track row.id) {
+            <div class="phorma-bell__action">
+              <button
+                type="button"
+                class="phorma-bell__action-main"
+                (click)="openAction(row)"
+                [attr.aria-label]="'Open ' + row.nodeName + ' in ' + row.workflowName"
+              >
+                <i class="ti {{ actionIcon(row) }} phorma-bell__action-icon" aria-hidden="true"></i>
+                <span class="phorma-bell__action-text">
+                  <span class="phorma-bell__action-title">{{ row.nodeName }}</span>
+                  <span class="phorma-bell__action-hint">{{ actionHint(row) }}</span>
+                  <span class="phorma-bell__meta">
+                    {{ row.workflowName }}
+                    @if (row.origin === 'deployed') {
+                      <i
+                        class="ti ti-cloud phorma-bell__cloud"
+                        aria-hidden="true"
+                        title="Running in the cloud"
+                      ></i>
+                    }
+                  </span>
+                </span>
+              </button>
+              <!--
+                Siblings in a flex wrapper, never nested inside the row button -
+                a <button> inside a <button> is invalid and swallows clicks.
+              -->
+              @if (row.resolvableInline) {
+                <span class="phorma-bell__decide">
+                  <p-button
+                    size="small"
+                    severity="secondary"
+                    [outlined]="true"
+                    styleClass="phorma-bell__reject"
+                    [disabled]="isBusy(row)"
+                    (onClick)="decide(row, false, $event)"
+                  >
+                    <span>Reject</span>
+                  </p-button>
+                  <p-button
+                    size="small"
+                    styleClass="phorma-btn-content"
+                    [disabled]="isBusy(row)"
+                    (onClick)="decide(row, true, $event)"
+                  >
+                    <span>Approve</span>
+                  </p-button>
+                </span>
+              } @else {
+                <p-button
+                  size="small"
+                  severity="secondary"
+                  [text]="true"
+                  styleClass="phorma-bell__review"
+                  (onClick)="openAction(row)"
+                >
+                  <span>Review</span>
+                </p-button>
+              }
+            </div>
+          }
+        </section>
+      }
+
+      <section class="phorma-bell__section">
+        <h3 class="phorma-bell__section-title">Recent</h3>
+        @if (centre.recent().length === 0) {
+          <p class="phorma-bell__empty">Nothing needs you right now.</p>
+        }
+        @for (item of centre.recent(); track item.id) {
+          <div class="phorma-bell__row" [class]="'phorma-bell__row--' + item.tone">
+            <button
+              type="button"
+              class="phorma-bell__row-main"
+              (click)="openNotification(item)"
+              [attr.aria-label]="item.title"
+            >
+              <i class="ti {{ item.icon }} phorma-bell__row-icon" aria-hidden="true"></i>
+              <span class="phorma-bell__row-text">
+                <span class="phorma-bell__row-title">{{ item.title }}</span>
+                @if (item.detail) {
+                  <span class="phorma-bell__row-detail">{{ item.detail }}</span>
+                }
+                <span class="phorma-bell__meta">
+                  {{ item.workflowName }}
+                  @if (item.origin === 'deployed') {
+                    <i
+                      class="ti ti-cloud phorma-bell__cloud"
+                      aria-hidden="true"
+                      title="Ran in the cloud"
+                    ></i>
+                  }
+                </span>
+              </span>
+            </button>
+            <span class="phorma-bell__row-actions">
+              @if (remedyLabel(item)) {
+                <p-button
+                  size="small"
+                  severity="secondary"
+                  [outlined]="true"
+                  styleClass="phorma-bell__remedy"
+                  (onClick)="runRemedy(item, $event)"
+                >
+                  <span>{{ remedyLabel(item) }}</span>
+                </p-button>
+              }
+              <p-button
+                [text]="true"
+                severity="secondary"
+                size="small"
+                styleClass="phorma-panel-icon-btn"
+                ariaLabel="Dismiss"
+                pTooltip="Dismiss"
+                tooltipPosition="left"
+                (onClick)="dismiss(item, $event)"
+              >
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </p-button>
+            </span>
+          </div>
+        }
+      </section>
+    </div>
+
+    <footer class="phorma-bell__footer">
+      <!--
+        Partial answers are stated, never hidden. "I could not check this one" and
+        "this one had nothing to say" are different facts, and collapsing them
+        turns an outage into a clean bill of health.
+      -->
+      @if (centre.pollError()) {
+        <p class="phorma-bell__note phorma-bell__note--warning">
+          <i class="ti ti-cloud-off" aria-hidden="true"></i>
+          Could not reach Phorma Cloud. Showing what was last known.
+        </p>
+      }
+      @if (centre.unreachable().length > 0) {
+        <p class="phorma-bell__note phorma-bell__note--warning">
+          <i class="ti ti-alert-circle" aria-hidden="true"></i>
+          {{ centre.unreachable().length }} deployment{{
+            centre.unreachable().length === 1 ? '' : 's'
+          }}
+          could not be checked.
+        </p>
+      }
+      @if (centre.truncated()) {
+        <p class="phorma-bell__note">
+          <i class="ti ti-info-circle" aria-hidden="true"></i>
+          Showing your most recently updated deployments only.
+        </p>
+      }
+      <!--
+        Two different gates, two different remedies. Signing in is not the same ask
+        as subscribing, and offering plans to somebody with no account is a dead end.
+      -->
+      @if (!phormaCloud.signedIn()) {
+        <p class="phorma-bell__note">
+          <i class="ti ti-cloud" aria-hidden="true"></i>
+          Local runs only. Sign in to see what your deployed workflows are doing.
+        </p>
+      } @else if (!phormaCloud.subscribed()) {
+        <p class="phorma-bell__note">
+          <i class="ti ti-cloud" aria-hidden="true"></i>
+          Local runs only. A Phorma Cloud plan adds notifications from every
+          deployed workflow.
+          <button type="button" class="phorma-bell__link" (click)="viewPlans()">
+            See plans
+          </button>
+        </p>
+      }
+    </footer>
+  </div>
+</p-popover>

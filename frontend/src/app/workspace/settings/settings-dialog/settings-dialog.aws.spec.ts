@@ -386,17 +386,17 @@ function scopePrefix(section: HTMLElement): string {
 
 /**
  * Sibling sections that live inside the Cloud page's single settings section but
- * are NOT part of the AWS body: the Reconciliation_List and the Library_Exporter
- * (cloud-workflow-backup). They are their own components, rendered outside the
- * per-provider branch because they describe the account and the local library
- * rather than one deploy target.
+ * are NOT part of the AWS body: the Reconciliation_List, the Library_Exporter
+ * (cloud-workflow-backup) and the notification settings. They are their own
+ * components, rendered outside the per-provider branch because they describe the
+ * account and the local library rather than one deploy target.
  *
  * The chrome assertions below are about the AWS FORM, so they exclude these -
  * otherwise this file's counts would track edits to unrelated sections, which is
  * how a guard turns into a chore and then gets deleted.
  */
 const SIBLING_SECTIONS =
-  'app-deployments-settings, app-library-export-settings, app-backup-settings';
+  'app-deployments-settings, app-library-export-settings, app-backup-settings, app-notification-settings';
 
 /** Every element of the AWS body, excluding the sibling sections beside it. */
 function awsBodyElements(section: HTMLElement): HTMLElement[] {

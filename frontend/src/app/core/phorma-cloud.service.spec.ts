@@ -36,8 +36,10 @@ import {
   type DesktopAuthState,
 } from './desktop-auth.service';
 import { PhormaCloudService } from './phorma-cloud.service';
+import { savePhormaCloudUrl } from './phorma-cloud-url';
 import { TauriService } from './tauri.service';
 import { TelemetryService } from './telemetry.service';
+import { TerminalOutputService } from './terminal-output.service';
 
 /** A Clerk that has loaded and reports nobody signed in. */
 function clerkStub(options: { user?: unknown; token?: string } = {}): Partial<ClerkService> {
@@ -66,6 +68,9 @@ interface DesktopStub {
   signedIn: () => boolean;
   email: () => string | null;
   userId: () => string | null;
+  pendingUrl: () => string | null;
+  handoff: () => 'browser' | 'manual';
+  lastErrorDetail: () => string | null;
 }
 
 function desktopStub(
@@ -75,10 +80,25 @@ function desktopStub(
     token?: string | null;
     beginResult?: boolean;
     failure?: DesktopAuthFailure | null;
+    /** Detail the service recorded about the failure, for the console line. */
+    errorDetail?: string | null;
+    /**
+     * When set, `begin` invokes its manual-handoff callback with this URL - what
+     * happens when the system browser could not be launched.
+     */
+    manualUrl?: string;
   } = {},
 ): DesktopStub {
   return {
-    begin: jasmine.createSpy('begin').and.resolveTo(options.beginResult ?? false),
+    begin: jasmine
+      .createSpy('begin')
+      .and.callFake(async (onManual?: (url: string) => void) => {
+        if (options.manualUrl) onManual?.(options.manualUrl);
+        return options.beginResult ?? false;
+      }),
+    pendingUrl: () => options.manualUrl ?? null,
+    handoff: () => (options.manualUrl ? 'manual' : 'browser'),
+    lastErrorDetail: () => options.errorDetail ?? null,
     cancel: jasmine.createSpy('cancel'),
     signOut: jasmine.createSpy('signOut').and.resolveTo(),
     restore: jasmine.createSpy('restore').and.resolveTo(),
@@ -125,6 +145,123 @@ function harness(options: {
 
 const openSignInOf = (clerk: Partial<ClerkService>): jasmine.Spy =>
   clerk.openSignIn as unknown as jasmine.Spy;
+
+/**
+ * Telling a failed BROWSER LAUNCH apart from a failed REQUEST.
+ *
+ * These were one `'unreachable'` failure, and collapsing them cost real debugging
+ * time: a `plugin-opener` problem produced "Could not reach Phorma Cloud - check
+ * your connection", which is not only unhelpful but false, and it ABANDONED a
+ * one-time code that was minted, registered and valid for another two minutes.
+ *
+ * So there are two claims here. A launch failure must keep the sign-in alive and
+ * hand the user the URL; a request failure must stay the connection error it always
+ * was. And in both cases the real cause has to reach the Problems console, because
+ * every `catch` on this path used to discard it.
+ */
+describe('PhormaCloudService desktop sign-in diagnostics', () => {
+  const SIGN_IN_URL = 'https://cloud.phorma-labs.com/auth/device?c=abc123';
+
+  it('offers the URL when the browser could not be launched, and keeps going', async () => {
+    const desktop = desktopStub({
+      manualUrl: SIGN_IN_URL,
+      errorDetail: 'Could not open the browser: opener.open_url not allowed',
+      // The poll still runs and can still succeed - a launch failure is not a
+      // sign-in failure.
+      beginResult: true,
+      email: 'owner@example.com',
+    });
+    const { cloud, toast } = harness({ isDesktop: true, desktop });
+
+    cloud.signIn();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const entries = toast.entries();
+    const offer = entries.find(entry => entry.summary === 'Open the sign-in page yourself');
+    expect(offer).withContext(JSON.stringify(entries.map(e => e.summary))).toBeTruthy();
+    // The URL itself, not a paraphrase - it is the only way forward.
+    expect(offer!.detail).toContain(SIGN_IN_URL);
+    // And it must NOT be the connection error, which is what shipped.
+    expect(entries.some(entry => entry.summary === 'Could not reach Phorma Cloud')).toBe(false);
+  });
+
+  it('puts the real cause and the URL in the Problems console', async () => {
+    const desktop = desktopStub({
+      manualUrl: SIGN_IN_URL,
+      errorDetail: 'Could not open the browser: opener.open_url not allowed',
+      beginResult: true,
+    });
+    harness({ isDesktop: true, desktop }).cloud.signIn();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const problems = TestBed.inject(TerminalOutputService)
+      .entries()
+      .filter(entry => entry.channel === 'problems')
+      .map(entry => entry.message);
+
+    // A toast cannot usefully carry an exception message; the console can, and it
+    // is where somebody looks a minute later.
+    expect(problems.some(message => message.includes('opener.open_url not allowed'))).toBe(true);
+    expect(problems.some(message => message.includes(SIGN_IN_URL))).toBe(true);
+  });
+
+  it('still reports a genuine request failure as a connection problem', async () => {
+    const desktop = desktopStub({
+      failure: 'unreachable',
+      errorDetail: 'https://cloud.phorma-labs.com/api/auth/device/start: Failed to fetch',
+    });
+    const { cloud, toast } = harness({ isDesktop: true, desktop });
+
+    cloud.signIn();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // `unreachable` now means ONLY "the request got no answer", so this copy is
+    // finally true whenever it appears.
+    const entry = toast.entries().find(item => item.summary === 'Could not reach Phorma Cloud');
+    expect(entry).toBeTruthy();
+    expect(
+      TestBed.inject(TerminalOutputService)
+        .entries()
+        .some(item => item.message.includes('Failed to fetch')),
+    ).toBe(true);
+  });
+
+  it('names the endpoint it could not reach', async () => {
+    // The endpoint is an overridable per-origin setting, so a stale value fails on
+    // one machine and works on another. Telling somebody to "check your connection"
+    // when the app is quietly addressing a dead `wrangler dev` URL is the wrong
+    // advice, and naming the host is what makes the two distinguishable on sight.
+    savePhormaCloudUrl('http://localhost:8787');
+    try {
+      const desktop = desktopStub({ failure: 'unreachable' });
+      const { cloud, toast } = harness({ isDesktop: true, desktop });
+
+      cloud.signIn();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const entry = toast.entries().find(item => item.summary === 'Could not reach Phorma Cloud');
+      expect(entry!.detail).toContain('http://localhost:8787');
+      expect(entry!.detail).toContain('Settings');
+    } finally {
+      savePhormaCloudUrl('');
+    }
+  });
+
+  it('says nothing extra when the browser opened normally', async () => {
+    const desktop = desktopStub({ beginResult: true, email: 'owner@example.com' });
+    const { cloud, toast } = harness({ isDesktop: true, desktop });
+
+    cloud.signIn();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(toast.entries().map(entry => entry.summary)).toEqual(['Signed in']);
+  });
+});
 
 describe('PhormaCloudService sign-in routing', () => {
   it('runs the browser handoff on desktop and never opens the in-app modal', async () => {
