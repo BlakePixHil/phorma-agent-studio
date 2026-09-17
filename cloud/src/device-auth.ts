@@ -255,6 +255,16 @@ export interface PendingHandoff {
    * Do not start trusting it for anything else.
    */
   email?: string;
+  /**
+   * The signed-in user's avatar URL, for DISPLAY ONLY.
+   *
+   * Travels the same way as {@link email} and for the same reason - see that
+   * comment - and is subject to the extra restriction in
+   * {@link sanitizeClaimedImageUrl}: a URL the studio will put in an `<img src>`
+   * is an outbound request from the webview, so unlike the email it cannot be
+   * merely size-checked.
+   */
+  imageUrl?: string;
   /** Epoch ms the handoff was registered, for debugging only. */
   at: number;
 }
@@ -275,4 +285,44 @@ export function sanitizeClaimedEmail(value: unknown): string | undefined {
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f<>]/.test(trimmed)) return undefined;
   return trimmed;
+}
+
+/**
+ * Hosts a claimed avatar URL may point at. Clerk serves every `user.imageUrl`
+ * from its own image CDN regardless of which provider the photo came from (a
+ * Google avatar included), so this is one host and not a provider list.
+ */
+const AVATAR_HOST_SUFFIX = '.clerk.com';
+
+/**
+ * Trims a claimed avatar URL down to something safe to render, or undefined.
+ *
+ * STRICTER than {@link sanitizeClaimedEmail}, and the difference is the point.
+ * An email is text; this value ends up in an `<img src>` inside the studio's
+ * webview, so an unconstrained string would let anything that can reach
+ * `/claim` - the value is client-supplied and unverified - aim a request out of
+ * the desktop app at a host of its choosing, complete with the IP and
+ * User-Agent that request carries. So: `https:` only, no credentials, no port,
+ * and the host must be Clerk's image CDN.
+ *
+ * A URL that fails any of these is DROPPED, not repaired. The avatar then falls
+ * back to the account initial, which is the pre-existing behaviour and reads as
+ * normal rather than as a failure.
+ */
+export function sanitizeClaimedImageUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 512) return undefined;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'https:') return undefined;
+  if (url.username.length > 0 || url.password.length > 0) return undefined;
+  if (url.port.length > 0) return undefined;
+  const host = url.hostname.toLowerCase();
+  if (!host.endsWith(AVATAR_HOST_SUFFIX)) return undefined;
+  return url.toString();
 }

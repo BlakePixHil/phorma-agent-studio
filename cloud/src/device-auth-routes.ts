@@ -68,6 +68,7 @@ import {
   isPlausibleDeviceCode,
   mintDeviceToken,
   sanitizeClaimedEmail,
+  sanitizeClaimedImageUrl,
   type PendingHandoff,
 } from './device-auth';
 /** Path of the browser page. Public, top-level navigation, no CORS. */
@@ -213,6 +214,10 @@ async function handleClaim(
     // Display only, and sanitized for size and control characters rather than
     // validated as an address - see `sanitizeClaimedEmail`.
     email: sanitizeClaimedEmail(body['email']),
+    // Display only as well, but held to a host allowlist rather than a size
+    // bound, because the studio renders it as an `<img src>` - see
+    // `sanitizeClaimedImageUrl`.
+    imageUrl: sanitizeClaimedImageUrl(body['imageUrl']),
   };
   await env.TENANTS!.put(key, JSON.stringify(claimed), { expirationTtl: remaining });
 
@@ -228,7 +233,8 @@ async function handleClaim(
  *
  * - `202` with `{ status: 'pending' }` - registered, nobody has signed in yet.
  *   The studio keeps polling.
- * - `200` with `{ token, userId }` - done, and the code is now spent.
+ * - `200` with `{ token, userId, email, imageUrl }` - done, and the code is now
+ *   spent. The last two are display-only and may be null.
  * - `404` - unknown, expired, or already redeemed. All three are the same answer,
  *   because telling them apart would confirm that a given code once existed.
  *
@@ -259,7 +265,15 @@ async function handleRedeem(
 
   await env.TENANTS!.delete(key);
   const token = await mintDeviceToken(env.PHORMA_AUTH_SECRET!, pending.sub, Date.now() / 1000);
-  return respond({ token, userId: pending.sub, email: pending.email ?? null }, 200);
+  return respond(
+    {
+      token,
+      userId: pending.sub,
+      email: pending.email ?? null,
+      imageUrl: pending.imageUrl ?? null,
+    },
+    200,
+  );
 }
 
 /**
@@ -447,10 +461,22 @@ function devicePage(clerkHost: string, publishableKey: string): string {
     // alternative is a Clerk Backend API call on every /api/me.
     var email = '';
     try { email = window.Clerk.user.primaryEmailAddress.emailAddress || ''; } catch (e) {}
+    // Same channel, same display-only status: this is how a Google (or any other
+    // provider) profile photo reaches a desktop install, which has no Clerk
+    // session of its own to read one from. Clerk serves \`imageUrl\` from its own
+    // image CDN whatever the provider, and asks for scaling through query
+    // parameters - 64px covers the 28px toolbar avatar at 2x.
+    var imageUrl = '';
+    try {
+      if (window.Clerk.user.hasImage) {
+        imageUrl = window.Clerk.user.imageUrl || '';
+        if (imageUrl) imageUrl += (imageUrl.indexOf('?') === -1 ? '?' : '&') + 'width=64&height=64&fit=crop&quality=85';
+      }
+    } catch (e) {}
     var res = await fetch('/api/auth/device/claim', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ code: code, email: email })
+      body: JSON.stringify({ code: code, email: email, imageUrl: imageUrl })
     });
     if (res.ok) {
       show('ok', "You're signed in", 'You can close this tab and return to Phorma Agent Studio.');

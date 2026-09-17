@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { MenubarModule } from 'primeng/menubar';
 import { ButtonModule } from 'primeng/button';
@@ -115,13 +115,36 @@ export class Toolbar {
   });
 
   /**
-   * One initial for the avatar stand-in.
+   * The account's profile picture, or null to fall back to {@link accountInitial}.
    *
-   * Clerk's provider image (the Google photo) is NOT reachable on desktop: it
-   * lives on the Clerk user object, and a device-token install has no Clerk
-   * session to load one from. An initial is the honest substitute - it identifies
-   * the account without pretending to a photo we cannot fetch. Falls back to a
-   * person glyph's stead ('P' for Phorma) when the handoff supplied no email.
+   * A device-token install has no Clerk session, so this does NOT come from a
+   * Clerk user object - it rides the sign-in handoff alongside the email, from
+   * `window.Clerk.user.imageUrl` on the worker's own sign-in page, which is how a
+   * Google (or any other provider) photo reaches a desktop install at all.
+   *
+   * Null is the ordinary case for an account with no photo, so the initial is
+   * still the substitute and not an error state.
+   */
+  protected readonly accountAvatar = computed(() => {
+    // A load failure is sticky for the session: retrying a broken URL on every
+    // change detection pass would be a request loop behind a 28px circle.
+    if (this.avatarFailed()) return null;
+    return this.phormaCloud.avatarUrl();
+  });
+
+  /** Set when the avatar `<img>` reports an error. See {@link accountAvatar}. */
+  private readonly avatarFailed = signal(false);
+
+  /** The `<img>` could not load the avatar - fall back to the initial. */
+  protected onAvatarError(): void {
+    this.avatarFailed.set(true);
+  }
+
+  /**
+   * One initial for the avatar, used whenever there is no picture to show.
+   *
+   * Falls back to a person glyph's stead ('P' for Phorma) when the handoff
+   * supplied no email either.
    */
   protected readonly accountInitial = computed(() => {
     const email = this.phormaCloud.email();

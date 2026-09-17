@@ -74,6 +74,51 @@ export const DEVICE_AUTH_POLL_CONFIG = new InjectionToken<DeviceAuthPollConfig>(
 /** Where the account email is remembered. Not a secret; the token is. */
 const EMAIL_STORAGE_KEY = 'phorma.desktopAuth.email';
 
+/** Where the account avatar URL is remembered. Also not a secret. */
+const AVATAR_STORAGE_KEY = 'phorma.desktopAuth.imageUrl';
+
+/**
+ * The display-only half of a handoff: what to CALL the account, not what it may
+ * do. One object rather than two parallel parameters through `store`/`adopt`/
+ * storage, so a third display field does not triple the plumbing again.
+ *
+ * Both members are independently optional. A brand new account has no tenant row
+ * and may supply neither; a user with no provider photo supplies only the email.
+ */
+export interface DesktopAccountDisplay {
+  email: string | null;
+  imageUrl: string | null;
+}
+
+/** Nothing to display. Used for a signed-out state and an unparseable payload. */
+const NO_DISPLAY: DesktopAccountDisplay = { email: null, imageUrl: null };
+
+/**
+ * Re-checks an avatar URL before it can become an `<img src>`.
+ *
+ * The worker already applies the authoritative version of this
+ * (`sanitizeClaimedImageUrl` in `cloud/src/device-auth.ts`), and this is not a
+ * substitute for it. It exists because there is a SECOND source on this side -
+ * `localStorage`, which anything running in the webview can write - and because
+ * an older worker predating that sanitizer would send an unchecked value. Cheap,
+ * local, and it fails to the account initial rather than to an error.
+ */
+export function isDisplayableAvatarUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.username.length === 0 &&
+      url.password.length === 0 &&
+      url.port.length === 0 &&
+      url.hostname.toLowerCase().endsWith('.clerk.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** What the studio is currently doing about sign-in. */
 export type DesktopAuthState = 'signed-out' | 'pending' | 'signed-in';
 
@@ -113,6 +158,7 @@ export class DesktopAuthService {
   private readonly failureSignal = signal<DesktopAuthFailure | null>(null);
   private readonly userIdSignal = signal<string | null>(null);
   private readonly emailSignal = signal<string | null>(null);
+  private readonly imageUrlSignal = signal<string | null>(null);
 
   /** Current sign-in state. */
   readonly state = this.stateSignal.asReadonly();
@@ -122,6 +168,14 @@ export class DesktopAuthService {
   readonly userId = this.userIdSignal.asReadonly();
   /** Account email, when the sign-in page supplied one. Display only. */
   readonly email = this.emailSignal.asReadonly();
+  /**
+   * Account avatar URL, when the sign-in page supplied one. Display only.
+   *
+   * Null is the NORMAL case, not a failure: a user with no provider photo, an
+   * install signed in against a worker older than this field, or a URL that did
+   * not pass {@link isDisplayableAvatarUrl}. Callers fall back to the initial.
+   */
+  readonly imageUrl = this.imageUrlSignal.asReadonly();
   /** True once a credential is held. */
   readonly signedIn = computed(() => this.stateSignal() === 'signed-in');
 
@@ -168,7 +222,7 @@ export class DesktopAuthService {
     this.loaded = true;
     const token = await this.readStoredToken();
     if (!token) return;
-    this.adopt(token, loadStoredEmail());
+    this.adopt(token, loadStoredDisplay());
   }
 
   /**
@@ -264,9 +318,10 @@ export class DesktopAuthService {
     this.cachedToken = null;
     this.userIdSignal.set(null);
     this.emailSignal.set(null);
+    this.imageUrlSignal.set(null);
     this.stateSignal.set('signed-out');
     this.failureSignal.set(null);
-    saveStoredEmail(null);
+    saveStoredDisplay(NO_DISPLAY);
     if (!this.tauri.isDesktop) return;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -306,21 +361,23 @@ export class DesktopAuthService {
       if (!response.ok) return this.fail('refused');
 
       const payload = (await response.json().catch(() => null)) as
-        | { token?: unknown; email?: unknown }
+        | { token?: unknown; email?: unknown; imageUrl?: unknown }
         | null;
       const token = typeof payload?.token === 'string' ? payload.token : null;
       if (!token) return this.fail('refused');
 
-      const email = typeof payload?.email === 'string' ? payload.email : null;
-      await this.store(token, email);
+      await this.store(token, {
+        email: typeof payload?.email === 'string' ? payload.email : null,
+        imageUrl: isDisplayableAvatarUrl(payload?.imageUrl) ? payload.imageUrl : null,
+      });
       return true;
     }
     return this.fail('timed-out');
   }
 
-  private async store(token: string, email: string | null): Promise<void> {
-    this.adopt(token, email);
-    saveStoredEmail(email);
+  private async store(token: string, display: DesktopAccountDisplay): Promise<void> {
+    this.adopt(token, display);
+    saveStoredDisplay(display);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('set_secret', { key: DEVICE_TOKEN_KEY, value: token });
@@ -332,12 +389,13 @@ export class DesktopAuthService {
   }
 
   /** Adopts a token into memory and derives the identity from it. */
-  private adopt(token: string, email: string | null): void {
+  private adopt(token: string, display: DesktopAccountDisplay): void {
     this.cachedToken = token;
     // The user id comes from the TOKEN, not from storage, so the displayed account
     // can never drift from the credential actually being sent.
     this.userIdSignal.set(subjectOf(token));
-    this.emailSignal.set(email);
+    this.emailSignal.set(display.email);
+    this.imageUrlSignal.set(display.imageUrl);
     this.stateSignal.set('signed-in');
   }
 
@@ -405,20 +463,38 @@ export function subjectOf(token: string): string | null {
   }
 }
 
-function loadStoredEmail(): string | null {
+function loadStoredDisplay(): DesktopAccountDisplay {
+  const imageUrl = readStored(AVATAR_STORAGE_KEY);
+  return {
+    email: readStored(EMAIL_STORAGE_KEY),
+    // Re-checked on the way OUT of storage, not only on the way in: an install
+    // that stored a value under an older, laxer rule must not keep rendering it.
+    imageUrl: isDisplayableAvatarUrl(imageUrl) ? imageUrl : null,
+  };
+}
+
+function saveStoredDisplay(display: DesktopAccountDisplay): void {
+  writeStored(EMAIL_STORAGE_KEY, display.email);
+  writeStored(AVATAR_STORAGE_KEY, display.imageUrl);
+}
+
+function readStored(key: string): string | null {
+  if (typeof localStorage === 'undefined') return null;
   try {
-    const value = localStorage.getItem(EMAIL_STORAGE_KEY);
+    const value = localStorage.getItem(key);
     return value && value.length > 0 ? value : null;
   } catch {
     return null;
   }
 }
 
-function saveStoredEmail(email: string | null): void {
+function writeStored(key: string, value: string | null): void {
+  if (typeof localStorage === 'undefined') return;
   try {
-    if (email) localStorage.setItem(EMAIL_STORAGE_KEY, email);
-    else localStorage.removeItem(EMAIL_STORAGE_KEY);
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
   } catch {
-    // Private-mode or quota failure. The email is a display nicety.
+    // Private-mode or quota failure. These are display niceties.
   }
 }
+

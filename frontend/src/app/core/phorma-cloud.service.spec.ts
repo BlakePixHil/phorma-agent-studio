@@ -67,6 +67,7 @@ interface DesktopStub {
   failure: () => DesktopAuthFailure | null;
   signedIn: () => boolean;
   email: () => string | null;
+  imageUrl: () => string | null;
   userId: () => string | null;
   pendingUrl: () => string | null;
   handoff: () => 'browser' | 'manual';
@@ -77,6 +78,8 @@ function desktopStub(
   options: {
     signedIn?: boolean;
     email?: string | null;
+    /** Avatar the handoff supplied, if any. Display only, like the email. */
+    imageUrl?: string | null;
     token?: string | null;
     beginResult?: boolean;
     failure?: DesktopAuthFailure | null;
@@ -107,6 +110,7 @@ function desktopStub(
     failure: () => options.failure ?? null,
     signedIn: () => options.signedIn ?? false,
     email: () => options.email ?? null,
+    imageUrl: () => options.imageUrl ?? null,
     userId: () => null,
   };
 }
@@ -344,6 +348,51 @@ describe('PhormaCloudService credential seam', () => {
     // A brand new account has no tenant row, so there may be no address anywhere.
     expect(cloud.signedIn()).toBe(true);
     expect(cloud.email()).toBeNull();
+  });
+
+  it('surfaces the handoff avatar on desktop, where Clerk supplies none', () => {
+    const desktop = desktopStub({
+      signedIn: true,
+      imageUrl: 'https://img.clerk.com/abc?width=64&height=64&fit=crop&quality=85',
+    });
+    const { cloud } = harness({ isDesktop: true, desktop });
+
+    // A provider photo (Google, say) reaches a device-token install only through
+    // the sign-in handoff - there is no Clerk user here to read one from.
+    expect(cloud.avatarUrl()).toBe(
+      'https://img.clerk.com/abc?width=64&height=64&fit=crop&quality=85',
+    );
+  });
+
+  it('reports no avatar when the account has no photo', () => {
+    const desktop = desktopStub({ signedIn: true, email: 'owner@example.com' });
+    const { cloud } = harness({ isDesktop: true, desktop });
+
+    // Null is ordinary, not a failure: callers fall back to the account initial
+    // rather than to Clerk's generated placeholder.
+    expect(cloud.avatarUrl()).toBeNull();
+  });
+
+  it('scales a Clerk avatar through the image CDN rather than fetching the original', () => {
+    const clerk = clerkStub({
+      user: { hasImage: true, imageUrl: 'https://img.clerk.com/xyz' },
+    });
+    const { cloud } = harness({ isDesktop: false, clerk });
+
+    expect(cloud.avatarUrl()).toBe(
+      'https://img.clerk.com/xyz?width=64&height=64&fit=crop&quality=85',
+    );
+  });
+
+  it('ignores a Clerk user with no image of their own', () => {
+    const clerk = clerkStub({
+      user: { hasImage: false, imageUrl: 'https://img.clerk.com/generated-placeholder' },
+    });
+    const { cloud } = harness({ isDesktop: false, clerk });
+
+    // `hasImage` false means Clerk would hand back a generated placeholder. Ours
+    // is the better one, so this must read as "no photo".
+    expect(cloud.avatarUrl()).toBeNull();
   });
 
   it('clears both credentials on sign-out regardless of platform', async () => {

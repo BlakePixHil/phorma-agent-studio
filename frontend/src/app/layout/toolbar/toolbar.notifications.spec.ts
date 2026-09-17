@@ -35,6 +35,7 @@ function setup(options: { signedIn: boolean }) {
     loading: signal(false),
     error: signal(null),
     email: signal(null),
+    avatarUrl: signal(null),
     signInIsExternal: false,
     refresh: async () => undefined,
     sessionToken: async () => null,

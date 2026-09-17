@@ -158,10 +158,10 @@
   }
 }
 
-// Device-token account button: a circular initial standing in for the Clerk
-// avatar, which is unreachable without a Clerk session. Sized to match the
-// UserButton trigger it replaces so the toolbar's right edge does not shift
-// between a browser build and a desktop one.
+// Device-token account button: the provider photo when the sign-in handoff
+// supplied one, a circular initial otherwise. Sized to match the UserButton
+// trigger it replaces so the toolbar's right edge does not shift between a
+// browser build and a desktop one.
 :host ::ng-deep .phorma-toolbar__account.p-button {
   padding: 0;
   width: 1.75rem;
@@ -181,6 +181,16 @@
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1;
+}
+
+// The photo variant. `object-fit` matters even though the source is requested at
+// 64x64 with `fit=crop`: a cached URL from an older request, or a CDN that
+// ignores the hint, would otherwise stretch. The tinted background is dropped so
+// a transparent PNG does not sit on a primary-coloured disc.
+.phorma-toolbar__avatar--photo {
+  display: block;
+  background: var(--phorma-overlay-border);
+  object-fit: cover;
 }
 
 // Clerk UserButton trigger (avatar) — make it clearly clickable.

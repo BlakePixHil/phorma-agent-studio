@@ -370,6 +370,48 @@ console.log('\nThe claimed email is display-only and size-bounded');
   check('an absent email yields null, not undefined', (await post('/api/auth/device/redeem', { code: c3 })).body?.email === null);
 }
 
+// The avatar URL rides the same channel and is display-only in the same sense,
+// but it is held to a HOST ALLOWLIST rather than a size bound. The studio puts it
+// in an `<img src>`, so an unconstrained value would let a claim aim an outbound
+// request from the desktop webview at a host of the caller's choosing.
+console.log('\nThe claimed avatar URL is restricted to Clerk-hosted https origins');
+{
+  const code = newCode();
+  await post('/api/auth/device/start', { codeHash: await hashDeviceCode(code) });
+  await post(
+    '/api/auth/device/claim',
+    { code, imageUrl: '  https://img.clerk.com/abc?width=64  ' },
+    { token: mintClerkToken(OWNER) },
+  );
+  const out = await post('/api/auth/device/redeem', { code });
+  check('a Clerk-hosted URL is trimmed and returned', out.body?.imageUrl === 'https://img.clerk.com/abc?width=64', JSON.stringify(out.body?.imageUrl));
+
+  for (const [label, value] of [
+    ['a foreign host', 'https://evil.example/track.gif'],
+    ['a look-alike host', 'https://img.clerk.com.evil.example/a.png'],
+    ['plain http', 'http://img.clerk.com/a.png'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a data: URL', 'data:image/png;base64,AAAA'],
+    ['embedded credentials', 'https://user:pass@img.clerk.com/a.png'],
+    ['an explicit port', 'https://img.clerk.com:8443/a.png'],
+    ['a relative path', '/a.png'],
+    ['an over-long value', `https://img.clerk.com/${'a'.repeat(520)}`],
+    ['a non-string', 42],
+  ]) {
+    const c = newCode();
+    await post('/api/auth/device/start', { codeHash: await hashDeviceCode(c) });
+    await post('/api/auth/device/claim', { code: c, imageUrl: value }, { token: mintClerkToken(OWNER) });
+    const r = await post('/api/auth/device/redeem', { code: c });
+    check(`${label} is dropped, not stored`, r.body?.imageUrl === null, `${label}: ${JSON.stringify(r.body?.imageUrl)}`);
+  }
+
+  // Absent is the ordinary case for an account with no provider photo.
+  const c2 = newCode();
+  await post('/api/auth/device/start', { codeHash: await hashDeviceCode(c2) });
+  await post('/api/auth/device/claim', { code: c2 }, { token: mintClerkToken(OWNER) });
+  check('an absent avatar yields null, not undefined', (await post('/api/auth/device/redeem', { code: c2 })).body?.imageUrl === null);
+}
+
 console.log('\nRoute-level refusals');
 {
   const short = await post('/api/auth/device/redeem', { code: 'too-short' });

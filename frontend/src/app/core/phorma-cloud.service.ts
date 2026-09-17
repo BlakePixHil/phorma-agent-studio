@@ -32,6 +32,18 @@ export interface PhormaCloudProfile {
 }
 
 /**
+ * Asks Clerk's image CDN for a thumbnail rather than the full-size original.
+ *
+ * 64px covers the 28px toolbar avatar on a 2x display. Appends rather than
+ * assumes a clean URL: `imageUrl` carries no query today, but a future one would
+ * silently truncate under a hardcoded `?`.
+ */
+function scaleClerkImage(url: string): string {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}width=64&height=64&fit=crop&quality=85`;
+}
+
+/**
  * Monthly credit allowance per tier — MUST mirror `monthlyCredits` in
  * `cloud/src/tenants.ts` TIERS. Used only as a fallback when the deployed
  * worker predates the credits fields in `/api/me` (returns costUsd* but no
@@ -177,6 +189,26 @@ export class PhormaCloudService {
   readonly email = computed(() => {
     const user = this.user();
     return user?.primaryEmailAddress?.emailAddress ?? this.desktopAuth.email() ?? null;
+  });
+
+  /**
+   * Signed-in profile picture (best-effort display value), or null.
+   *
+   * The same Clerk-or-handoff union as {@link email}, and null for the same kind
+   * of ordinary reasons: an account with no provider photo, a handoff from a
+   * worker older than the field, or a URL that failed the host check. Callers
+   * fall back to an initial - `hasImage` is checked at the source, so null here
+   * means "no photo" rather than "photo we could not load", and Clerk's generated
+   * placeholder is deliberately never substituted for ours.
+   *
+   * Clerk's own value is scaled through its image CDN's query parameters (the
+   * handoff path is scaled at the source, on the sign-in page).
+   */
+  readonly avatarUrl = computed(() => {
+    const user = this.user();
+    const clerkImage = user?.hasImage ? user.imageUrl : null;
+    if (clerkImage) return scaleClerkImage(clerkImage);
+    return this.desktopAuth.imageUrl() ?? null;
   });
 
   /** Latest /api/me response (null until fetched or when signed out). */
