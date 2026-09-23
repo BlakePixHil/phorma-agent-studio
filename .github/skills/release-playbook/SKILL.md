@@ -63,7 +63,11 @@ git fetch origin
 git status -sb                     # expect: no "behind" / "ahead" surprises
 git describe --tags                # tells you the last tag and commits since
 git log --oneline <lastTag>..HEAD  # read this: it IS the release scope
+gh run list --limit 3              # expect: CI on HEAD green
 ```
+
+A red CI on HEAD settles whether a local failure is "just this machine". At beta.4, a karma
+cascade that looked like load-driven flake was already failing CI on HEAD.
 
 **Gate.** A dirty tree is a stop, not a warning - `release.mjs` runs `git add` on 12 specific paths
 and then `git commit`, so unrelated staged work is silently *excluded* while unrelated unstaged work
