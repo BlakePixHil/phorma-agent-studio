@@ -73,6 +73,37 @@ const ids = await page.evaluate(() =>
 | `waits()` / `sendEvent(nodeId, payload)` | Inspect and resolve Wait-for-Event suspensions. |
 | `questions()` / `answerQuestion(requestId, response)` | Inspect and answer Ask-User suspensions. |
 | `stop()` | Stop the in-flight run. |
+| `setDecisionStub(script \| null)` | Script System One (Jev) answers for Decide routers, auto-resolving gates and Decide nodes, with no key or network. Each call takes the next entry (the last repeats). A router asks `route` (option labels are the route port NAMES), a gate asks `approve`, a Decide node asks its own question ids. |
+| `decisionRequests()` | The requests the stub received (model, state, questions), to assert what System One was asked. |
+| `edgeLabels()` | Probability pills drawn on canvas edges after a routing decision (`connectionId -> { text, selected }`). |
+
+**System One routing (stubbed):**
+
+```js
+await page.evaluate(() => {
+  const t = window.__phormaTest;
+  t.setDecisionStub([
+    { route: { type: 'choice', choice: 'Billing', probabilities: { Billing: 0.92, Technical: 0.08 }, confidence: 0.88 } },
+  ]);
+  const ids = t.buildWorkflow({
+    nodes: [
+      { key: 'trig', catalogId: 'trigger-manual' },
+      { key: 'route', catalogId: 'flow-router', data: { mode: 'decide', instructions: 'Which team?' } },
+      { key: 'a', catalogId: 'flow-parallel' },
+      { key: 'b', catalogId: 'flow-parallel' },
+    ],
+    edges: [
+      { from: 'trig', to: 'route' },
+      { from: 'route', to: 'a', fromPort: 'Route A' },
+      { from: 'route', to: 'b', fromPort: 'Route B' },
+    ],
+  });
+  return ids;
+});
+```
+
+Rename the router ports to match the stub's option labels first (or script labels that match
+`Route A` / `Route B`).
 
 ### Opening dialogs
 

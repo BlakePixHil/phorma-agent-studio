@@ -16,6 +16,7 @@ import {
 } from '@phorma/engine';
 
 import { CloudService } from './cloud.service';
+import { DecisionTransportService } from './decision-transport.service';
 import { EvalService } from './eval.service';
 import { ModelPricingService } from './model-pricing.service';
 import { ModelTransportService } from './model-transport.service';
@@ -71,6 +72,7 @@ interface LocalEvalSnapshot {
 export class EvalRunnerService {
   private readonly workflow = inject(WorkflowService);
   private readonly transport = inject(ModelTransportService);
+  private readonly decisionTransport = inject(DecisionTransportService);
   private readonly settings = inject(SettingsService);
   private readonly toolHost = inject(ToolHostService);
   private readonly pricing = inject(ModelPricingService);
@@ -236,6 +238,8 @@ export class EvalRunnerService {
       subWorkflows: snapshot.spec.subWorkflows,
       maxSubWorkflowDepth: snapshot.maxSubWorkflowDepth,
       model: this.transport.create(),
+      decisions: this.decisionTransport.create(),
+      decisionModel: this.decisionTransport.defaultModel(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
       lmstudioBaseUrl: this.settings.lmstudioBaseUrl(),
       bedrockRegion: this.settings.bedrockRegion(),

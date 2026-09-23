@@ -174,6 +174,8 @@ OPENROUTER_PROVISIONING_KEY=sk-or-v1-...
 # OPENROUTER_API_KEY=
 # BEDROCK_API_KEY=
 # BEDROCK_REGION=us-east-1
+# TYPESAFE_API_KEY=           System One (Jev) decisions for BYO runs
+# TYPESAFE_PLATFORM_KEY=      hosted mode only: System One on tenant credits
 # OLLAMA_BASE_URL=http://localhost:11434
 #
 # Per-run credentials, one var each, named by the engine:

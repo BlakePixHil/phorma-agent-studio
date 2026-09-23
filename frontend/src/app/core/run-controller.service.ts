@@ -4,6 +4,8 @@ import {
   applyConnectionAuth,
   BROWSER_CAPABILITIES,
   createRedactor,
+  decisionEdgeLabels,
+  type DecisionEdgeLabel,
   DEFAULT_MAX_RESPONSE_BYTES,
   startRun,
   TAURI_DESKTOP_CAPABILITIES,
@@ -39,6 +41,7 @@ import {
 } from './data-path-settings';
 import { CapabilityService } from './capability.service';
 import { DataFetchService } from './data-fetch.service';
+import { DecisionTransportService } from './decision-transport.service';
 import { FixtureStoreService } from './fixture-store.service';
 import { ModelTransportService } from './model-transport.service';
 import { ModelPricingService } from './model-pricing.service';
@@ -208,6 +211,10 @@ export class RunControllerService {
   private readonly sqlHost = inject(SqlHostService);
   private readonly workflowState = inject(WorkflowStateService);
   private readonly fixtureStore = inject(FixtureStoreService);
+  // Safe DI direction: `DecisionTransportService` injects only Tauri, Settings,
+  // PhormaCloud and ActiveOwner - the same set `ModelTransportService` already
+  // reaches - and never `CloudService`, so it cannot close the NG0200 cycle.
+  private readonly decisionTransport = inject(DecisionTransportService);
   // Safe DI direction: `TelemetryService` is a leaf that injects only
   // `TauriService`, so this edge cannot close the known NG0200 cycle
   // (`RunControllerService -> ModelTransportService -> PhormaCloudService ->
@@ -236,6 +243,12 @@ export class RunControllerService {
   readonly nodeStates = signal<ReadonlyMap<string, RunNodeState>>(new Map());
   /** Connection ids currently pulsing. */
   readonly activeEdges = signal<ReadonlySet<string>>(new Set());
+  /**
+   * System One probability pills per connection id, set by routing `decision`
+   * events. Survives until the next run so the canvas explains WHY each branch
+   * was taken after the run ends.
+   */
+  readonly edgeLabels = signal<ReadonlyMap<string, DecisionEdgeLabel>>(new Map());
   /** Node ids with breakpoints. */
   readonly breakpoints = signal<ReadonlySet<string>>(new Set());
   /** The Runs panel timeline for the current/most recent run. */
@@ -537,6 +550,10 @@ export class RunControllerService {
       subWorkflows,
       maxSubWorkflowDepth: this.phormaCloud.subWorkflowDepth(),
       model: this.transport.create(),
+      // System One: absent when no key / sign-in is configured, so Decide
+      // routers fall back to keyword routing and other steps fail by name.
+      decisions: this.decisionTransport.create(),
+      decisionModel: this.decisionTransport.defaultModel(),
       ollamaBaseUrl: this.settings.ollamaBaseUrl(),
       lmstudioBaseUrl: this.settings.lmstudioBaseUrl(),
       bedrockRegion: this.settings.bedrockRegion(),
@@ -690,9 +707,13 @@ export class RunControllerService {
     // nodes in cycles/loops settle on their final outcome).
     const states = new Map<string, RunNodeState>();
     const thinking = new Map<string, { text: string; streaming: boolean }>();
+    const edgeLabels = new Map<string, DecisionEdgeLabel>();
     for (const event of record.events) {
       if ('scope' in event && event.scope?.length) continue;
       switch (event.type) {
+        case 'decision':
+          for (const [id, label] of decisionEdgeLabels(record.graph, event)) edgeLabels.set(id, label);
+          break;
         case 'node-started':
           states.set(event.nodeId, 'thinking');
           break;
@@ -710,6 +731,7 @@ export class RunControllerService {
 
     this.nodeStates.set(states);
     this.nodeThinking.set(thinking);
+    this.edgeLabels.set(edgeLabels);
     this.trace.set(traceFromRunLog(record.events, nodeName, { formatCost: this.formatTraceCost }));
     this.traceCounter = this.trace().length;
     this.runInput.set(record.summary.input);
@@ -981,6 +1003,28 @@ export class RunControllerService {
           `${this.nodeName(event.nodeId)}: context compressed (~${event.beforeTokens.toLocaleString()} → ~${event.afterTokens.toLocaleString()} tokens).`,
         );
         break;
+
+      case 'decision': {
+        if (scoped) break;
+        const labels = decisionEdgeLabels(this.workflow.graph(), event);
+        if (labels.size > 0) {
+          this.edgeLabels.update(current => new Map([...current, ...labels]));
+        }
+        this.console(
+          'run',
+          event.fallback ? 'warning' : 'info',
+          `${event.nodeName}: System One ${
+            event.fallback === 'no-transport'
+              ? 'unavailable - keyword routing used'
+              : event.fallback === 'low-confidence'
+                ? 'unsure - took the unsure route'
+                : event.purpose === 'gate'
+                  ? 'assessed the approval'
+                  : 'decided'
+          }.`,
+        );
+        break;
+      }
 
       case 'handoff': {
         if (scoped) break;
@@ -1498,6 +1542,7 @@ export class RunControllerService {
     this.trace.set([]);
     this.nodeStates.set(new Map());
     this.activeEdges.set(new Set());
+    this.edgeLabels.set(new Map());
     this.pendingApprovals.set([]);
     this.pendingWaits.set([]);
     this.clearQuestions();

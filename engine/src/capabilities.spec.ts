@@ -30,6 +30,7 @@ const FEATURE_FLAGS = [
   'privateNetworkEgress',
   'stdioMcp',
   'mcpOAuth',
+  'decisions',
 ] as const;
 
 const RECORDS: ReadonlyArray<readonly [string, HostCapabilities]> = [
@@ -50,7 +51,7 @@ describe('host capability records', () => {
     expect(new Set(RECORDS.map(([, record]) => record.id)).size).toBe(4);
   });
 
-  it.each(RECORDS)('%s declares an id, a label and all six feature flags', (_name, record) => {
+  it.each(RECORDS)('%s declares an id, a label and every feature flag', (_name, record) => {
     expect(record.id.length).toBeGreaterThan(0);
     expect(record.label.length).toBeGreaterThan(0);
     expect(Object.keys(record.features).sort()).toEqual([...FEATURE_FLAGS].sort());
@@ -136,6 +137,7 @@ describe('host capability records', () => {
       privateNetworkEgress: true,
       stdioMcp: false,
       mcpOAuth: false,
+      decisions: true,
     });
   });
 

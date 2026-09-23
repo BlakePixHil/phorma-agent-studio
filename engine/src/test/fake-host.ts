@@ -35,6 +35,12 @@ import type {
   SqlResult,
 } from '../data-host.js';
 import type { ResolvedConnection, SqlDriver } from '../connections.js';
+import type {
+  DecisionAnswer,
+  DecisionClient,
+  DecisionRequest,
+  DecisionResult,
+} from '../decisions.js';
 import type { ModelClient } from '../model.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,3 +265,56 @@ export const NEVER_CALLED_MODEL: ModelClient = {
     throw new Error('No model call is expected in these scripted runs.');
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DecisionClient (System One)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One scripted decision step: answers by question id, or an Error to throw. */
+export type FakeDecisionStep =
+  | Record<string, DecisionAnswer>
+  | Error
+  | ((request: DecisionRequest) => Record<string, DecisionAnswer> | Error);
+
+/**
+ * A scriptable `DecisionClient`. Each `evaluate` consumes one step; an
+ * unscripted call throws so a test proves exactly how many calls ran. Every
+ * request is recorded for assertions on state and questions.
+ */
+export class FakeDecisionClient implements DecisionClient {
+  readonly requests: DecisionRequest[] = [];
+  private index = 0;
+
+  constructor(
+    private readonly script: FakeDecisionStep[] = [],
+    private readonly model = 'jev-1.13.0',
+  ) {}
+
+  async evaluate(request: DecisionRequest): Promise<DecisionResult> {
+    this.requests.push(request);
+    const raw = this.script[this.index++];
+    if (raw === undefined) throw new Error(`Unscripted decision call ${this.index}.`);
+    const step = typeof raw === 'function' ? raw(request) : raw;
+    if (step instanceof Error) throw step;
+    return { model: this.model, answers: step, usage: { inputTokens: 1000, outputTokens: 10 } };
+  }
+
+  get calls(): number {
+    return this.requests.length;
+  }
+}
+
+/** Shorthand answers for scripts. */
+export const noul = (value: number): DecisionAnswer => ({ type: 'noul', noul: value });
+export const choice = (
+  winner: string,
+  probabilities: Record<string, number>,
+  confidence: number,
+): DecisionAnswer => ({ type: 'choice', choice: winner, probabilities, confidence });
+export const score = (value: number, confidence = 0.9): DecisionAnswer => ({
+  type: 'score',
+  score: value,
+  legend: {},
+  probabilities: {},
+  confidence,
+});

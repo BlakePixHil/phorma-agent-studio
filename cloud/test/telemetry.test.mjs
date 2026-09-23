@@ -152,7 +152,7 @@ function dayOffsetFrom(nowMs, offsetDays) {
 // `DeployTargetId` is compile-enforced in the studio twin (`AssertCovered`) and
 // asserted in `frontend/src/app/core/telemetry-catalog.spec.ts`. Those unions do
 // not exist at runtime here, so this file pins the part that a compiler cannot
-// see: the two modules expand to the same 56 names, over the same five dimension
+// see: the two modules expand to the same 57 names, over the same five dimension
 // lists, at the same schema version.
 
 console.log('\nProperty 5: the Counter_Catalog is closed and complete (twin identity)');
@@ -189,7 +189,7 @@ check(
   workerNames.join('\n') === studioNames.join('\n'),
   `worker ${workerNames.length} vs studio ${studioNames.length}`,
 );
-check('the catalog holds 56 names', workerNames.length === 56, String(workerNames.length));
+check('the catalog holds 57 names', workerNames.length === 57, String(workerNames.length));
 check(
   'the Worker catalog is exactly its own family expansion',
   workerNames.join('\n') === workerExpansion.join('\n'),

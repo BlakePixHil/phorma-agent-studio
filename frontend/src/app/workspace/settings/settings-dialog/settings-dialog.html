@@ -310,6 +310,84 @@
                         }
                       </div>
                     }
+
+                    <!-- System One (TypeSafe Jev): a decision model, not an agent model,
+                         so it lives beside the provider keys but never in a model picker. -->
+                    <div class="phorma-settings__row">
+                      <span class="phorma-settings__row-label">
+                        TypeSafe (System One)
+                        @if (settings.decisionKeyConfigured()) {
+                          <i
+                            class="ti ti-circle-check phorma-settings__ok"
+                            pTooltip="Key configured"
+                            tooltipPosition="top"
+                            aria-hidden="true"
+                          ></i>
+                        }
+                      </span>
+                      <input
+                        type="password"
+                        class="phorma-settings__input"
+                        id="api-key-typesafe"
+                        [placeholder]="settings.decisionKeyConfigured() ? '••••••••  (stored)' : 'Paste TypeSafe API key'"
+                        [value]="decisionKeyDraft() ?? ''"
+                        (input)="onDecisionKeyInput($event)"
+                        (keydown.enter)="saveDecisionKey()"
+                        autocomplete="off"
+                        aria-label="TypeSafe System One API key"
+                      />
+                      <p-button
+                        styleClass="phorma-settings__btn"
+                        size="small"
+                        label="Save"
+                        [disabled]="decisionKeyDraft() === undefined"
+                        (onClick)="saveDecisionKey()"
+                      />
+                      @if (settings.decisionKeyConfigured()) {
+                        <p-button
+                          styleClass="phorma-input-icon-btn phorma-input-icon-btn--danger"
+                          [text]="true"
+                          severity="secondary"
+                          size="small"
+                          icon="ti ti-trash"
+                          pTooltip="Remove stored key"
+                          tooltipPosition="top"
+                          (onClick)="clearDecisionKey()"
+                          ariaLabel="Remove stored TypeSafe key"
+                        />
+                      }
+                    </div>
+                    <div class="phorma-settings__row">
+                      <span class="phorma-settings__row-label">System One source</span>
+                      <p-select
+                        [options]="decisionSources"
+                        optionLabel="label"
+                        optionValue="id"
+                        [ngModel]="settings.decisionSource()"
+                        (ngModelChange)="settings.decisionSource.set($event)"
+                        ariaLabel="Where System One decisions are made"
+                        appendTo="body"
+                        size="small">
+                        <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+                      </p-select>
+                    </div>
+                    <div class="phorma-settings__row">
+                      <span class="phorma-settings__row-label">System One model</span>
+                      <input
+                        type="text"
+                        class="phorma-settings__input"
+                        [value]="settings.decisionModel()"
+                        (change)="setDecisionModel($event)"
+                        aria-label="Default System One model"
+                        placeholder="jev-latest"
+                      />
+                    </div>
+                    <p class="phorma-settings__note">
+                      <i class="ti ti-scale" aria-hidden="true"></i>
+                      System One makes fast, calibrated yes/no, choice and score decisions for
+                      Decide routers, auto-resolving approvals and Decide nodes. Pin a version
+                      (for example jev-1.13.0) to keep tuned thresholds stable.
+                    </p>
                   }
 
                   @case ('palette-picker') {

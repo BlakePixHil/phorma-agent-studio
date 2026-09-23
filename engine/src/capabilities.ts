@@ -13,6 +13,7 @@
 
 import { workerSecretName, type ConnectionSummary, type ConnectionType } from './connections.js';
 import type { HostCapabilities } from './data-host.js';
+import { DECISION_API_HOST, nodeUsesDecisions } from './decisions.js';
 import { validateExpression } from './expr.js';
 import type {
   EmbeddedWorkflow,
@@ -57,6 +58,8 @@ export const ALL_NODE_KINDS = [
   'state-get',
   'state-set',
   'notify',
+  // ── System One ─────────────────────────────────────────────────────────────────
+  'decide',
 ] as const satisfies readonly WorkflowNodeKind[];
 
 /**
@@ -98,6 +101,7 @@ export const TAURI_DESKTOP_CAPABILITIES: HostCapabilities = {
     privateNetworkEgress: true,
     stdioMcp: true,
     mcpOAuth: true,
+    decisions: true,
   },
 };
 
@@ -120,6 +124,7 @@ export const BROWSER_CAPABILITIES: HostCapabilities = {
     privateNetworkEgress: false,
     stdioMcp: false,
     mcpOAuth: true,
+    decisions: true,
   },
 };
 
@@ -148,6 +153,7 @@ export const CLOUDFLARE_CAPABILITIES: HostCapabilities = {
     privateNetworkEgress: false,
     stdioMcp: false,
     mcpOAuth: false,
+    decisions: true,
   },
 };
 
@@ -171,6 +177,7 @@ export const AWS_CAPABILITIES: HostCapabilities = {
     stdioMcp: false,
     // An OAuth session never leaves the device that signed in.
     mcpOAuth: false,
+    decisions: true,
   },
 };
 
@@ -415,6 +422,21 @@ function validateGraph(
       );
     }
 
+    // A System One step needs a host that can inject a decision client. A
+    // Decide-mode router degrades to keyword routing instead of failing, so
+    // it only warns.
+    if (data && nodeUsesDecisions(node) && !capabilities.features.decisions) {
+      if (node.kind === 'router') {
+        report(
+          `${label(node)} (router) uses System One, which is not available on ` +
+            `${capabilities.label}; it will fall back to keyword routing.`,
+          'warning',
+        );
+      } else {
+        report(`${label(node)} (${node.kind}) uses System One, which is not available on ${capabilities.label}.`);
+      }
+    }
+
     // Rule 4: every expression in the node must compile.
     if (data) {
       for (const expression of expressionsOf(node.kind, data)) {
@@ -429,6 +451,8 @@ function validateGraph(
     if (data && (DATA_IO_KINDS as readonly string[]).includes(node.kind)) {
       collectNodeEgress(label(node), node.kind, data, summary, egress, report);
     }
+    // Every System One step reaches the one fixed decision endpoint.
+    if (data && nodeUsesDecisions(node)) egress.add(DECISION_API_HOST);
 
     // Rule 6: a data node is never an agent's tool (Requirement 1.4).
     if (rejectsToolLink(node) && toolLinked.has(node.id)) {

@@ -7,6 +7,7 @@
  * Phorma its local-to-cloud visualization parity.
  */
 
+import type { DecisionAnswer, DecisionPurpose } from './decisions.js';
 import type { ModelUsage } from './model.js';
 import type { RunSource, SyncSummary } from './run-record.js';
 
@@ -100,7 +101,12 @@ type RunEventPayload =
   | { type: 'handoff'; runId: string; connectionId: string; fromNodeId: string; toNodeId: string; payload: string; at: number }
   | { type: 'tool-call'; runId: string; nodeId: string; toolNodeId: string; name: string; arguments: string; at: number }
   | { type: 'tool-result'; runId: string; nodeId: string; toolNodeId: string; name: string; result: string; isError: boolean; at: number }
-  | { type: 'approval-required'; runId: string; requestId: string; nodeId: string; message: string; payload: string; at: number }
+  | { type: 'approval-required'; runId: string; requestId: string; nodeId: string; message: string; payload: string;
+      /**
+       * Present when System One auto-resolve ran but landed in the uncertain
+       * band: its P(safe to approve), shown to the human deciding.
+       */
+      decisionProbability?: number; at: number }
   | { type: 'approval-resolved'; runId: string; requestId: string; nodeId: string; approved: boolean;
       /** See {@link RunGateActor}. */
       actor?: RunGateActor; at: number }
@@ -167,6 +173,25 @@ type RunEventPayload =
       routed: boolean; at: number }
   | { type: 'notify-sent'; runId: string; nodeId: string; channel: string;
       target: string; at: number }
+  // System One (TypeSafe Jev): one event per decision call, carrying the typed
+  // answers so the canvas can label edges with probabilities and the trace can
+  // explain WHY a branch was taken. Never carries the state that was evaluated.
+  | { type: 'decision'; runId: string; nodeId: string; nodeName: string;
+      purpose: DecisionPurpose;
+      /** Versioned model that answered (empty for a fallback). */
+      model: string;
+      answers: Record<string, DecisionAnswer>;
+      /** Out-port the decision routed through, for routing purposes. */
+      selectedPortId?: string;
+      /**
+       * Why the decision was NOT made by the model: `no-transport` (host has no
+       * decision client, so a keyword fallback ran) or `low-confidence` (the
+       * answer fell under the node's threshold and routed to its unsure path).
+       */
+      fallback?: 'no-transport' | 'low-confidence' | 'error';
+      durationMs: number;
+      /** True when served from a fixture, with `durationMs: 0`. */
+      replayed?: boolean; at: number }
   /** Emitted exactly once, immediately before the terminal event, when a run executed a data node. */
   | { type: 'sync-summary'; runId: string; summary: SyncSummary; at: number }
   | { type: 'run-paused'; runId: string; nodeId?: string; at: number }

@@ -7,6 +7,7 @@
 
 mod commands;
 mod data;
+mod decisions;
 mod deploy_assets;
 mod llm;
 mod mcp;
@@ -50,6 +51,7 @@ pub fn run() {
             llm::llm_proxy_stream,
             llm::cancel_llm_stream,
             data::data_request,
+            decisions::decision_evaluate,
             sql::sql_query,
             process::run_streamed_command,
             deploy_assets::prepare_deploy_workspace,

@@ -78,6 +78,7 @@ const UNION_NODE_KINDS = [
   'state-get',
   'state-set',
   'notify',
+  'decide',
 ] as const satisfies readonly WorkflowNodeKind[];
 
 /** Compile error when a `WorkflowNodeKind` is missing from the list above. */
@@ -260,13 +261,13 @@ describe('telemetry Counter_Catalog', () => {
 
   // ─── Exact contents, asserted once ────────────────────────────────────────
 
-  it('equals its family expansion and holds 56 names', () => {
+  it('equals its family expansion and holds 57 names', () => {
     expect([...COUNTER_CATALOG].sort()).toEqual(EXPANSION_NAMES.sort());
-    expect(COUNTER_CATALOG.size).toBe(56);
+    expect(COUNTER_CATALOG.size).toBe(57);
   });
 
   it('sizes each dimension list as the design declares', () => {
-    expect(UNION_NODE_KINDS.length).toBe(25);
+    expect(UNION_NODE_KINDS.length).toBe(26);
     expect(DEFAULT_PANEL_TAB_IDS.length).toBe(11);
     expect(UNION_ASSISTANT_MODES.length).toBe(3);
     expect(REGISTERED_DEPLOY_TARGETS.length).toBe(3);

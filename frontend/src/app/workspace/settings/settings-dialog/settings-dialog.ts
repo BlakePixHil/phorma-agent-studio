@@ -42,7 +42,7 @@ import { CreditsDialogService } from '../../cloud/credits-dialog.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
 import { DesktopAuthService } from '../../../core/desktop-auth.service';
 import { PhormaCloudService, tierLabel } from '../../../core/phorma-cloud.service';
-import { SettingsService } from '../../../core/settings.service';
+import { SettingsService, type DecisionSource } from '../../../core/settings.service';
 import {
   SettingsRegistryService,
   type SettingDef,
@@ -227,6 +227,47 @@ export class SettingsDialog {
 
   private providerLabel(provider: ModelProviderId): string | undefined {
     return this.keyedProviders.find(p => p.id === provider)?.label;
+  }
+
+  // ── System One (TypeSafe Jev) ──────────────────────────────────────────────────
+
+  protected readonly decisionSources: { id: DecisionSource; label: string }[] = [
+    { id: 'auto', label: 'Automatic (key, else Phorma Cloud)' },
+    { id: 'byo', label: 'My TypeSafe key' },
+    { id: 'phorma-cloud', label: 'Phorma Cloud credits' },
+  ];
+
+  /** Unsaved TypeSafe key input. `undefined` = untouched. */
+  protected readonly decisionKeyDraft = signal<string | undefined>(undefined);
+
+  protected onDecisionKeyInput(event: Event): void {
+    this.decisionKeyDraft.set((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected async saveDecisionKey(): Promise<void> {
+    const draft = this.decisionKeyDraft();
+    if (draft === undefined) return;
+    try {
+      await this.settings.setDecisionKey(draft);
+      this.decisionKeyDraft.set(undefined);
+      this.toast.success(draft.trim() ? 'Key saved' : 'Key removed', 'TypeSafe (System One)');
+    } catch (error) {
+      this.toast.error('Could not save key', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  protected async clearDecisionKey(): Promise<void> {
+    try {
+      await this.settings.setDecisionKey('');
+      this.toast.success('Key removed', 'TypeSafe (System One)');
+    } catch (error) {
+      this.toast.error('Could not remove key', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  protected setDecisionModel(event: Event): void {
+    const value = ((event.target as HTMLInputElement | null)?.value ?? '').trim();
+    this.settings.decisionModel.set(value || 'jev-latest');
   }
 
   // ── Minimap anchor picker (custom template) ─────────────────────────────
@@ -1202,6 +1243,7 @@ export class SettingsDialog {
     'OPENAI_API_KEY',
     'GEMINI_API_KEY',
     'OPENROUTER_API_KEY',
+    'TYPESAFE_API_KEY',
     'PHORMA_TOKEN',
   ] as const;
 

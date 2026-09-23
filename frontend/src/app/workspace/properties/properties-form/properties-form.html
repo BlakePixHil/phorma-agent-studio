@@ -1277,6 +1277,14 @@
       </section>
     }
 
+    <!-- System One: Router decide mode, Approval auto-resolve, Decide questions.
+         Deferred so it stays out of the initial bundle. -->
+    @if (usesDecisionConfig()) {
+      @defer (on immediate) {
+        <app-decision-config [node]="selected" [scope]="scope()" />
+      }
+    }
+
     <!-- ForEach loop -->
     @if (forEachData(); as data) {
       <section class="phorma-props__section">

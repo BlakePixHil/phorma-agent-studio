@@ -1,0 +1,342 @@
+<!-- System One availability: one line, never blocking. -->
+@if (!available() && (router()?.mode === 'decide' || gate()?.enabled || decide())) {
+  <p class="phorma-dc__notice" role="status">
+    <i class="ti ti-plug-connected-x" aria-hidden="true"></i>
+    <span>
+      System One is not configured.
+      @if (router()) { This router falls back to keyword matching. } @else { This step will fail when it runs. }
+      <button type="button" class="phorma-dc__link" (click)="openSettings()">Add a TypeSafe key</button>
+    </span>
+  </p>
+}
+
+<!-- ── Router: Decide mode ─────────────────────────────────────────────── -->
+@if (router(); as data) {
+  <section class="phorma-dc__section" data-section="router-decide">
+    <label class="phorma-dc__label" [for]="id('router-mode')">Routing</label>
+    <p-select
+      [inputId]="id('router-mode')"
+      class="phorma-dc__full"
+      [options]="routerModes"
+      optionLabel="label"
+      optionValue="id"
+      [ngModel]="data.mode ?? 'keyword'"
+      (ngModelChange)="setRouterMode($event)"
+      appendTo="body"
+      size="small">
+      <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+    </p-select>
+
+    @if (data.mode === 'decide') {
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('router-question')">Routing question</label>
+      <textarea
+        pTextarea
+        pSize="small"
+        [id]="id('router-question')"
+        class="phorma-dc__textarea"
+        rows="2"
+        [value]="data.instructions ?? ''"
+        (input)="patch({ instructions: value($event) })"
+        placeholder="Which team should handle this ticket?"
+      ></textarea>
+
+      <span class="phorma-dc__label phorma-dc__label--gap">What belongs on each route</span>
+      @for (port of routes(); track port.id) {
+        <div class="phorma-dc__route">
+          <span class="phorma-dc__route-name">{{ port.name || 'Unnamed route' }}</span>
+          <input
+            pInputText
+            pSize="small"
+            type="text"
+            class="phorma-dc__input"
+            [value]="data.routeCriteria?.[port.id] ?? ''"
+            (input)="setRouteCriteria(port.id, value($event))"
+            [attr.aria-label]="'What belongs on ' + port.name"
+            placeholder="Describe what belongs here (optional)"
+          />
+        </div>
+      }
+
+      <label class="phorma-dc__check">
+        <p-checkbox
+          [binary]="true"
+          size="small"
+          [inputId]="id('router-unsure')"
+          [ngModel]="!!unsurePort()"
+          (ngModelChange)="toggleUnsure($event)"
+        />
+        Send uncertain inputs to a "Not sure" route
+      </label>
+      @if (unsurePort()) {
+        <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('router-confidence')">
+          Minimum confidence (%)
+        </label>
+        <p-inputnumber
+          [inputId]="id('router-confidence')"
+          class="phorma-dc__number"
+          size="small"
+          [min]="0"
+          [max]="100"
+          [showButtons]="false"
+          [useGrouping]="false"
+          suffix="%"
+          [ngModel]="percent(data.minConfidence, 0.5)"
+          (ngModelChange)="setPercent('minConfidence', $event)"
+        />
+      }
+
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('router-path')">Evaluate only (state path)</label>
+      <input
+        pInputText
+        pSize="small"
+        [id]="id('router-path')"
+        type="text"
+        class="phorma-dc__input phorma-dc__input--mono"
+        [value]="data.statePath ?? ''"
+        (input)="patch({ statePath: value($event) || undefined })"
+        placeholder="ticket.message"
+      />
+      <p class="phorma-dc__hint">
+        Route names are the options System One picks from. Narrowing the input to the relevant
+        field makes decisions more accurate. Probabilities appear on the canvas while it runs.
+      </p>
+    } @else {
+      <p class="phorma-dc__hint">
+        Takes the first route whose name appears in the input. Switch to System One to route on
+        meaning, with a calibrated confidence per route.
+      </p>
+    }
+  </section>
+}
+
+<!-- ── Approval gate: auto-resolve ─────────────────────────────────────── -->
+@if (gate(); as auto) {
+  <section class="phorma-dc__section" data-section="gate-auto">
+    <label class="phorma-dc__check phorma-dc__check--first">
+      <p-checkbox
+        [binary]="true"
+        size="small"
+        [inputId]="id('gate-enabled')"
+        [ngModel]="auto.enabled"
+        (ngModelChange)="patchGate({ enabled: $event })"
+      />
+      Let System One settle confident cases
+    </label>
+    @if (auto.enabled) {
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('gate-question')">Safe to approve when</label>
+      <textarea
+        pTextarea
+        pSize="small"
+        [id]="id('gate-question')"
+        class="phorma-dc__textarea"
+        rows="2"
+        [value]="auto.question ?? ''"
+        (input)="patchGate({ question: value($event) })"
+        placeholder="Is this reply polite, accurate and free of personal data?"
+      ></textarea>
+      <div class="phorma-dc__pair">
+        <div>
+          <label class="phorma-dc__label" [for]="id('gate-approve')">Approve at (%)</label>
+          <p-inputnumber
+            [inputId]="id('gate-approve')"
+            class="phorma-dc__number"
+            size="small"
+            [min]="0"
+            [max]="100"
+            [showButtons]="false"
+            [useGrouping]="false"
+            suffix="%"
+            [ngModel]="percent(auto.approveAt, 0.9)"
+            (ngModelChange)="setPercent('approveAt', $event)"
+          />
+        </div>
+        <div>
+          <label class="phorma-dc__label" [for]="id('gate-reject')">Reject at (%)</label>
+          <p-inputnumber
+            [inputId]="id('gate-reject')"
+            class="phorma-dc__number"
+            size="small"
+            [min]="0"
+            [max]="100"
+            [showButtons]="false"
+            [useGrouping]="false"
+            suffix="%"
+            [ngModel]="percent(auto.rejectAt, 0.1)"
+            (ngModelChange)="setPercent('rejectAt', $event)"
+          />
+        </div>
+      </div>
+      <p class="phorma-dc__hint">
+        At or above the approve line the gate opens on its own; at or below the reject line it
+        closes. Anything in between waits for a person, who sees System One's estimate.
+      </p>
+    }
+  </section>
+}
+
+<!-- ── Decide node: questions ──────────────────────────────────────────── -->
+@if (decide(); as data) {
+  <section class="phorma-dc__section" data-section="decide-questions">
+    <span class="phorma-dc__label">Questions</span>
+    @for (question of questions(); track $index; let i = $index) {
+      <div class="phorma-dc__question" [class.phorma-dc__question--bad]="badIds().has(i)">
+        <div class="phorma-dc__row">
+          <input
+            pInputText
+            pSize="small"
+            type="text"
+            class="phorma-dc__input phorma-dc__input--mono phorma-dc__qid"
+            [value]="question.id"
+            (input)="patchQuestion(i, { id: value($event).trim() })"
+            [attr.aria-label]="'Answer key for question ' + (i + 1)"
+            [attr.aria-invalid]="badIds().has(i)"
+          />
+          <p-select
+            class="phorma-dc__qtype"
+            [options]="questionTypes"
+            optionLabel="label"
+            optionValue="id"
+            [ngModel]="question.type"
+            (ngModelChange)="changeType(i, $event)"
+            [ariaLabel]="'Type of question ' + (i + 1)"
+            appendTo="body"
+            size="small">
+            <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+          </p-select>
+          <button
+            type="button"
+            pButton
+            severity="danger"
+            [text]="true"
+            size="small"
+            (click)="removeQuestion(i)"
+            [disabled]="questions().length <= 1"
+            title="Remove question">
+            <i class="ti ti-trash" aria-hidden="true"></i>
+          </button>
+        </div>
+        <textarea
+          pTextarea
+          pSize="small"
+          class="phorma-dc__textarea"
+          rows="2"
+          [value]="question.instructions"
+          (input)="patchQuestion(i, { instructions: value($event) })"
+          [attr.aria-label]="'Question ' + (i + 1)"
+          placeholder="Ask one narrow thing, e.g. Does the customer ask for a refund?"
+        ></textarea>
+
+        @if (question.type === 'choice') {
+          <ul class="phorma-dc__options">
+            @for (option of question.options ?? []; track $index; let o = $index) {
+              <li>
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-dc__input phorma-dc__opt-label"
+                  [value]="option.label"
+                  (input)="patchOption(i, o, { label: value($event) })"
+                  [attr.aria-label]="'Option ' + (o + 1)"
+                />
+                <input
+                  pInputText
+                  pSize="small"
+                  type="text"
+                  class="phorma-dc__input"
+                  [value]="option.description ?? ''"
+                  (input)="patchOption(i, o, { description: value($event) || undefined })"
+                  [attr.aria-label]="'Description of option ' + (o + 1)"
+                  placeholder="Covers…"
+                />
+                <button
+                  type="button"
+                  pButton
+                  severity="danger"
+                  [text]="true"
+                  size="small"
+                  (click)="removeOption(i, o)"
+                  [disabled]="(question.options ?? []).length <= 2"
+                  title="Remove option">
+                  <i class="ti ti-x" aria-hidden="true"></i>
+                </button>
+              </li>
+            }
+          </ul>
+          <button type="button" class="phorma-dc__link" (click)="addOption(i)">
+            <i class="ti ti-plus" aria-hidden="true"></i> Option
+          </button>
+        } @else if (question.type === 'score') {
+          <textarea
+            pTextarea
+            pSize="small"
+            class="phorma-dc__textarea"
+            rows="3"
+            [value]="levelsText(question)"
+            (change)="setLevels(i, value($event))"
+            [attr.aria-label]="'Levels for question ' + (i + 1) + ', one per line, lowest first'"
+            placeholder="One level per line, lowest first"
+          ></textarea>
+        } @else {
+          <div class="phorma-dc__pair">
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-dc__input"
+              [value]="question.yes ?? ''"
+              (input)="patchQuestion(i, { yes: value($event) || undefined })"
+              aria-label="What yes means"
+              placeholder="Yes means…"
+            />
+            <input
+              pInputText
+              pSize="small"
+              type="text"
+              class="phorma-dc__input"
+              [value]="question.no ?? ''"
+              (input)="patchQuestion(i, { no: value($event) || undefined })"
+              aria-label="What no means"
+              placeholder="No means…"
+            />
+          </div>
+        }
+        <code class="phorma-dc__read">{{ readHint(question) }}</code>
+      </div>
+    }
+    <div class="phorma-dc__adders">
+      @for (type of questionTypes; track type.id) {
+        <button type="button" pButton severity="secondary" [outlined]="true" size="small" (click)="addQuestion(type.id)">
+          <i class="ti ti-plus" aria-hidden="true"></i> {{ type.label }}
+        </button>
+      }
+    </div>
+
+    <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('decide-key')">Answers merge under</label>
+    <input
+      pInputText
+      pSize="small"
+      [id]="id('decide-key')"
+      type="text"
+      class="phorma-dc__input phorma-dc__input--mono"
+      [value]="data.resultKey ?? 'decisions'"
+      (input)="patch({ resultKey: value($event) || undefined })"
+    />
+    <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('decide-path')">Evaluate only (state path)</label>
+    <input
+      pInputText
+      pSize="small"
+      [id]="id('decide-path')"
+      type="text"
+      class="phorma-dc__input phorma-dc__input--mono"
+      [value]="data.statePath ?? ''"
+      (input)="patch({ statePath: value($event) || undefined })"
+      placeholder="ticket"
+    />
+    <p class="phorma-dc__hint">
+      Every question is answered in one fast call. Yes/no answers are probabilities (0 to 1); use
+      them in a Guard, Transform or Router downstream.
+      @if (backendLabel(); as source) { Billed to {{ source }}. }
+    </p>
+  </section>
+}

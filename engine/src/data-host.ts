@@ -250,5 +250,11 @@ export interface HostCapabilities {
     privateNetworkEgress: boolean;
     stdioMcp: boolean;
     mcpOAuth: boolean;
+    /**
+     * The host can inject a System One `DecisionClient` (a TypeSafe key, a
+     * Phorma Cloud sign-in, or a worker secret). Declared rather than probed so
+     * validation can say a Decide node cannot run here before it fails.
+     */
+    decisions: boolean;
   };
 }

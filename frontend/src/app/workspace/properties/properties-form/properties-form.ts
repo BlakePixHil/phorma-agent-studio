@@ -35,6 +35,7 @@ import {
   type SchedulePlan,
 } from '../../../core/schedule-cron';
 import { InfoPopover } from '../../../shared/info-popover/info-popover';
+import { DecisionConfig } from '../decision-config/decision-config';
 import {
   MCP_LOCAL_ICON,
   MCP_OAUTH_ICON,
@@ -212,11 +213,11 @@ const NOTIFY_CHANNELS: Choice<'email' | 'webhook' | 'chat-webhook'>[] = [
 ];
 
 /** Kinds carrying a `retry` policy. Nothing else renders the retry block. */
-const RETRY_KINDS = new Set(['http-request', 'sql-query', 'notify']);
-/** Kinds carrying a `fixtures` mode — the two that perform real I/O. */
-const FIXTURE_KINDS = new Set(['http-request', 'sql-query']);
+const RETRY_KINDS = new Set(['http-request', 'sql-query', 'notify', 'decide']);
+/** Kinds carrying a `fixtures` mode — the ones that perform real I/O. */
+const FIXTURE_KINDS = new Set(['http-request', 'sql-query', 'decide']);
 /** Kinds carrying an `errorPortId`. `assert` uses `failedPortId` instead. */
-const ERROR_PORT_KINDS = new Set(['http-request', 'sql-query', 'notify']);
+const ERROR_PORT_KINDS = new Set(['http-request', 'sql-query', 'notify', 'decide']);
 /** Kinds carrying a `connectionId`. */
 const CONNECTION_KINDS = new Set(['http-request', 'sql-query', 'notify', 'http-tool']);
 
@@ -343,6 +344,7 @@ const SCHEDULE_FREQUENCIES: { id: ScheduleFrequency; label: string }[] = [
     TextareaModule,
     PhormaCloudIcon,
     InfoPopover,
+    DecisionConfig,
   ],
   templateUrl: './properties-form.html',
   styleUrl: './properties-form.scss',
@@ -1252,6 +1254,12 @@ export class PropertiesForm {
       this.toast.error('Could not disconnect', error instanceof Error ? error.message : String(error));
     }
   }
+
+  /** Kinds whose System One configuration renders in `DecisionConfig`. */
+  protected readonly usesDecisionConfig = computed(() => {
+    const kind = this.node()?.kind;
+    return kind === 'router' || kind === 'approval-gate' || kind === 'decide';
+  });
 
   /** Router/parallel/aggregator branch ports are editable lists. */
   protected readonly editableOutPorts = computed(() => {

@@ -43,6 +43,13 @@ export interface TenantEnv {
   OPENROUTER_WORKSPACE_ID?: string;
   /** Static bearer protecting the admin provisioning endpoints. */
   PHORMA_ADMIN_TOKEN?: string;
+  /**
+   * Phorma Labs' TypeSafe API key for System One (Jev) decisions made on behalf
+   * of hosted tenants: `/api/decide` (local runs) and hosted DO runs. Metered
+   * against tenant credits like `/api/infer`. Hosted only:
+   * `npx wrangler secret put TYPESAFE_PLATFORM_KEY --env hosted`.
+   */
+  TYPESAFE_PLATFORM_KEY?: string;
 }
 
 // ── Tiers ────────────────────────────────────────────────────────────────────

@@ -42,9 +42,12 @@ export const DEFAULT_MAX_BACKOFF_MS = 30_000;
 /** Ceiling applied to a server-provided `Retry-After`. */
 export const DEFAULT_MAX_RETRY_AFTER_MS = 120_000;
 
-/** Statuses that are retryable for an idempotent step. */
+/**
+ * Statuses that are retryable for an idempotent step. 529 is the "overloaded"
+ * answer used by TypeSafe System One (and Anthropic): transient by definition.
+ */
 export const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([
-  408, 425, 429, 500, 502, 503, 504,
+  408, 425, 429, 500, 502, 503, 504, 529,
 ]);
 
 /** Header the classifier consults, lower-cased as hosts deliver it. */

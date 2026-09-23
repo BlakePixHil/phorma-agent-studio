@@ -55,7 +55,9 @@ export type WorkflowNodeKind =
   | 'assert' // P1-9
   | 'state-get' // P1-8
   | 'state-set' // P1-8
-  | 'notify'; // P1-10
+  | 'notify' // P1-10
+  // ── System One (TypeSafe Jev) ─────────────────────────────────────────────
+  | 'decide';
 
 /**
  * Kinds that execute in the graph walk AND may perform external I/O. Used by
@@ -70,6 +72,7 @@ export const DATA_NODE_KINDS: readonly WorkflowNodeKind[] = [
   'state-get',
   'state-set',
   'notify',
+  'decide',
 ] as const;
 
 /** Data nodes that reach outside the run (fixtures + egress declaration). */
@@ -77,6 +80,7 @@ export const DATA_IO_KINDS: readonly WorkflowNodeKind[] = [
   'http-request',
   'sql-query',
   'notify',
+  'decide',
 ] as const;
 
 /**
@@ -261,6 +265,12 @@ export interface PortalTriggerData {
   embedOrigins?: string[];
   /** Label on the launcher bubble the loader injects. */
   embedLabel?: string;
+  /**
+   * System One screening of visitor messages (input) and the final answer
+   * (output). Output screening switches the portal to final-answer-only: no
+   * live tokens reach the visitor before the answer is screened.
+   */
+  guardrails?: PortalGuardrails;
 }
 
 /**
@@ -368,6 +378,10 @@ export interface AgentNodeData {
    * Rendered into the system prompt in array order.
    */
   skills?: AgentSkill[];
+  /** System One output verification (see {@link AgentVerifyConfig}). */
+  verify?: AgentVerifyConfig;
+  /** System One tool/skill preselection (see {@link AgentPreselectConfig}). */
+  preselect?: AgentPreselectConfig;
 }
 
 // ── Phase 1 data nodes: shared vocabulary ────────────────────────────────────
@@ -619,6 +633,147 @@ export interface NotifyNodeData {
   body?: PayloadTemplate;
   retry?: NodeRetryPolicy;
   errorPortId?: string;
+}
+
+// ── System One (TypeSafe Jev) decisions ──────────────────────────────────────
+
+/** Fields every decision-backed config shares. */
+export interface DecisionTuning {
+  /**
+   * Dotted path into the JSON payload narrowing what the model evaluates
+   * (e.g. `ticket.message`). Empty = the whole payload. Narrow state is the
+   * biggest accuracy lever: Jev degrades on large irrelevant context.
+   */
+  statePath?: string;
+  /** Pinned model id or alias. Absent = the run default, else `jev-latest`. */
+  decisionModel?: string;
+}
+
+/** A question authored on a Decide node (or any decision config). */
+export interface DecisionQuestionSpec {
+  /** Key the answer is stored under. Letters, digits, `_`. */
+  id: string;
+  type: 'noul' | 'choice' | 'score';
+  /** The question, markdown/plain text. */
+  instructions: string;
+  /** `choice`: one entry per option (`label` + optional description). */
+  options?: { label: string; description?: string }[];
+  /** `score`: ordered level descriptions, lowest first (2..10). */
+  levels?: string[];
+  /** `noul`: optional meaning of yes / no. */
+  yes?: string;
+  no?: string;
+}
+
+/** Router configuration. `keyword` is the historical substring match. */
+export interface RouterNodeData extends DecisionTuning {
+  /**
+   * `keyword` (default): the first route whose name appears in the payload.
+   * `decide`: System One picks the route with a calibrated Choice.
+   */
+  mode?: 'keyword' | 'decide';
+  /** Decide mode: the routing question. Markdown. */
+  instructions?: string;
+  /** Decide mode: port base id -> what belongs on that route. */
+  routeCriteria?: Record<string, string>;
+  /** Decide mode: below this confidence the unsure port is taken (default 0.5). */
+  minConfidence?: number;
+  /** Decide mode: port base id taken on low confidence. Absent = best guess. */
+  unsurePortId?: string;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+}
+
+/** Approval Gate auto-resolve: confident answers never wait for a human. */
+export interface ApprovalAutoResolve extends DecisionTuning {
+  enabled: boolean;
+  /** Yes/no question whose YES means "safe to approve". */
+  question?: string;
+  /** Optional meaning of yes / no. */
+  yes?: string;
+  no?: string;
+  /** P(yes) at or above this approves automatically (default 0.9). */
+  approveAt?: number;
+  /** P(yes) at or below this rejects automatically (default 0.1). */
+  rejectAt?: number;
+}
+
+export interface ApprovalGateNodeData {
+  /** Message shown to the human approver. Markdown. */
+  message?: string;
+  autoResolve?: ApprovalAutoResolve;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+}
+
+/** A Decide node: many typed questions in ONE call, merged into the payload. */
+export interface DecideNodeData extends DecisionTuning {
+  questions: DecisionQuestionSpec[];
+  /** Payload key the answers merge under (default `decisions`). */
+  resultKey?: string;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+  errorPortId?: string;
+}
+
+/** Agent output verification: calibrated "is this wrong?" checks. */
+export interface AgentVerifyConfig extends DecisionTuning {
+  enabled: boolean;
+  /**
+   * Built-in checks to ask. Each is a Noul framed so YES means "something is
+   * wrong": `unsupported` (claims not backed by the task input), `off-task`,
+   * `incomplete`, `format` (violates the requested format).
+   */
+  checks?: ('unsupported' | 'off-task' | 'incomplete' | 'format')[];
+  /** Extra custom yes-means-wrong questions. */
+  custom?: string[];
+  /** Any single check at or above this fires (default 0.7). */
+  fireAt?: number;
+  /**
+   * On a fired check: `fallback` reruns on the fallback model (else fails),
+   * `error` fails the node (routing through On error when wired),
+   * `warn` records the verdict and keeps the output.
+   */
+  onFail?: 'fallback' | 'error' | 'warn';
+}
+
+/** Per-turn tool/skill preselection: offer the model only what fits. */
+export interface AgentPreselectConfig {
+  enabled: boolean;
+  /** Narrow attached tools (never to zero). Default true. */
+  tools?: boolean;
+  /** Narrow attached skills (may drop all). Default true. */
+  skills?: boolean;
+  /** Candidates kept after the ranking pass (default 3). */
+  topK?: number;
+  /** A candidate whose "does this fit" P(yes) falls under this is dropped (default 0.3). */
+  minFit?: number;
+  decisionModel?: string;
+}
+
+/** One side of portal guardrail screening. */
+export interface PortalGuardrailSide {
+  enabled: boolean;
+  /** Hazards to screen for. Default: every hazard for that side. */
+  hazards?: ('jailbreak' | 'harmful' | 'medical' | 'self-harm')[];
+  /** P(hazard) at or above this goes to review (default 0.35). */
+  reviewAt?: number;
+  /** P(hazard) at or above this triggers the hazard's action (default 0.7). */
+  actionAt?: number;
+  /** Severity score (0..3) at or above this turns a review into a block (default 2). */
+  severityBlockAt?: number;
+  /** What a `review` verdict does on a public surface: let it through flagged, or block. */
+  reviewAction?: 'pass' | 'block';
+}
+
+export interface PortalGuardrails {
+  input?: PortalGuardrailSide;
+  output?: PortalGuardrailSide;
+  /** Shown to the visitor when a message is blocked. */
+  refusalMessage?: string;
+  /** Shown when the self-harm path fires. */
+  supportMessage?: string;
+  decisionModel?: string;
 }
 
 export interface WorkflowNode {

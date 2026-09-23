@@ -11,6 +11,7 @@ import type {
   AgentNodeData,
   AggregateNodeData,
   AssertNodeData,
+  DecideNodeData,
   HttpRequestNodeData,
   McpToolData,
   NodeCategory,
@@ -566,6 +567,32 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
       { name: 'On error', role: 'message-out' },
     ],
     defaultData: (): NotifyNodeData => ({ channel: 'webhook' }),
+  },
+  {
+    id: 'data-decide',
+    label: 'Decide',
+    description: 'Asks System One typed yes/no, choice and score questions about the input in one fast call.',
+    icon: 'ti ti-scale',
+    category: 'flow',
+    kind: 'decide',
+    section: DATA_SECTION_LABEL,
+    keywords: ['decide', 'classify', 'judge', 'score', 'system one', 'jev', 'typesafe', 'probability', 'triage'],
+    defaultName: 'Decide',
+    ports: [
+      { name: 'In', role: 'message-in' },
+      { name: 'Decided', role: 'message-out' },
+      { name: 'On error', role: 'message-out' },
+    ],
+    defaultData: (): DecideNodeData => ({
+      questions: [
+        {
+          id: 'urgent',
+          type: 'noul',
+          instructions: 'Does the input convey urgency or time pressure?',
+        },
+      ],
+      resultKey: 'decisions',
+    }),
   },
 ];
 

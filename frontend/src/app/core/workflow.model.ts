@@ -47,7 +47,9 @@ export type WorkflowNodeKind =
   | 'assert' // P1-9
   | 'state-get' // P1-8
   | 'state-set' // P1-8
-  | 'notify'; // P1-10
+  | 'notify' // P1-10
+  // ── System One (TypeSafe Jev) ─────────────────────────────────────────────
+  | 'decide';
 
 /**
  * Kinds that execute in the graph walk AND may perform external I/O. Every one
@@ -65,6 +67,7 @@ export const DATA_NODE_KINDS: readonly WorkflowNodeKind[] = [
   'state-get',
   'state-set',
   'notify',
+  'decide',
 ] as const;
 
 /** Data nodes that reach outside the run (fixtures + egress declaration). */
@@ -72,6 +75,7 @@ export const DATA_IO_KINDS: readonly WorkflowNodeKind[] = [
   'http-request',
   'sql-query',
   'notify',
+  'decide',
 ] as const;
 
 /**
@@ -335,6 +339,10 @@ export interface AgentNodeData {
    * Rendered into the system prompt in array order.
    */
   skills?: AgentSkill[];
+  /** System One output verification (see {@link AgentVerifyConfig}). */
+  verify?: AgentVerifyConfig;
+  /** System One tool/skill preselection (see {@link AgentPreselectConfig}). */
+  preselect?: AgentPreselectConfig;
 }
 
 export interface ScheduleTriggerData {
@@ -421,6 +429,8 @@ export interface PortalTriggerData {
   embedOrigins?: string[];
   /** Label on the launcher bubble the loader injects. */
   embedLabel?: string;
+  /** System One screening of visitor input and the final answer. */
+  guardrails?: PortalGuardrails;
 }
 
 export interface HttpToolParam {
@@ -480,14 +490,117 @@ export interface McpToolData {
   presetId?: string;
 }
 
-export interface RouterNodeData {
-  /** Extra routing guidance appended to the routing prompt. Markdown. */
+// ── System One (TypeSafe Jev) decisions ──────────────────────────────────────
+// Structural twins of the same-named interfaces in `engine/src/types.ts`.
+
+/** Fields every decision-backed config shares. */
+export interface DecisionTuning {
+  /** Dotted path narrowing what the model evaluates (e.g. `ticket.message`). */
+  statePath?: string;
+  /** Pinned model id or alias. Absent = the run default, else `jev-latest`. */
+  decisionModel?: string;
+}
+
+/** A question authored on a Decide node. */
+export interface DecisionQuestionSpec {
+  /** Key the answer is stored under. Letters, digits, `_`. */
+  id: string;
+  type: 'noul' | 'choice' | 'score';
+  instructions: string;
+  /** `choice`: one entry per option. */
+  options?: { label: string; description?: string }[];
+  /** `score`: ordered level descriptions, lowest first (2..10). */
+  levels?: string[];
+  /** `noul`: optional meaning of yes / no. */
+  yes?: string;
+  no?: string;
+}
+
+export interface RouterNodeData extends DecisionTuning {
+  /** `keyword` (default) substring match, or `decide` (System One picks). */
+  mode?: 'keyword' | 'decide';
+  /** Decide mode: the routing question. Markdown. */
   instructions?: string;
+  /** Decide mode: port base id -> what belongs on that route. */
+  routeCriteria?: Record<string, string>;
+  /** Decide mode: below this confidence the unsure port is taken (default 0.5). */
+  minConfidence?: number;
+  /** Decide mode: port base id taken on low confidence. */
+  unsurePortId?: string;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+}
+
+/** Approval Gate auto-resolve: confident answers never wait for a human. */
+export interface ApprovalAutoResolve extends DecisionTuning {
+  enabled: boolean;
+  /** Yes/no question whose YES means "safe to approve". */
+  question?: string;
+  yes?: string;
+  no?: string;
+  /** P(yes) at or above this approves automatically (default 0.9). */
+  approveAt?: number;
+  /** P(yes) at or below this rejects automatically (default 0.1). */
+  rejectAt?: number;
 }
 
 export interface ApprovalGateData {
   /** Message shown to the human approver. Markdown. */
   message?: string;
+  autoResolve?: ApprovalAutoResolve;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+}
+
+/** A Decide node: many typed questions in ONE call, merged into the payload. */
+export interface DecideNodeData extends DecisionTuning {
+  questions: DecisionQuestionSpec[];
+  /** Payload key the answers merge under (default `decisions`). */
+  resultKey?: string;
+  retry?: NodeRetryPolicy;
+  fixtures?: FixtureMode;
+  errorPortId?: string;
+}
+
+export type AgentVerifyCheck = 'unsupported' | 'off-task' | 'incomplete' | 'format';
+
+/** Agent output verification: calibrated "is this wrong?" checks. */
+export interface AgentVerifyConfig extends DecisionTuning {
+  enabled: boolean;
+  checks?: AgentVerifyCheck[];
+  custom?: string[];
+  /** Any single check at or above this fires (default 0.7). */
+  fireAt?: number;
+  onFail?: 'fallback' | 'error' | 'warn';
+}
+
+/** Per-turn tool/skill preselection. */
+export interface AgentPreselectConfig {
+  enabled: boolean;
+  tools?: boolean;
+  skills?: boolean;
+  topK?: number;
+  minFit?: number;
+  decisionModel?: string;
+}
+
+export type PortalGuardrailHazard = 'jailbreak' | 'harmful' | 'medical' | 'self-harm';
+
+export interface PortalGuardrailSide {
+  enabled: boolean;
+  hazards?: PortalGuardrailHazard[];
+  reviewAt?: number;
+  actionAt?: number;
+  severityBlockAt?: number;
+  reviewAction?: 'pass' | 'block';
+}
+
+export interface PortalGuardrails {
+  input?: PortalGuardrailSide;
+  output?: PortalGuardrailSide;
+  refusalMessage?: string;
+  supportMessage?: string;
+  decisionModel?: string;
 }
 
 export interface ForEachNodeData {
@@ -827,6 +940,7 @@ export type WorkflowNodeData =
   | StateGetNodeData
   | StateSetNodeData
   | NotifyNodeData
+  | DecideNodeData
   | Record<string, never>;
 
 // ── Nodes, connections, graph ────────────────────────────────────────────────

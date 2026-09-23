@@ -25,6 +25,7 @@
  */
 
 import type { DataRequest, DataResponse, FixtureStore, SqlResult } from './data-host.js';
+import type { DecisionAnswer, DecisionRequest, DecisionResult } from './decisions.js';
 import { STATE_NS, canonicalJson, fnv1a, scopedStateKey, utf8ByteLength } from './state.js';
 import type { FixtureMode } from './types.js';
 
@@ -177,7 +178,46 @@ export interface SqlFixture {
   readonly columns?: { name: string; type: string }[];
 }
 
-export type Fixture = HttpFixture | SqlFixture;
+/** A recorded System One result: the answers and the model that gave them. */
+export interface DecisionFixture {
+  readonly kind: 'decision';
+  readonly model: string;
+  readonly answers: Record<string, DecisionAnswer>;
+  readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
+}
+
+export type Fixture = HttpFixture | SqlFixture | DecisionFixture;
+
+/**
+ * Request fingerprint of a decision call: the model, the state and the
+ * questions in canonical form. Pinning `jev-latest` vs a versioned id changes
+ * the key on purpose - a replay must never pretend a different model answered.
+ */
+export function decisionRequestFingerprint(request: DecisionRequest): string {
+  return fnv1a(canonicalJson({ model: request.model, state: request.state, questions: request.questions }));
+}
+
+/** Serialises a live decision result into its fixture text. */
+export function serializeDecisionFixture(result: DecisionResult): string {
+  const fixture: DecisionFixture = {
+    kind: 'decision',
+    model: result.model,
+    answers: result.answers,
+    usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
+  };
+  return canonicalJson(fixture);
+}
+
+/** Rehydrates a recorded decision result. */
+export function parseDecisionFixture(raw: string): DecisionResult | undefined {
+  const fixture = parseFixture(raw);
+  if (!fixture || fixture.kind !== 'decision') return undefined;
+  return {
+    model: fixture.model,
+    answers: fixture.answers,
+    usage: { inputTokens: fixture.usage.inputTokens, outputTokens: fixture.usage.outputTokens },
+  };
+}
 
 /** Serialises a live response into its fixture text. */
 export function serializeHttpFixture(response: DataResponse): string {
@@ -302,6 +342,25 @@ function parseFixture(raw: string): Fixture | undefined {
     };
   }
 
+  if (record['kind'] === 'decision') {
+    const answers = record['answers'];
+    if (answers === null || typeof answers !== 'object' || Array.isArray(answers)) return undefined;
+    const valid = Object.values(answers as Record<string, unknown>).every((answer) => {
+      const type = (answer as { type?: unknown } | null)?.type;
+      return type === 'noul' || type === 'choice' || type === 'score';
+    });
+    if (!valid) return undefined;
+    const usage = (record['usage'] ?? {}) as Record<string, unknown>;
+    const count = (value: unknown): number =>
+      typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    return {
+      kind: 'decision',
+      model: typeof record['model'] === 'string' ? record['model'] : '',
+      answers: answers as Record<string, DecisionAnswer>,
+      usage: { inputTokens: count(usage['inputTokens']), outputTokens: count(usage['outputTokens']) },
+    };
+  }
+
   return undefined;
 }
 
@@ -409,6 +468,19 @@ const SQL_CODEC: FixtureCodec<SqlResult> = {
   parse: parseSqlFixture,
   noun: 'result',
 };
+
+const DECISION_CODEC: FixtureCodec<DecisionResult> = {
+  serialize: serializeDecisionFixture,
+  parse: parseDecisionFixture,
+  noun: 'decision',
+};
+
+/** Record/replay for one System One decision call. */
+export function createDecisionFixtureSession(
+  options: FixtureSessionOptions,
+): FixtureSession<DecisionResult> {
+  return createSession(options, DECISION_CODEC);
+}
 
 /** Record/replay for an `http-request` node execution. */
 export function createHttpFixtureSession(options: FixtureSessionOptions): FixtureSession<DataResponse> {

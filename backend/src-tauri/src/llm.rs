@@ -20,8 +20,28 @@ const API_KEY_PLACEHOLDER: &str = "{{API_KEY}}";
 const LLM_STREAM_EVENT: &str = "llm-stream-event";
 
 /// Providers allowed to have keys stored. Guards the keyring namespace.
-const KNOWN_PROVIDERS: [&str; 7] =
-    ["anthropic", "openai", "gemini", "openrouter", "ollama", "bedrock", "lmstudio"];
+///
+/// `typesafe` is the System One (Jev) decision-model key. It is not a chat
+/// provider - the webview never builds a streaming request for it - but it
+/// lives in the same namespace so Settings reuses `set_provider_key` /
+/// `has_provider_key`, and [`crate::decisions`] reads it here.
+const KNOWN_PROVIDERS: [&str; 8] = [
+    "anthropic",
+    "openai",
+    "gemini",
+    "openrouter",
+    "ollama",
+    "bedrock",
+    "lmstudio",
+    "typesafe",
+];
+
+/// Reads a stored provider key. Crate-internal: a provider key never crosses
+/// IPC; callers use it to authenticate a request performed in Rust.
+pub(crate) fn provider_key(provider: &str) -> Result<Option<String>, String> {
+    validate_provider(provider)?;
+    read_secret_value(provider)
+}
 
 /// Max characters stored in a single keychain entry. Windows Credential
 /// Manager caps a credential blob at 2560 UTF-16 code units, so large secrets

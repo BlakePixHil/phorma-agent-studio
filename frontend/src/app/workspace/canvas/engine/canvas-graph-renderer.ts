@@ -251,6 +251,7 @@ export class CanvasGraphRenderer {
   private nodeStates = new Map<string, string>();
   /** Connection ids currently pulsing with a handoff. */
   private activeEdges = new Set<string>();
+  private edgeLabels = new Map<string, { text: string; selected: boolean }>();
   /** Node ids carrying a breakpoint badge. */
   private breakpointNodes = new Set<string>();
   /** Node ids carrying a configuration warning badge. */
@@ -381,6 +382,15 @@ export class CanvasGraphRenderer {
   /** Connection ids whose wires pulse with the handoff animation. */
   setActiveEdges(ids: Iterable<string>): void {
     this.activeEdges = new Set(ids);
+    this.dirty = true;
+  }
+
+  /**
+   * System One probability pills per connection id (routing decisions). The
+   * taken edge renders in the active accent; the others muted.
+   */
+  setEdgeLabels(labels: ReadonlyMap<string, { text: string; selected: boolean }>): void {
+    this.edgeLabels = new Map(labels);
     this.dirty = true;
   }
 
@@ -1206,6 +1216,7 @@ export class CanvasGraphRenderer {
     // Connection severity badges at wire midpoints (on top of nodes/wires).
     if (showWires) {
       this.drawEdgeMarkers(ctx, visible);
+      if (drawText && this.edgeLabels.size > 0) this.drawEdgeLabels(ctx, visible);
     }
 
     this.onVisibleCount?.(drawn);
@@ -1251,6 +1262,48 @@ export class CanvasGraphRenderer {
           ctx.font = `bold ${11 / this.sc}px sans-serif`;
           ctx.fillText(e.severity === 'warning' ? '!' : '×', m.x, m.y + 0.5 / this.sc);
         }
+      }
+    }
+  }
+
+  /**
+   * Draws a rounded pill with the decision probability at each labelled
+   * edge's midpoint. Screen-constant size. When the edge also carries a
+   * severity badge the pill shifts right of it so neither covers the other.
+   */
+  private drawEdgeLabels(ctx: CanvasRenderingContext2D, visible: number[]): void {
+    const frame = ++this.frameId;
+    const s = 1 / this.sc;
+    const padX = 6 * s;
+    const h = 16 * s;
+    const radius = h / 2;
+    ctx.font = `700 ${9.5 * s}px Nunito, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const ni of visible) {
+      const incident = this.adjacency[ni];
+      if (!incident) continue;
+      for (const ei of incident) {
+        if (this.edgeStamp[ei] === frame) continue;
+        this.edgeStamp[ei] = frame;
+        const e = this.edges[ei];
+        const label = this.edgeLabels.get(e.id);
+        if (!label) continue;
+        const m = this.edgeMidpointResolved(e);
+        const w = Math.max(h, ctx.measureText(label.text).width + padX * 2);
+        // Clear the 9px-radius severity badge plus a 4px gap.
+        const cx = e.severity ? m.x + 9 * s + 4 * s + w / 2 : m.x;
+        const x = cx - w / 2;
+        const y = m.y - h / 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, radius);
+        ctx.fillStyle = label.selected ? this.theme.wireActive : this.theme.nodeHeaderBg;
+        ctx.fill();
+        ctx.lineWidth = 1 * s;
+        ctx.strokeStyle = label.selected ? this.theme.background : this.theme.nodeBorder;
+        ctx.stroke();
+        ctx.fillStyle = label.selected ? '#ffffff' : this.theme.rowText;
+        ctx.fillText(label.text, cx, m.y + 0.5 * s);
       }
     }
   }

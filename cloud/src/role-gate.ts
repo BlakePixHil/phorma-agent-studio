@@ -301,6 +301,12 @@ export const WRITE_ROUTES: readonly WriteRoute[] = [
   },
   {
     method: 'POST',
+    match: /^\/api\/decide$/,
+    required: 'operator',
+    note: "A System One decision spends the owner's credits, exactly as inference does.",
+  },
+  {
+    method: 'POST',
     match: /^\/api\/deployments\/[^/]+\/claim$/,
     required: 'builder',
     note: 'Claiming a deployment into an organisation is a deployment write (Requirement 3.2).',

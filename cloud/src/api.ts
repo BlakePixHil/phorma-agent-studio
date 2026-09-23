@@ -32,7 +32,14 @@
  * its own signature-verified route.
  */
 
-import { isConnectionId, workerSecretName } from '@phorma/engine';
+import {
+  DECISION_API_URL,
+  decisionCostUsd,
+  isConnectionId,
+  validateDecisionRequest,
+  workerSecretName,
+  type DecisionRequest,
+} from '@phorma/engine';
 
 // `resolveRole` is the ONE level seam (Requirement 6.2). `/api/me` reports what it
 // answers; it never re-derives a level, and it deliberately does not reach for
@@ -1301,6 +1308,92 @@ async function routeApiRequest(
         ...cors,
       },
     });
+  }
+
+  // ── POST /api/decide — System One (TypeSafe Jev) proxy for local runs ─────
+  // The decision twin of /api/infer: a tenant's local run asks System One on
+  // Phorma Labs' platform key, gated by the SAME entitlement check and metered
+  // into the SAME ledger. Non-streaming, so the ledger write is awaited inline.
+  // The request is validated with the engine's own rules before any upstream
+  // call, so a malformed body never spends a token.
+  if (request.method === 'POST' && url.pathname === '/api/decide') {
+    const auth = await verifyRequest(env, request);
+    if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
+    const ownerId = auth.ownerId ?? auth.userId;
+    // Same level as /api/infer: this spends the owner's credits.
+    const role = await requireCapability(env, auth, 'operator', respond);
+    if (role instanceof Response) return role;
+
+    const platformKey = env.TYPESAFE_PLATFORM_KEY?.trim();
+    if (!platformKey) {
+      return respond({ error: 'System One is not enabled on this Phorma Cloud deployment.' }, 501);
+    }
+
+    const body = (await request.json().catch(() => null)) as Partial<DecisionRequest> & {
+      workflowId?: unknown;
+    } | null;
+    if (!body || typeof body !== 'object') return respond({ error: 'Body must be a JSON object.' }, 400);
+    const decisionRequest: DecisionRequest = {
+      model: typeof body.model === 'string' ? body.model : '',
+      state: body.state as DecisionRequest['state'],
+      questions: (body.questions ?? {}) as DecisionRequest['questions'],
+    };
+    const invalid = validateDecisionRequest(decisionRequest);
+    if (invalid) return respond({ error: invalid }, 422);
+    const workflowId =
+      typeof body.workflowId === 'string' && body.workflowId.length > 0 ? body.workflowId : undefined;
+
+    const gate = await resolveHostedInference(store, ownerId, {
+      workflowId,
+      impersonated: impersonation !== null,
+    });
+    if ('status' in gate) return respond({ error: gate.error, code: gate.code }, gate.status);
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(DECISION_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${platformKey}`,
+          'User-Agent': 'PhormaCloud/1.0 (https://phorma.dev)',
+        },
+        body: JSON.stringify(decisionRequest),
+      });
+    } catch {
+      return respond({ error: 'System One could not be reached.' }, 502);
+    }
+    const text = await upstream.text().catch(() => '');
+    // Pass the upstream status straight through (with Retry-After on 429/529)
+    // so the studio's retry classifier sees the real signal.
+    const passthrough: Record<string, string> = { 'Content-Type': 'application/json', ...cors };
+    const retryAfter = upstream.headers.get('retry-after');
+    if (retryAfter) passthrough['Retry-After'] = retryAfter;
+    if (!upstream.ok) {
+      return new Response(text.slice(0, 2000), { status: upstream.status, headers: passthrough });
+    }
+
+    // Meter on the reported input tokens (Jev bills input only). Best-effort
+    // like /api/infer: a ledger failure never fails the decision.
+    try {
+      const parsed = JSON.parse(text) as { usage?: { input_tokens?: number; output_tokens?: number } };
+      const inputTokens = Number(parsed.usage?.input_tokens ?? 0) || 0;
+      const outputTokens = Number(parsed.usage?.output_tokens ?? 0) || 0;
+      await store.recordRun({
+        tenantId: ownerId,
+        tier: gate.tenant.tier,
+        runId: `decide-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        workflowId: `decide:${decisionRequest.model}`,
+        costUsd: decisionCostUsd({ inputTokens, outputTokens }),
+        tokensIn: inputTokens,
+        tokensOut: outputTokens,
+        countsAsRun: false,
+      });
+    } catch {
+      // Metering is best-effort; the answer is still valid.
+    }
+    return new Response(text, { status: 200, headers: passthrough });
   }
 
   // ── /api/backups/* — hosted workflow backup ───────────────────────────────

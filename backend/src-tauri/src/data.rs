@@ -480,7 +480,7 @@ fn effective_max_response_bytes(declared: Option<u64>) -> u64 {
 /// Collects response headers under lower-cased names, joining a repeated
 /// header (`link`, `set-cookie`) the way a wire reader would (Requirement
 /// 8.17). Values that are not valid UTF-8 are skipped.
-fn collect_headers(headers: &HeaderMap) -> HashMap<String, String> {
+pub(crate) fn collect_headers(headers: &HeaderMap) -> HashMap<String, String> {
     let mut collected: HashMap<String, String> = HashMap::new();
     for (name, value) in headers {
         let Ok(value) = value.to_str() else { continue };
@@ -519,7 +519,7 @@ pub(crate) fn transport_error(kind: &str, message: impl Into<String>) -> DataErr
 /// `connect`, `dns` and `tls` are the kinds the retry classifier treats as
 /// "the request provably never reached the server", so they are only reported
 /// when the failure happened while establishing the connection.
-fn classify_reqwest(error: &reqwest::Error) -> DataErrorDto {
+pub(crate) fn classify_reqwest(error: &reqwest::Error) -> DataErrorDto {
     let chain = error_chain(error);
     let kind = if error.is_timeout() {
         "timeout"

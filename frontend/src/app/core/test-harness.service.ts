@@ -1,6 +1,9 @@
 import { Injectable, NgZone, inject, isDevMode } from '@angular/core';
 
+import type { DecisionResult } from '@phorma/engine';
+
 import { CanvasStateService } from './canvas-state.service';
+import { DecisionTransportService } from './decision-transport.service';
 import { GraphLayoutService } from './graph-layout.service';
 import { RunControllerService } from './run-controller.service';
 import { SelectionService } from './selection.service';
@@ -122,6 +125,17 @@ export interface TestHarnessApi {
   openSettings(pageId?: string, anchorId?: string): void;
   /** Closes the Settings dialog. */
   closeSettings(): void;
+  /**
+   * Installs a scripted System One client for subsequent runs: each call is
+   * answered by the next entry (answers keyed by question id; the router asks
+   * `route`, an auto-resolving gate asks `approve`). The last entry repeats.
+   * `null` removes the stub. Every request is recorded; see `decisionRequests`.
+   */
+  setDecisionStub(script: Record<string, unknown>[] | null): void;
+  /** Requests the stub received (state + questions), oldest first. */
+  decisionRequests(): unknown[];
+  /** System One probability pills on canvas edges (connectionId -> label). */
+  edgeLabels(): Record<string, { text: string; selected: boolean }>;
 }
 
 declare global {
@@ -156,6 +170,7 @@ export class TestHarnessService {
   private readonly terminal = inject(TerminalOutputService);
   private readonly canvasState = inject(CanvasStateService);
   private readonly settingsDialog = inject(SettingsDialogService);
+  private readonly decisions = inject(DecisionTransportService);
 
   /** Installs `window.__phormaTest` (no-op in production builds). */
   install(): void {
@@ -266,8 +281,30 @@ export class TestHarnessService {
       openSettings: zoned((pageId, anchorId) => this.settingsDialog.open(pageId, anchorId)),
 
       closeSettings: zoned(() => this.settingsDialog.visible.set(false)),
+
+      setDecisionStub: zoned(script => {
+        this.decisionRequestLog = [];
+        if (!script || script.length === 0) {
+          this.decisions.setTestClient(null);
+          return;
+        }
+        let index = 0;
+        this.decisions.setTestClient({
+          evaluate: async request => {
+            this.decisionRequestLog.push(structuredClone(request));
+            const answers = script[Math.min(index++, script.length - 1)] as DecisionResult['answers'];
+            return { model: 'jev-test', answers, usage: { inputTokens: 100, outputTokens: 0 } };
+          },
+        });
+      }),
+
+      decisionRequests: () => structuredClone(this.decisionRequestLog),
+
+      edgeLabels: () => Object.fromEntries(this.runs.edgeLabels()),
     };
   }
+
+  private decisionRequestLog: unknown[] = [];
 
   // ── Internals ──────────────────────────────────────────────────────────────
 

@@ -13,6 +13,9 @@
 //   1. npx wrangler login
 //   2. Set provider secrets (once):  npx wrangler secret put ANTHROPIC_API_KEY
 //      (repeat for OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY as needed)
+//      For System One (TypeSafe Jev) decisions - Decide routers, auto-resolving
+//      approvals, Decide nodes, agent verification, portal guardrails:
+//        npx wrangler secret put TYPESAFE_API_KEY
 //   3. Protect the endpoints (recommended):  npx wrangler secret put PHORMA_TOKEN
 //      To use Clerk user auth instead, set:  npx wrangler secret put CLERK_SECRET_KEY
 //      (the studio then authenticates with Clerk session JWTs; PHORMA_TOKEN
@@ -143,6 +146,11 @@
 	//                                 workspace, so a dedicated workspace needs the
 	//                                 `var` below, not a second key.
 	//   PHORMA_ADMIN_TOKEN          - guards /api/provision + /api/deactivate
+	//   TYPESAFE_PLATFORM_KEY       - Phorma Labs' TypeSafe key for System One
+	//                                 decisions on tenant credits (/api/decide and
+	//                                 hosted DO runs). OPTIONAL: unset answers 501
+	//                                 on /api/decide and hosted System One steps
+	//                                 fall back (router) or fail by name.
 	//   TELEMETRY_ADMIN_USER_IDS    - comma-separated Clerk user ids allowed to read
 	//                                 /api/admin/telemetry/* (absent or empty = 403
 	//                                 for everyone, which is the intended default)

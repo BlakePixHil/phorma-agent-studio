@@ -1,4 +1,4 @@
-import type { RunLogEvent } from '@phorma/engine';
+import { DECISION_ACTOR, describeDecisionAnswers, formatProbability, type RunLogEvent } from '@phorma/engine';
 
 import type { TraceEntry } from './run-controller.service';
 
@@ -32,6 +32,7 @@ export interface TraceOptions {
  */
 function settledBy(actor: string | undefined, verb = 'by'): string {
   if (!actor) return '';
+  if (actor === DECISION_ACTOR) return ' automatically by System One';
   return verb === 'by' ? ` by ${actor}` : ` (${verb} by ${actor})`;
 }
 
@@ -123,7 +124,35 @@ export function describeRunEvent(
         kind: 'tool-result',
       };
     case 'approval-required':
-      return { icon: 'ti ti-user-check', label: 'Approval required', detail: event.message, tone: 'warning', kind: 'event' };
+      return {
+        icon: 'ti ti-user-check',
+        label:
+          event.decisionProbability === undefined
+            ? 'Approval required'
+            : `Approval required - System One unsure (${formatProbability(event.decisionProbability)} safe)`,
+        detail: event.message,
+        tone: 'warning',
+        kind: 'event',
+      };
+    case 'decision': {
+      const lines = describeDecisionAnswers(event.answers);
+      const suffix = event.replayed ? ' (fixture)' : event.durationMs > 0 ? ` in ${event.durationMs}ms` : '';
+      const label =
+        event.fallback === 'no-transport'
+          ? `${event.nodeName} - no System One on this host, used keyword routing`
+          : event.fallback === 'low-confidence'
+            ? `${event.nodeName} - System One unsure, took the unsure route${suffix}`
+            : event.purpose === 'gate'
+              ? `${event.nodeName} - System One assessed the approval${suffix}`
+              : `${event.nodeName} - System One decided${suffix}`;
+      return {
+        icon: 'ti ti-scale',
+        label,
+        detail: [...lines, event.model ? `model ${event.model}` : ''].filter(Boolean).join('\n') || undefined,
+        tone: event.fallback ? 'warning' : 'info',
+        kind: 'event',
+      };
+    }
     case 'approval-resolved':
       return {
         icon: event.approved ? 'ti ti-thumb-up' : 'ti ti-thumb-down',

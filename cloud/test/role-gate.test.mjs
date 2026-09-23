@@ -834,6 +834,12 @@ try {
       matchPath: '/api/connection-secrets',
     },
     { method: 'POST', path: '/api/infer', required: 'operator', body: { model: 'x', messages: [] } },
+    {
+      method: 'POST',
+      path: '/api/decide',
+      required: 'operator',
+      body: { model: 'jev-latest', state: 'x', questions: { q: { type: 'noul', instructions: 'q?' } } },
+    },
     // The ownership claim route (task 2). Nothing is deployed under this workflow
     // id, so an admitted caller reaches `claim_unowned` rather than a capability
     // refusal - which is exactly what this drive needs to tell apart. The claim path

@@ -32,3 +32,4 @@ export * from './data-http.js';
 export * from './fixtures.js';
 export * from './sql-statement.js';
 export * from './egress.js';
+export * from './decisions.js';

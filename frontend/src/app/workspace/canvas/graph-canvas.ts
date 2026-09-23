@@ -830,6 +830,11 @@ export class GraphCanvas implements AfterViewInit, OnDestroy {
       const edges = this.runController.activeEdges();
       untracked(() => this.engine.setActiveEdges(edges));
     });
+    // System One routing decisions: probability pill on each outgoing edge.
+    effect(() => {
+      const labels = this.runController.edgeLabels();
+      untracked(() => this.engine.setEdgeLabels(labels));
+    });
     effect(() => {
       const breakpoints = this.runController.breakpoints();
       untracked(() => this.engine.setBreakpoints(breakpoints));

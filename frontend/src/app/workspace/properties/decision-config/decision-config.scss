@@ -1,0 +1,199 @@
+// System One configuration: mirrors the properties form's section rhythm
+// (`phorma-props__*`) so the two read as one form.
+
+:host {
+  display: contents;
+}
+
+.phorma-dc__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.phorma-dc__label {
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+
+  &--gap {
+    margin-top: 0.45rem;
+  }
+}
+
+.phorma-dc__input,
+.phorma-dc__textarea,
+.phorma-dc__full {
+  width: 100%;
+  font-size: 0.928rem;
+}
+
+.phorma-dc__textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.phorma-dc__input--mono {
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+}
+
+.phorma-dc__number {
+  width: 100%;
+
+  ::ng-deep .p-inputnumber,
+  ::ng-deep .p-inputnumber-input {
+    width: 100%;
+    font-size: 0.928rem;
+  }
+}
+
+.phorma-dc__hint {
+  margin: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-dc__check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  font-size: 0.928rem;
+  color: var(--p-text-color);
+  cursor: pointer;
+
+  &--first {
+    margin-top: 0;
+  }
+}
+
+.phorma-dc__route {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.phorma-dc__route-name {
+  font-size: 0.857rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+
+.phorma-dc__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+}
+
+.phorma-dc__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.phorma-dc__qid {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.phorma-dc__qtype {
+  flex: 0 0 7.5rem;
+}
+
+.phorma-dc__question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent);
+
+  &--bad {
+    border-color: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 55%, transparent);
+  }
+}
+
+.phorma-dc__options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto;
+    align-items: center;
+    gap: 0.35rem;
+  }
+}
+
+.phorma-dc__read {
+  align-self: flex-start;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
+}
+
+.phorma-dc__adders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.phorma-dc__link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--p-primary-color);
+  font: inherit;
+  font-size: 0.928rem;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--p-primary-color);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
+}
+
+.phorma-dc__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 40%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-amber, #fbbf24) 8%, transparent);
+  font-size: 0.86rem;
+  line-height: 1.45;
+
+  i {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+    color: var(--phorma-accent-amber, #fbbf24);
+  }
+}

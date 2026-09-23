@@ -137,6 +137,7 @@ import {
 import {
   CLOUDFLARE_CAPABILITIES,
   DEFAULT_MAX_RESPONSE_BYTES,
+  FetchDecisionClient,
   FetchModelClient,
   HttpMcpClient,
   applyConnectionAuth,
@@ -170,6 +171,7 @@ import {
   type Connection as DataConnection,
   type DataFetcher,
   type DataRequest,
+  type DecisionClient,
   type JournalEntry,
   type ModelProviderId,
   type Redactor,
@@ -230,6 +232,12 @@ export interface Env extends TenantEnv, PortalRegistryEnv, SecretVaultEnv {
   BEDROCK_REGION?: string;
   /** Remote Ollama/OpenAI-compatible server, if you host one. */
   OLLAMA_BASE_URL?: string;
+  /**
+   * TypeSafe API key for System One (Jev) decisions in BYO deployments:
+   * Decide routers, auto-resolving approvals, Decide nodes, agent
+   * verification and portal guardrails. `npx wrangler secret put TYPESAFE_API_KEY`.
+   */
+  TYPESAFE_API_KEY?: string;
   /**
    * Connection secrets (Requirement 3.5). One variable per
    * `Connection.secretKeys` entry, named by the engine's
@@ -558,6 +566,20 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private dataFetchHost(): DataFetcher {
     this.dataFetcher ??= createWorkerDataFetcher();
     return this.dataFetcher;
+  }
+
+  /**
+   * `RunOptions.decisions` (System One). The endpoint is fixed in the engine,
+   * never user-supplied, so no SSRF guard is needed. Hosted runs use the
+   * platform key (cost reaches the tenant through the relabelled
+   * `node-usage` events summed into `recordRun`); BYO runs use the worker's
+   * own secret. Undefined when no key is available.
+   */
+  private decisionClient(): DecisionClient | undefined {
+    const key = this.hosted ? this.env.TYPESAFE_PLATFORM_KEY : this.env.TYPESAFE_API_KEY;
+    if (typeof key !== 'string' || key.trim().length === 0) return undefined;
+    const trimmed = key.trim();
+    return new FetchDecisionClient(async () => trimmed);
   }
 
   /**
@@ -1892,6 +1914,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       runTimeoutMs,
       journal,
       model,
+      // System One: hosted runs decide on the platform key (metered below via
+      // `node-usage`, re-labelled `phorma-cloud`); BYO runs use the worker's
+      // own `TYPESAFE_API_KEY`. No key = no client, so Decide routers fall
+      // back to keyword routing and other System One steps fail by name.
+      decisions: this.decisionClient(),
       tools: new CloudToolHost({
         restrictEgress: this.hosted,
         // Remote MCP bearer tokens come from worker secrets named

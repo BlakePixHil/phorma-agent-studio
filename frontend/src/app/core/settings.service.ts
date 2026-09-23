@@ -12,6 +12,21 @@ const BROWSER_KEYS_STORAGE = 'phorma.provider-keys';
 const BROWSER_MCP_SECRETS_STORAGE = 'phorma.mcp-secrets';
 
 /**
+ * Keychain / browser-store id of the TypeSafe System One API key. Not a
+ * `ModelProviderId`: System One is a decision model, never an agent model, so
+ * it must not appear in model pickers.
+ */
+export const DECISION_KEY_ID = 'typesafe';
+
+/**
+ * Where System One calls go:
+ *  - `auto` - your TypeSafe key when one is set, else Phorma Cloud when signed in.
+ *  - `byo` - always your TypeSafe key.
+ *  - `phorma-cloud` - always the metered Phorma Cloud proxy.
+ */
+export type DecisionSource = 'auto' | 'byo' | 'phorma-cloud';
+
+/**
  * Where deployed workflows run:
  *  - `'phorma'` — Phorma Cloud, the managed offering (subscription).
  *  - `'cloudflare'` — the user's own Cloudflare account (free, technical).
@@ -67,6 +82,15 @@ export class SettingsService {
 
   /** Default sampling temperature applied to inheriting agents. */
   readonly defaultTemperature = signal(loadLayout('defaultTemperature', 0.7));
+
+  // ── System One (TypeSafe Jev) ───────────────────────────────────────────────
+
+  /** Where decision calls go (see {@link DecisionSource}). */
+  readonly decisionSource = signal<DecisionSource>(loadLayout<DecisionSource>('decisionSource', 'auto'));
+  /** Default decision model for steps that pin none. */
+  readonly decisionModel = signal(loadLayout('decisionModel', 'jev-latest'));
+  /** Whether a TypeSafe key is stored (keychain or browser store). */
+  readonly decisionKeyConfigured = signal(false);
 
   /** Resolved app default as a single object (for run options / display). */
   readonly resolvedDefaultModel = computed(() => ({
@@ -188,6 +212,27 @@ export class SettingsService {
     effect(() => saveLayout('cloudProvider', this.cloudProvider()));
     effect(() => saveLayout('rememberCloudToken', this.rememberCloudToken()));
     effect(() => saveLayout('libraryExportOnSave', this.libraryExportOnSave()));
+    effect(() => saveLayout('decisionSource', this.decisionSource()));
+    effect(() => saveLayout('decisionModel', this.decisionModel()));
+  }
+
+  /** Stores (or clears, when empty) the TypeSafe System One API key. */
+  async setDecisionKey(key: string): Promise<void> {
+    if (this.tauri.isDesktop) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('set_provider_key', { provider: DECISION_KEY_ID, key });
+    } else {
+      const keys = this.browserKeys() as Record<string, string>;
+      if (key.trim()) keys[DECISION_KEY_ID] = key.trim();
+      else delete keys[DECISION_KEY_ID];
+      localStorage.setItem(BROWSER_KEYS_STORAGE, JSON.stringify(keys));
+    }
+    await this.refreshKeyFlags();
+  }
+
+  /** Browser-mode TypeSafe key lookup (desktop keys never reach the webview). */
+  browserDecisionKey(): string | null {
+    return (this.browserKeys() as Record<string, string>)[DECISION_KEY_ID] ?? null;
   }
 
   /**
@@ -385,6 +430,7 @@ export class SettingsService {
   private async refreshKeyFlags(): Promise<void> {
     const flags: Partial<Record<ModelProviderId, boolean>> = {};
     const providers: ModelProviderId[] = ['anthropic', 'openai', 'gemini', 'openrouter', 'bedrock'];
+    let decisionKey = false;
     if (this.tauri.isDesktop) {
       const { invoke } = await import('@tauri-apps/api/core');
       for (const provider of providers) {
@@ -394,11 +440,18 @@ export class SettingsService {
           flags[provider] = false;
         }
       }
+      try {
+        decisionKey = await invoke<boolean>('has_provider_key', { provider: DECISION_KEY_ID });
+      } catch {
+        decisionKey = false;
+      }
     } else {
       const keys = this.browserKeys();
       for (const provider of providers) flags[provider] = !!keys[provider];
+      decisionKey = !!this.browserDecisionKey();
     }
     this.keyConfigured.set(flags);
+    this.decisionKeyConfigured.set(decisionKey);
   }
 
   private browserKeys(): Partial<Record<ModelProviderId, string>> {

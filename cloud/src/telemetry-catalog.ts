@@ -77,6 +77,7 @@ export const COUNTED_NODE_KINDS = [
   'state-get',
   'state-set',
   'notify',
+  'decide',
 ] as const;
 
 /** Every default panel id that gets a `panel.opened:{id}` counter. */
@@ -142,7 +143,7 @@ export function counterName(family: CounterFamily, dimension?: string): string {
 
 /**
  * Every permitted counter name: the families crossed with their dimension lists,
- * expanded once at module load. 56 names.
+ * expanded once at module load. 57 names.
  */
 export const COUNTER_CATALOG: ReadonlySet<string> = expandCounterCatalog();
 

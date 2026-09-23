@@ -1975,6 +1975,20 @@ const RUN_EVENT_FRAMES: Readonly<Record<RunEventType, RunEvent>> = {
     target: 'ops@example.test',
     at: MONITOR_AT,
   },
+  decision: {
+    type: 'decision',
+    runId: MONITOR_RUN_ID,
+    nodeId: MONITOR_NODE_ID,
+    nodeName: 'Route ticket',
+    purpose: 'route',
+    model: 'jev-1.13.0',
+    answers: {
+      route: { type: 'choice', choice: 'Billing', probabilities: { Billing: 0.9, Technical: 0.1 }, confidence: 0.85 },
+    },
+    selectedPortId: 'port-billing',
+    durationMs: 96,
+    at: MONITOR_AT,
+  },
   'sync-summary': {
     type: 'sync-summary',
     runId: MONITOR_RUN_ID,
@@ -2366,10 +2380,10 @@ function parsedByHandler(parseSpy: jasmine.Spy<typeof JSON.parse>, frame: string
  * `RunControllerService.apply` untransformed, and the `monitor-synced` sentinel
  * never reaches it at all.
  *
- * Exhaustive enumeration over the closed space: 48 frames (one per member of the
+ * Exhaustive enumeration over the closed space: 49 frames (one per member of the
  * `RunEvent` union in `engine/src/events.ts`, plus six wire shapes the union
- * cannot express) x 3 Deploy_Targets = 144 cases, plus 7 malformed frames x 3
- * targets and one sentinel-only delivery per target - 168 in all. `fast-check` is
+ * cannot express) x 3 Deploy_Targets = 147 cases, plus 7 malformed frames x 3
+ * targets and one sentinel-only delivery per target - 171 in all. `fast-check` is
  * an `engine` dependency and must not be added here, so "property" means the
  * whole product, not sampling.
  *
@@ -2547,18 +2561,18 @@ describe('Property 28: RunEvents reach the run controller untransformed', () => 
     // total `Record<RunEventType, RunEvent>` already makes a new member of the
     // union a compile error; these cover the rest.
     const types = Object.keys(RUN_EVENT_FRAMES) as RunEventType[];
-    expect(types.length).toBe(42);
+    expect(types.length).toBe(43);
     for (const type of types) {
       expect(RUN_EVENT_FRAMES[type].type).withContext(`corpus entry "${type}"`).toBe(type);
     }
     expect(WIRE_ODDITY_CASES.length).toBe(6);
-    expect(EVENT_FRAME_CASES.length).toBe(48);
-    expect(new Set(EVENT_FRAME_CASES.map(each => each.label)).size).toBe(48);
-    expect(new Set(EVENT_FRAME_CASES.map(each => each.frame)).size).toBe(48);
+    expect(EVENT_FRAME_CASES.length).toBe(49);
+    expect(new Set(EVENT_FRAME_CASES.map(each => each.label)).size).toBe(49);
+    expect(new Set(EVENT_FRAME_CASES.map(each => each.frame)).size).toBe(49);
     expect(TARGET_IDS.length).toBe(3);
-    expect(EVENT_FRAME_CASES.length * TARGET_IDS.length).toBe(144);
+    expect(EVENT_FRAME_CASES.length * TARGET_IDS.length).toBe(147);
     expect(MALFORMED_FRAMES.length * TARGET_IDS.length).toBe(21);
-    expect(144 + 21 + TARGET_IDS.length).toBe(168);
+    expect(147 + 21 + TARGET_IDS.length).toBe(171);
 
     // Both malformed groups are populated, or one of the two branches above is
     // asserted against nothing.

@@ -54,6 +54,11 @@ const EXPECTED_PORTS: Record<WorkflowNodeKind, { name: string; role: PortRole }[
     { name: 'Sent', role: 'message-out' },
     { name: 'On error', role: 'message-out' },
   ],
+  decide: [
+    { name: 'In', role: 'message-in' },
+    { name: 'Decided', role: 'message-out' },
+    { name: 'On error', role: 'message-out' },
+  ],
   // Non-data kinds are unused by this test but keep the record total.
   agent: [],
   'manual-trigger': [],
@@ -84,6 +89,7 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   'state-get': ['key'],
   'state-set': ['key', 'valueExpression'],
   notify: ['channel'],
+  decide: ['questions'],
 };
 
 describe('node-catalog: Data section completeness (Requirement 19.1)', () => {

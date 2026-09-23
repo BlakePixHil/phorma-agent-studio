@@ -59,12 +59,33 @@ import {
   STATE_TTL_MIN_SEC,
 } from './state.js';
 import {
+  createDecisionFixtureSession,
   createHttpFixtureSession,
   createSqlFixtureSession,
+  decisionRequestFingerprint,
   httpRequestFingerprint,
   sqlRequestFingerprint,
   type FixtureSession,
 } from './fixtures.js';
+import {
+  DECISION_ACTOR,
+  DECISION_PROVIDER,
+  buildDecisionQuestions,
+  decisionCostUsd,
+  mergeDecisionAnswers,
+  payloadToState,
+  readThreshold,
+  resolveDecisionModel,
+  uniqueOptionLabels,
+  validateDecisionRequest,
+  type ChoiceAnswer,
+  type DecisionClient,
+  type DecisionPurpose,
+  type DecisionQuestion,
+  type DecisionResult,
+  type DecisionTuningLike,
+  type NoulAnswer,
+} from './decisions.js';
 import {
   isWriteStatement,
   reconcileSqlParameters,
@@ -99,9 +120,13 @@ import {
   nodeForConnector,
   portBaseId,
   type AgentNodeData,
+  type ApprovalGateNodeData,
   type AskUserNodeData,
   type AssertNodeData,
   type Assertion,
+  type DecideNodeData,
+  type FixtureMode,
+  type RouterNodeData,
   type EmbeddedWorkflow,
   type ExecuteWorkflowNodeData,
   type ForEachNodeData,
@@ -388,6 +413,16 @@ export interface RunOptions {
   redact?: (value: string) => string;
   /** Declared host capability set, used for run-time guardrails. */
   capabilities?: HostCapabilities;
+
+  // ── System One (TypeSafe Jev) ─────────────────────────────────────────────────
+
+  /**
+   * Typed decision model. Optional: a Decide-mode router falls back to keyword
+   * routing without it; every other System One step fails naming the host.
+   */
+  decisions?: DecisionClient;
+  /** Default decision model for steps that pin none (default `jev-latest`). */
+  decisionModel?: string;
 }
 
 export interface RunHandle {
@@ -1015,7 +1050,15 @@ class WorkflowRun {
 
     switch (node.kind) {
       case 'router':
-        return this.runRouter(node, payload);
+        return this.runRouter(
+          node,
+          payload,
+          executionKey ?? this.nextExecutionKey(node, payload),
+        );
+      case 'decide': {
+        const key = executionKey ?? this.nextExecutionKey(node, payload);
+        return this.routeAwayFromErrorPort(node, await this.runDecide(node, payload, key));
+      }
       case 'parallel':
         return { output: payload }; // fan-out happens in followHandoffs
       case 'aggregator':
@@ -2884,13 +2927,197 @@ class WorkflowRun {
     return prompt;
   }
 
-  private runRouter(
+  // ── System One (TypeSafe Jev) ─────────────────────────────────────────────────
+
+  /**
+   * The one path every System One call takes: validation, fixture replay, the
+   * shared rate-limit-aware retry loop (decision calls are read-only, so they
+   * are idempotent unless the node says otherwise), then exactly one `decision`
+   * event and one `node-usage` event so cost lands in the run totals.
+   *
+   * `emitDecision: false` lets a caller that knows the routing outcome emit the
+   * event itself with `selectedPortId`.
+   */
+  private async evaluateDecision(
+    node: WorkflowNode,
+    purpose: DecisionPurpose,
+    input: {
+      payload: string;
+      executionKey: string;
+      tuning: DecisionTuningLike;
+      questions: Record<string, DecisionQuestion>;
+      fixtures?: FixtureMode;
+      retry?: NodeRetryPolicy;
+    },
+  ): Promise<{ result: DecisionResult; durationMs: number; replayed: boolean }> {
+    const client = this.options.decisions;
+    if (!client) throw this.missingCapability(node, 'decisions', 'ask System One');
+
+    const request = {
+      model: resolveDecisionModel(input.tuning.decisionModel, this.options.decisionModel),
+      state: payloadToState(input.payload, input.tuning.statePath),
+      questions: input.questions,
+    };
+    const invalid = validateDecisionRequest(request);
+    if (invalid) throw new Error(`Step "${node.name}" cannot ask System One. ${invalid}`);
+
+    const session = createDecisionFixtureSession({
+      mode: input.fixtures,
+      workflowId: this.options.workflowId ?? '',
+      // Purpose-scoped so an agent's verify and preselect calls never collide.
+      nodeId: `${node.id}#${purpose}`,
+      nodeName: node.name,
+      payload: input.payload,
+      occurrence: this.occurrenceOf(input.executionKey),
+      requestFingerprint: decisionRequestFingerprint(request),
+      store: this.options.fixtures,
+    });
+    const replay = await session.read();
+    if (replay) return { result: replay.value, durationMs: 0, replayed: true };
+
+    const policy: NodeRetryPolicy = { idempotent: true, ...(input.retry ?? {}) };
+    const started = Date.now();
+    const result = await runWithNodeRetry(policy, () => client.evaluate(request), {
+      onRetry: notice => {
+        this.emit({
+          type: 'node-retrying',
+          runId: this.options.runId,
+          nodeId: node.id,
+          nodeName: node.name,
+          attempt: notice.attempt,
+          maxAttempts: notice.maxAttempts,
+          delayMs: notice.delayMs,
+          error: formatRetryEventError(notice.error, notice.reason),
+          at: Date.now(),
+        });
+      },
+      sleep: ms => this.gate.sleep(ms),
+      stopped: () => this.gate.stopped,
+      awaitResume: () => (this.gate.paused ? this.gate.checkpoint(node.id) : Promise.resolve()),
+      describe: error => describeRetryError(error, this.options.redact),
+    });
+    if (this.gate.stopped) throw new RunStoppedError();
+    const durationMs = Math.max(0, Date.now() - started);
+
+    if (session.writes) {
+      const outcome = await session.write(result);
+      if (!outcome.stored && outcome.warning) {
+        (globalThis as { console?: { warn?: (message: string) => void } }).console?.warn?.(outcome.warning);
+      }
+    }
+
+    this.emit({
+      type: 'node-usage',
+      runId: this.options.runId,
+      nodeId: node.id,
+      provider: DECISION_PROVIDER,
+      model: result.model || request.model,
+      usage: {
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        costUsd: decisionCostUsd(result.usage),
+        costSource: 'estimated',
+      },
+      at: Date.now(),
+    });
+    return { result, durationMs, replayed: false };
+  }
+
+  private emitDecision(
+    node: WorkflowNode,
+    purpose: DecisionPurpose,
+    outcome: { result?: DecisionResult; durationMs: number; replayed?: boolean },
+    extra: { selectedPortId?: string; fallback?: 'no-transport' | 'low-confidence' | 'error' } = {},
+  ): void {
+    this.emit({
+      type: 'decision',
+      runId: this.options.runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      purpose,
+      model: outcome.result?.model ?? '',
+      answers: outcome.result?.answers ?? {},
+      ...(extra.selectedPortId ? { selectedPortId: extra.selectedPortId } : {}),
+      ...(extra.fallback ? { fallback: extra.fallback } : {}),
+      durationMs: outcome.durationMs,
+      ...(outcome.replayed ? { replayed: true } : {}),
+      at: Date.now(),
+    });
+  }
+
+  /**
+   * Router. `keyword` (default) is the historical substring match. `decide`
+   * asks System One one Choice over the routes - option labels are the port
+   * names (what the model reads), mapped back to port ids so renaming a port
+   * never breaks a spec. Low confidence takes the declared unsure port.
+   */
+  private async runRouter(
     node: WorkflowNode,
     payload: string,
-  ): { output: string; viaPortIds: Set<string> } {
+    executionKey: string,
+  ): Promise<{ output: string; viaPortIds: Set<string> }> {
     const routes = node.ports.filter(port => port.role === 'message-out');
     if (routes.length === 0) return { output: payload, viaPortIds: new Set() };
 
+    const data = (node.data ?? {}) as RouterNodeData;
+    if (data.mode !== 'decide') return this.keywordRoute(routes, payload);
+
+    const unsure = routes.find(port => port.id === data.unsurePortId);
+    const options = unsure ? routes.filter(port => port !== unsure) : routes;
+    if (!this.options.decisions) {
+      const fallback = this.keywordRoute(routes, payload);
+      this.emitDecision(
+        node,
+        'route',
+        { durationMs: 0 },
+        { selectedPortId: [...fallback.viaPortIds][0], fallback: 'no-transport' },
+      );
+      return fallback;
+    }
+    if (options.length === 0) return { output: payload, viaPortIds: new Set([routes[0].id]) };
+    if (options.length === 1) {
+      return { output: payload, viaPortIds: new Set([options[0].id]) };
+    }
+
+    const labels = uniqueOptionLabels(
+      options.map(port => port.name),
+      index => `Route ${index + 1}`,
+    );
+    const byLabel = new Map(labels.map((label, index) => [label, options[index]]));
+    const criteria: Record<string, string | null> = {};
+    labels.forEach((label, index) => {
+      const description = (data.routeCriteria?.[options[index].id] ?? '').trim();
+      criteria[label] = description || null;
+    });
+    const instructions =
+      (data.instructions ?? '').trim() || 'Which route should handle this input?';
+
+    const outcome = await this.evaluateDecision(node, 'route', {
+      payload,
+      executionKey,
+      tuning: data,
+      questions: { route: { type: 'choice', instructions, criteria } },
+      fixtures: data.fixtures,
+      retry: data.retry,
+    });
+    const answer = outcome.result.answers['route'] as ChoiceAnswer | undefined;
+    const chosen = answer ? byLabel.get(answer.choice) : undefined;
+    const minConfidence = readThreshold(data.minConfidence, 0.5);
+
+    let via = chosen ?? options[0];
+    let fallback: 'low-confidence' | undefined;
+    if (unsure && (!answer || answer.confidence < minConfidence)) {
+      via = unsure;
+      fallback = 'low-confidence';
+    }
+    this.emitDecision(node, 'route', outcome, { selectedPortId: via.id, fallback });
+    return { output: payload, viaPortIds: new Set([via.id]) };
+  }
+
+  private keywordRoute(
+    routes: readonly { id: string; name: string }[],
+    payload: string,
+  ): { output: string; viaPortIds: Set<string> } {
     const haystack = payload.toLowerCase();
     const match =
       routes.find(route => route.name.trim() && haystack.includes(route.name.trim().toLowerCase())) ??
@@ -2898,18 +3125,105 @@ class WorkflowRun {
     return { output: payload, viaPortIds: new Set([match.id]) };
   }
 
+  /**
+   * Decide node: every authored question in ONE System One call (questions run
+   * in parallel server-side, so adding one is nearly free), answers merged into
+   * the payload under `resultKey` for downstream `router` / `assert` /
+   * `transform` / prompt templates.
+   */
+  private async runDecide(node: WorkflowNode, payload: string, executionKey: string): Promise<string> {
+    const data = (node.data ?? {}) as DecideNodeData;
+    if (!this.options.decisions) throw this.missingCapability(node, 'decisions', 'ask System One');
+    const built = buildDecisionQuestions(data.questions);
+    if ('error' in built) throw new Error(`Step "${node.name}" cannot ask System One. ${built.error}`);
+
+    const outcome = await this.evaluateDecision(node, 'decide', {
+      payload,
+      executionKey,
+      tuning: data,
+      questions: built.questions,
+      fixtures: data.fixtures,
+      retry: data.retry,
+    });
+    this.emitDecision(node, 'decide', outcome);
+    const resultKey = (data.resultKey ?? '').trim() || 'decisions';
+    return mergeDecisionAnswers(payload, resultKey, outcome.result.answers);
+  }
+
+  /**
+   * Auto-resolve for an approval gate: one Noul whose YES means "safe to
+   * approve". Confident answers settle the gate without a human; the band in
+   * between falls through to the normal approval prompt. Returns `null` when
+   * the gate should ask a human.
+   */
+  private async autoResolveApproval(
+    node: WorkflowNode,
+    payload: string,
+    executionKey: string,
+  ): Promise<{ approved: boolean; probability: number } | { probability: number } | null> {
+    const data = (node.data ?? {}) as ApprovalGateNodeData;
+    const auto = data.autoResolve;
+    if (!auto?.enabled) return null;
+    if (!this.options.decisions) throw this.missingCapability(node, 'decisions', 'auto-resolve approvals with System One');
+
+    const question =
+      (auto.question ?? '').trim() ||
+      (data.message ?? '').trim() ||
+      'Is this safe to approve without human review?';
+    const yes = (auto.yes ?? '').trim();
+    const no = (auto.no ?? '').trim();
+    const outcome = await this.evaluateDecision(node, 'gate', {
+      payload,
+      executionKey,
+      tuning: auto,
+      questions: {
+        approve: {
+          type: 'noul',
+          instructions: question,
+          ...(yes || no ? { criteria: { ...(yes ? { true: yes } : {}), ...(no ? { false: no } : {}) } } : {}),
+        },
+      },
+      fixtures: data.fixtures,
+      retry: data.retry,
+    });
+    this.emitDecision(node, 'gate', outcome);
+    const probability = (outcome.result.answers['approve'] as NoulAnswer | undefined)?.noul ?? 0.5;
+    const approveAt = readThreshold(auto.approveAt, 0.9);
+    const rejectAt = readThreshold(auto.rejectAt, 0.1);
+    if (probability >= approveAt) return { approved: true, probability };
+    if (probability <= rejectAt) return { approved: false, probability };
+    return { probability };
+  }
+
   private async runApprovalGate(
     node: WorkflowNode,
     payload: string,
     executionKey: string,
   ): Promise<{ output: string; viaPortIds: Set<string> }> {
-    const data = node.data as { message?: string };
+    const data = node.data as ApprovalGateNodeData;
     const message =
       typeof data.message === 'string' && data.message.trim()
         ? data.message
         : `Approve the work arriving at "${node.name}"?`;
+    const outs = node.ports.filter(port => port.role === 'message-out');
 
     const requestId = `approval:${executionKey}`;
+    const verdict = await this.autoResolveApproval(node, payload, executionKey);
+    if (verdict && 'approved' in verdict) {
+      // Settled by System One: the trace records it as a resolution with the
+      // `system-one` actor, and no human is ever prompted.
+      this.emit({
+        type: 'approval-resolved',
+        runId: this.options.runId,
+        requestId,
+        nodeId: node.id,
+        approved: verdict.approved,
+        actor: DECISION_ACTOR,
+        at: Date.now(),
+      });
+      const via = verdict.approved ? outs[0] : (outs[1] ?? outs[0]);
+      return { output: payload, viaPortIds: via ? new Set([via.id]) : new Set() };
+    }
     this.emit({
       type: 'approval-required',
       runId: this.options.runId,
@@ -2917,6 +3231,8 @@ class WorkflowRun {
       nodeId: node.id,
       message,
       payload,
+      // The uncertain middle band: the human sees what System One thought.
+      ...(verdict ? { decisionProbability: verdict.probability } : {}),
       at: Date.now(),
     });
 
@@ -2934,7 +3250,6 @@ class WorkflowRun {
 
     // Route via the matching out port (Approved / Rejected by position:
     // first message-out port = approved, second = rejected).
-    const outs = node.ports.filter(port => port.role === 'message-out');
     const via = approved ? outs[0] : (outs[1] ?? outs[0]);
     return { output: payload, viaPortIds: via ? new Set([via.id]) : new Set() };
   }
