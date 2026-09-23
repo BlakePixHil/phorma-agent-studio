@@ -162,19 +162,37 @@
 // supplied one, a circular initial otherwise. Sized to match the UserButton
 // trigger it replaces so the toolbar's right edge does not shift between a
 // browser build and a desktop one.
+//
+// The button is a borderless 2rem (28px) square and the avatar fills it
+// EXACTLY. PrimeNG's `.p-button` is `border-box` with a 1px border, so a 1.75rem
+// button holding a 1.75rem image squeezed the image to 22.5px wide inside a
+// 24.5px circle - an off-centre, slightly oval photo. Border zeroed, avatar
+// sized to 100%, and `flex: none` so the button's flex row cannot shrink it.
+//
+// `display: flex` (block-level) rather than PrimeNG's `inline-flex`: an inline
+// button holding an `<img>` takes the image's bottom edge as its BASELINE, so the
+// `<p-button>` host's line box grew descender space underneath and the photo sat
+// 3px above every sibling's centre line. The initial did not, which is why only
+// accounts with a picture looked off.
 :host ::ng-deep .phorma-toolbar__account.p-button {
+  display: flex;
   padding: 0;
-  width: 1.75rem;
-  height: 1.75rem;
+  border-width: 0;
+  width: 2rem;
+  height: 2rem;
+  min-width: 0;
   border-radius: 50%;
+  overflow: hidden;
 }
 
 .phorma-toolbar__avatar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);

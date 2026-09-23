@@ -63,6 +63,7 @@ const {
 } = await import('../src/auth.ts');
 const { mintDeviceToken } = await import('../src/device-auth.ts');
 const { CAPABILITY_LEVELS } = await import('../src/capabilities.ts');
+const { orgNameCacheKey, rememberOrgName, resolveOrgNames } = await import('../src/org-names.ts');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrations = join(here, '..', 'migrations');
@@ -193,6 +194,27 @@ const CORS = { 'Access-Control-Allow-Origin': 'http://localhost:7322' };
 const CTX = { waitUntil: () => undefined, passThroughOnException: () => undefined };
 
 let TENANTS = memoryKv();
+
+// `/api/me` now resolves organisation NAMES from Clerk (`org-names.ts`). Every
+// section except the names one below asserts `owners` without a name, so the
+// suite-wide default answers every Clerk organisation read with a 404 - the
+// "no name" shape - and refuses any other outbound call, so a test can never
+// reach the real network by accident. Section 7 swaps in its own stub.
+globalThis.fetch = async (input) => {
+  const url = typeof input === 'string' ? input : input.url;
+  if (url.startsWith('https://api.clerk.com/v1/organizations/')) {
+    return new Response(JSON.stringify({ errors: [{ code: 'resource_not_found' }] }), { status: 404 });
+  }
+  throw new Error(`unexpected outbound request: ${url}`);
+};
+{
+  // The 404s are logged by design; keep them out of this suite's output.
+  const realError = console.error;
+  console.error = (...args) => {
+    if (String(args[0]).startsWith('org names:')) return;
+    realError(...args);
+  };
+}
 
 function hostedEnv(extra = {}) {
   return {
@@ -459,6 +481,95 @@ console.log('\nlistMemberships bounds and failure shape');
   } finally {
     console.error = realError;
   }
+}
+
+// ══ 7. Organisation NAMES ride on `owners` ══════════════════════════════════
+//
+// A desktop install has no Clerk user and so no `organizationMemberships`; before
+// this the switcher could only render `Organisation <id tail>`. The worker now
+// resolves the name from Clerk, caches it in KV, and omits it when it cannot - so
+// the three claims are: a name is reported, it is fetched ONCE per TTL rather than
+// per poll, and a Clerk failure degrades to "no name" without failing the read.
+
+console.log('\nOrganisation names on `owners`');
+{
+  await setMemberships([
+    { orgId: 'org_named', userId: 'user_member', level: 'admin' },
+    { orgId: 'org_broken', userId: 'user_member', level: 'operator' },
+  ]);
+  await setTenant({ id: 'user_member', tier: null });
+  TENANTS = memoryKv();
+
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  const clerkCalls = [];
+  console.error = () => undefined;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (!url.startsWith('https://api.clerk.com/')) throw new Error(`unexpected outbound ${url}`);
+    clerkCalls.push({ url, auth: (init.headers ?? {}).Authorization });
+    if (url.endsWith('/organizations/org_named')) {
+      return new Response(JSON.stringify({ id: 'org_named', name: '  Phorma Labs  ' }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), { status: 503 });
+  };
+  try {
+    const first = await me({ bearer: mintToken('user_member') });
+    check('the read still answers 200 when one name lookup fails', first.status === 200, String(first.status));
+    check(
+      'a resolvable organisation carries its trimmed name',
+      JSON.stringify(first.body?.owners?.[1]) === JSON.stringify({ ownerId: 'org_named', level: 'admin', name: 'Phorma Labs' }),
+      JSON.stringify(first.body?.owners),
+    );
+    check(
+      'an unresolvable one omits the field, byte-identical to an older worker',
+      JSON.stringify(first.body?.owners?.[0]) === JSON.stringify({ ownerId: 'org_broken', level: 'operator' }),
+      JSON.stringify(first.body?.owners),
+    );
+    check(
+      'Clerk is asked with the worker secret',
+      clerkCalls.every((call) => call.auth === 'Bearer sk_test_clerk_not_used_offline'),
+      JSON.stringify(clerkCalls),
+    );
+
+    const callsAfterFirst = clerkCalls.length;
+    const deviceToken = await mintDeviceToken(DEVICE_SECRET, 'user_member', Date.now() / 1000);
+    const second = await me({ bearer: deviceToken });
+    check(
+      'a desktop credential gets the same names',
+      JSON.stringify(second.body?.owners) === JSON.stringify(first.body?.owners),
+      JSON.stringify(second.body?.owners),
+    );
+    check(
+      'and the second poll made NO Clerk call - hits and misses are both cached',
+      clerkCalls.length === callsAfterFirst,
+      `${callsAfterFirst} then ${clerkCalls.length}`,
+    );
+    check(
+      'the cache holds one key per organisation',
+      TENANTS.entries.has(orgNameCacheKey('org_named')) && TENANTS.entries.has(orgNameCacheKey('org_broken')),
+      [...TENANTS.entries.keys()].join(', '),
+    );
+
+    // Seeding (what `org-admin.ts` does at creation) short-circuits the fetch.
+    TENANTS = memoryKv();
+    await rememberOrgName({ TENANTS }, 'org_broken', 'Seeded Name');
+    const calls = clerkCalls.length;
+    const seeded = await me({ bearer: mintToken('user_member') });
+    check(
+      'a seeded name is reported with no Clerk read for it',
+      seeded.body?.owners?.[0]?.name === 'Seeded Name' &&
+        !clerkCalls.slice(calls).some((call) => call.url.endsWith('/org_broken')),
+      JSON.stringify(seeded.body?.owners),
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realError;
+  }
+
+  // No KV binding: no lookup at all, rather than a Clerk call on every poll.
+  const noKv = await resolveOrgNames({ CLERK_SECRET_KEY: 'sk_x' }, ['org_named']);
+  check('with no cache binding nothing is looked up', noKv.get('org_named') === null);
 }
 
 await setMemberships([]);

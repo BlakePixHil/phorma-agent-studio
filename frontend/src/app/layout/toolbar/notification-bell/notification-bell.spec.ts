@@ -200,14 +200,32 @@ describe('NotificationBell', () => {
     expect(rig.fixture.nativeElement.querySelector('.ti-bell')).toBeTruthy();
   });
 
-  it('shows the count and switches to the filled bell', () => {
+  it('shows the count and KEEPS the bell glyph', () => {
     const rig = setup();
     rig.badge.set(3);
     rig.fixture.detectChanges();
 
     const pill = rig.fixture.nativeElement.querySelector('.phorma-bell__count') as HTMLElement;
     expect(pill.textContent?.trim()).toBe('3');
-    expect(rig.fixture.nativeElement.querySelector('.ti-bell-filled')).toBeTruthy();
+    // `ti-bell-filled` does not exist in the outline webfont `styles.scss`
+    // imports, so switching to it made the bell VANISH the moment a notification
+    // arrived. The outline bell stays; the pill carries the state.
+    expect(rig.fixture.nativeElement.querySelector('.ti-bell')).toBeTruthy();
+    expect(rig.fixture.nativeElement.querySelector('[class*="-filled"]')).toBeNull();
+  });
+
+  it('keeps the count pill OUTSIDE the button, so the ripple stays clipped', () => {
+    const rig = setup();
+    rig.badge.set(2);
+    rig.fixture.detectChanges();
+
+    const button = rig.fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    const pill = rig.fixture.nativeElement.querySelector('.phorma-bell__count') as HTMLElement;
+    // Inside the button, the pill needed `overflow: visible` on `.p-button`, and
+    // that same override let PrimeNG's ripple ink bleed past the button's edge.
+    // (No computed-overflow assertion: karma loads no PrimeNG theme, so the
+    // button's `overflow: hidden` does not exist here to measure.)
+    expect(button.contains(pill)).toBeFalse();
   });
 
   it('caps the count so a three-digit pill cannot break the toolbar row', () => {

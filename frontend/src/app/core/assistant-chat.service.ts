@@ -65,20 +65,86 @@ export class AssistantChatService {
   /** The workflow id threads are currently scoped to. */
   private scopeWorkflowId: string | null = null;
 
+  /**
+   * Set when the active workflow changed WHILE a turn was in flight, so the
+   * rescope runs once the turn settles instead of in the middle of it.
+   */
+  private rescopePending = false;
+
+  /** False until the thread list has been scoped for the first time. */
+  private scoped = false;
+
+  /**
+   * The active document's workflow id, and nothing else.
+   *
+   * A `computed` is the whole point: `activeDoc()` is a NEW object on every graph
+   * edit (`updateDoc` spreads the doc), so an effect reading it directly re-ran on
+   * every node an Agent-mode turn added. The computed's equality check collapses
+   * those to the id, so only a real workflow switch notifies the effect below.
+   */
+  private readonly activeWorkflowId = computed(
+    () => this.workflow.activeDoc()?.workflowId ?? null,
+  );
+
   /** The model the next turn will run on (override or automatic). */
   readonly resolvedModel = computed(() => this.builder.resolveModel(this.modelOverride()));
 
   constructor() {
     // Rescope the thread list whenever the active workflow document changes.
+    //
+    // Three rules, each of which was once violated and made the conversation
+    // vanish mid-turn in Agent mode:
+    //  - Track the workflow ID only (see `activeWorkflowId`), never the doc.
+    //  - An unchanged id is ALWAYS a no-op. The old guard also required
+    //    `threads().length > 0`, and a workflow's first chat is not persisted
+    //    until its turn settles - so during a first turn every graph edit wiped
+    //    the open thread.
+    //  - Never rescope while a turn is in flight. A turn can itself change the
+    //    active workflow (`workflow_open`, `workflow_create`, saving a draft
+    //    assigns an id), and the user can click another tab. The in-flight turn
+    //    keeps its thread; the rescope is deferred to `settleTurn`.
     effect(() => {
-      const workflowId = this.workflow.activeDoc()?.workflowId ?? null;
+      const workflowId = this.activeWorkflowId();
       untracked(() => {
-        if (workflowId === this.scopeWorkflowId && this.threads().length > 0) return;
-        this.scopeWorkflowId = workflowId;
-        this.activeThread.set(null);
-        void this.refresh();
+        // `scoped` so the very first run loads the list even though a draft's
+        // id and the initial scope are both null.
+        if (this.scoped && workflowId === this.scopeWorkflowId) return;
+        if (this.busy()) {
+          this.rescopePending = true;
+          return;
+        }
+        this.rescope(workflowId);
       });
     });
+  }
+
+  private rescope(workflowId: string | null, options: { keepThread?: boolean } = {}): void {
+    this.scoped = true;
+    this.rescopePending = false;
+    this.scopeWorkflowId = workflowId;
+    if (!options.keepThread) this.activeThread.set(null);
+    void this.refresh();
+  }
+
+  /**
+   * Ends a turn: clears the busy state, persists the thread, then applies any
+   * rescope that was deferred while the turn ran.
+   *
+   * The deferred rescope KEEPS the open conversation. The switch happened
+   * during the turn - usually because the assistant itself opened or created a
+   * workflow - and the user is reading that conversation right now, so clearing
+   * it the moment the turn finishes is the same "the chat disappeared" defect a
+   * few seconds later. The thread keeps its original `workflowId` and stays
+   * saved under it; only the list behind it follows the new workflow.
+   */
+  private async settleTurn(): Promise<void> {
+    this.busy.set(false);
+    await this.persistActive();
+    if (this.rescopePending) {
+      const current = this.activeWorkflowId();
+      if (current !== this.scopeWorkflowId) this.rescope(current, { keepThread: true });
+      else this.rescopePending = false;
+    }
   }
 
   /** Reloads the thread list for the current workflow scope. */
@@ -218,10 +284,9 @@ export class AssistantChatService {
         error: message,
       });
     } finally {
-      this.busy.set(false);
       this.streamingText.set('');
       this.activity.set([]);
-      await this.persistActive();
+      await this.settleTurn();
     }
   }
 
@@ -290,9 +355,8 @@ export class AssistantChatService {
         error: message,
       });
     } finally {
-      this.busy.set(false);
       this.streamingText.set('');
-      await this.persistActive();
+      await this.settleTurn();
     }
   }
 
@@ -335,8 +399,7 @@ export class AssistantChatService {
         error: `Applying the plan failed: ${message}`,
       });
     } finally {
-      this.busy.set(false);
-      await this.persistActive();
+      await this.settleTurn();
     }
   }
 

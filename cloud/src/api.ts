@@ -53,6 +53,7 @@ import {
 // comparison, and the declaration of what each one requires lives beside the
 // table in `role-gate.ts` so the suite can drive every entry.
 import { requireCapability } from './role-gate';
+import { resolveOrgNames } from './org-names';
 import { secretVault, SECRET_VAULT_MAX_VALUE_CHARS, type SecretVaultEnv } from './secret-vault';
 import {
   resolveCataloguePrice,
@@ -1069,6 +1070,15 @@ async function routeApiRequest(
       // and is told nothing about the customer's.
       listMemberships(env, verified.userId),
     ]);
+    // Display names for the switcher, resolved HERE rather than in the studio: a
+    // desktop install has no Clerk user and so no `organizationMemberships`, and
+    // without this every organisation rendered as `Organisation <id tail>`.
+    // KV-cached per organisation and never fatal (`org-names.ts`); an absent name
+    // is simply omitted, which the studio renders with its id-based fallback.
+    const orgNames = await resolveOrgNames(
+      env,
+      memberships.map(membership => membership.orgId),
+    );
     // WHILE IMPERSONATING, THE LEVEL IS OMITTED. `resolveRole` answers about the
     // VERIFIED credential - `applyImpersonation` moves the owner and leaves the
     // claims alone - so reporting it here would state the OPERATOR's level over
@@ -1084,10 +1094,16 @@ async function routeApiRequest(
       // branch is the COMMON case for an organisation member and a switcher fed
       // only by the provisioned branch would be empty for exactly the people who
       // need it.
-      owners: memberships.map(membership => ({
-        ownerId: membership.orgId,
-        level: membership.level,
-      })),
+      owners: memberships.map(membership => {
+        const name = orgNames.get(membership.orgId) ?? null;
+        return {
+          ownerId: membership.orgId,
+          level: membership.level,
+          // ADDITIVE and omitted when unknown, so an entry with no resolvable name
+          // is byte-identical to what an older worker sends.
+          ...(name === null ? {} : { name }),
+        };
+      }),
     };
 
     if (!tenant) {

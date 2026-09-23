@@ -54,8 +54,11 @@ export interface OwnerChoice {
 /** The request header a member uses to name their OWN organisation. */
 export const REQUESTED_OWNER_HEADER = 'X-Phorma-Owner';
 
-/** What the personal account is called wherever an owner is named. */
-export const PERSONAL_OWNER_LABEL = 'Personal account';
+/**
+ * What the personal account is called wherever an owner is named. Deliberately
+ * one plain word beside organisation names, never the account email.
+ */
+export const PERSONAL_OWNER_LABEL = 'Personal';
 
 /**
  * A readable label for an organisation id with no name attached.

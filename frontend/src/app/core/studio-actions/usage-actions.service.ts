@@ -1,6 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 
-import { UsageAnalyticsService, type UsagePeriod } from '../usage-analytics.service';
+import {
+  UsageAnalyticsService,
+  type UsagePeriod,
+  type UsageReport,
+} from '../usage-analytics.service';
 import { WorkflowService } from '../workflow.service';
 import {
   actionOk,
@@ -89,18 +93,18 @@ export class UsageActionsService {
   // ── Executors ────────────────────────────────────────────────────────────
 
   private async readSummary(args: ActionArgs): Promise<ActionResult> {
-    const period = await this.applyScope(args);
-    const totals = this.usage.totals();
+    const { period, scope, report } = await this.load(args);
+    const totals = report.totals;
     return actionOk({
       period,
-      scope: this.usage.scope() ?? 'all workflows',
+      scope: scope ?? 'all workflows',
       runs: totals.runs,
       inputTokens: totals.inputTokens,
       outputTokens: totals.outputTokens,
       usd: round(totals.usd),
       credits: Math.round(totals.credits),
       estimated: totals.estimated,
-      daily: this.usage.daily().map(point => ({
+      daily: report.daily.map(point => ({
         day: point.day,
         runs: point.runs,
         usd: round(point.usd),
@@ -110,7 +114,7 @@ export class UsageActionsService {
   }
 
   private async readHotspots(args: ActionArgs): Promise<ActionResult> {
-    const period = await this.applyScope(args);
+    const { period, report } = await this.load(args);
     const limit = Math.max(1, Math.min(argNum(args, 'limit') ?? HOTSPOT_LIMIT, 25));
     const graph = this.workflow.graph();
     const nodeName = (nodeId: string): string =>
@@ -119,8 +123,7 @@ export class UsageActionsService {
       `Deleted node - ${nodeId.slice(-6)}`;
     return actionOk({
       period,
-      nodes: this.usage
-        .byNode()
+      nodes: report.byNode
         .slice(0, limit)
         .map(row => ({
           nodeKey: row.nodeKey,
@@ -133,8 +136,7 @@ export class UsageActionsService {
           credits: row.credits,
           estimated: row.estimated,
         })),
-      workflows: this.usage
-        .byWorkflow()
+      workflows: report.byWorkflow
         .slice(0, limit)
         .map(row => ({
           workflowId: row.workflowId,
@@ -144,8 +146,7 @@ export class UsageActionsService {
           credits: row.credits,
           estimated: row.estimated,
         })),
-      models: this.usage
-        .byModel()
+      models: report.byModel
         .slice(0, limit)
         .map(row => ({
           provider: row.provider,
@@ -159,22 +160,23 @@ export class UsageActionsService {
   }
 
   /**
-   * Points the analytics service at the requested window and scope, then loads
-   * the ledger. The period and scope are panel FILTERS, not studio state
-   * covered by Requirement 5.6, and leaving them set means the Usage panel
-   * revealed afterwards shows exactly the numbers just reported.
+   * Loads the ledgers and computes a report for the requested window and scope.
+   *
+   * Reads through `UsageAnalyticsService.report` and NEVER writes `period`,
+   * `scope` or the facet filters: those are the Usage panel's filters, and an
+   * assistant lookup rewriting them changed what the user was looking at behind
+   * their back. `refresh()` only reloads the ledger data, which the panel would
+   * show the same way on its own next refresh.
    */
-  private async applyScope(args: ActionArgs): Promise<UsagePeriod> {
+  private async load(
+    args: ActionArgs,
+  ): Promise<{ period: UsagePeriod; scope: string | null; report: UsageReport }> {
     const period = (argStr(args, 'period') as UsagePeriod | undefined) ?? '30d';
-    this.usage.period.set(period);
-    this.usage.scope.set(
-      argBool(args, 'activeWorkflowOnly')
-        ? (this.workflow.activeDoc()?.workflowId ?? 'draft')
-        : null,
-    );
-    this.usage.clearFacets();
+    const scope = argBool(args, 'activeWorkflowOnly')
+      ? (this.workflow.activeDoc()?.workflowId ?? 'draft')
+      : null;
     await this.usage.refresh().catch(() => undefined);
-    return period;
+    return { period, scope, report: this.usage.report(period, scope) };
   }
 }
 

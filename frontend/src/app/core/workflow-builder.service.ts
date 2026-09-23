@@ -694,8 +694,10 @@ export class WorkflowBuilderService {
       this.status.set('thinking');
     }
 
-    // Bring the freshly placed nodes into view, then arrange and fit again.
-    if (this.workflow.graph().nodes.length > 0) {
+    // Bring the freshly placed nodes into view, then arrange and fit again - but
+    // ONLY when this turn changed the graph. A turn that just looked things up
+    // must leave the user's pan and zoom exactly where they were.
+    if (this.actions.turnTouchedGraph && this.workflow.graph().nodes.length > 0) {
       this.fitToScreen();
       await this.delay(PLAN_APPLY_DELAY_MS);
     }

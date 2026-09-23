@@ -1,49 +1,38 @@
+// The host is the positioning context for the count pill. The trigger itself is
+// an untouched icon-only `p-button`, identical to its siblings - including
+// PrimeNG's default `overflow: hidden`, which is what keeps the ripple ink inside
+// the button. Never set `overflow: visible` on it again to fit the pill.
 :host {
+  position: relative;
   display: inline-flex;
 }
 
-// ── The trigger ─────────────────────────────────────────────────────────────
-//
-// Sized to match the sibling icon buttons exactly, so adding the bell does not
-// shift the toolbar's right edge. `overflow: visible` is required: the count pill
-// deliberately overhangs the glyph, and PrimeNG's button clips by default.
-:host ::ng-deep .phorma-bell__trigger.p-button {
-  position: relative;
-  overflow: visible;
-  padding: 0.25rem;
-}
-
-.phorma-bell__glyph {
-  position: relative;
+// The count, pinned to the trigger's top-right corner and overhanging it
+// slightly. `pointer-events: none` so a click on the pill still reaches the
+// button underneath; `--problem` swaps to the error tint so a failure is visible
+// without opening the panel.
+.phorma-bell__count {
+  position: absolute;
+  top: 0.1rem;
+  right: -0.1rem;
+  box-sizing: border-box;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  line-height: 1;
-
-  i {
-    font-size: 1rem;
-  }
-}
-
-// The count. Follows the pill recipe used by the version-history and prompt
-// dialogs rather than inventing a third one; `--problem` swaps to the error tint
-// so a failure is visible without opening the panel.
-.phorma-bell__count {
-  position: absolute;
-  top: -0.35rem;
-  right: -0.45rem;
-  min-width: 0.95rem;
-  padding: 0 0.2rem;
-  border-radius: 999px;
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
-  font-size: 0.6rem;
+  font-size: 0.643rem; // 9px against the 14px root
   font-weight: 700;
-  line-height: 0.95rem;
-  text-align: center;
-  // The toolbar is frosted glass and the canvas bleeds through it, so the pill
-  // needs a hairline to stay legible over a dark node.
-  box-shadow: 0 0 0 1px var(--phorma-chrome-bg);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  // The toolbar is frosted glass, so a ring in the chrome colour separates the
+  // pill from the glyph it overlaps.
+  box-shadow: 0 0 0 2px var(--phorma-chrome-bg);
 }
 
 .phorma-bell__count--problem {

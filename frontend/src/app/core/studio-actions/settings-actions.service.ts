@@ -102,7 +102,7 @@ export class SettingsActionsService {
         id: 'navigate_panel',
         label: 'Open a panel',
         description:
-          'Reveals and activates a studio panel so the user can see it. Use this after working on a surface, or when the user asks where something is.',
+          'Switches the sidebar to a studio panel. ONLY use this when the user explicitly asks to see or open a panel. Never use it to look something up or after working on a surface - every read action returns its data directly, and changing the user\'s layout uninvited is disruptive.',
         surface: 'navigation',
         access: 'write',
         risk: 'silent',
@@ -123,8 +123,10 @@ export class SettingsActionsService {
 
   /**
    * Reveals and activates a tab, honouring the side it currently lives on and
-   * expanding that sidebar if the user collapsed it. Shared with the registry's
-   * post-action panel reveal (Requirement 8.6).
+   * expanding that sidebar if the user collapsed it. Reached ONLY through the
+   * explicit `navigate_panel` action - the registry's automatic post-action
+   * reveal (the original Requirement 8.6) was removed because it switched tabs
+   * on every lookup.
    *
    * Reads `allowedTabs()` rather than `tabs()`, for the same reason the Window
    * menu does: `tabs()` is the record of the user's arrangement and holds every

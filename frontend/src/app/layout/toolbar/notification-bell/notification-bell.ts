@@ -28,12 +28,14 @@ import type { PendingActionRow, StudioNotification } from '../../../core/notific
  * dialog would break canvas deselection for as long as the bell is open. This is a
  * menu, not a modal, and the markup says so.
  *
- * ## Why the trigger projects its content
+ * ## Why the count pill is OUTSIDE the button
  *
- * Every sibling toolbar button passes `icon="ti ti-…"`, but a count pill has to
- * layer ON TOP of the glyph, and the `icon` prop renders into a span this
- * component cannot position against. So the icon is projected and the pill is an
- * absolutely-positioned sibling inside a `position: relative` button.
+ * The trigger passes `icon` like every sibling toolbar button, and the pill is an
+ * absolutely-positioned sibling of the `<p-button>`, anchored to this component's
+ * host. It used to be projected INSIDE the button, which needed
+ * `overflow: visible` on `.p-button` so the pill could overhang - and that same
+ * override let PrimeNG's ripple ink bleed out past the button's edge. Outside the
+ * button, the default clipping stays on and the pill still overhangs.
  */
 @Component({
   selector: 'app-notification-bell',
@@ -94,8 +96,14 @@ export class NotificationBell {
     return count > 9 ? '9+' : String(count);
   }
 
+  /**
+   * Always the outline bell. `ti-bell-filled` is NOT in the outline webfont
+   * `styles.scss` imports (filled glyphs ship in a separate `tabler-icons-filled`
+   * font), so it rendered no glyph at all and the bell vanished the moment a
+   * notification arrived. The pill carries the state.
+   */
   protected bellIcon(): string {
-    return this.centre.badgeCount() > 0 ? 'ti ti-bell-filled' : 'ti ti-bell';
+    return 'ti ti-bell';
   }
 
   protected tooltip(): string {

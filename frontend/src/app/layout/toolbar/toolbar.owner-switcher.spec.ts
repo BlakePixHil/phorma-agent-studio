@@ -125,12 +125,13 @@ describe('Toolbar owner switcher', () => {
       { orgId: 'org_acme', label: 'Acme Accounting', level: 'builder' },
       { orgId: 'org_beta', label: 'Beta Books', level: 'operator' },
     ]);
-    rig.owner.setPersonalLabel('someone@example.com');
     rig.detect();
 
     const labels = visible(rig.root, '.phorma-toolbar__owner-label');
     expect(labels.length).toBe(1);
-    expect(labels[0].textContent?.trim()).toBe('someone@example.com');
+    // "Personal", never the account email: the switcher names ACCOUNTS, and the
+    // address already sits on the account control beside it.
+    expect(labels[0].textContent?.trim()).toBe('Personal');
 
     rig.owner.setActiveOrg('org_acme');
     rig.detect();

@@ -268,8 +268,11 @@ assistant does what I asked instead of the nearest graph edit.
    later turn.
 5. WHERE no Studio_Action covers a request, THE Assistant SHALL state that the capability is
    unavailable and SHALL name the closest available Studio_Action.
-6. WHEN a Studio_Action on a Surface other than `graph` completes, THE Assistant SHALL reveal and
-   activate the panel that owns that Surface through `Panel_Registry`.
+6. WHEN a Studio_Action completes, THE Assistant SHALL leave the panel layout unchanged: no tab is
+   activated, shown, or un-collapsed as a side effect. The only Studio_Action that changes the
+   layout is the explicit `navigation` action of Requirement 2.10, used when the user asks to see a
+   panel. (Revised 2026-09-23: the original automatic reveal switched tabs on every lookup and hid
+   the Assistant pane the conversation was streaming into.)
 
 ### Requirement 9: Prompt edits land on the identified prompt
 

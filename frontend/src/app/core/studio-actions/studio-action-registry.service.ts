@@ -27,19 +27,6 @@ import {
   type StudioAction,
 } from './studio-action.model';
 
-/** Panel tab that owns each surface, for the post-action reveal. */
-const SURFACE_PANEL: Partial<Record<ActionSurface, string>> = {
-  evals: 'evals',
-  runs: 'runs',
-  prompts: 'prompt',
-  workflows: 'workflows',
-  versions: 'workflows',
-  skills: 'skills',
-  connections: 'connections',
-  portal: 'portal',
-  usage: 'usage',
-};
-
 /** Options for one dispatch. */
 export interface ExecuteOptions {
   /**
@@ -47,8 +34,6 @@ export interface ExecuteOptions {
    * asks once for the whole plan rather than once per op (Requirement 4.7).
    */
   confirmed?: boolean;
-  /** Suppresses the post-action panel reveal (used by silent internal calls). */
-  quiet?: boolean;
   /**
    * Refuses Write_Actions. Ask mode only OFFERS reads, but a model can name any
    * id it likes, so the guarantee is enforced at dispatch too
@@ -115,8 +100,6 @@ export class StudioActionRegistryService {
     return entries;
   });
 
-  /** Surfaces already revealed this turn, so reads do not thrash the sidebar. */
-  private revealedSurfaces = new Set<ActionSurface>();
   private effects: TurnEffect[] = [];
   private failures: string[] = [];
 
@@ -185,11 +168,10 @@ export class StudioActionRegistryService {
 
   /**
    * Resets per-turn state: new-node placement is seeded from the pre-turn
-   * graph, the reveal tracker is cleared, and the effect log starts empty.
+   * graph and the effect log starts empty.
    */
   beginTurn(graphBefore: WorkflowGraph): void {
     this.graphActions.beginPlacement(graphBefore);
-    this.revealedSurfaces = new Set();
     this.effects = [];
     this.failures = [];
   }
@@ -292,6 +274,11 @@ export class StudioActionRegistryService {
     const revertable = result.revertable ?? (action.graphEdit === true && result.ok);
     result = { ...result, revertable };
 
+    // NO post-action panel reveal. Every action used to switch the sidebar to the
+    // panel owning its surface, so a turn that merely LOOKED THINGS UP flipped the
+    // user's tabs (and, in the default layout, hid the Assistant pane the chat was
+    // streaming into). The assistant works in the background; the layout is the
+    // user's, and `navigate_panel` is the one explicit way to change it.
     if (result.ok) {
       this.effects.push({
         actionId: action.id,
@@ -299,7 +286,6 @@ export class StudioActionRegistryService {
         surface: action.surface,
         revertable,
       });
-      if (!options.quiet) this.revealFor(action.surface);
     } else {
       this.failures.push(
         `${describeAction(action, args)}: ${result.message ?? 'it failed for an unknown reason.'}`,
@@ -366,18 +352,6 @@ export class StudioActionRegistryService {
       }
     }
     return `The assistant wants to run "${action.label}". Continue?`;
-  }
-
-  /**
-   * Reveals the panel that owns a surface (Requirement 8.6), once per surface
-   * per turn so a multi-read turn does not flip the sidebar repeatedly.
-   */
-  private revealFor(surface: ActionSurface): void {
-    if (surface === 'graph' || this.revealedSurfaces.has(surface)) return;
-    const tabId = SURFACE_PANEL[surface];
-    this.revealedSurfaces.add(surface);
-    if (!tabId) return;
-    this.settingsActions.reveal(tabId);
   }
 }
 

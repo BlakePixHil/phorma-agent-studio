@@ -56,7 +56,16 @@ export interface PhormaCloudProfile {
    * memberships, and nobody is a member of themselves; `ActiveOwnerService`
    * prepends the personal entry.
    */
-  owners?: readonly { ownerId?: string; level?: string }[];
+  owners?: readonly {
+    ownerId?: string;
+    level?: string;
+    /**
+     * The organisation's display name, resolved by the worker from Clerk.
+     * Additive and optional: an older worker, or a name Clerk could not answer
+     * for, omits it and the studio falls back to an id-based label.
+     */
+    name?: string;
+  }[];
   provisioned: boolean;
   tier: string | null;
   status: 'active' | 'past_due' | 'canceled' | null;
@@ -762,10 +771,15 @@ export class PhormaCloudService {
    * like an empty one - an older worker and a solo account produce the same
    * no-switching-surface outcome.
    *
-   * Labels come from CLERK where Clerk has them: `user.organizationMemberships`
-   * carries the real organisation names in a browser build. A desktop install
-   * holds no Clerk session at all, so it falls back to a short form of the id -
-   * legible and honest, rather than a name invented client-side.
+   * Labels, best first: the NAME the worker resolved from Clerk (the only source
+   * a desktop install has, since it holds no Clerk session), then Clerk's
+   * `user.organizationMemberships` in a browser build, then a short form of the
+   * id - legible and honest, rather than a name invented client-side.
+   *
+   * The personal entry is always {@link PERSONAL_OWNER_LABEL}. It used to be the
+   * account email, which made the switcher read as two different kinds of thing
+   * ("blake@..." beside "Phorma Labs") and repeated the address the account
+   * control already shows.
    *
    * Only ever CALLED with a successful answer, for the same reason the level is:
    * going offline is not a change of membership, and a poll that briefly failed
@@ -784,14 +798,14 @@ export class PhormaCloudService {
     for (const entry of profile.owners ?? []) {
       const orgId = entry?.ownerId;
       if (typeof orgId !== 'string' || orgId.length === 0) continue;
+      const reported = typeof entry.name === 'string' ? entry.name.trim() : '';
       owners.push({
         orgId,
-        label: names.get(orgId) ?? shortOwnerLabel(orgId),
+        label: reported || names.get(orgId) || shortOwnerLabel(orgId),
         ...(typeof entry.level === 'string' ? { level: entry.level } : {}),
       });
     }
     this.activeOwner.adoptOwners(owners);
-    const email = this.email();
-    this.activeOwner.setPersonalLabel(email ?? PERSONAL_OWNER_LABEL);
+    this.activeOwner.setPersonalLabel(PERSONAL_OWNER_LABEL);
   }
 }

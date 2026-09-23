@@ -30,6 +30,7 @@ import { ClerkService } from 'ngx-clerk';
 import { ReplaySubject } from 'rxjs';
 
 import { ToastService } from '../shared/toast/toast.service';
+import { ActiveOwnerService, PERSONAL_OWNER_LABEL } from './active-owner.service';
 import { CapabilityService } from './capability.service';
 import { PanelRegistryService } from './panel-registry.service';
 import {
@@ -831,6 +832,83 @@ describe('PhormaCloudService selfServeBilling', () => {
     await cloud.refresh();
 
     expect(cloud.selfServeBilling()).toBe(false);
+  });
+});
+
+/**
+ * The owner switcher's LABELS, as `/api/me` delivers them.
+ *
+ * The reported defects: a desktop install showed "Organisation OoAwQ0" for an
+ * organisation named "Phorma Labs", and the personal entry showed the account
+ * email. A desktop install has no Clerk user, so the only name source it has is
+ * the one the worker now sends - which is why the desktop case is the one driven.
+ */
+describe('PhormaCloudService owner labels', () => {
+  function desktopWith(owners: unknown): { cloud: PhormaCloudService; labels: () => string[] } {
+    TestBed.resetTestingModule();
+    const desktop = desktopStub({ signedIn: true, token: 'phd_token', email: 'blake@example.com' });
+    desktop.userId = () => 'user_desktop';
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TauriService, useValue: { isDesktop: true } },
+        { provide: ClerkService, useValue: clerkStub() },
+        { provide: DesktopAuthService, useValue: desktop },
+        { provide: TelemetryService, useValue: { recordError: () => undefined } },
+      ],
+    });
+    spyOn(window, 'fetch').and.callFake(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 'user_desktop',
+            ownerId: 'user_desktop',
+            owners,
+            provisioned: false,
+            tier: null,
+            status: null,
+            quota: null,
+          }),
+          { status: 200 },
+        ),
+    );
+    const cloud = TestBed.inject(PhormaCloudService);
+    const owner = TestBed.inject(ActiveOwnerService);
+    return { cloud, labels: () => owner.owners().map(entry => entry.label) };
+  }
+
+  it('uses the name the worker reports, with no Clerk session at all', async () => {
+    const { cloud, labels } = desktopWith([
+      { ownerId: 'org_3OoAwQ0abcdefg', level: 'admin', name: 'Phorma Labs' },
+    ]);
+    await cloud.refresh();
+
+    expect(cloud.user()).toBeNull();
+    expect(labels()).toEqual(['Personal', 'Phorma Labs']);
+  });
+
+  it('calls the personal account "Personal", never the email', async () => {
+    const { cloud, labels } = desktopWith([{ ownerId: 'org_a', level: 'builder', name: 'Acme' }]);
+    await cloud.refresh();
+
+    expect(labels()[0]).toBe(PERSONAL_OWNER_LABEL);
+    expect(PERSONAL_OWNER_LABEL).toBe('Personal');
+    expect(labels().join(' ')).not.toContain('blake@example.com');
+  });
+
+  it('falls back to the id tail when an older worker sends no name', async () => {
+    const { cloud, labels } = desktopWith([{ ownerId: 'org_2abcdefghijkl', level: 'admin' }]);
+    await cloud.refresh();
+
+    expect(labels()).toEqual(['Personal', 'Organisation ghijkl']);
+  });
+
+  it('treats a blank reported name as absent', async () => {
+    const { cloud, labels } = desktopWith([
+      { ownerId: 'org_2abcdefghijkl', level: 'admin', name: '   ' },
+    ]);
+    await cloud.refresh();
+
+    expect(labels()[1]).toBe('Organisation ghijkl');
   });
 });
 

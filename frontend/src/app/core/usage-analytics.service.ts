@@ -106,6 +106,15 @@ export interface UsageTotals {
   estimated: boolean;
 }
 
+/** Everything {@link UsageAnalyticsService.report} computes for one window. */
+export interface UsageReport {
+  totals: UsageTotals;
+  daily: DailyUsagePoint[];
+  byModel: ModelUsageRow[];
+  byWorkflow: WorkflowUsageRow[];
+  byNode: NodeUsageRow[];
+}
+
 function periodStart(period: UsagePeriod, now = new Date()): number {
   switch (period) {
     case '7d':
@@ -240,10 +249,47 @@ export class UsageAnalyticsService {
   );
 
   /** Per-day cost/run buckets, oldest first (chart-ready). */
-  readonly daily = computed<DailyUsagePoint[]>(() => {
+  readonly daily = computed<DailyUsagePoint[]>(() => this.dailyOf(this.entries()));
+
+  /** Per-model breakdown, most expensive first. */
+  readonly byModel = computed<ModelUsageRow[]>(() => this.modelRowsOf(this.entries()));
+
+  /** Per-workflow breakdown, most expensive first. */
+  readonly byWorkflow = computed<WorkflowUsageRow[]>(() => this.workflowRowsOf(this.entries()));
+
+  /**
+   * Per-node breakdown from the `usage.byNode` rollup every recorder writes,
+   * most expensive first. Keys are scope-aware (`frameId/nodeId` inside
+   * sub-workflows) so a shared agent used in two places reports separately.
+   */
+  readonly byNode = computed<NodeUsageRow[]>(() => this.nodeRowsOf(this.entries()));
+
+  /**
+   * The same figures the panel shows, for an arbitrary period and scope,
+   * WITHOUT touching the panel's own filters.
+   *
+   * The assistant's usage actions read through this. They used to set
+   * `period` / `scope` and clear the facets before reading the computeds, which
+   * silently rewrote the Usage panel's filters behind the user's back whenever
+   * the assistant looked a number up. Same aggregation functions as the
+   * computeds, so the two cannot disagree. Facet filters are not applied: a
+   * report is about the whole period, not whatever chips the user left on.
+   */
+  report(period: UsagePeriod, scope: string | null): UsageReport {
+    const entries = this.entriesIn(periodStart(period), scope);
+    return {
+      totals: this.totalsOf(entries),
+      daily: this.dailyOf(entries),
+      byModel: this.modelRowsOf(entries),
+      byWorkflow: this.workflowRowsOf(entries),
+      byNode: this.nodeRowsOf(entries),
+    };
+  }
+
+  private dailyOf(entries: readonly UsageLedgerEntry[]): DailyUsagePoint[] {
     const rate = this.phormaCloud.creditsPerUsd();
     const byDay = new Map<string, DailyUsagePoint>();
-    for (const entry of this.entries()) {
+    for (const entry of entries) {
       const key = dayKey(entry.startedAt);
       const point = byDay.get(key) ?? { day: key, usd: 0, credits: 0, runs: 0 };
       const cloudShare = entry.usage.phormaCloudCostUsd ?? 0;
@@ -255,13 +301,12 @@ export class UsageAnalyticsService {
     return [...byDay.values()]
       .map(point => ({ ...point, credits: Math.round(point.credits) }))
       .sort((a, b) => a.day.localeCompare(b.day));
-  });
+  }
 
-  /** Per-model breakdown, most expensive first. */
-  readonly byModel = computed<ModelUsageRow[]>(() => {
+  private modelRowsOf(entries: readonly UsageLedgerEntry[]): ModelUsageRow[] {
     const rate = this.phormaCloud.creditsPerUsd();
     const rows = new Map<string, ModelUsageRow & { rank: number }>();
-    for (const entry of this.entries()) {
+    for (const entry of entries) {
       const buckets = entry.usage.byModel;
       if (buckets && Object.keys(buckets).length > 0) {
         for (const bucket of Object.values(buckets)) this.foldModel(rows, bucket, rate);
@@ -287,20 +332,12 @@ export class UsageAnalyticsService {
         ...row,
         credits: row.credits === null ? null : Math.round(row.credits),
       }));
-  });
+  }
 
-  /** Per-workflow breakdown, most expensive first. */
-  readonly byWorkflow = computed<WorkflowUsageRow[]>(() => this.workflowRowsOf(this.entries()));
-
-  /**
-   * Per-node breakdown from the `usage.byNode` rollup every recorder writes,
-   * most expensive first. Keys are scope-aware (`frameId/nodeId` inside
-   * sub-workflows) so a shared agent used in two places reports separately.
-   */
-  readonly byNode = computed<NodeUsageRow[]>(() => {
+  private nodeRowsOf(entries: readonly UsageLedgerEntry[]): NodeUsageRow[] {
     const rate = this.phormaCloud.creditsPerUsd();
     const rows = new Map<string, NodeUsageRow & { rank: number }>();
-    for (const entry of this.entries()) {
+    for (const entry of entries) {
       const buckets = entry.usage.byNode;
       if (!buckets) continue;
       for (const [nodeKey, bucket] of Object.entries(buckets)) {
@@ -340,7 +377,7 @@ export class UsageAnalyticsService {
         ...row,
         credits: row.credits === null ? null : Math.round(row.credits),
       }));
-  });
+  }
 
   /** Spend grouped by trigger source (manual, schedule, webhook, eval, …). */
   readonly bySource = computed<UsageGroupRow[]>(() =>
@@ -497,7 +534,7 @@ export class UsageAnalyticsService {
     return rows.sort((a, b) => b.startedAt - a.startedAt);
   }
 
-  private totalsOf(entries: UsageLedgerEntry[]): UsageTotals {
+  private totalsOf(entries: readonly UsageLedgerEntry[]): UsageTotals {
     const totals: UsageTotals = {
       runs: 0,
       inputTokens: 0,
@@ -521,7 +558,7 @@ export class UsageAnalyticsService {
     return totals;
   }
 
-  private workflowRowsOf(entries: UsageLedgerEntry[]): WorkflowUsageRow[] {
+  private workflowRowsOf(entries: readonly UsageLedgerEntry[]): WorkflowUsageRow[] {
     const rate = this.phormaCloud.creditsPerUsd();
     const rows = new Map<string, WorkflowUsageRow & { rank: number }>();
     for (const entry of entries) {

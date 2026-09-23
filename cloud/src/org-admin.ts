@@ -97,6 +97,7 @@ import {
 } from './admin-auth';
 import { orgMemberCacheKey } from './auth';
 import { CAPABILITY_LEVELS, isCapabilityLevel, type CapabilityLevel } from './capabilities';
+import { rememberOrgName } from './org-names';
 import type { RoleRefusalCode } from './role-gate';
 import {
   TIERS,
@@ -518,6 +519,12 @@ async function listOrganisations(env: OrgAdminEnv, reply: AdminRespond): Promise
         slug: typeof raw.slug === 'string' ? raw.slug : null,
       });
     }
+    // Refreshes the switcher's name cache as a side benefit: the operator just
+    // paid for this read, and a rename then reaches members immediately. In
+    // parallel, and `rememberOrgName` never throws.
+    await Promise.all(
+      [...names].map(([id, entry]) => rememberOrgName(env, id, entry.name)),
+    );
   } else {
     degraded.push(DEGRADED_CLERK);
   }
@@ -642,6 +649,13 @@ async function createOrganisation(
     );
   }
   const orgId = id as string;
+  // Seed the switcher's name cache from the name in hand, so the first `/api/me`
+  // after a creation shows "Phorma Labs" rather than paying a Clerk read.
+  await rememberOrgName(
+    env,
+    orgId,
+    typeof created.data?.name === 'string' ? created.data.name : name,
+  );
 
   const provisioned = await provisionTenantTier(env, store, {
     id: orgId,
