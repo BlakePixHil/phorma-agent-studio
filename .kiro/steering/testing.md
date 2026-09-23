@@ -25,6 +25,20 @@ For a bug fix, reproduce end to end as close to real user interaction as possibl
 written against an assumed cause usually moves the symptom. Build the state with the harness, then
 drive the actual surface the user touches.
 
+## A karma spec that persists a value must reset it
+
+Karma runs ONE browser for the whole frontend suite and jasmine randomises spec order, so anything a
+spec writes to `localStorage` - `phorma.layout.*` through `layout-storage.ts`, the Phorma Cloud URL,
+a worker URL, a token, the palette mode - is visible to every spec that runs after it, in a
+different order on every run. That produces a failure in an innocent file, on one run in three, with
+no bad commit behind it.
+
+So a spec that sets a persisted value resets it in `afterEach` (empty resets the Phorma Cloud URL to
+its default), and a spec that reads one clears the namespace in `beforeEach` rather than trusting
+what it inherited. `panel-registry.service.spec.ts` and the capability push block in
+`phorma-cloud.service.spec.ts` do both. Judge a green frontend run over several passes, not one:
+`npx ng test` green once says little about an ordering leak.
+
 ## Stubbing AI features in the browser
 
 - Get the component instance with `window.ng.getComponent(el)`, then replace the transport:

@@ -1,4 +1,9 @@
-@if (phormaCloud.signedIn()) {
+<!-- ABSENT, not disabled, while an organisation owner is active: Phorma Labs
+     invoices an organisation, so a plan grid would describe a relationship this
+     user is not in and every button on it would be refused `billing_managed`
+     (multi-organisation-phorma, requirement 19.7). Settings > Cloud renders the
+     organisation's plan and credits read-only in its place. -->
+@if (phormaCloud.signedIn() && phormaCloud.selfServeBilling()) {
   <section class="phorma-plans" aria-label="Phorma Cloud plans">
     <div class="phorma-plans__grid">
       @for (plan of selfServePlans; track plan.tier) {

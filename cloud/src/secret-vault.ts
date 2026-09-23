@@ -12,10 +12,12 @@
  *
  * Shape and guarantees:
  *
- * - One instance per TENANT (hosted) or per deployment (BYO), addressed through
+ * - One instance per OWNER (hosted) or per deployment (BYO), addressed through
  *   {@link secretVaultName}. Deliberately NOT per workflow: a credential is a
  *   property of the account, and re-entering the same API key once per workflow
- *   would be its own dead end.
+ *   would be its own dead end. "Owner" and not "user": an organisation's members
+ *   share one vault, which is the whole point of a shared workspace
+ *   (multi-organisation-phorma, Requirement 4.1).
  * - Values are AES-GCM encrypted by the CALLER with `KEY_ENC_SECRET` before
  *   they arrive (`encryptString` in `tenants.ts`). The vault stores opaque
  *   ciphertext and has no way to read it, so a bug here cannot leak a
@@ -122,12 +124,20 @@ export interface SecretVaultEnv {
 }
 
 /**
- * The vault instance name for one owner.
+ * The vault instance name for one owner: `secrets:{ownerId}`
+ * (multi-organisation-phorma, Requirement 4.1).
  *
- * Hosted mode passes the Clerk `userId`, which is exactly the prefix the
- * gateway already uses to scope workflow instances (`{userId}:{workflowId}`),
- * so tenant isolation here is the same structural boundary rather than a second
- * scheme to keep in step. BYO mode has one tenant and passes null.
+ * Hosted mode passes the RESOLVED owner - `auth.ownerId`, which is the
+ * organisation when the credential names one and the account otherwise - because
+ * that is exactly the prefix the gateway uses to scope workflow instances
+ * (`{ownerId}:{workflowId}`), so isolation here is the same structural boundary
+ * rather than a second scheme to keep in step. Passing `auth.userId` instead
+ * would give every member of an organisation a private vault and report every
+ * shared credential as missing on a deployed run. BYO mode has one owner and
+ * passes null.
+ *
+ * Nothing here parses the value: an owner id is opaque, and the colon guard lives
+ * beside `resolveOwner` in `auth.ts` (Requirement 1.5).
  */
 export function secretVaultName(ownerId: string | null | undefined): string {
   return ownerId ? `secrets:${ownerId}` : 'secrets:default';

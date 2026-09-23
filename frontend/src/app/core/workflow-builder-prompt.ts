@@ -23,6 +23,16 @@ import {
  */
 export interface ActionCatalogue {
   summarizeActions(access: 'read' | 'write' | 'all'): string;
+  /**
+   * The action ids the caller's Capability_Level permits
+   * (multi-organisation-phorma Requirement 8.3).
+   *
+   * `summarizeActions` already narrows itself, so the prompts need this only for
+   * the Plan output format, whose five legacy op shorthands are NOT registry
+   * entries - they are aliases for graph actions, and an alias the caller cannot
+   * dispatch has to go with the action it aliases.
+   */
+  availableIds(access: 'read' | 'write' | 'all'): ReadonlySet<string>;
 }
 
 /**
@@ -176,12 +186,77 @@ function section(block: string | undefined): string {
   return block && block.trim().length > 0 ? `\n${block}\n` : '';
 }
 
+/**
+ * The Plan_Op shorthand forms, each with the Studio_Action it dispatches as and
+ * the JSON line the prompt shows for it.
+ *
+ * The action id is what makes these narrow with the level: a shorthand is an
+ * ALIAS, so `"op": "add"` offered to a caller who cannot run `graph_add_node`
+ * is a plan step that fails at apply. `LEGACY_OP_ACTIONS` in
+ * `studio-actions/plan-op.ts` owns the same mapping for dispatch; this table is
+ * its prompt-side twin, and `workflow-builder-prompt.spec.ts` asserts the two
+ * agree rather than trusting them to.
+ */
+const PLAN_OP_FORMS: readonly { op: string; actionId: string; line: string }[] = [
+  {
+    op: 'add',
+    actionId: 'graph_add_node',
+    line: '{ "op": "add", "ref": "a1", "type": "<catalog type id>", "name": "<display name>", "prompt": "<markdown system prompt, agents only>", "detail": "<how to do this by hand>" }',
+  },
+  {
+    op: 'connect',
+    actionId: 'graph_connect_nodes',
+    line: '{ "op": "connect", "from": "<ref or existing node id>", "to": "<ref or existing node id>", "fromPort": "<optional source port name>", "toPort": "<optional target port name>", "detail": "<how to do this by hand>" }',
+  },
+  {
+    op: 'update',
+    actionId: 'graph_update_node',
+    line: '{ "op": "update", "node": "<existing node id>", "name": "<optional>", "prompt": "<optional>", "detail": "<how to do this by hand>" }',
+  },
+  {
+    op: 'remove',
+    actionId: 'graph_remove_node',
+    line: '{ "op": "remove", "node": "<existing node id>", "detail": "<how to do this by hand>" }',
+  },
+  {
+    op: 'disconnect',
+    actionId: 'graph_remove_connection',
+    line: '{ "op": "disconnect", "connection": "<existing connection id>", "detail": "<how to do this by hand>" }',
+  },
+];
+
+/** The `action` op form, which is always offered: the registry narrows itself. */
+const PLAN_ACTION_OP_LINE =
+  '{ "op": "action", "action": "<studio action id>", "args": { }, "detail": "<how to do this by hand>" }';
+
+/**
+ * The shorthand-to-action mapping this file uses, exported for the one assertion
+ * that keeps it honest: it must equal `LEGACY_OP_ACTIONS` in
+ * `studio-actions/plan-op.ts`. A shorthand offered here and dispatched there under
+ * a different id would narrow against the wrong action's minimum.
+ */
+export const PLAN_OP_SHORTHAND_ACTIONS: Readonly<Record<string, string>> = Object.fromEntries(
+  PLAN_OP_FORMS.map(form => [form.op, form.actionId]),
+);
+
+
 /** System prompt for Plan mode: emit a complete JSON edit plan. */
 export function buildPlanSystemPrompt(
   graph: WorkflowGraph,
   actions: ActionCatalogue,
   context?: string,
 ): string {
+  const allowed = actions.availableIds('all');
+  const shorthands = PLAN_OP_FORMS.filter(form => allowed.has(form.actionId));
+  const opLines = [...shorthands.map(form => form.line), PLAN_ACTION_OP_LINE]
+    .map(line => `    ${line}`)
+    .join(',\n');
+  const shorthandRule =
+    shorthands.length === 0
+      ? '- There are no canvas shorthands available to you; use the "action" op for everything.'
+      : `- The graph shorthands above (${shorthands
+          .map(form => `"${form.op}"`)
+          .join(', ')}) stay available for canvas edits; prefer them there because they support refs.`;
   return `You are the Phorma Agent Studio assistant. The user describes what they want in natural language; you produce a JSON plan of studio operations that the user reviews and applies.
 
 ${SHARED_RULES}
@@ -203,17 +278,12 @@ Respond with ONLY a JSON object — no markdown fences, no prose before or after
 {
   "summary": "One sentence describing what you built.",
   "ops": [
-    { "op": "add", "ref": "a1", "type": "<catalog type id>", "name": "<display name>", "prompt": "<markdown system prompt, agents only>", "detail": "<how to do this by hand>" },
-    { "op": "connect", "from": "<ref or existing node id>", "to": "<ref or existing node id>", "fromPort": "<optional source port name>", "toPort": "<optional target port name>", "detail": "<how to do this by hand>" },
-    { "op": "update", "node": "<existing node id>", "name": "<optional>", "prompt": "<optional>", "detail": "<how to do this by hand>" },
-    { "op": "remove", "node": "<existing node id>", "detail": "<how to do this by hand>" },
-    { "op": "disconnect", "connection": "<existing connection id>", "detail": "<how to do this by hand>" },
-    { "op": "action", "action": "<studio action id>", "args": { }, "detail": "<how to do this by hand>" }
+${opLines}
   ]
 }
 
 - Use the "action" op for ANY capability outside the canvas: evals, runs, prompts, workflows, versions, deploy, skills, connections, portal, usage, settings, navigation. "args" holds that action's parameters.
-- The four graph shorthands above ("add", "connect", "update", "remove", "disconnect") stay available for canvas edits; prefer them there because they support refs.
+${shorthandRule}
 - "ref" is a temporary handle you invent for nodes added in this plan, used by later connect ops. A ref is also substituted into "action" args, so a later step can target a node this plan just added.
 - "connect" port names are only needed for multi-port flow nodes: Router routes and Parallel branches use "fromPort", Aggregator inputs use "toPort". Naming a port that doesn't exist on a router/parallel/aggregator CREATES it (e.g. fromPort "Database" adds a Database route) — prefer descriptive route names over the default "Route A"/"Route B". Omit port names everywhere else and the studio picks the right ports.
 - Handoff vs tool connections are derived automatically from the node kinds — never specify the connection kind.
@@ -351,6 +421,20 @@ export function buildAgentSystemPrompt(
   actions: ActionCatalogue,
   context?: string,
 ): string {
+  const allowed = actions.availableIds('all');
+  // Named in prose, so they have to narrow with the tool list: telling a caller to
+  // call an action they were not given is an invitation to a call that can only be
+  // refused (multi-organisation-phorma Requirement 8.3).
+  const canvasGuidance = [
+    allowed.has('graph_add_node')
+      ? "- Call graph_add_node to create nodes (it returns the new node's id - use that id in later calls)."
+      : null,
+    allowed.has('graph_connect_nodes')
+      ? '- Call graph_connect_nodes to wire nodes together (handoff vs tool is derived automatically; port names only matter for multi-port flow nodes).'
+      : null,
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n');
   return `You are the Phorma Agent Studio assistant, operating the studio directly. The user tells you what they want; you do it by calling the provided actions while they watch.
 
 ${SHARED_RULES}
@@ -366,10 +450,7 @@ ${summarizeCatalog()}
 ${summarizeGraph(graph)}
 ${section(context)}
 ## How to work
-
-- Call graph_add_node to create nodes (it returns the new node's id — use that id in later calls).
-- Call graph_connect_nodes to wire nodes together (handoff vs tool is derived automatically; port names only matter for multi-port flow nodes).
-- For anything off the canvas, call the action for that surface. Never approximate an eval, a run, a deploy or a setting with a graph edit.
+${section(canvasGuidance)}- For anything off the canvas, call the action for that surface. Never approximate an eval, a run, a deploy or a setting with a graph edit.
 - Every action returns {"ok": true, ...} or {"ok": false, "message": "..."}. Read the result. On a failure, fix the arguments or explain the problem — do not repeat the same call.
 - You have at most 12 rounds. Batch independent calls in one round.
 - When the work is complete, respond with a short plain-text summary — do not call more tools. Mention any effect the Revert control cannot undo (eval suites, runs, deploys, settings) separately from the canvas edits.`;

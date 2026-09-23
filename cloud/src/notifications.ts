@@ -59,12 +59,16 @@
  */
 
 import { verifyRequest, isHosted, type AuthEnv } from './auth';
+import { applyImpersonation, type Impersonation } from './impersonation';
 import {
   deploymentOwner,
   portalIndex,
+  workflowAgentInstance,
   type DeploymentRecord,
   type PortalRegistryEnv,
 } from './portal-registry';
+import { ProposalStore, type ProposalNotice } from './proposals';
+import type { TenantEnv } from './tenants';
 
 /** The one path this module answers. */
 export const NOTIFICATIONS_PATH = '/api/notifications';
@@ -293,6 +297,22 @@ export interface NotificationsResponse {
   /** True when the deployment list was longer than {@link NOTIFY_FANOUT_MAX}. */
   truncated: boolean;
   deployments: DeploymentNotice[];
+  /**
+   * The CALLER's own proposals that were published or rejected since the cursor
+   * (multi-organisation-phorma, Requirement 12.11).
+   *
+   * ADDITIVE and OPTIONAL, which is what makes it safe on both sides of a version
+   * gap: an older studio ignores it, and a BYO worker - which binds no D1 and has
+   * no proposal queue - never sends it. Absent and empty mean the same thing to a
+   * consumer, so neither has to be special-cased.
+   *
+   * This half is a D1 read rather than a fan-out, because the fact lives in D1:
+   * `workflow_proposals` records who submitted a proposal and when its status last
+   * moved, so it is one indexed query instead of one subrequest per deployment -
+   * and it reports a decision about a workflow this account may no longer have
+   * deployed at all.
+   */
+  proposals?: ProposalNotice[];
 }
 
 /** The RPC surface this route needs from an instance. */
@@ -300,8 +320,16 @@ interface NotifiableInstance {
   notificationsSince(ownerId: string, cursor: number): Promise<DeploymentNoticePayload>;
 }
 
-/** Bindings this route needs. */
+/**
+ * Bindings this route needs.
+ *
+ * `TenantEnv` folds in the OPTIONAL `DB` binding, for the proposal-outcome half
+ * alone. It stays optional: a BYO worker binds no D1, and the deployment fan-out -
+ * which is what this route is for - must keep working there exactly as it does
+ * today (Requirement 16.6).
+ */
 export type NotificationsEnv = AuthEnv &
+  TenantEnv &
   PortalRegistryEnv & {
     WorkflowAgent: DurableObjectNamespace;
   };
@@ -318,12 +346,19 @@ export async function handleNotificationsRequest(
   env: NotificationsEnv,
   url: URL,
   respond: (body: unknown, status?: number) => Response,
+  impersonation: Impersonation | null = null,
 ): Promise<Response | null> {
   if (url.pathname !== NOTIFICATIONS_PATH) return null;
   if (request.method !== 'GET') return respond({ error: 'Method not allowed.' }, 405);
 
-  const auth = await verifyRequest(env, request);
-  if (!auth) return respond({ error: 'Unauthorized.' }, 401);
+  const verified = await verifyRequest(env, request);
+  if (!verified) return respond({ error: 'Unauthorized.' }, 401);
+  // The operator act-as owner, when the router resolved one - already allowlisted,
+  // already restricted to a GET and already audited by `api.ts`, so this is a
+  // SUBSTITUTION rather than a second decision (Requirement 14.5). The fan-out
+  // below re-checks the substituted owner against each instance's stamp, so an
+  // operator sees only what that owner really owns.
+  const auth = applyImpersonation(verified, impersonation);
   // Hosted mode is per-tenant, so an anonymous identity has no account to read.
   // A BYO worker has ONE owner and answers for it.
   if (isHosted(env) && !auth.userId) return respond({ error: 'Unauthorized.' }, 401);
@@ -331,10 +366,16 @@ export async function handleNotificationsRequest(
     return respond({ error: 'This deployment has no deployment registry binding.' }, 501);
   }
 
-  // Scoped by the VERIFIED identity, never by a request field - which is what
-  // makes tenant isolation structural rather than a filter somebody could
-  // forget to write.
-  const ownerId = deploymentOwner(auth.userId);
+  // Scoped by the RESOLVED owner off the VERIFIED identity, never by a request
+  // field - which is what makes tenant isolation structural rather than a filter
+  // somebody could forget to write.
+  //
+  // `auth.ownerId` and not `auth.userId` (multi-organisation-phorma,
+  // Requirement 4.5): the registry prefix and the instance stamp are both the
+  // resolved owner, so scoping by the caller would fan out over an EMPTY registry
+  // prefix for every member of every organisation - a silent "nothing is wrong"
+  // about deployments nobody looked at.
+  const ownerId = deploymentOwner(auth.ownerId);
   const cursor = readCursor(url);
 
   const all = await portalIndex(env).listDeployments(ownerId);
@@ -376,7 +417,37 @@ export async function handleNotificationsRequest(
     unreachable,
     truncated: all.length > selected.length,
     deployments,
+    ...(await proposalOutcomes(env, ownerId, auth.userId, cursor)),
   } satisfies NotificationsResponse);
+}
+
+/**
+ * The caller's own decided proposals since the cursor, as a spreadable fragment
+ * (Requirement 12.11).
+ *
+ * Three ways it contributes NOTHING, and all three are deliberate: no D1 binding
+ * (a BYO worker), no caller identity (an anonymous BYO request), and no decided
+ * row. A READ FAILURE also contributes nothing and logs, rather than failing the
+ * whole request - the deployment feed is what this route exists for, and losing it
+ * because a proposal query failed would trade the important half for the additive
+ * one.
+ */
+async function proposalOutcomes(
+  env: NotificationsEnv,
+  ownerId: string,
+  userId: string | null | undefined,
+  cursor: number,
+): Promise<{ proposals?: ProposalNotice[] }> {
+  if (!userId) return {};
+  const store = new ProposalStore(env);
+  if (!store.enabled) return {};
+  try {
+    const proposals = await store.outcomesForAuthor(ownerId, userId, cursor);
+    return proposals.length > 0 ? { proposals } : {};
+  } catch (error) {
+    console.error('Proposal outcome read failed for the notification feed:', error);
+    return {};
+  }
 }
 
 /**
@@ -401,10 +472,20 @@ async function askInstance(
   ownerId: string,
   cursor: number,
 ): Promise<DeploymentNoticePayload> {
-  // The instance name mirrors the gateway's `{userId}:{workflowId}` scheme in
-  // hosted mode. In BYO `ownerId` is the `default` literal and instances are
-  // named by the bare workflow id, exactly as `index.ts` routes them.
-  const name = isHosted(env) ? `${ownerId}:${record.workflowId}` : record.workflowId;
+  // Through `workflowAgentInstance`, never a hand-built string, and the reason is
+  // not style. The gateway writes `encodeURIComponent('{owner}:{workflowId}')`
+  // into the path and partyserver hashes that path segment WITHOUT decoding it,
+  // so `idFromName('org_a:wf')` and `idFromName('org_a%3Awf')` are two DIFFERENT
+  // Durable Objects. This function built the raw colon form, so in hosted mode
+  // the whole fan-out addressed blank instances: every one answered successfully
+  // with empty state, the feed read as "nothing has happened", and nothing logged
+  // a thing. Fixed here; measured in `organisation-isolation.test.mjs` against the
+  // real deploy bundle.
+  //
+  // `ownerId` is the `default` literal in BYO and instances there are named by the
+  // bare workflow id with no prefix to encode, so null is passed rather than the
+  // literal - exactly as `index.ts` routes them.
+  const name = workflowAgentInstance(isHosted(env) ? ownerId : null, record.workflowId);
   const id = env.WorkflowAgent.idFromName(name);
   const stub = env.WorkflowAgent.get(id) as unknown as NotifiableInstance;
   return stub.notificationsSince(ownerId, cursor);

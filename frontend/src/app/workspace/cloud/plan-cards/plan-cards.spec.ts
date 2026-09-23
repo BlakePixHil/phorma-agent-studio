@@ -59,11 +59,24 @@ function profile(overrides: Partial<PhormaCloudProfile> = {}): PhormaCloudProfil
 }
 
 /** A `PhormaCloudService` with no constructor effect and no network. */
-function cloudStub(options: { signedIn?: boolean; profile?: PhormaCloudProfile | null } = {}) {
+function cloudStub(
+  options: {
+    signedIn?: boolean;
+    profile?: PhormaCloudProfile | null;
+    /**
+     * False stands for "an organisation owner is active", which Phorma Labs
+     * invoices (multi-organisation-phorma, requirement 19.7). Set explicitly rather
+     * than derived, so a case can pin the exact combination the template branches
+     * on - including a signed-in ACTIVE tenant whose plan is somebody else's bill.
+     */
+    selfServeBilling?: boolean;
+  } = {},
+) {
   const current = signal<PhormaCloudProfile | null>(options.profile ?? null);
   return {
     signedIn: signal(options.signedIn ?? true),
     profile: current,
+    selfServeBilling: signal(options.selfServeBilling ?? true),
     subscribed: signal(current()?.status === 'active'),
     // Separate from `subscribed` on purpose: `past_due` is false for BOTH, and
     // the surfaces branch on it to swap a Subscribe CTA for an update-card
@@ -181,6 +194,29 @@ describe('PlanCards', () => {
 
     expect(buttonLabels(fixture)).not.toContain('Choose');
     expect(buttonLabels(fixture)).toContain('Manage billing');
+  });
+
+  /**
+   * An ORGANISATION owner (multi-organisation-phorma, requirement 19.7). Phorma Labs
+   * invoices an organisation, so this whole surface is ABSENT - not a disabled grid,
+   * not a note about a plan the member cannot buy. Signed in AND active, which is
+   * the state most likely to leak a card: every other predicate in the component is
+   * satisfied.
+   */
+  it('renders nothing for an organisation owner, however healthy the plan', () => {
+    const cloud = cloudStub({
+      profile: profile({ id: 'org_acme', ownerId: 'org_acme', tier: 'team', status: 'active' }),
+      selfServeBilling: false,
+    });
+    const { fixture, billing } = mount(PlanCards, cloud);
+
+    expect(fixture.nativeElement.querySelector('.phorma-plans')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.phorma-plans__card').length).toBe(0);
+    // No price either: the cards are the only thing here that prints one.
+    expect((fixture.nativeElement.textContent ?? '')).not.toContain('/month');
+    expect(buttonLabels(fixture)).toEqual([]);
+    expect(billing.startCheckout).not.toHaveBeenCalled();
+    expect(billing.openBillingPortal).not.toHaveBeenCalled();
   });
 
   it('hides Manage billing when there is no billing account to manage', () => {

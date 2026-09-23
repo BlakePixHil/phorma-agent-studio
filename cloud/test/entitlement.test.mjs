@@ -33,6 +33,13 @@
  * production functions - see the block above that section for why each generator
  * is shaped the way it is.
  *
+ * Section 8 (multi-organisation-phorma task 14) is the per-workflow pricing
+ * preparation, and it is a different KIND of subject: two changes that are both
+ * inert by design. The gate takes a workflow id it reads nowhere, and a seventh
+ * refusal code is declared and never returned. So the claims are "nothing moved"
+ * and "nothing returns it" - one asserted over every call-site shape and every
+ * tenant state, the other over the source.
+ *
  * Harness. A REAL local D1 (Miniflare's SQLite binding reached from Node) with
  * the real migrations applied, the same shape `tenant-billing.test.mjs` and
  * `billing-routes.test.mjs` use: no `dispatchFetch`, no loopback socket per
@@ -47,7 +54,7 @@
  */
 
 import { createSign, generateKeyPairSync } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1264,6 +1271,306 @@ console.log('\nP3: the key cap the reconciler patches IS the gate ceiling (requi
     check(`sequences spending past the allowance were reached (${coverage.pastAllowance})`, coverage.pastAllowance > 0);
     check(`tier changes on a tenant holding a pool were reached (${coverage.retiered})`, coverage.retiered > 0);
   }
+}
+
+// ══ 8. Per-workflow pricing preparation ═════════════════════════════════════
+//
+// multi-organisation-phorma task 14, Requirements 15.1, 15.2, 15.3, 15.4, 15.6,
+// 15.7. Two changes ship and BOTH are inert, which makes them the kind of change
+// that is easy to get wrong invisibly:
+//
+//  - THE SIGNATURE. `options.workflowId` is read by nothing, so "it compiles" is
+//    the whole of what a type check proves. What has to be true is stronger: every
+//    existing caller, and every shape of the bag, produces the answer the gate gave
+//    before the field existed. A gate that started branching on the field - or a
+//    route that started REFUSING a request for carrying it - would pass tsc and
+//    break a paying tenant's run.
+//  - THE RESERVED TOKEN. `workflow_not_entitled` is appended and must never be
+//    returned in this release, and the only way to state that is over the source:
+//    it appears in the union declaration and its doc comment and nowhere else under
+//    `cloud/src/`. That is a grep, and it fails the moment somebody wires the token
+//    up without also wiring up the policy.
+//
+// No catalogue, no meter, no entitlement table, and no property here: Requirement 15
+// names one property (34) and it is the STUDIO's half, in
+// `frontend/src/app/core/billing-refusal.spec.ts`.
+
+console.log('\nThe gate carries a workflow id and answers identically (Requirement 15.1)');
+{
+  // Fresh tenants rather than the ones section 1 used: the sections between here
+  // and there record runs and patch keys, and "identical" is only a claim about the
+  // field if nothing else moved underneath it.
+  await seedTenant('user_wf_canceled', { status: 'canceled' });
+  await seedTenant('user_wf_dunning', { status: 'past_due' });
+  await seedTenant('user_wf_runs');
+  await setQuota('user_wf_runs', { runs: STARTER.monthlyRuns });
+  await seedTenant('user_wf_credits');
+  await setQuota('user_wf_credits', { costUsd: STARTER.monthlyCostUsd });
+  await seedTenant('user_wf_nokey', { withKey: false });
+  await seedTenant('user_wf_ok');
+
+  /** Every answer the gate has, named by the code it should still produce. */
+  const states = [
+    ['a missing tenant', 'user_wf_missing', 'no_subscription'],
+    ['a canceled tenant', 'user_wf_canceled', 'no_subscription'],
+    ['a past_due tenant', 'user_wf_dunning', 'subscription_past_due'],
+    ['an exhausted run count', 'user_wf_runs', 'runs_exhausted'],
+    ['an exhausted allowance', 'user_wf_credits', 'credits_exhausted'],
+    ['an unprovisioned tenant', 'user_wf_nokey', 'no_runtime_key'],
+    ['an ENTITLED tenant', 'user_wf_ok', null],
+  ];
+
+  /**
+   * The five bag shapes that reach the gate in practice. The two named ones are
+   * the real call sites: `WorkflowAgent.trigger` passes the workflow id alone
+   * (Requirement 15.3) and `/api/infer` passes it beside the impersonation flag
+   * (Requirement 15.2). The other three are the compatibility cases - no bag at
+   * all is what every caller did before task 13, and both empty forms are what a
+   * caller with nothing to name produces.
+   */
+  const shapes = [
+    ['no bag at all', undefined],
+    ['an empty bag', {}],
+    ['an explicitly absent workflow id', { workflowId: undefined }],
+    ['the trigger call site', { workflowId: 'wf_prep_deployed' }],
+    ['the /api/infer call site', { workflowId: 'wf_prep_local', impersonated: false }],
+  ];
+
+  for (const [label, tenantId, expectedCode] of states) {
+    const base = await resolveHostedInference(store, tenantId);
+    check(
+      `${label} still answers ${expectedCode ?? 'with a key'}`,
+      expectedCode === null ? base.key === RUNTIME_KEY : base.code === expectedCode,
+      JSON.stringify(base),
+    );
+    for (const [shape, options] of shapes) {
+      const answer =
+        options === undefined
+          ? await resolveHostedInference(store, tenantId)
+          : await resolveHostedInference(store, tenantId, options);
+      check(
+        `${label} answers identically with ${shape}`,
+        JSON.stringify(answer) === JSON.stringify(base),
+        `${JSON.stringify(answer)} vs ${JSON.stringify(base)}`,
+      );
+    }
+  }
+
+  // The workflow id must not be able to change an answer by being WEIRD either -
+  // an id is a studio-supplied string and nothing sanitizes it, because nothing
+  // reads it. A gate that started using it would most likely break here first.
+  const entitled = await resolveHostedInference(store, 'user_wf_ok');
+  for (const workflowId of ['', ' ', 'wf:with:colons', '../../etc/passwd', 'x'.repeat(4096), '🙂']) {
+    const answer = await resolveHostedInference(store, 'user_wf_ok', { workflowId });
+    check(
+      `an entitled tenant is unaffected by the workflow id ${JSON.stringify(workflowId.slice(0, 12))}`,
+      JSON.stringify(answer) === JSON.stringify(entitled),
+      JSON.stringify(answer),
+    );
+  }
+
+  // ORDERING, which the new field sits beside rather than in front of: the
+  // impersonation refusal is still checked BEFORE any read, for a tenant that would
+  // otherwise be entitled, and naming a workflow does not get a caller past it.
+  const impersonated = await resolveHostedInference(store, 'user_wf_ok', { impersonated: true });
+  const impersonatedNamed = await resolveHostedInference(store, 'user_wf_ok', {
+    workflowId: 'wf_prep_deployed',
+    impersonated: true,
+  });
+  check(
+    'an impersonated caller is still refused impersonation_read_only',
+    impersonated.code === 'impersonation_read_only' && impersonated.status === 403,
+    JSON.stringify(impersonated),
+  );
+  check(
+    'and naming a workflow changes nothing about that refusal',
+    JSON.stringify(impersonatedNamed) === JSON.stringify(impersonated),
+    JSON.stringify(impersonatedNamed),
+  );
+
+  // The five original codes' LOAD-BEARING PROSE, re-asserted here because this task
+  // touched the union they live on: an older studio falls back to a regex when the
+  // code is absent, so the phrase is contract, not phrasing (Requirement 15.4).
+  check(
+    'the credits refusal still carries the phrase an older studio matches',
+    /credits exhausted/i.test((await resolveHostedInference(store, 'user_wf_credits')).error),
+    (await resolveHostedInference(store, 'user_wf_credits')).error,
+  );
+  check(
+    'and the unsubscribed refusal still carries its own',
+    /subscription/i.test((await resolveHostedInference(store, 'user_wf_canceled')).error),
+    (await resolveHostedInference(store, 'user_wf_canceled')).error,
+  );
+  // `subscription_past_due` deliberately does NOT carry either phrase: it postdates
+  // the code field, and an older studio reaches its CTA through the `(402)` half of
+  // the same regex. So the claim to pin is the STATUS, not a word.
+  check(
+    'and the past_due refusal stays a 402, which is what the older regex matches',
+    (await resolveHostedInference(store, 'user_wf_dunning')).status === 402,
+    JSON.stringify(await resolveHostedInference(store, 'user_wf_dunning')),
+  );
+}
+
+console.log('\nPOST /api/infer accepts the additive workflowId (Requirement 15.2)');
+{
+  // The route through the REAL router, which is the only way to see that the new
+  // body field is accepted rather than validated into a 400 - the gate assertions
+  // above cannot, because they never build a request. A refusing tenant is used on
+  // purpose: the gate refuses before any OpenRouter fetch, so this case reaches the
+  // whole route and touches no network.
+  const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+  const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const mintToken = (sub) => {
+    const seconds = Math.floor(Date.now() / 1000);
+    const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-entitlement-infer' })}.${base64url({ sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600 })}`;
+    const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
+    return `${signing}.${signature}`;
+  };
+  const env = {
+    PHORMA_MODE: 'hosted',
+    CLERK_SECRET_KEY: 'sk_test_clerk_not_used_offline',
+    CLERK_JWT_KEY,
+    KEY_ENC_SECRET,
+    DB,
+  };
+  const infer = async (userId, body) => {
+    const response = await handleApiRequest(
+      new Request('https://cloud.example.com/api/infer', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${mintToken(userId)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }),
+      env,
+      { 'Access-Control-Allow-Origin': 'http://localhost:7322' },
+      { waitUntil: () => undefined, passThroughOnException: () => undefined },
+    );
+    return { status: response.status, body: await response.text() };
+  };
+
+  const call = { model: 'openai/gpt-4o-mini', messages: [{ role: 'user', content: 'hi' }] };
+  const without = await infer('user_wf_credits', call);
+  check(
+    'a refused local run answers 402 credits_exhausted',
+    without.status === 402 && JSON.parse(without.body).code === 'credits_exhausted',
+    `${without.status} ${without.body}`,
+  );
+
+  // The additive field, and then every value that is NOT a workflow id. All of them
+  // must read as "the caller named none" rather than as a malformed request: an
+  // older studio omits the field, and a field nothing reads must never be the reason
+  // a run is refused with the wrong answer.
+  for (const workflowId of ['wf_prep_local', '', 0, null, false, { id: 'wf' }, ['wf']]) {
+    const answer = await infer('user_wf_credits', { ...call, workflowId });
+    check(
+      `the body carrying workflowId ${JSON.stringify(workflowId)} answers identically`,
+      answer.status === without.status && answer.body === without.body,
+      `${answer.status} ${answer.body}`,
+    );
+  }
+
+  // And the field is not required: a body without it is still the body the studio
+  // has always sent, which the first case above already proved, so the failure mode
+  // left is a 400 for the field being PRESENT - which the loop just ruled out.
+  const stillMalformed = await infer('user_wf_credits', { workflowId: 'wf_prep_local' });
+  check(
+    'a body that carries only the workflow id is still a 400',
+    stillMalformed.status === 400,
+    `${stillMalformed.status} ${stillMalformed.body}`,
+  );
+}
+
+console.log('\nThe reserved refusal code is unreachable (Requirement 15.4)');
+{
+  // A GREP, and the reason it is enough is that a token nothing returns cannot be
+  // tested for behaviour: the claim is about the source, so the source is what is
+  // read. The three non-vacuity guards matter more than the assertion itself - a
+  // walker that found zero files, or a matcher that matched nothing, would pass this
+  // section while saying nothing at all.
+  const srcDir = join(here, '..', 'src');
+  const walk = (dir) => {
+    const files = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) files.push(...walk(full));
+      else if (entry.name.endsWith('.ts')) files.push(full);
+    }
+    return files;
+  };
+  const sources = walk(srcDir).map((path) => ({
+    name: path.slice(srcDir.length + 1).replace(/\\/g, '/'),
+    lines: readFileSync(path, 'utf8').split(/\r?\n/),
+  }));
+
+  // GUARD 1: the walker found the module tree, not an empty directory.
+  check(`the scan read the worker source (${sources.length} files)`, sources.length >= 25, String(sources.length));
+  // GUARD 2: it found the file the claim is about.
+  check('including the module that declares the union', sources.some((file) => file.name === 'tenants.ts'));
+  // GUARD 3: the matcher finds a token that IS spread across the tree, so a
+  // scanner that silently matches nothing cannot pass the assertion below.
+  const control = sources.filter((file) => file.lines.some((line) => line.includes('HostedInferenceRefusalCode')));
+  check(
+    `the matcher finds a control token in more than one file (${control.map((file) => file.name).join(', ')})`,
+    control.length >= 2,
+    String(control.length),
+  );
+
+  const RESERVED = 'workflow_not_entitled';
+  const mentions = sources.filter((file) => file.lines.some((line) => line.includes(RESERVED)));
+  check(
+    `${RESERVED} is mentioned in exactly one module (${mentions.map((file) => file.name).join(', ') || 'none'})`,
+    mentions.length === 1 && mentions[0].name === 'tenants.ts',
+    mentions.map((file) => file.name).join(', '),
+  );
+
+  const lines = (mentions[0]?.lines ?? []).filter((line) => line.includes(RESERVED));
+  const declarations = lines.filter((line) => new RegExp(`^\\s*\\|\\s*'${RESERVED}'`).test(line));
+  const comments = lines.filter((line) => /^\s*\*/.test(line));
+  check(
+    'it is declared exactly once, as a union member',
+    declarations.length === 1,
+    JSON.stringify(lines),
+  );
+  check('and documented as reserved', comments.length >= 1 && comments.join(' ').includes('RESERVED'), JSON.stringify(comments));
+  // The load-bearing one: every other appearance is neither, so a `return`, a
+  // `code:` property or any other executable mention fails here.
+  check(
+    'and appears nowhere else - no code path can return it',
+    lines.length === declarations.length + comments.length,
+    JSON.stringify(lines.filter((line) => !declarations.includes(line) && !comments.includes(line))),
+  );
+
+  // The trigger call site, which this harness cannot wake: `member-run.test.mjs`
+  // drives a real hosted trigger, but no suite can show that the call NAMES the
+  // deployed spec, because the gate reads the field in no release. So the wiring is
+  // read off the source, narrowly (Requirement 15.3).
+  const agent = readFileSync(join(srcDir, 'workflow-agent.ts'), 'utf8');
+  const triggerCall = /resolveHostedInference\(\s*store,\s*ownerId,\s*\{([^}]*)\}/.exec(agent);
+  check('WorkflowAgent passes an options bag to the gate', triggerCall !== null, 'no call matched');
+  check(
+    'and names the deployed spec id in it',
+    /workflowId:\s*spec\.id/.test(triggerCall?.[1] ?? ''),
+    triggerCall?.[1] ?? '',
+  );
+  // Requirement 15.7: exactly two call sites, still. A third would be a second
+  // entitlement check by definition, and the whole reason the gate exists is that
+  // there used to be two copies of it.
+  const callers = sources.filter((file) =>
+    file.lines.some((line) => /resolveHostedInference\(/.test(line) && !/^\s*[*/]/.test(line) && !line.includes('export async function')),
+  );
+  check(
+    `the gate is called from exactly two modules (${callers.map((file) => file.name).join(', ')})`,
+    callers.length === 2 &&
+      callers.some((file) => file.name === 'api.ts') &&
+      callers.some((file) => file.name === 'workflow-agent.ts'),
+    callers.map((file) => file.name).join(', '),
+  );
 }
 
 await mf.dispose();

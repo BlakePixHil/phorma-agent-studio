@@ -76,7 +76,7 @@ function profile(overrides: Partial<PhormaCloudProfile> = {}): PhormaCloudProfil
  * exact combination the template branches on - including the one that matters
  * here, `subscribed() === false` WITH a live plan.
  */
-function cloudStub(current: PhormaCloudProfile | null) {
+function cloudStub(current: PhormaCloudProfile | null, selfServeBilling = true) {
   return {
     user: signal(current ? { id: current.id } : null),
     signedIn: signal(current != null),
@@ -86,6 +86,13 @@ function cloudStub(current: PhormaCloudProfile | null) {
     error: signal(null),
     subscribed: signal(current?.status === 'active'),
     pastDue: signal(current?.status === 'past_due'),
+    /**
+     * False stands for "an organisation owner is active" - Phorma Labs invoices an
+     * organisation, so every purchase surface is ABSENT (multi-organisation-phorma,
+     * requirement 19.7). Set explicitly, like `subscribed` and `pastDue`, so a case
+     * can pin an owner whose plan is perfectly healthy and still not theirs to buy.
+     */
+    selfServeBilling: signal(selfServeBilling),
     subWorkflowDepth: signal(2),
     schedulesPerWorkflow: signal(1),
     runsFraction: signal(0.06),
@@ -108,6 +115,7 @@ interface Mounted {
 function mountCloudPage(
   provider: CloudProviderChoice,
   current: PhormaCloudProfile | null,
+  selfServeBilling = true,
 ): Mounted {
   const billing = billingStub();
   const watch = jasmine.createSpy('watch');
@@ -117,7 +125,7 @@ function mountCloudPage(
       { provide: TauriService, useValue: { isDesktop: false, selectFolderDialog: () => Promise.resolve(null) } },
       { provide: BillingService, useValue: billing },
       { provide: BillingRefreshService, useValue: { watch, stop: () => undefined, watching: signal(false), remaining: signal(0) } },
-      { provide: PhormaCloudService, useValue: cloudStub(current) },
+      { provide: PhormaCloudService, useValue: cloudStub(current, selfServeBilling) },
     ],
   });
   TestBed.inject(SettingsService).cloudProvider.set(provider);
@@ -202,6 +210,43 @@ describe('Settings > Cloud with a past_due tenant (requirements 17, 18)', () => 
   });
 });
 
+// ── The five surfaces and five actions, shared by both absence cases ─────────
+
+/**
+ * The PURCHASE surfaces: a grid to buy from, a card to buy, and a banner whose
+ * whole content is a payment action. Absent means ABSENT for both the BYO case and
+ * the organisation case: not a disabled control, not an explanatory note about a
+ * subscription the user has no reason to want.
+ */
+const PURCHASE_SURFACES: readonly { readonly what: string; readonly selector: string }[] = [
+  { what: 'the plan grid', selector: '.phorma-plans' },
+  { what: 'a plan card', selector: '.phorma-plans__card' },
+  { what: 'the dunning banner', selector: '.phorma-past-due' },
+];
+
+/**
+ * The READING surfaces: what the account is on and what is left of it.
+ *
+ * The partition is load-bearing rather than tidy, and it is where the BYO case and
+ * the organisation case genuinely differ. A BYO deployment renders neither, because
+ * its user pays Cloudflare or AWS and the whole Phorma panel is absent. An
+ * organisation owner renders BOTH, read-only, because requirement 19.8 requires it:
+ * a member who sees no plan, no credits and no Subscribe button reads the page as a
+ * broken account rather than as somebody else's bill. So "zero of the five" holds
+ * for BYO and "zero of the three, plus the two present and read-only" holds for an
+ * organisation - stated over ONE list, so neither case can quietly stop covering a
+ * surface.
+ */
+const READING_SURFACES: readonly { readonly what: string; readonly selector: string }[] = [
+  { what: 'the quota bar', selector: '.phorma-settings__quota' },
+  { what: 'the account panel', selector: '.phorma-settings__account' },
+];
+
+const BILLING_SURFACES = [...PURCHASE_SURFACES, ...READING_SURFACES];
+
+/** Every billing ACTION the Cloud page can offer. Both cases require zero. */
+const BILLING_ACTIONS = ['Choose', 'Change plan', 'Manage billing', 'Update card', 'Buy more credits'];
+
 // ── BYO absence ──────────────────────────────────────────────────────────────
 
 describe('Billing surfaces on a BYO deployment (requirement 32)', () => {
@@ -210,21 +255,6 @@ describe('Billing surfaces on a BYO deployment (requirement 32)', () => {
     TestBed.resetTestingModule();
     localStorage.clear();
   });
-
-  /**
-   * Every billing surface the Cloud page can render, as a selector or a button
-   * label. Absent means ABSENT: not a disabled control, not an explanatory note
-   * about a subscription the user has no reason to want.
-   */
-  const BILLING_SURFACES: readonly { readonly what: string; readonly selector: string }[] = [
-    { what: 'the plan grid', selector: '.phorma-plans' },
-    { what: 'a plan card', selector: '.phorma-plans__card' },
-    { what: 'the dunning banner', selector: '.phorma-past-due' },
-    { what: 'the quota bar', selector: '.phorma-settings__quota' },
-    { what: 'the account panel', selector: '.phorma-settings__account' },
-  ];
-
-  const BILLING_ACTIONS = ['Choose', 'Change plan', 'Manage billing', 'Update card', 'Buy more credits'];
 
   for (const provider of ['cloudflare', 'aws'] as const) {
     describe(`with the ${provider} deploy target`, () => {
@@ -265,6 +295,113 @@ describe('Billing surfaces on a BYO deployment (requirement 32)', () => {
     const { fixture } = mountCloudPage('phorma', profile({ status: 'active' }));
 
     expect(laidOut(fixture, '.phorma-plans__card').length).toBe(3);
+    expect(buttonLabels(fixture)).toContain('Manage billing');
+  });
+});
+
+// ── Organisation absence ─────────────────────────────────────────────────────
+
+/**
+ * The same five surfaces and five actions, for an ACTIVE ORGANISATION owner
+ * (multi-organisation-phorma, Requirement 19.7, 19.8).
+ *
+ * The deploy target is `phorma` throughout, which is what makes this a second
+ * parameterisation rather than a restatement of the BYO one: every predicate the BYO
+ * case fails on is satisfied here. The account is signed in, the target is Phorma
+ * Cloud, the tenant is provisioned, and one thing differs - who pays. So anything
+ * still on screen is on screen because of the owner and nothing else.
+ *
+ * **Validates: Requirements 19.7, 19.8**
+ */
+describe('Billing surfaces while an organisation owner is active (Requirements 19.7, 19.8)', () => {
+  afterEach(() => {
+    TestBed.inject(SettingsService).cloudProvider.set(null);
+    TestBed.resetTestingModule();
+    localStorage.clear();
+  });
+
+  /** An organisation's `/api/me` answer: the owner IS the tenant, and it is an org. */
+  const orgProfile = (overrides: Partial<PhormaCloudProfile> = {}) =>
+    profile({ id: 'org_acme', ownerId: 'org_acme', tier: 'team', status: 'active', ...overrides });
+
+  const mountOrg = (current = orgProfile()) => mountCloudPage('phorma', current, false);
+
+  it('offers no purchase surface', () => {
+    const { fixture } = mountOrg();
+
+    for (const surface of PURCHASE_SURFACES) {
+      expect(laidOut(fixture, surface.selector).length)
+        .withContext(`${surface.what} for an organisation owner`)
+        .toBe(0);
+    }
+  });
+
+  it('offers no billing action', () => {
+    // `lowOnCredits` is true here, so the Buy-more-credits button's own predicate is
+    // satisfied and only the owner check can be keeping it off screen.
+    const { fixture } = mountOrg(
+      orgProfile({
+        quota: { month: '2026-09', runsUsed: 10, runsLimit: 2000, creditsUsed: 9800, creditsLimit: 10000, costUsdUsed: 40, costUsdLimit: 44 },
+      }),
+    );
+    const labels = buttonLabels(fixture);
+
+    for (const action of BILLING_ACTIONS) {
+      expect(labels).withContext(`"${action}" for an organisation owner`).not.toContain(action);
+    }
+  });
+
+  it('mentions no price', () => {
+    const { fixture } = mountOrg();
+    const body = laidOut<HTMLElement>(fixture, '.phorma-settings__content')[0]?.textContent ?? '';
+
+    expect(body).not.toContain('/month');
+  });
+
+  it('still shows the plan and the remaining credits, read-only', () => {
+    const { fixture } = mountOrg();
+
+    // Requirement 19.8. The reading surfaces are PRESENT - the opposite of the BYO
+    // case - because a member has to be able to see what the organisation is on.
+    for (const surface of READING_SURFACES) {
+      expect(laidOut(fixture, surface.selector).length)
+        .withContext(`${surface.what} for an organisation owner`)
+        .toBe(1);
+    }
+    const account = laidOut<HTMLElement>(fixture, '.phorma-settings__account')[0];
+    expect(account.textContent).toContain('Teams');
+    const quota = laidOut<HTMLElement>(fixture, '.phorma-settings__quota')[0];
+    expect(quota.textContent).toContain('Credits');
+  });
+
+  it('names Phorma Labs, so the missing actions read as intended rather than broken', () => {
+    const { fixture } = mountOrg();
+    const body = laidOut<HTMLElement>(fixture, '.phorma-settings__content')[0]?.textContent ?? '';
+
+    expect(body).toContain('Phorma Labs');
+  });
+
+  it('offers no card update even when the organisation row is past_due', () => {
+    // Unreachable through Stripe (an organisation has no Stripe customer), but an
+    // operator CAN set the status by hand - and the Billing Portal that banner routes
+    // to is exactly what the worker refuses with `billing_managed`.
+    const { fixture, billing } = mountOrg(orgProfile({ status: 'past_due' }));
+
+    expect(laidOut(fixture, '.phorma-past-due').length).toBe(0);
+    expect(buttonLabels(fixture)).not.toContain('Update card');
+    expect(billing.openBillingPortal).not.toHaveBeenCalled();
+  });
+
+  it('renders every one of them again for a personal owner, so absence is the owner', () => {
+    // The control. Same target, same active tenant, personal owner: all five surfaces
+    // are back, which is what makes the four cases above about the owner.
+    const { fixture } = mountCloudPage('phorma', profile({ status: 'active' }));
+
+    for (const surface of [...PURCHASE_SURFACES.filter((s) => s.selector !== '.phorma-past-due'), ...READING_SURFACES]) {
+      expect(laidOut(fixture, surface.selector).length)
+        .withContext(`${surface.what} for a personal owner`)
+        .toBeGreaterThan(0);
+    }
     expect(buttonLabels(fixture)).toContain('Manage billing');
   });
 });

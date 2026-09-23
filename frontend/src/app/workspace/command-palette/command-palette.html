@@ -117,7 +117,16 @@
         <div class="phorma-cmdk__box phorma-cmdk__box--locked">
           <div class="phorma-cmdk__locked">
             <p class="phorma-cmdk__locked-title">Build workflows with AI</p>
-            @if (phormaCloud.pastDue()) {
+            @if (!selfServeBilling()) {
+              <!-- An organisation owner is active, and Phorma Labs invoices it. Every
+                   purchase action is ABSENT rather than disabled (requirement 19.7);
+                   the copy names who to ask so the absence reads as intended. -->
+              <p class="phorma-cmdk__locked-copy">
+                Describe what you want and the AI assembles it on your canvas. Phorma Labs
+                manages your organisation's plan - ask an organisation admin to have AI
+                building enabled.
+              </p>
+            } @else if (phormaCloud.pastDue()) {
               <!-- A failed payment, not a missing plan. The remedy is the portal
                    and never a second subscription (requirement 17), and the copy
                    has to say the plan itself survived (requirement 18). -->

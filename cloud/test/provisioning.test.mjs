@@ -56,7 +56,7 @@ registerHooks({
 });
 
 const { handleApiRequest } = await import('../src/api.ts');
-const { TenantStore, grantCostUsd, isClerkUserId, reconcileRuntimeKey } = await import(
+const { TenantStore, grantCostUsd, isClerkUserId, isOwnerId, reconcileRuntimeKey } = await import(
   '../src/tenants.ts'
 );
 
@@ -235,7 +235,7 @@ async function keyColumns(id) {
 
 // ══ 1. tenantId must look like a Clerk user id (task 8.4, requirement 1) ════
 
-console.log('\nPOST /api/provision refuses a tenantId that is not a Clerk user id (requirement 1)');
+console.log('\nPOST /api/provision refuses a tenantId that is not an owner id (requirement 1)');
 {
   const stub = openRouterStub();
   try {
@@ -244,11 +244,14 @@ console.log('\nPOST /api/provision refuses a tenantId that is not a Clerk user i
       ['an email', 'owner@example.com'],
       ['a near miss', 'usr_2abc'],
       ['the prefix alone', 'user_'],
+      ['an organisation prefix alone', 'org_'],
       ['a Stripe customer id', 'cus_2abc'],
       ['whitespace inside', 'user_2abc def'],
+      ['whitespace inside an org id', 'org_2abc def'],
       ['markup', '<script>user_2abc</script>'],
       ['a number', 42],
       ['too long', `user_${'a'.repeat(121)}`],
+      ['an over-long org id', `org_${'a'.repeat(121)}`],
     ]) {
       const answer = await api(hostedEnv(), '/api/provision', { body: { tenantId, tier: 'starter' } });
       check(`${label} is refused (400)`, answer.status === 400 && /Clerk user id/.test(answer.body?.error ?? ''), `${answer.status} ${JSON.stringify(answer.body)}`);
@@ -267,16 +270,40 @@ console.log('\nPOST /api/provision refuses a tenantId that is not a Clerk user i
     check('an unauthorized caller is 401, not 400', stranger.status === 401, `${stranger.status} ${JSON.stringify(stranger.body)}`);
 
     // The predicate itself, at the boundary the route depends on.
-    check('isClerkUserId accepts a real id', isClerkUserId('user_2abcDEF-90_x'));
-    check('isClerkUserId rejects a non-string', !isClerkUserId(undefined) && !isClerkUserId(null) && !isClerkUserId({}));
+    check('isOwnerId accepts a real user id', isOwnerId('user_2abcDEF-90_x'));
+    check('isOwnerId accepts a real organisation id', isOwnerId('org_2abcDEF-90_x'));
+    check('isOwnerId rejects a non-string', !isOwnerId(undefined) && !isOwnerId(null) && !isOwnerId({}));
     // A read must NOT re-validate: a row provisioned before this check can hold an
     // id that fails it, and refusing to resolve it would strand a real payment.
     await store.upsertTenant({ id: 'legacy-hand-provisioned', tier: 'pro', status: 'active' });
-    check('a legacy row with a non-Clerk id is still readable', (await store.getTenant('legacy-hand-provisioned'))?.tier === 'pro');
+    check('a legacy row with a non-owner id is still readable', (await store.getTenant('legacy-hand-provisioned'))?.tier === 'pro');
+
+    // ── The classifier PAIR, and why both still exist ─────────────────────────
+    //
+    // Feature: multi-organisation-phorma, Property 3: Owner id validation is a
+    // classifier applied only on writes.
+    //
+    // `/api/provision` is the ONE call site that widened to `isOwnerId`, because it
+    // is the only way an organisation tenant row comes into existence at all - an
+    // organisation is invoiced by Phorma Labs and never reaches Stripe. The three
+    // Stripe-supplied id paths stay on `isClerkUserId`, so that predicate has to
+    // stay exported and stay strictly narrower. These are the assertions that fail
+    // if somebody later "finishes" the widening.
+    check('isClerkUserId is still exported', typeof isClerkUserId === 'function');
+    check(
+      'isClerkUserId is still NARROWER than isOwnerId',
+      isOwnerId('org_2abc') && !isClerkUserId('org_2abc'),
+    );
+    check(
+      'and agrees with it on every user id',
+      isClerkUserId('user_2abc') && isOwnerId('user_2abc'),
+    );
   } finally {
     stub.restore();
   }
 }
+
+
 
 // ══ 2. A first-time provision mints at the tier's cap ══════════════════════
 
@@ -717,6 +744,74 @@ console.log('\nA tenant with no grants is capped exactly as before');
     check('the pool is 0, not NULL', pool.costUsdRemaining === 0, JSON.stringify(pool));
     const outcome = await reconcileRuntimeKey(hostedEnv(), store, await store.getTenant('user_grant_none'));
     check('so the cap is the bare tier figure', outcome.limitUsd === CAP.team && stub.limits()[0]?.body?.limit === CAP.team, JSON.stringify(outcome));
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ An organisation owner provisions (multi-organisation-phorma, 4.11, 19.5) ══
+//
+// The Super_Admin route family is the ONLY path to an entitled organisation, so
+// this is not a convenience: refuse an `org_` id here and an organisation can
+// never run anything at all, because `/api/checkout` refuses it too by design.
+//
+// LAST in the file deliberately. The mint counter this suite asserts against
+// (`hash_minted_1`, `hash_minted_2`, ...) is module state shared by every section,
+// so inserting a minting case in the middle silently renumbers every expectation
+// after it.
+
+console.log('\nPOST /api/provision accepts an organisation owner (requirements 4.11, 19.5)');
+{
+  const stub = openRouterStub();
+  try {
+    const ORG = 'org_provision_alpha';
+    const answer = await api(hostedEnv(), '/api/provision', {
+      body: { tenantId: ORG, email: 'billing@acme.example.com', tier: 'pro' },
+    });
+    check('answers 200', answer.status === 200 && answer.body?.ok === true, `${answer.status} ${JSON.stringify(answer.body)}`);
+    check('the tenant id is the organisation, verbatim', answer.body?.tenantId === ORG, JSON.stringify(answer.body));
+
+    const row = await keyColumns(ORG);
+    check('the row is active on the tier asked for', row?.tier === 'pro' && row?.status === 'active', JSON.stringify(row));
+    // The runtime key is provisioned against the ORGANISATION's row, capped at the
+    // organisation's tier - the same mechanism a personal tenant gets, which is the
+    // point: this task adds no new billing path, it names the existing one.
+    check('a runtime key is minted for it', answer.body?.runtimeKeyAction === 'minted' && answer.body?.runtimeKeyProvisioned === true, JSON.stringify(answer.body));
+    check('capped at the organisation tier budget', answer.body?.runtimeKeyLimitUsd === CAP.pro, JSON.stringify(answer.body));
+    check('and the key is named for the organisation', stub.mints()[0]?.body?.name === `phorma-tenant-${ORG}`, JSON.stringify(stub.mints()[0]?.body));
+
+    // NO Stripe object anywhere: an organisation is invoiced outside Stripe, and a
+    // provisioning call that quietly created a Customer would be the first step
+    // towards two ways of billing one owner.
+    check(
+      'nothing reached Stripe',
+      stub.calls.every((call) => !String(call.host ?? '').includes('stripe')),
+      JSON.stringify(stub.calls.map((call) => call.host)),
+    );
+    const stripeColumns = await DB.prepare(
+      'SELECT stripe_customer_id, stripe_subscription_id FROM tenants WHERE id = ?',
+    )
+      .bind(ORG)
+      .first();
+    check(
+      'and the row holds no Stripe customer or subscription',
+      stripeColumns?.stripe_customer_id === null && stripeColumns?.stripe_subscription_id === null,
+      JSON.stringify(stripeColumns),
+    );
+
+    // Re-running is an upgrade, exactly as for a personal tenant: the existing key
+    // is re-capped rather than a second one minted.
+    const upgraded = await api(hostedEnv(), '/api/provision', { body: { tenantId: ORG, tier: 'team' } });
+    check('re-provisioning the organisation patches the cap', upgraded.body?.runtimeKeyAction === 'limit_updated', JSON.stringify(upgraded.body));
+    check('to the new tier budget', upgraded.body?.runtimeKeyLimitUsd === CAP.team, JSON.stringify(upgraded.body));
+    check('and mints nothing further', stub.mints().length === 1, JSON.stringify(stub.calls));
+
+    // Requirement 19.1/19.2: a personal row and an organisation row are fully
+    // independent. The member who runs this curl has nothing provisioned by it.
+    check(
+      "no row appears for any member of the organisation",
+      (await keyColumns('user_provision_member')) === null,
+    );
   } finally {
     stub.restore();
   }

@@ -386,6 +386,54 @@ export function isClerkUserId(value: unknown): boolean {
   return typeof value === 'string' && CLERK_USER_ID.test(value);
 }
 
+/**
+ * The organisation form of the same thing. Same bounds, same alphabet, same
+ * reasoning about opacity - only the prefix differs.
+ */
+const CLERK_ORG_ID = /^org_[A-Za-z0-9_-]{1,120}$/;
+
+/**
+ * Whether `value` could be an Owner_Id: a Clerk USER id or a Clerk ORGANISATION
+ * id (Requirement 1.9 of `.kiro/specs/multi-organisation-phorma/`).
+ *
+ * It inherits {@link isClerkUserId}'s asymmetry VERBATIM, and for the same
+ * reason: **apply it on WRITE paths only, never to an id read back out of a row**
+ * (Requirement 1.10). Rows written before an id was checked at all can carry a
+ * value this rejects, and refusing to RESOLVE one would strand a real account for
+ * no benefit.
+ *
+ * {@link isClerkUserId} stays exported and stays NARROWER, which is the load
+ * bearing half of the pair. It remains the predicate for anything that genuinely
+ * means a human, and in particular for the three Stripe-supplied id paths in
+ * `stripe-webhook.ts`: an organisation is invoiced by Phorma Labs and `/api/checkout`
+ * refuses an organisation owner outright, so an `org_` id can never legitimately
+ * arrive from Stripe, and widening a classifier on a third-party-supplied input
+ * would only broaden what an inbound value is allowed to claim.
+ *
+ * `unknown` on purpose, like its narrower twin: a caller holds a value parsed out
+ * of a JSON body, so the declared type is a claim rather than a fact.
+ */
+export function isOwnerId(value: unknown): boolean {
+  return typeof value === 'string' && (CLERK_USER_ID.test(value) || CLERK_ORG_ID.test(value));
+}
+
+/**
+ * The NARROWEST of the three: an organisation id and nothing else.
+ *
+ * The third member of the same family, and it exists because the organisation
+ * management routes (`org-admin.ts`) take an `orgId` and a `userId` as two
+ * SEPARATE parameters of one write. {@link isOwnerId} accepts either shape, so
+ * validating both fields with it would let a swapped pair through - a membership
+ * row keyed `(user_x, org_y)` resolves for nobody, ever, and nothing logs a word
+ * about it.
+ *
+ * Same asymmetry as its two siblings: WRITE paths only, never an id read back out
+ * of a row.
+ */
+export function isOrgId(value: unknown): boolean {
+  return typeof value === 'string' && CLERK_ORG_ID.test(value);
+}
+
 // ── Records ──────────────────────────────────────────────────────────────────
 
 export interface TenantRecord {
@@ -605,7 +653,12 @@ export function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-const TENANT_CACHE_TTL_S = 60;
+/**
+ * Exported because `auth.ts` caches an `org_members` lookup behind the SAME KV
+ * shape `getTenant` uses, and two copies of the number is how one of the two
+ * caches quietly stops matching the other.
+ */
+export const TENANT_CACHE_TTL_S = 60;
 // Cloudflare KV enforces a 60s minimum expirationTtl — anything lower is
 // rejected with a 400 (which previously surfaced to the browser as a bare
 // CORS failure, since the unhandled exception replaced our response before
@@ -1446,13 +1499,47 @@ export function toOpenRouterModel(
  *                              are gone.
  *  - `no_runtime_key`        - entitled, but no OpenRouter key is provisioned.
  *                              An internal fault, not a billing state.
+ *  - `impersonation_read_only` - the request is being served as another owner
+ *                              through the operator act-as header, so it spends
+ *                              nothing (multi-organisation-phorma Requirement 14.6).
+ *                              NOT a billing state either: the tenant is entitled
+ *                              and the CALLER is not allowed to spend on their
+ *                              behalf. The third and last of the three independent
+ *                              places that refusal is answered - see
+ *                              `impersonation.ts`.
+ *
+ *  - `workflow_not_entitled` - RESERVED, and never returned in this release
+ *                              (multi-organisation-phorma Requirement 15.4). It is
+ *                              the token per-workflow pricing will refuse with once
+ *                              there is a policy to refuse on, declared NOW so that
+ *                              policy is a change inside {@link
+ *                              resolveHostedInference} rather than a change to a
+ *                              wire contract a studio three versions old is already
+ *                              branching on. Nothing under `cloud/src/` may mention
+ *                              it apart from this comment and the union member
+ *                              below, and `cloud/test/entitlement.test.mjs` greps
+ *                              for exactly that - so wiring it up without also
+ *                              wiring up the policy fails a test.
+ *
+ * The sixth is the one token in this set with NO entry in the studio's
+ * `HOSTED_REFUSAL_REMEDIES` map (`frontend/src/app/core/billing-refusal.ts`), and
+ * that is correct rather than a gap: the studio offers no impersonation surface and
+ * never sends an act-as header, so it can never receive this code - and an
+ * unrecognised code already renders the served prose. `billing-refusal.spec.ts`
+ * asserts that map holds no key the worker does not send, so adding one there fails
+ * a test rather than drifting. The SEVENTH has no entry there for the stronger
+ * reason that nothing sends it at all; an unrecognised code renders the served
+ * prose and offers nothing, which is Property 34 and is what makes appending a
+ * token safe.
  */
 export type HostedInferenceRefusalCode =
   | 'no_subscription'
   | 'subscription_past_due'
   | 'runs_exhausted'
   | 'credits_exhausted'
-  | 'no_runtime_key';
+  | 'no_runtime_key'
+  | 'impersonation_read_only'
+  | 'workflow_not_entitled';
 
 /**
  * A refusal a caller can return verbatim.
@@ -1483,11 +1570,43 @@ export interface HostedInferenceRefusal {
  * provisioning. Each refusal names the FIRST thing the user can act on, so a
  * `past_due` tenant is told to update their card rather than told they are out
  * of credits they cannot spend anyway.
+ *
+ * `options.impersonated` is checked BEFORE all of that, and before any read
+ * (multi-organisation-phorma Requirement 14.6). It is a property of the CALLER
+ * rather than of the tenant, so a tenant state that would otherwise be entitled is
+ * refused just the same - and it costs nothing, because an ordinary request omits
+ * the bag entirely. This is the THIRD independent layer of the read-only rule: the
+ * gateway and the Role_Gate both refuse an impersonated write before it can reach a
+ * run, and this is what makes "an impersonated request spends no credits" true even
+ * if neither of them did.
+ *
+ * `options.workflowId` is the WHOLE of the per-workflow pricing preparation
+ * (multi-organisation-phorma Requirements 15.1, 15.6). It is read by nothing in
+ * this release, deliberately: there is no workflow catalogue, no per-workflow meter
+ * and no entitlement table, and there must not be one here. What it buys is that
+ * both call sites already NAME the workflow a spend belongs to, so pricing later is
+ * a policy change inside this function rather than a signature change across two
+ * call sites plus the `POST /api/infer` body. `/api/infer` passes it when the
+ * request carries one and `WorkflowAgent.trigger` passes the deployed spec's id
+ * (Requirements 15.2, 15.3). Absent is a legitimate answer, not a defect: an
+ * assistant or Ctrl+P builder call belongs to no workflow at all, so a future
+ * policy has to decide what an unnamed spend costs rather than assume the field is
+ * always there.
+ *
+ * One optional options bag, so every existing call site keeps compiling.
  */
 export async function resolveHostedInference(
   store: TenantStore,
   tenantId: string,
+  options?: { workflowId?: string; impersonated?: boolean },
 ): Promise<{ key: string; tenant: TenantRecord } | HostedInferenceRefusal> {
+  if (options?.impersonated === true) {
+    return {
+      status: 403,
+      code: 'impersonation_read_only',
+      error: 'An impersonated session is read-only, so it cannot run hosted inference.',
+    };
+  }
   const tenant = await store.getTenant(tenantId);
   if (!tenant) {
     return {
@@ -2086,6 +2205,101 @@ export async function reconcileRuntimeKey(
       detail: 'minting an OpenRouter runtime key failed; the worker log carries the reason',
     };
   }
+}
+
+/**
+ * The outcome shape a caller reports when nothing was reconciled because the
+ * tenant is not `active`.
+ *
+ * Reconciling a non-active tenant would hand them a live key - the PATCH carries
+ * `disabled: false` - which is why {@link reconcileRuntimeKey} documents the
+ * status gate as the CALL SITE's. {@link provisionTenantTier} makes that gate
+ * structural instead of documentary, and this is what it reports when it holds.
+ *
+ * `action: 'skipped'` rather than a sixth token: the wire meaning of `skipped` is
+ * already "this call managed no key", and the token set is append-only.
+ */
+export const RUNTIME_KEY_NOT_RECONCILED: RuntimeKeyOutcome = Object.freeze({
+  action: 'skipped',
+  keyPresent: false,
+  limitUsd: 0,
+  supersededKeyDisabled: null,
+  detail: 'the tenant is not active, so no runtime key was reconciled',
+});
+
+/** What {@link provisionTenantTier} did, or `null` when the row vanished. */
+export interface ProvisionedTenant {
+  /** The row as it stands AFTER the write, read back rather than assumed. */
+  tenant: TenantRecord;
+  /**
+   * The runtime-key reconciliation, or {@link RUNTIME_KEY_NOT_RECONCILED} when
+   * the written status is not `active`.
+   */
+  key: RuntimeKeyOutcome;
+}
+
+/**
+ * The ONE provisioning path: write a tenant's tier and status, read the row back,
+ * and bring its runtime key into line.
+ *
+ * Two callers, and the reason they must share this rather than each perform the
+ * three steps: `POST /api/provision` is the operator curl, and the organisation
+ * management route family (`org-admin.ts`) is the dashboard button. Requirement
+ * 19.5 names provisioning as the only way an organisation becomes entitled, and
+ * Requirement 13.4 says creating one grants no paid tier - both are claims about
+ * ONE path, so there has to be one.
+ *
+ * The ordering is the whole content of the function and is not negotiable:
+ *
+ *  1. THE ROW FIRST. That is what makes a re-run an upgrade rather than a
+ *     re-provision.
+ *  2. READ IT BACK. `reconcileRuntimeKey` reads the tier off the stored record,
+ *     never off whatever the caller believed, so a stale event cannot move the
+ *     spend cap to a superseded plan.
+ *  3. RECONCILE ONLY AN `active` TENANT. See
+ *     {@link RUNTIME_KEY_NOT_RECONCILED}.
+ *
+ * There is NO credit grant here and there must not be one:
+ * `credit_grants.stripe_payment_id` is `NOT NULL UNIQUE`, which is what makes a
+ * grant idempotent on the payment, and a comp-credit path would have to weaken
+ * it. An organisation that needs a higher ceiling gets a TIER change
+ * (Requirement 19.10), which is exactly this call with a different `tier`.
+ *
+ * Returns `null` when the row was written and could not be read back, which is a
+ * D1 fault rather than a caller error - reporting it beats minting a key with
+ * nowhere to live.
+ */
+export async function provisionTenantTier(
+  env: TenantEnv,
+  store: TenantStore,
+  input: {
+    /** The Owner_Id: a Clerk user id or an organisation id. Validated by the CALLER. */
+    id: string;
+    email?: string | null;
+    /** Written verbatim. An unknown token falls back to starter LIMITS on read. */
+    tier: string;
+    /** The effective status. Only `active` reaches the runtime key. */
+    status: TenantRecord['status'];
+    /** Force a key replacement. For a workspace migration or a compromised key. */
+    rotate?: boolean;
+  },
+): Promise<ProvisionedTenant | null> {
+  await store.upsertTenant({
+    id: input.id,
+    email: input.email ?? null,
+    tier: input.tier,
+    status: input.status,
+  });
+  const tenant = await store.getTenant(input.id);
+  if (!tenant) {
+    console.error(`Tenant ${input.id} was provisioned but could not be read back.`);
+    return null;
+  }
+  if (tenant.status !== 'active') {
+    return { tenant, key: RUNTIME_KEY_NOT_RECONCILED };
+  }
+  const key = await reconcileRuntimeKey(env, store, tenant, { rotate: input.rotate === true });
+  return { tenant, key };
 }
 
 // ── AES-GCM string encryption (WebCrypto, no deps) ───────────────────────────

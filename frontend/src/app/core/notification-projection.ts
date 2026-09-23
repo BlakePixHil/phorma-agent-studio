@@ -114,6 +114,8 @@ const PRESENTATION: Readonly<Record<NotificationKind, { icon: string; tone: Noti
   'local-run-completed': { icon: 'ti-circle-check', tone: 'success' },
   'local-run-stopped': { icon: 'ti-player-stop', tone: 'warning' },
   'orphan-deployment': { icon: 'ti-cloud-question', tone: 'warning' },
+  'proposal-published': { icon: 'ti-git-merge', tone: 'success' },
+  'proposal-rejected': { icon: 'ti-git-pull-request-closed', tone: 'warning' },
 };
 
 /** The icon and tone a kind renders with. */
@@ -309,6 +311,54 @@ export function notificationFromLocalRun(input: {
     workflowName: input.workflowName,
     runId: input.runId,
     ...(remedy ? { remedy } : {}),
+  };
+}
+
+/**
+ * A decided proposal as a notification for its AUTHOR
+ * (multi-organisation-phorma, Requirement 12.11).
+ *
+ * The worker scopes the feed to `author_user_id`, so anything arriving here is the
+ * reader's own submission and the copy can say "your change" without checking.
+ *
+ * The id keys on the PROPOSAL rather than on the workflow, because an author can
+ * have several decided proposals for one workflow and each decision is its own
+ * piece of news. `at` is the worker's `updated_at`, so a decision made while the
+ * app was closed is not dated to the poll that found it.
+ */
+export function notificationFromProposal(input: {
+  proposalId: string;
+  workflowId: string;
+  status: 'published' | 'rejected';
+  reason: string | null;
+  at: number;
+  workflowName: string;
+  now: number;
+}): StudioNotification {
+  const kind: NotificationKind =
+    input.status === 'published' ? 'proposal-published' : 'proposal-rejected';
+  const { icon, tone } = presentationFor(kind);
+  return {
+    id: notificationId(input.workflowId, input.proposalId, kind),
+    kind,
+    origin: 'deployed',
+    tone,
+    icon,
+    title:
+      input.status === 'published'
+        ? `Your change to "${input.workflowName}" was published`
+        : `Your change to "${input.workflowName}" was not accepted`,
+    detail: clipDetail(
+      input.reason ??
+        (input.status === 'published'
+          ? 'It is now the deployed workflow.'
+          : 'No reason was given. Ask a builder what to change.'),
+    ),
+    // A worker timestamp of 0 means the row carried no readable `updated_at`, and
+    // dating a notification to 1970 would sort it out of reach forever.
+    at: input.at > 0 ? input.at : input.now,
+    workflowId: input.workflowId,
+    workflowName: input.workflowName,
   };
 }
 

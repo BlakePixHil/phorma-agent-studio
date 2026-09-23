@@ -21,6 +21,12 @@ import {
  * Attaching a skill embeds it BY VALUE into the agent node (the same thing the
  * Prompt panel does), so it is a graph edit covered by the Edit_Session.
  * Library CRUD is not.
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): the whole
+ * surface is builder, matching the Skills PANEL in `DEFAULT_TABS`. The skill
+ * library is local authoring material, and attaching one rewrites an agent's
+ * prompt out of it - an operator has neither the library nor the panel that
+ * shows it.
  */
 @Injectable({ providedIn: 'root' })
 export class SkillActionsService {
@@ -39,6 +45,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Listing skills',
         run: () => this.list(),
       },
@@ -49,6 +56,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         params: { skillId: { type: 'string', description: 'Skill id.', required: true } },
         activity: () => 'Reading a skill',
         run: args => this.read(args),
@@ -61,6 +69,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         params: {
           name: { type: 'string', description: 'Skill name.', required: true },
           content: { type: 'string', description: 'Markdown body.', required: true },
@@ -76,6 +85,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         params: {
           skillId: { type: 'string', description: 'Skill id.', required: true },
           name: { type: 'string', description: 'New name.' },
@@ -93,6 +103,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: { skillId: { type: 'string', description: 'Skill id.', required: true } },
         confirmSummary: args =>
           `Delete skill "${this.skillName(argStr(args, 'skillId'))}" from the library? Agents keep their embedded copy.`,
@@ -106,6 +117,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           skillId: { type: 'string', description: 'Skill id.', required: true },
@@ -121,6 +133,7 @@ export class SkillActionsService {
         surface: 'skills',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           skillId: { type: 'string', description: 'Skill id.', required: true },

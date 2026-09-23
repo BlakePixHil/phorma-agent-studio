@@ -214,3 +214,82 @@ export function notificationDetail(event: RunEvent): string {
       return event.type;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Who settled a gate (multi-organisation Requirement 10.5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The three suspension kinds a member can settle, as the maps `WorkflowAgent`
+ * holds them in: an approval, an Ask-User question, and a Wait-for-Event.
+ *
+ * Named tokens rather than the map objects themselves, because the identity a
+ * gate is settled BY differs per kind - an approval and a question are keyed on
+ * the engine's `requestId`, a wait on the author's correlation key - and a single
+ * flat map would attribute a correlation key that happened to equal a request id
+ * to the wrong gate.
+ */
+export type GateKind = 'approval' | 'question' | 'event';
+
+/** The map key an acting user id is remembered under. */
+export function gateActorKey(kind: GateKind, id: string): string {
+  return `${kind}:${id}`;
+}
+
+/**
+ * The gate key this event SETTLES, or null when the event is not a gate outcome.
+ *
+ * Derived from the event rather than recorded beside the resolver, because the
+ * resolver is deleted from its map at settle time and the engine emits the
+ * resolved event afterwards - so by the time there is an outcome to attribute,
+ * the entry that held the metadata is gone.
+ */
+export function resolvedGateKey(event: RunEvent): string | null {
+  switch (event.type) {
+    case 'approval-resolved':
+      return gateActorKey('approval', event.requestId);
+    case 'ask-resolved':
+      return gateActorKey('question', event.requestId);
+    case 'wait-resolved':
+      return gateActorKey('event', event.correlationKey);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Stamps the acting user id onto a resolved gate event, CONSUMING the entry.
+ *
+ * A reducer over the pending-actor map rather than a pure read, and consuming is
+ * the load-bearing half: a `requestId` is derived from the journal key plus the
+ * node occurrence, so the same gate reached twice in one run - a loop, a retried
+ * sub-workflow frame - produces the same key, and an entry left behind would
+ * attribute the SECOND outcome to whoever answered the FIRST.
+ *
+ * Returns the event UNCHANGED (same object) when there is nothing to stamp, which
+ * is every event on a BYO worker with an open endpoint, every scheduled or webhook
+ * run that resolved a gate through no human at all, and every gate abandoned by
+ * `drainPendingGates`. An absent `actor` therefore means "nobody is recorded",
+ * never "recorded as nobody".
+ */
+export function attributeGateActor(event: RunEvent, actors: Map<string, string>): RunEvent {
+  if (actors.size === 0) return event;
+  // Narrowed by a switch rather than by the key lookup, because only these three
+  // members of the union declare `actor` - spreading the whole union and adding the
+  // field is not assignable back to `RunEvent`, which is the type system saying
+  // exactly the right thing.
+  switch (event.type) {
+    case 'approval-resolved':
+    case 'ask-resolved':
+    case 'wait-resolved': {
+      const key = resolvedGateKey(event);
+      if (key === null) return event;
+      const actor = actors.get(key);
+      if (actor === undefined) return event;
+      actors.delete(key);
+      return { ...event, actor };
+    }
+    default:
+      return event;
+  }
+}

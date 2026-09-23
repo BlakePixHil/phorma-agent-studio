@@ -1,0 +1,157 @@
+@if (dialog.visible()) {
+  <div class="phorma-proposals" role="presentation" (click)="dialog.close()">
+    <section
+      class="phorma-proposals__card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Proposed changes"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="phorma-proposals__header">
+        <div>
+          <h2>Proposed changes</h2>
+          <p>Changes submitted for review, compared with what is deployed now.</p>
+        </div>
+        <button type="button" class="phorma-proposals__close" aria-label="Close" (click)="dialog.close()">
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="phorma-proposals__body">
+        <aside class="phorma-proposals__queue" aria-label="Submitted changes">
+          @if (proposals.loading()) {
+            <div class="phorma-proposals__empty">
+              <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i> Loading changes...
+            </div>
+          } @else if (proposals.error(); as failure) {
+            <div class="phorma-proposals__empty">
+              <i class="ti ti-cloud-off" aria-hidden="true"></i>
+              <span>{{ failure }}</span>
+            </div>
+          } @else if (proposals.proposals().length === 0) {
+            <div class="phorma-proposals__empty">
+              <i class="ti ti-inbox" aria-hidden="true"></i>
+              <span>Nothing has been submitted for this workflow.</span>
+            </div>
+          } @else {
+            @for (proposal of proposals.proposals(); track proposal.proposalId) {
+              <button
+                type="button"
+                class="phorma-proposals__row"
+                [class.phorma-proposals__row--selected]="detail()?.proposal?.proposalId === proposal.proposalId"
+                [attr.data-status]="proposal.status"
+                (click)="select(proposal)"
+              >
+                <span class="phorma-proposals__row-icon">
+                  <i [class]="statusIcon(proposal)" aria-hidden="true"></i>
+                </span>
+                <span class="phorma-proposals__row-meta">
+                  <span class="phorma-proposals__row-title">{{ statusLabel(proposal) }}</span>
+                  <span>{{ proposal.createdAt | date: 'MMM d, y, h:mm a' }}</span>
+                </span>
+              </button>
+            }
+          }
+        </aside>
+
+        <section class="phorma-proposals__review" aria-label="What this change does">
+          @if (loadingDetail()) {
+            <div class="phorma-proposals__empty phorma-proposals__empty--large">
+              <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+              <span>Loading the proposed workflow...</span>
+            </div>
+          } @else if (detail(); as loaded) {
+            <div class="phorma-proposals__review-header">
+              <div>
+                <h3>Compared with what is deployed</h3>
+                <p>Submitted {{ loaded.proposal.createdAt | date: 'medium' }}</p>
+              </div>
+              <span class="phorma-proposals__count">{{ diff().length }} changes</span>
+            </div>
+
+            @if (loaded.proposal.reason; as reason) {
+              <p class="phorma-proposals__reason">
+                <i class="ti ti-message-circle" aria-hidden="true"></i>
+                <span>{{ reason }}</span>
+              </p>
+            }
+
+            @if (!liveSpec()) {
+              <div class="phorma-proposals__empty phorma-proposals__empty--large">
+                <i class="ti ti-cloud-question" aria-hidden="true"></i>
+                <strong>Nothing is deployed for this workflow</strong>
+                <span>Publishing this change would be its first deployment.</span>
+              </div>
+            } @else if (diff().length === 0) {
+              <div class="phorma-proposals__empty phorma-proposals__empty--large">
+                <i class="ti ti-circle-check" aria-hidden="true"></i>
+                <strong>This matches what is deployed</strong>
+                <span>Nothing would change.</span>
+              </div>
+            } @else {
+              <ul class="phorma-proposals__changes">
+                @for (change of diff(); track $index) {
+                  <li [attr.data-kind]="change.kind">
+                    <i [class]="change.icon" aria-hidden="true"></i><span>{{ change.text }}</span>
+                  </li>
+                }
+              </ul>
+            }
+
+            @for (prompt of promptChanges(); track prompt.nodeName) {
+              <details class="phorma-proposals__prompt">
+                <summary>Prompt on "{{ prompt.nodeName }}"</summary>
+                <div class="phorma-proposals__prompt-pair">
+                  <div>
+                    <h4>Deployed</h4>
+                    <div class="phorma-proposals__markdown" [innerHTML]="markdown(prompt.before)"></div>
+                  </div>
+                  <div>
+                    <h4>Proposed</h4>
+                    <div class="phorma-proposals__markdown" [innerHTML]="markdown(prompt.after)"></div>
+                  </div>
+                </div>
+              </details>
+            }
+          } @else {
+            <div class="phorma-proposals__empty phorma-proposals__empty--large">
+              <i class="ti ti-git-pull-request" aria-hidden="true"></i>
+              <span>Select a submitted change to review it.</span>
+            </div>
+          }
+        </section>
+      </div>
+
+      <footer class="phorma-proposals__actions">
+        @if (detail()?.proposal?.status === 'pending' && canDecide()) {
+          <button
+            pButton
+            size="small"
+            severity="secondary"
+            [outlined]="true"
+            class="phorma-proposals__btn--danger"
+            [disabled]="proposals.busyProposalId() !== null"
+            (click)="reject()"
+          >
+            <i class="ti ti-circle-x" aria-hidden="true"></i>
+            <span>Reject</span>
+          </button>
+          <button
+            pButton
+            size="small"
+            class="phorma-btn-content"
+            [disabled]="proposals.busyProposalId() !== null"
+            (click)="publish()"
+          >
+            <i class="ti ti-cloud-up" aria-hidden="true"></i>
+            <span>Publish</span>
+          </button>
+        } @else {
+          <button pButton size="small" severity="secondary" [text]="true" (click)="dialog.close()">
+            <span>Close</span>
+          </button>
+        }
+      </footer>
+    </section>
+  </div>
+}

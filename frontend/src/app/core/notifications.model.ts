@@ -13,6 +13,7 @@
  */
 
 import type { BillingRemedy } from './billing-refusal';
+import type { ProposalNotice } from './proposals.model';
 
 // ── The wire contract (twin of cloud/src/notifications.ts) ──────────────────
 
@@ -117,6 +118,16 @@ export interface NotificationsResponse {
   /** True when the account has more deployments than one poll asks. */
   truncated: boolean;
   deployments: DeploymentNotice[];
+  /**
+   * The caller's own proposals that were published or rejected since the cursor
+   * (multi-organisation-phorma, Requirement 12.11).
+   *
+   * OPTIONAL, and absent means exactly the same thing as empty: a BYO worker has
+   * no proposal queue and never sends it, and an older worker does not know the
+   * field. `ProposalNotice` lives in `proposals.model.ts`, with the rest of that
+   * twin, rather than being restated here.
+   */
+  proposals?: ProposalNotice[];
 }
 
 // ── The studio's own record (no worker counterpart) ─────────────────────────
@@ -149,16 +160,35 @@ export type NotificationKind =
   /**
    * A deployment with no local workflow to open - the reinstall case.
    *
-   * There is deliberately no `spec-drift` sibling. `DeploymentRecord.specHash` is
-   * `fnv1a(canonicalJson(spec))` over the spec AFTER `CloudService.materializeDefaults()`
-   * has baked in the app-level defaults, and that method is private to
-   * `CloudService` - which every service on this path must not inject, because it
-   * closes the NG0200 cycle. Reproducing the transform here would be a second copy
-   * of it, and comparing against the un-materialized spec would report drift on
-   * every deployment that is perfectly current. A "your cloud copy is behind"
-   * notice belongs with the push path that can compute it honestly.
+   * There is no `spec-drift` sibling YET, and the reason is now only that nobody
+   * has built it. `DeploymentRecord.specHash` is `fnv1a(canonicalJson(spec))` over
+   * the spec AFTER the app-level defaults are baked in, and that transform used to
+   * be private to `CloudService` - which every service on this path must not
+   * inject, because it closes the NG0200 cycle. So the only two options were a
+   * second copy of the transform, or a comparison against the un-materialized spec
+   * that reports drift on every deployment that is perfectly current.
+   *
+   * That blocker is gone: `canonicalSpecHash` in `core/spec-defaults.ts` is a pure
+   * leaf and needs three settings values and no service (Requirement 12.4), so a
+   * drift kind is now computable here honestly. Adding it is a separate feature -
+   * it needs its own noise budget, mute behaviour and remedy, and a "your cloud
+   * copy is behind" row that fires on every open workflow would be worse than
+   * none.
    */
-  | 'orphan-deployment';
+  | 'orphan-deployment'
+  /**
+   * A change this account submitted was published by a reviewer
+   * (multi-organisation-phorma, Requirement 12.11).
+   *
+   * APPENDED rather than folded into `deployed-run-completed`, because the two
+   * answer different questions: one is "your workflow ran", the other is "your
+   * change is now the workflow". Both proposal kinds are reported to the AUTHOR
+   * only - the worker scopes the feed to `author_user_id` - so a reviewer does not
+   * get a notification about their own decision.
+   */
+  | 'proposal-published'
+  /** A change this account submitted was rejected, with the reviewer's reason. */
+  | 'proposal-rejected';
 
 /** Whether a notification is about the cloud or about this machine. */
 export type NotificationOrigin = 'deployed' | 'local';

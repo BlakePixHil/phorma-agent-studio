@@ -1,7 +1,9 @@
 import { Route, Routes } from '@angular/router';
 
 import { BILLING_VIEW_ID } from './core/billing-models';
+import { IMPERSONATION_VIEW_ID } from './core/impersonation-models';
 import { TELEMETRY_ROUTES, type TelemetryRoute } from './core/models';
+import { ORG_VIEW_ID } from './core/org-models';
 
 /** The lazy component loader shape the router accepts. */
 type ViewLoader = NonNullable<Route['loadComponent']>;
@@ -46,6 +48,26 @@ export const routes: Routes = [
     path: BILLING_VIEW_ID,
     data: { view: BILLING_VIEW_ID },
     loadComponent: () => import('./views/spend/spend').then((m) => m.Spend),
+  },
+  // Organisations is listed explicitly for the same reason Spend is: it reads
+  // `/api/admin/organisations/*` across four routes and two of its own resources,
+  // so there is no one-to-one aggregate route to derive a path from. Lazy like
+  // every other view, so the only visitor who pays for its form controls is one
+  // who opens it.
+  {
+    path: ORG_VIEW_ID,
+    data: { view: ORG_VIEW_ID },
+    loadComponent: () => import('./views/organisations/organisations').then((m) => m.Organisations),
+  },
+  // Impersonation, listed explicitly for the same reason as the two above: it reads
+  // `/api/admin/impersonation` and, as the act-as caller, `/api/deployments`, so
+  // there is no one aggregate route to derive a path from. Lazy like every other
+  // view - and the only visitor who loads it is one who opened it, which is worth
+  // having for a surface that is used rarely and on purpose.
+  {
+    path: IMPERSONATION_VIEW_ID,
+    data: { view: IMPERSONATION_VIEW_ID },
+    loadComponent: () => import('./views/impersonation/impersonation').then((m) => m.Impersonation),
   },
   { path: '**', redirectTo: TELEMETRY_ROUTES[0] },
 ];

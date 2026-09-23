@@ -31,6 +31,7 @@
  */
 
 import { verifyRequest, isHosted, type AuthEnv } from './auth';
+import { applyImpersonation, type Impersonation } from './impersonation';
 import {
   deploymentOwner,
   portalIndex,
@@ -102,12 +103,20 @@ export async function handleDeploymentsRequest(
   env: DeploymentsEnv,
   url: URL,
   respond: (body: unknown, status?: number) => Response,
+  impersonation: Impersonation | null = null,
 ): Promise<Response | null> {
   if (url.pathname !== DEPLOYMENTS_PATH) return null;
   if (request.method !== 'GET') return respond({ error: 'Method not allowed.' }, 405);
 
-  const auth = await verifyRequest(env, request);
-  if (!auth) return respond({ error: 'Unauthorized.' }, 401);
+  const verified = await verifyRequest(env, request);
+  if (!verified) return respond({ error: 'Unauthorized.' }, 401);
+  // The operator act-as owner, when the router resolved one. It arrives already
+  // gated - only `api.ts` can produce it, only for an allowlisted `clerk` caller,
+  // only on a GET, and only once the audit row has landed - so this line is a
+  // SUBSTITUTION rather than a second decision (multi-organisation-phorma
+  // Requirement 14.5). Null for every other request, including one that named an
+  // owner and was not honoured, which is why nothing here can tell the two apart.
+  const auth = applyImpersonation(verified, impersonation);
   // Hosted mode is per-tenant, so an anonymous identity has no account to list
   // (Requirement 5.1). A BYO worker has ONE owner and answers for it.
   if (isHosted(env) && !auth.userId) return respond({ error: 'Unauthorized.' }, 401);
@@ -115,14 +124,20 @@ export async function handleDeploymentsRequest(
     return respond({ error: 'This deployment has no deployment registry binding.' }, 501);
   }
 
-  // Scoped by the VERIFIED identity, never by a request field - which is what
-  // makes the tenant-isolation property of Requirement 5.7 structural rather
-  // than a filter somebody could forget.
-  const ownerId = deploymentOwner(auth.userId);
+  // Scoped by the RESOLVED owner off the VERIFIED identity, never by a request
+  // field - which is what makes the tenant-isolation property of Requirement 5.7
+  // structural rather than a filter somebody could forget.
+  //
+  // `auth.ownerId` and not `auth.userId` (multi-organisation-phorma,
+  // Requirement 4.4): the registry key space is `deploy:{ownerId}:{workflowId}`
+  // and `WorkflowAgent` stamps the resolved owner on a first push, so scoping this
+  // read by the caller would answer an EMPTY list to every member of every
+  // organisation - the deployments are there, under a prefix nobody asked for.
+  const ownerId = deploymentOwner(auth.ownerId);
   const records = await portalIndex(env).listDeployments(ownerId);
   const month = currentMonth();
 
-  const spend = await monthlySpendByWorkflow(env, auth.userId);
+  const spend = await monthlySpendByWorkflow(env, auth.ownerId);
   return respond({
     month,
     deployments: records.map(record => toSummary(record, spend)),
@@ -155,19 +170,24 @@ function toSummary(
  * ledger to read.
  *
  * Null covers three cases that are all "cannot tell" rather than "spent
- * nothing": no D1 binding (a BYO worker), no verified user id, and a D1 read
+ * nothing": no D1 binding (a BYO worker), no resolved owner, and a D1 read
  * that failed. The last one is deliberately folded in: the deployment list is
  * what stops a runaway cron, and losing the whole list because a spend query
  * timed out would be the worst possible trade.
+ *
+ * The owner is the quota bucket (multi-organisation-phorma, Requirements 4.8,
+ * 4.9): `usage.tenant_id` and the `tenants` row it prices against are both the
+ * resolved owner, so an organisation's spend is one figure regardless of which
+ * member's run produced it.
  */
 async function monthlySpendByWorkflow(
   env: DeploymentsEnv,
-  userId: string | null | undefined,
+  ownerId: string | null | undefined,
 ): Promise<Map<string, WorkflowSpend> | null> {
   const store = new TenantStore(env);
-  if (!store.enabled || !userId || !env.DB) return null;
+  if (!store.enabled || !ownerId || !env.DB) return null;
   try {
-    const tenant = await store.getTenant(userId);
+    const tenant = await store.getTenant(ownerId);
     // A tenant row is what makes hosted inference possible at all, so no row
     // means no hosted spend. The tier is only needed for the credit conversion.
     const tier = tenant?.tier ?? 'starter';
@@ -177,7 +197,7 @@ async function monthlySpendByWorkflow(
         WHERE tenant_id = ? AND month = ?
         GROUP BY workflow_id`,
     )
-      .bind(userId, currentMonth())
+      .bind(ownerId, currentMonth())
       .all<{ workflow_id: string; cost_usd: number | null; runs: number | null }>();
 
     const out = new Map<string, WorkflowSpend>();

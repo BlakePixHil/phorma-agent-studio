@@ -1,3 +1,31 @@
+<!--
+  Cloud_Library mode (multi-organisation Requirement 9.1).
+
+  An `operator` or `editor` has no local library, no desktop install and no
+  keychain, so their organisation's DEPLOYED workflows are their workflow list -
+  this panel renders those instead of the saved library and the template gallery,
+  neither of which they can save into.
+
+  `@defer (on immediate)` is what keeps the surface out of the initial bundle
+  (Requirements 9.7, 18.4), the same treatment chart.js gets. `CloudLibrary` is
+  referenced ONLY inside this block, which is what makes the import dynamic.
+-->
+@if (cloudLibraryOnly()) {
+  @defer (on immediate) {
+    <app-cloud-library />
+  } @placeholder {
+    <!--
+      Wrapped in the panel container on purpose: `__placeholder` is `flex: 1`, and
+      outside a flex column it collapses to its content with no height.
+    -->
+    <div class="phorma-workflows">
+      <div class="phorma-workflows__placeholder">
+        <i class="ti ti-cloud" aria-hidden="true"></i>
+        <p>Loading your organisation's workflows.</p>
+      </div>
+    </div>
+  }
+} @else {
 <div class="phorma-workflows">
   <!--
     The restore banner (cloud-workflow-backup Requirement 18).
@@ -158,3 +186,4 @@
     }
   </section>
 </div>
+}

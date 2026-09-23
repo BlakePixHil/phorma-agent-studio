@@ -36,6 +36,13 @@ const CONNECTION_TYPES: readonly ConnectionType[] = [
  * payload here reports secret field NAMES plus a per-name presence boolean
  * resolved through `ConnectionsService.secretPresent`, which reads the
  * keychain's existence flag and never the value.
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): the whole
+ * surface is builder - `connection.manage` is a builder capability and the
+ * Connections PANEL carries the same minimum. `edit.connection_secret` is an
+ * EDITOR capability, but nothing here exercises it: no action on this surface
+ * accepts a secret value, and the editor's path to one is the panel field, not
+ * the assistant.
  */
 @Injectable({ providedIn: 'root' })
 export class ConnectionActionsService {
@@ -56,6 +63,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Listing connections',
         run: () => this.list(),
       },
@@ -67,6 +75,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           name: { type: 'string', description: 'Display name (1-100 characters).', required: true },
           type: {
@@ -102,6 +111,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           connectionId: { type: 'string', description: 'Connection id.', required: true },
           name: { type: 'string', description: 'New display name.' },
@@ -124,6 +134,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           connectionId: { type: 'string', description: 'Connection id.', required: true },
         },
@@ -147,6 +158,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           connectionId: { type: 'string', description: 'Connection id.', required: true },
@@ -165,6 +177,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Listing connectors',
         run: () => this.listConnectors(),
       },
@@ -176,6 +189,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           connectorId: { type: 'string', description: 'Connector id from connector_list.', required: true },
@@ -192,6 +206,7 @@ export class ConnectionActionsService {
         surface: 'connections',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           connectorId: { type: 'string', description: 'Connector id.', required: true },
         },

@@ -28,6 +28,13 @@ const PLACE_ROWS_PER_COLUMN = 4;
  * Every write here goes through {@link LocalAgentRouterService} and records an
  * {@link AiEditSessionService} entry, so the Revert/Keep bar describes exactly
  * what changed (Requirement 7.2).
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): changing the
+ * SHAPE of the graph - adding, removing, connecting, disconnecting - is the
+ * `graph.structure` capability and sits at the builder level.
+ * `graph_update_node` does not: it renames a node and rewrites its prompt, which
+ * are values INSIDE an existing graph and exactly what the editor level exists
+ * for. Reading the canvas is open.
  */
 @Injectable({ providedIn: 'root' })
 export class GraphActionsService {
@@ -76,6 +83,7 @@ export class GraphActionsService {
         surface: 'graph',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Inspecting the canvas',
         run: () => this.readState(),
       },
@@ -87,6 +95,7 @@ export class GraphActionsService {
         surface: 'graph',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           type: {
@@ -112,6 +121,7 @@ export class GraphActionsService {
         surface: 'graph',
         access: 'write',
         risk: 'silent',
+        minLevel: 'editor',
         graphEdit: true,
         params: {
           nodeId: { type: 'string', description: 'Id of the node to update.', required: true },
@@ -131,6 +141,7 @@ export class GraphActionsService {
         surface: 'graph',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           nodeId: { type: 'string', description: 'Id of the node to remove.', required: true },
@@ -148,6 +159,7 @@ export class GraphActionsService {
         surface: 'graph',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           sourceNodeId: { type: 'string', description: 'Source node id.', required: true },
@@ -171,6 +183,7 @@ export class GraphActionsService {
         surface: 'graph',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         graphEdit: true,
         params: {
           connectionId: {

@@ -48,6 +48,18 @@ export interface OpenWorkflowDoc {
   dirty: boolean;
   /** Historical preview tabs are immutable and cannot be saved over the library. */
   readOnly?: boolean;
+  /**
+   * A deployed workflow an EDITOR may change, whose save is a proposal
+   * (multi-organisation-phorma, Requirement 12.1).
+   *
+   * A third state rather than a `readOnly` variant, because `readOnly` conflates
+   * two things this document needs apart: it is MUTABLE (an editor changes prompts
+   * and node configuration on it) and it is NOT PERSISTED (a member has no local
+   * library, and Requirement 9.4 says nothing about them reaches local storage).
+   * So every write rail stays open and the two PERSISTENCE rails - the open-tab
+   * session effect and the autosave effect - exclude it alongside `readOnly`.
+   */
+  proposeOnly?: boolean;
 }
 
 /**
@@ -90,6 +102,20 @@ export class WorkflowService {
   /** Debounce handle for the autosave effect. */
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * What SAVING a propose-only document does (Requirement 12.1).
+   *
+   * A settable seam installed by the shell, the same idiom as
+   * `RunControllerService.deployedRunLauncher` and `CloudService.specProposer`. It
+   * has to be one: the submission must carry a spec with the application defaults
+   * MATERIALIZED, which only `CloudService` can do, and that service injects this
+   * one. Resolves true when the change was accepted for review.
+   *
+   * Absent means this build cannot submit a proposal, which {@link saveActive}
+   * reports rather than writing the change somewhere it does not belong.
+   */
+  proposeActive: (() => Promise<boolean>) | null = null;
+
   private readonly docsState = signal<OpenWorkflowDoc[]>([]);
   private readonly activeDocIdState = signal<string | null>(null);
   private readonly libraryState = signal<WorkflowSpec[]>([]);
@@ -123,8 +149,21 @@ export class WorkflowService {
     void this.initialize();
 
     // Persist the open-tab session (saved tabs only) for restore on reload.
+    //
+    // A READ-ONLY document is excluded, and that exclusion is what keeps the
+    // Cloud_Library out of local storage: `openDeployedSpec` preserves the
+    // deployed workflow id, so without the filter that id would be written here
+    // for a member who persists nothing (multi-organisation Requirement 9.4).
+    // It restores nothing either way - `restoreSession` resolves each id against
+    // the local library, which a deployed-only workflow is absent from.
+    //
+    // A PROPOSE-ONLY document is excluded for the same reason and is not the same
+    // state: it is mutable, and persisting it would put an organisation's deployed
+    // workflow id into a member's local storage.
     effect(() => {
-      const docs = this.docsState();
+      const docs = this.docsState().filter(
+        doc => doc.readOnly !== true && doc.proposeOnly !== true,
+      );
       const activeId = this.activeDocIdState();
       const activeDoc = docs.find(doc => doc.docId === activeId);
       saveLayout('openWorkflows', {
@@ -140,7 +179,11 @@ export class WorkflowService {
       const enabled = this.settings.autosaveEnabled();
       const doc = this.activeDoc();
       // Track dirtiness reactively (graph edits flip `dirty`).
-      const shouldSave = enabled && !!doc && doc.workflowId !== null && doc.dirty;
+      // A propose-only document never autosaves: there is nothing local to save
+      // into, and a debounced SUBMISSION every two seconds would put a queue of
+      // proposals in front of a reviewer for one sitting of typing.
+      const shouldSave =
+        enabled && !!doc && doc.workflowId !== null && doc.dirty && doc.proposeOnly !== true;
       if (this.autosaveTimer !== null) {
         clearTimeout(this.autosaveTimer);
         this.autosaveTimer = null;
@@ -260,6 +303,16 @@ export class WorkflowService {
    * Closes a tab. The caller is responsible for any unsaved-changes
    * confirmation. When the last tab closes, a fresh untitled workflow opens
    * so the canvas is never document-less.
+   *
+   * Operates on the FULL document list, read-only tabs included. Do not filter
+   * `readOnly` here, however tempting the symmetry with the open-tab session
+   * effect in the constructor looks: that filter decides what gets PERSISTED,
+   * and copying it into this method broke closing twice over - it dropped every
+   * read-only tab from the tab bar when an ordinary neighbour closed, and made a
+   * deployed preview or a version snapshot un-closable even though the tab strip
+   * renders a close button for it. A read-only document is immutable, not
+   * permanent, and an owner switch has to be able to close one
+   * (multi-organisation Requirement 20.7).
    */
   closeDocument(docId: string): void {
     const docs = this.docsState();
@@ -278,6 +331,50 @@ export class WorkflowService {
       const next = remaining[index - 1] ?? remaining[index];
       this.activeDocIdState.set(next.docId);
     }
+  }
+
+  /**
+   * Closes EVERY open tab and opens one fresh untitled workflow
+   * (multi-organisation-phorma, Requirement 20.7).
+   *
+   * One operation rather than a loop over {@link closeDocument}, because that
+   * method opens a replacement the moment the list empties - so a loop would mint
+   * an untitled document part way through and then close it again, firing the
+   * session-persistence effect several times with intermediate states. This
+   * replaces the list once.
+   *
+   * Read-only and propose-only tabs go too. A document tab addresses a workflow id
+   * INSIDE one owner, and the same id means a different workflow under another, so
+   * a deployed preview is exactly the kind of tab that must not survive a switch.
+   * The caller is responsible for any unsaved-changes confirmation, exactly as it
+   * is for {@link closeDocument}.
+   */
+  closeAllDocuments(): void {
+    this.docsState.set([]);
+    this.activeDocIdState.set(null);
+    this.newWorkflow();
+  }
+
+  /**
+   * Re-reads the library for the ACTIVE owner (Requirement 20.13).
+   *
+   * Deliberately does NOT restore the tab session the way startup does: the
+   * persisted tab list belongs to whoever was active when it was written, and
+   * resolving those ids against a different owner's library is how one owner's id
+   * would silently open another owner's workflow of the same id. An owner switch
+   * closes the tabs and opens an untitled document instead.
+   */
+  async reloadLibrary(): Promise<void> {
+    try {
+      const specs = await this.storage.listWorkflows();
+      specs.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+      this.libraryState.set(specs);
+    } catch {
+      // Best-effort, exactly as at startup: a broken IndexedDB must not brick the
+      // app, and least of all in the middle of a switch.
+      this.libraryState.set([]);
+    }
+    this.libraryLoadedState.set(true);
   }
 
   /** Reorders an open tab from one index to another (tab drag-drop). */
@@ -299,6 +396,24 @@ export class WorkflowService {
     if (!doc) return null;
     if (doc.readOnly) {
       this.toast.warning('Preview is read-only', 'Restore this version to make it the current editable workflow.');
+      return null;
+    }
+
+    // An editor's save is a PROPOSAL (Requirement 12.1), and nothing is written
+    // locally. Through a settable seam rather than a service call, because the
+    // performer has to MATERIALIZE the application defaults first - that lives in
+    // `CloudService`, which injects this service, so the shell installs the
+    // direction back. Returning null is honest: nothing entered the library.
+    if (doc.proposeOnly) {
+      if (!this.proposeActive) {
+        this.toast.warning(
+          'Submit for review',
+          'This change is submitted for review rather than saved locally, and this build cannot ' +
+            'submit one. Update the app and try again.',
+        );
+        return null;
+      }
+      if (await this.proposeActive()) this.updateDoc(doc.docId, { dirty: false });
       return null;
     }
 
@@ -656,6 +771,72 @@ export class WorkflowService {
       subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
       dirty: false,
       readOnly: true,
+    };
+    this.docsState.update(docs => [...docs, doc]);
+    this.activeDocIdState.set(doc.docId);
+  }
+
+  /**
+   * Opens a deployed spec read from the cloud as a read-only tab (Cloud_Library,
+   * multi-organisation Requirements 9.2, 9.3, 9.4).
+   *
+   * RESTORE-shaped in IDENTITY, SNAPSHOT-shaped in PERSISTENCE, and both halves
+   * are load-bearing:
+   *
+   * - The id is PRESERVED, unlike {@link importSpec}, which mints a fresh one
+   *   because a file import is a COPY. This document has to keep addressing the
+   *   deployment it was read from: an editor's proposal is keyed on that workflow
+   *   id and a builder's publish pushes back to that instance, so an
+   *   import-shaped open would produce a proposal against a workflow id that does
+   *   not exist in the cloud. Same reasoning as {@link restoreSpec}, and it holds
+   *   even when the local library already carries the id - a collision here means
+   *   the user has a local copy of the SAME workflow, not a different one.
+   * - Nothing is written. No `storage.saveWorkflow`, no `libraryState` touch, and
+   *   the open-tab session effect skips a read-only document, so no spec, prompt
+   *   body or connection secret value reaches IndexedDB or `localStorage`. The
+   *   local stores are workflow-keyed by `workflowKey`, so "do not write" is the
+   *   whole mechanism and there is no scoping to get wrong.
+   *
+   * `readOnly: true` is the existing immutability rail rather than a new one:
+   * `mutateGraph`, `renameActive`, `describeActive`, `updateSettings` and
+   * `saveActive` already return early on it, and `CloudService.pushWorkflow`
+   * already refuses a read-only active document.
+   *
+   * `mode` is the caller's, and the caller is the cloud library, because the answer
+   * depends on the CAPABILITY of the session rather than on the spec:
+   *
+   * - `'read-only'` (the default) for an operator, and for a builder who would
+   *   restore rather than propose.
+   * - `'propose'` for an editor: the document is MUTABLE so they can change a
+   *   prompt or a node's configuration, still writes nothing locally, and its save
+   *   becomes a proposal (Requirement 12.1). See `proposeOnly` on
+   *   {@link OpenWorkflowDoc} for why that is a third state and not a `readOnly`
+   *   variant.
+   */
+  openDeployedSpec(spec: WorkflowSpec, mode: 'read-only' | 'propose' = 'read-only'): void {
+    // Either deployed mode matches an already-open tab for this workflow: both are
+    // "the deployed copy", and opening a second one would put two documents with
+    // the same workflow id in the tab bar.
+    const existing = this.docsState().find(
+      doc =>
+        (doc.readOnly === true || doc.proposeOnly === true) && doc.workflowId === spec.id,
+    );
+    if (existing) {
+      this.activeDocIdState.set(existing.docId);
+      return;
+    }
+    docCounter += 1;
+    const doc: OpenWorkflowDoc = {
+      docId: `doc-${docCounter}`,
+      workflowId: spec.id,
+      name: spec.name,
+      description: spec.description ?? '',
+      graph: structuredClone(spec.graph),
+      settings: spec.settings ? { ...spec.settings } : {},
+      subWorkflows: spec.subWorkflows ? structuredClone(spec.subWorkflows) : undefined,
+      dirty: false,
+      readOnly: mode === 'read-only',
+      proposeOnly: mode === 'propose',
     };
     this.docsState.update(docs => [...docs, doc]);
     this.activeDocIdState.set(doc.docId);

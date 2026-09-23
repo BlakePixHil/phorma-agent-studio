@@ -67,6 +67,18 @@ export class CommandPalette {
   protected readonly canBuild = computed(() => this.phormaCloud.subscribed());
 
   /**
+   * True when the upsell may OFFER a purchase (multi-organisation-phorma,
+   * Requirement 19.7).
+   *
+   * False while an organisation owner is active, because Phorma Labs bills it. The
+   * Subscribe button, the "See all plans" link (which deep-links to plan cards that
+   * are themselves absent for that owner) and the `past_due` card update all go with
+   * it, leaving copy that says who to ask - the locked state is a box the user
+   * opened on purpose, so it has to say something rather than nothing.
+   */
+  protected readonly selfServeBilling = computed(() => this.phormaCloud.selfServeBilling());
+
+  /**
    * The billing CTA the last failure earned, or null when it was not a hosted
    * refusal (or was one this build has no remedy for, in which case the error
    * text stands on its own and the generic Retry is the honest offer).

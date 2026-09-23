@@ -123,10 +123,17 @@ const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
 });
 const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-function mintToken(sub) {
+/**
+ * A real RS256 session token for `sub`, plus whatever extra claims a case needs.
+ *
+ * `claims` is how the organisation cases below name an organisation: the token is
+ * verified for real, so `auth.orgId` comes off a VERIFIED claim exactly as it does
+ * in production rather than from a stubbed context.
+ */
+function mintToken(sub, claims = {}) {
   const seconds = Math.floor(Date.now() / 1000);
   const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-billing-test' })}.${base64url(
-    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600 },
+    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600, ...claims },
   )}`;
   const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
   return `${signing}.${signature}`;
@@ -254,9 +261,9 @@ function stripeStub(overrides = {}) {
 }
 
 /** One `/api/*` request through the real router. */
-async function api(env, path, { method = 'POST', body, token, bearer } = {}) {
+async function api(env, path, { method = 'POST', body, token, claims, bearer } = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  const authorization = bearer ?? (token ? `Bearer ${mintToken(token)}` : null);
+  const authorization = bearer ?? (token ? `Bearer ${mintToken(token, claims)}` : null);
   if (authorization) headers.Authorization = authorization;
   const request = new Request(`${ORIGIN}${path}`, {
     method,
@@ -667,6 +674,172 @@ console.log('\nPOST /api/billing-portal (requirement 28)');
 
     const wrongMethod = await api(hostedEnv(), '/api/billing-portal', { method: 'GET', token: 'user_mapped' });
     check('GET /api/billing-portal is not a route', wrongMethod.status === 404, `${wrongMethod.status} ${JSON.stringify(wrongMethod.body)}`);
+  } finally {
+    stub.restore();
+  }
+}
+
+// ══ 9. An organisation owner never reaches Stripe ═══════════════════════════
+//
+// Feature: multi-organisation-phorma, task 15, Requirement 19.4. An organisation is
+// invoiced by Phorma Labs, so neither self-serve billing route may create a Stripe
+// object for one.
+//
+// WHAT IS ACTUALLY ASSERTED is the ABSENCE OF THE OUTBOUND CALL, not the 403. A
+// refusal that still created a Customer, or that resolved a price first, is the
+// failure that matters here: the status would look correct and a Stripe account
+// would be quietly accumulating customers for accounts that can never check out.
+//
+// Both org claim layouts are driven, because `readOrgClaim` tolerates two and a
+// refusal wired to only one would leave the other spending. And the ADMIN case is
+// the load-bearing one: `org:admin` maps to `admin`, so the level gate PASSES and
+// the level is therefore not what refuses them.
+
+console.log('\nAn organisation owner is refused billing_managed with no Stripe call (Requirement 19.4)');
+{
+  const ORG_CLAIMS = [
+    ['a top-level org_id claim', { org_id: 'org_acme', org_role: 'org:admin' }],
+    ['a compacted o.id claim', { o: { id: 'org_acme', rol: 'admin' } }],
+    ['an org with no role claim at all', { org_id: 'org_acme' }],
+    ['a member, not an admin', { org_id: 'org_acme', org_role: 'org:member' }],
+  ];
+
+  for (const [label, claims] of ORG_CLAIMS) {
+    for (const path of ['/api/checkout', '/api/billing-portal']) {
+      const stub = stripeStub();
+      try {
+        const answer = await api(hostedEnv(), path, {
+          body: { lookupKey: 'phorma_starter_monthly' },
+          token: 'user_org_member',
+          claims,
+        });
+        check(
+          `${path} with ${label} is 403`,
+          answer.status === 403,
+          `${answer.status} ${JSON.stringify(answer.body)}`,
+        );
+        check(
+          `${path} with ${label} answers code billing_managed`,
+          answer.body?.code === 'billing_managed',
+          JSON.stringify(answer.body),
+        );
+        // The refusal names who to ask, because there is no button that fixes this.
+        check(
+          `${path} with ${label} names Phorma Labs`,
+          /Phorma Labs/.test(answer.body?.error ?? ''),
+          JSON.stringify(answer.body),
+        );
+        // The whole point. No price read, no customer search, no customer create,
+        // no session - not one byte left this worker.
+        check(
+          `${path} with ${label} made NO Stripe call of any kind`,
+          stub.calls.length === 0,
+          JSON.stringify(stub.calls.map((call) => `${call.method} ${call.path}`)),
+        );
+      } finally {
+        stub.restore();
+      }
+    }
+  }
+
+  // Nothing was written under either id either: no tenant row for the member and
+  // none for the organisation, because the refusal is above every write.
+  check(
+    'no tenant row was created for the member or the organisation',
+    (await store.getTenant('user_org_member')) === null && (await store.getTenant('org_acme')) === null,
+    JSON.stringify([await store.getTenant('user_org_member'), await store.getTenant('org_acme')]),
+  );
+
+  // The positive control, and it is what makes every assertion above mean
+  // something: the SAME user id, the SAME body, the SAME env, with no organisation
+  // claim, reaches Stripe and gets a URL. So the discriminator is the claim and not
+  // anything else about the request.
+  const control = stripeStub();
+  try {
+    const answer = await api(hostedEnv(), '/api/checkout', {
+      body: { lookupKey: 'phorma_starter_monthly' },
+      token: 'user_org_member',
+    });
+    check(
+      'the same caller with no org claim still checks out',
+      answer.status === 200 && typeof answer.body?.url === 'string',
+      `${answer.status} ${JSON.stringify(answer.body)}`,
+    );
+    check(
+      'and the session carries their PERSONAL id, never an org id',
+      control.callsTo('/v1/checkout/sessions')[0]?.params['client_reference_id'] === 'user_org_member',
+      JSON.stringify(control.callsTo('/v1/checkout/sessions')[0]?.params),
+    );
+    // No VALUE anywhere in any call is an organisation id. Checked per value with
+    // a prefix test rather than as a substring of the whole capture, because the
+    // member's own user id legitimately contains the letters `org_`.
+    const values = control.calls.flatMap((call) => [
+      ...Object.values(call.params),
+      ...Object.values(call.query),
+      ...Object.values(call.headers),
+    ]);
+    check(
+      'no org id reaches Stripe in any parameter, query value or header',
+      values.every((value) => !String(value).startsWith('org_')) &&
+        !JSON.stringify(control.calls).includes('org_acme'),
+      JSON.stringify(values),
+    );
+  } finally {
+    control.restore();
+  }
+}
+
+// ══ 10. A personal owner behaves exactly as before ═════════════════════════
+//
+// Requirement 19.3. The refusal above is a new branch on a shipped route, so the
+// two personal-owner behaviours most likely to be broken by it are re-asserted
+// here: `past_due` still routes to the portal (requirement 17 - the remedy is the
+// CARD, and the tenant keeps the plan), and a tenant with no Stripe customer still
+// gets the 404 that says so rather than a refusal about an organisation.
+
+console.log('\nA personal owner is unaffected, including past_due (Requirement 19.3)');
+{
+  const stub = stripeStub();
+  try {
+    await store.upsertTenant({
+      id: 'user_past_due',
+      email: 'dunning@example.com',
+      tier: 'pro',
+      status: 'past_due',
+      stripeCustomerId: 'cus_past_due',
+    });
+
+    const portal = await api(hostedEnv(), '/api/billing-portal', { token: 'user_past_due' });
+    check(
+      'a past_due personal tenant still reaches the Billing Portal',
+      portal.status === 200 && portal.body?.url === 'https://billing.stripe.com/p/session/bps_1',
+      `${portal.status} ${JSON.stringify(portal.body)}`,
+    );
+    check(
+      'for their own customer',
+      stub.callsTo('/v1/billing_portal/sessions')[0]?.params['customer'] === 'cus_past_due',
+      JSON.stringify(stub.callsTo('/v1/billing_portal/sessions')[0]?.params),
+    );
+    check(
+      'and the row is untouched by the visit',
+      (await store.getTenant('user_past_due'))?.status === 'past_due',
+      JSON.stringify(await store.getTenant('user_past_due')),
+    );
+
+    // Unchanged from section 8, restated here because it is the other branch the
+    // new refusal sits above: a personal owner with nothing to manage must still
+    // read as "nothing to manage", never as "managed elsewhere".
+    const fresh = await api(hostedEnv(), '/api/billing-portal', { token: 'user_personal_fresh' });
+    check(
+      'a personal tenant with no Stripe customer still gets the 404',
+      fresh.status === 404 && /no billing account/i.test(fresh.body?.error ?? ''),
+      `${fresh.status} ${JSON.stringify(fresh.body)}`,
+    );
+    check(
+      'and NOT a billing_managed refusal',
+      fresh.body?.code === undefined,
+      JSON.stringify(fresh.body),
+    );
   } finally {
     stub.restore();
   }

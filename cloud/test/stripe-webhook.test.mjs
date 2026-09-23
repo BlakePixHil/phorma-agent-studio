@@ -548,6 +548,147 @@ console.log('\nAll three resolution paths, and the recorded failure (task 5.4)')
   }
 }
 
+// ══ 4b. A Stripe-supplied id is still NARROWED to a user (multi-org task 3) ══
+//
+// Feature: multi-organisation-phorma, Property 3: Owner id validation is a
+// classifier applied only on writes.
+//
+// `/api/provision` widened from `isClerkUserId` to `isOwnerId` so an organisation
+// tenant row can exist at all. These three paths deliberately did NOT, and these
+// are the load-bearing assertions - they are what fails if somebody later
+// "finishes" the widening for symmetry.
+//
+// The reason is not caution for its own sake. An organisation is invoiced by
+// Phorma Labs and `/api/checkout` refuses an organisation owner outright, so an
+// `org_` id can never legitimately arrive from Stripe. Widening a classifier whose
+// input is supplied by a third party would only broaden what an inbound value is
+// allowed to claim, in exchange for nothing - and what it would claim here is
+// "attach this payment to that organisation".
+
+console.log('\nAn org_ id from Stripe resolves nobody, on all three paths (requirement 3)');
+{
+  const stub = stripeStub();
+  try {
+    const ORG = 'org_webhook_alpha';
+
+    // Path 1: `client_reference_id` on a Checkout Session. The one path that works
+    // before any mapping exists, which is exactly why it must stay narrow.
+    CUSTOMERS['cus_org_ref'] = { id: 'cus_org_ref', metadata: {} };
+    SUBSCRIPTIONS['sub_org_ref'] = subscriptionObject({ id: 'sub_org_ref', customer: 'cus_org_ref' });
+    const referenced = stripeEvent('checkout.session.completed', {
+      id: 'cs_org_ref',
+      object: 'checkout.session',
+      mode: 'subscription',
+      client_reference_id: ORG,
+      customer: 'cus_org_ref',
+      subscription: 'sub_org_ref',
+      payment_status: 'paid',
+    });
+    const first = await deliver(hostedEnv(), referenced);
+    check(
+      'an org_ client_reference_id resolves nobody',
+      first.status === 200 && first.body?.status === 'unresolved',
+      `${first.status} ${JSON.stringify(first.body)}`,
+    );
+    check(
+      'and is recorded with a null tenant rather than dropped',
+      (await eventRow(referenced.id))?.tenant_id === null,
+      JSON.stringify(await eventRow(referenced.id)),
+    );
+    check(
+      'no organisation tenant row is created from a Stripe id',
+      (await store.getTenant(ORG)) === null,
+      JSON.stringify(await store.getTenant(ORG)),
+    );
+    // The refusal is logged, and deliberately does NOT echo the value: this is an
+    // attacker-reachable field on a public route, and a log line is a place a
+    // reflected value gets read by a human later.
+    check(
+      'the fall-through is logged without echoing the refused value',
+      stub.logs.some(
+        (line) => /client_reference_id that is not a Clerk user id shape/.test(line) && !line.includes(ORG),
+      ),
+      stub.logs.join(' | '),
+    );
+
+    // Path 2: `metadata.clerk_user_id` on the customer. Same narrowing, and the
+    // reason it matters more here: customer metadata is operator-editable in the
+    // Stripe Dashboard.
+    CUSTOMERS['cus_org_meta'] = { id: 'cus_org_meta', metadata: { clerk_user_id: ORG } };
+    const metadata = stripeEvent(
+      'customer.subscription.created',
+      subscriptionObject({ id: 'sub_org_meta', customer: 'cus_org_meta' }),
+    );
+    const second = await deliver(hostedEnv(), metadata);
+    check(
+      'an org_ metadata.clerk_user_id resolves nobody',
+      second.status === 200 && second.body?.status === 'unresolved',
+      `${second.status} ${JSON.stringify(second.body)}`,
+    );
+    check(
+      'and still creates no row',
+      (await store.getTenant(ORG)) === null,
+      JSON.stringify(await store.getTenant(ORG)),
+    );
+
+    // Path 3: the delayed-payment branch, which reads `client_reference_id` ALONE -
+    // no customer read at all, because asking for a redelivery of an event we will
+    // never act on is a non-2xx over nothing.
+    CUSTOMERS['cus_org_async'] = { id: 'cus_org_async', metadata: {} };
+    LINE_ITEMS['cs_org_async'] = [{ id: 'li_1', quantity: 1, price: TOPUP_PRICE }];
+    const failedAsync = stripeEvent('checkout.session.async_payment_failed', {
+      id: 'cs_org_async',
+      object: 'checkout.session',
+      mode: 'payment',
+      client_reference_id: ORG,
+      customer: 'cus_org_async',
+      payment_intent: 'pi_org_async',
+      payment_status: 'unpaid',
+    });
+    const third = await deliver(hostedEnv(), failedAsync);
+    check(
+      'the delayed-payment branch is still a 2xx',
+      third.status === 200,
+      `${third.status} ${JSON.stringify(third.body)}`,
+    );
+    check(
+      'and records an org_ reference as no tenant at all',
+      (await eventRow(failedAsync.id))?.tenant_id === null,
+      JSON.stringify(await eventRow(failedAsync.id)),
+    );
+    check(
+      'no grant exists under the organisation id',
+      (await grantRows(ORG)).length === 0,
+      JSON.stringify(await grantRows(ORG)),
+    );
+
+    // The positive control, so none of the above is passing because resolution is
+    // simply broken: the same three shapes with a USER id still resolve.
+    CUSTOMERS['cus_user_ref'] = { id: 'cus_user_ref', metadata: {} };
+    SUBSCRIPTIONS['sub_user_ref'] = subscriptionObject({ id: 'sub_user_ref', customer: 'cus_user_ref' });
+    const control = await deliver(
+      hostedEnv(),
+      stripeEvent('checkout.session.completed', {
+        id: 'cs_user_ref',
+        object: 'checkout.session',
+        mode: 'subscription',
+        client_reference_id: 'user_webhook_control',
+        customer: 'cus_user_ref',
+        subscription: 'sub_user_ref',
+        payment_status: 'paid',
+      }),
+    );
+    check(
+      'a user_ client_reference_id on the same shape still resolves',
+      control.body?.status === 'applied' &&
+        (await store.getTenant('user_webhook_control'))?.status === 'active',
+      `${JSON.stringify(control.body)} ${JSON.stringify(await store.getTenant('user_webhook_control'))}`,
+    );
+  } finally {
+    stub.restore();
+  }
+}
+
 // ══ 5. Top-ups (task 5.5, requirements 21, 22) ═════════════════════════════
 
 console.log('\nA credit pack writes exactly one grant, keyed on the payment (requirement 21)');

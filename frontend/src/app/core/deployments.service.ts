@@ -32,6 +32,7 @@
 
 import { Injectable, computed, inject, signal } from '@angular/core';
 
+import { ActiveOwnerService } from './active-owner.service';
 import { DesktopAuthService } from './desktop-auth.service';
 import { PhormaCloudService } from './phorma-cloud.service';
 import { WorkflowService } from './workflow.service';
@@ -77,6 +78,10 @@ export class DeploymentsService {
   private readonly desktopAuth = inject(DesktopAuthService);
   private readonly workflow = inject(WorkflowService);
   private readonly toast = inject(ToastService);
+  // A DI LEAF - it injects nothing at all - so this edge is safe even on the
+  // transport path. It supplies the `X-Phorma-Owner` header this service's
+  // `fetch-bearer` transport sends beside its bearer.
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   /** Raw rows from the last successful refresh. */
   private readonly rows = signal<DeploymentSummary[]>([]);
@@ -145,6 +150,26 @@ export class DeploymentsService {
       this.loading.set(false);
       this.loaded.set(true);
     }
+  }
+
+  /**
+   * Drops the previous owner's list and re-reads it for the ACTIVE owner
+   * (multi-organisation-phorma, Requirement 20.6).
+   *
+   * The rows are cleared BEFORE the refresh rather than replaced by it, because a
+   * refresh is an async round trip and a list of an organisation's deployments left
+   * on screen under a personal account - or worse, the other way round - is state
+   * belonging to the previous owner presented as the new owner's. `loaded` goes
+   * back to false with them, so the surface renders its loading state rather than
+   * "no deployments", which is the one answer that would stop somebody looking.
+   */
+  async resetForOwner(): Promise<void> {
+    this.rows.set([]);
+    this.month.set('');
+    this.error.set(null);
+    this.busyWorkflowId.set(null);
+    this.loaded.set(false);
+    await this.refresh();
   }
 
   /**
@@ -296,6 +321,11 @@ export class DeploymentsService {
         'Content-Type': 'application/json',
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      // The ACTIVE owner, beside the bearer. This list is the sharpest case for it:
+      // `/api/deployments` answers for the RESOLVED owner, so without the header a
+      // switched desktop install would render its personal deployments under an
+      // organisation's name (multi-organisation-phorma, Requirement 20.6).
+      Object.assign(headers, this.activeOwner.ownerHeader());
       const response = await fetch(url, { method: init.method, headers, body: init.body });
       return { status: response.status, ok: response.ok, body: await response.text() };
     },

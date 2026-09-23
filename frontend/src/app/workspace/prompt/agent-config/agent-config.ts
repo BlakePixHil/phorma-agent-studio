@@ -139,6 +139,19 @@ export class AgentConfig {
   );
 
   /**
+   * True when this panel should OFFER that subscription
+   * (multi-organisation-phorma, Requirement 19.7).
+   *
+   * While an organisation owner is active, Phorma Labs bills it, so both the
+   * Subscribe CTA and the `past_due` notice are ABSENT rather than disabled - the
+   * worker refuses `/api/checkout` with `billing_managed` for that owner, and a
+   * button that ends in a refusal reads as a broken app.
+   */
+  protected readonly offerPhormaCloudSubscription = computed(
+    () => this.needsPhormaCloudSubscription() && this.phormaCloud.selfServeBilling(),
+  );
+
+  /**
    * True when this agent is blocked because a PAYMENT failed rather than because
    * there is no plan (requirement 17). The template swaps the Subscribe CTA for
    * the update-card notice on this, since selling a second subscription to a

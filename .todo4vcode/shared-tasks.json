@@ -23,27 +23,6 @@
       "order": 2000
     },
     {
-      "id": "scan-algkzh",
-      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
-      "description": "[NOTE] cloud/wrangler.jsonc:100",
-      "tags": [
-        "note",
-        "cloud/wrangler.jsonc",
-        "cloud/wrangler.jsonc:100"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1788922081761,
-      "order": 3000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/wrangler.jsonc",
-        "line": 100,
-        "marker": "NOTE"
-      }
-    },
-    {
       "id": "scan-1lenuej",
       "text": "what this exercises about the handler's ordering choice. The event row is",
       "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1072",
@@ -82,6 +61,111 @@
         "type": "comment-scan",
         "file": "cloud/test/telemetry.test.mjs",
         "line": 605,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1seikit",
+      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
+      "description": "[NOTE] cloud/wrangler.jsonc:108",
+      "tags": [
+        "note",
+        "cloud/wrangler.jsonc",
+        "cloud/wrangler.jsonc:108"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1790040245971,
+      "order": 6000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/wrangler.jsonc",
+        "line": 108,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1mvb582",
+      "text": "the prose: it contains \"subscription\", \"payment failed\" and a 402,",
+      "description": "[NOTE] frontend/src/app/core/run-controller.service.billing.spec.ts:74",
+      "tags": [
+        "note",
+        "frontend/src/app/core/run-controller.service.billing.spec.ts",
+        "frontend/src/app/core/run-controller.service.billing.spec.ts:74"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1790040250519,
+      "order": 7000,
+      "source": {
+        "type": "comment-scan",
+        "file": "frontend/src/app/core/run-controller.service.billing.spec.ts",
+        "line": 74,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-1je6zxx",
+      "text": "the dividing line is rendered ONCE, by the resize handle's hairline",
+      "description": "[NOTE] frontend/src/app/layout/sidebar/sidebar.scss:19",
+      "tags": [
+        "note",
+        "frontend/src/app/layout/sidebar/sidebar.scss",
+        "frontend/src/app/layout/sidebar/sidebar.scss:19"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1790041351211,
+      "order": 8000,
+      "source": {
+        "type": "comment-scan",
+        "file": "frontend/src/app/layout/sidebar/sidebar.scss",
+        "line": 19,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-ovjl02",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1208",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:1208"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1790069835803,
+      "order": 9000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 1208,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-ih31m2",
+      "text": "what this exercises about the handler's ordering choice. The event row is",
+      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1213",
+      "tags": [
+        "note",
+        "cloud/test/stripe-webhook.test.mjs",
+        "cloud/test/stripe-webhook.test.mjs:1213"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1790069907456,
+      "order": 10000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/test/stripe-webhook.test.mjs",
+        "line": 1213,
         "marker": "NOTE"
       }
     }

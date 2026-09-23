@@ -80,7 +80,15 @@ export type CloudOperation =
   | 'backup-revisions'
   | 'backup-download'
   | 'backup-delete'
-  | 'backup-delete-all';
+  | 'backup-delete-all'
+  // multi-organisation-phorma Phase 3: an editor's change, held for a builder.
+  // Phorma Cloud only, like the backup family and for the same reason - a BYO
+  // worker binds no D1 or R2 and answers 404 on the whole surface.
+  | 'proposal-list'
+  | 'proposal-create'
+  | 'proposal-detail'
+  | 'proposal-publish'
+  | 'proposal-reject';
 
 /**
  * Everything an endpoint may need to build its path.
@@ -107,6 +115,13 @@ export interface CloudEndpointContext {
   ifMatch?: number | null;
   /** Destroy a tombstone rather than creating one. */
   purge?: boolean;
+  /**
+   * The proposal a detail read, a publish or a reject addresses.
+   *
+   * The WIRE id (`prop-...`), never the rowid - the worker deliberately keeps its
+   * own row identity out of every URL.
+   */
+  proposalId?: string;
 }
 
 /** Logical payload for `push-spec`: the spec plus its connection metadata. */
@@ -392,6 +407,11 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
       ),
       truncated: asRecord(parsed)?.['truncated'] === true,
       deployments: arrayField(parsed, 'deployments') ?? [],
+      // The caller's decided proposals. Read as an EMPTY ARRAY when absent, which
+      // is what a BYO worker and an older hosted worker both send - and note that
+      // this unwrapper builds a new object, so a field left out here is a field the
+      // studio never sees no matter what the worker returned.
+      proposals: arrayField(parsed, 'proposals') ?? [],
     }),
   },
   // Settles one pending approval. Instance-scoped, because a gate belongs to the
@@ -475,6 +495,62 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
     scope: 'root',
     path: () => '/api/backups',
   },
+  // ── multi-organisation-phorma Phase 3: proposals ───────────────────────────
+  //
+  // All root-scoped, and that is the point rather than a detail: a proposal is a
+  // control-plane record and creating one must not be able to touch the deployed
+  // instance (Requirement 11.10). An instance-scoped route would be exactly the
+  // edge that guarantee forbids.
+  'proposal-list': {
+    method: 'GET',
+    scope: 'root',
+    path: (ctx) => `/api/proposals/${encodeURIComponent(ctx.workflowId)}`,
+    unwrap: (parsed) => ({
+      workflowId: stringField(parsed, 'workflowId') ?? '',
+      proposals: arrayField(parsed, 'proposals') ?? [],
+      proposalsKept: numberField(parsed, 'proposalsKept') ?? 0,
+    }),
+  },
+  // The body travels as-is: `{spec, connections, liveSpec}`. The worker rebuilds
+  // `connections` to `{id, name}` and stores neither anything else nor `liveSpec`,
+  // which it uses for the scope check alone.
+  'proposal-create': {
+    method: 'POST',
+    scope: 'root',
+    path: (ctx) => `/api/proposals/${encodeURIComponent(ctx.workflowId)}`,
+    body: (payload) => payload,
+  },
+  'proposal-detail': {
+    method: 'GET',
+    scope: 'root',
+    path: (ctx) =>
+      `/api/proposals/${encodeURIComponent(ctx.workflowId)}/` +
+      `${encodeURIComponent(ctx.proposalId ?? '')}`,
+    unwrap: (parsed) => ({
+      proposal: asRecord(parsed)?.['proposal'] ?? null,
+      spec: asRecord(parsed)?.['spec'] ?? null,
+      connections: arrayField(parsed, 'connections') ?? [],
+    }),
+  },
+  // Both transitions carry `{revision, reason?}`. The revision is REQUIRED by the
+  // worker and is never looked up there: a transition that read it itself would be
+  // a read-then-write, and two reviewers would both be told they won.
+  'proposal-publish': {
+    method: 'POST',
+    scope: 'root',
+    path: (ctx) =>
+      `/api/proposals/${encodeURIComponent(ctx.workflowId)}/` +
+      `${encodeURIComponent(ctx.proposalId ?? '')}/publish`,
+    body: (payload) => payload,
+  },
+  'proposal-reject': {
+    method: 'POST',
+    scope: 'root',
+    path: (ctx) =>
+      `/api/proposals/${encodeURIComponent(ctx.workflowId)}/` +
+      `${encodeURIComponent(ctx.proposalId ?? '')}/reject`,
+    body: (payload) => payload,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -501,6 +577,9 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
  *   a Phorma Cloud control-plane concern, and `DeploymentsService` pins the
  *   `phorma` table for exactly that reason. An AWS deployment is enumerable from
  *   the user's own AWS console, so there is nothing to recover here.
+ * - the five `proposal-*` operations - a review queue belongs to an organisation,
+ *   which is a Phorma Cloud concept. `ProposalsService` pins the `phorma` table
+ *   the same way, so a subscriber deploying to AWS still reviews proposals.
  * - `list-notifications`, `approve` - the notification centre is a Phorma Cloud
  *   control-plane concern for the same reason, and
  *   `DeployedNotificationsService` pins the `phorma` table the same way. The AWS

@@ -96,7 +96,15 @@ function statementsOf(file) {
     .filter(statement => statement.length > 0);
 }
 
-for (const file of ['0001_init.sql', '0003_billing.sql', '0004_billing_ordering.sql', '0005_workflow_backups.sql']) {
+for (const file of [
+  '0001_init.sql',
+  '0003_billing.sql',
+  '0004_billing_ordering.sql',
+  '0005_workflow_backups.sql',
+  // 0006 adds the nullable `body_key` column this store now selects. Applied here
+  // because it is applied on the hosted database, not to make a test pass.
+  '0006_organisations.sql',
+]) {
   for (const statement of statementsOf(file)) {
     await DB.prepare(statement).run();
   }
@@ -388,9 +396,19 @@ console.log('\nPurge and delete-all');
   await store.claimRevision('user_all', 'wf-e', null, next());
   await store.claimRevision('user_all', 'wf-f', null, next());
   const removed = await store.deleteAllForTenant('user_all');
-  // The ids come back so the caller can delete the bodies: this table is the ONLY
-  // index of which R2 keys belong to a tenant.
-  check('delete-all reports every workflow id', removed.sort().join(',') === 'wf-e,wf-f', JSON.stringify(removed));
+  // Whole ROWS come back, not ids, so the caller can delete the bodies: this table
+  // is the ONLY index of which R2 keys belong to a tenant, and a claimed row's keys
+  // live under a prefix that only `body_key` records (Requirement 4.7).
+  check(
+    'delete-all reports every workflow id',
+    removed.map(row => row.workflowId).sort().join(',') === 'wf-e,wf-f',
+    JSON.stringify(removed),
+  );
+  check(
+    'and each row carries the prefix its bodies live under',
+    removed.every(row => 'bodyKey' in row),
+    JSON.stringify(removed),
+  );
   check('the tenant has no rows left', (await store.count('user_all')) === 0);
   check('delete-all on an empty tenant is a no-op', (await store.deleteAllForTenant('user_all')).length === 0);
 }

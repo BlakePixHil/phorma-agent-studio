@@ -18,6 +18,7 @@ import {
   type UsageLedgerEntry,
 } from '@phorma/engine';
 
+import { ActiveOwnerService } from './active-owner.service';
 import type { ChatThread } from './assistant-chat.model';
 import type { WorkflowBackupState } from './backup.model';
 import type { InstalledConnector } from './connectors.model';
@@ -28,7 +29,17 @@ import { WORKFLOW_VERSIONS_KEEP, type WorkflowVersion } from './workflow-version
 import { TelemetryService } from './telemetry.service';
 
 const DB_NAME = 'phorma-agent-studio-db';
-const DB_VERSION = 11;
+/**
+ * v12 adds {@link OWNER_FIELD} to every workflow-scoped store
+ * (multi-organisation-phorma, Requirement 20.13).
+ *
+ * THE ONE IRREVERSIBLE STEP in that feature: it runs on the user's machine on
+ * first launch of the new build and no worker deploy rolls it back. So the
+ * migration is deliberately the smallest thing that can be correct - it adds a
+ * field, it deletes nothing, and it rewrites no value that already exists. See
+ * {@link OWNER_SCOPED_STORES}.
+ */
+const DB_VERSION = 12;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -140,6 +151,82 @@ const WORKFLOW_STATE_BY_WORKFLOW = 'by-workflow';
 const WORKFLOW_BACKUP_STATE_STORE = 'workflow-backup-state';
 
 /**
+ * The owner a locally stored row belongs to (multi-organisation-phorma,
+ * Requirement 20.13). `null` IS the personal account.
+ *
+ * NOT indexed, deliberately. Every read that needs it already fetches a whole
+ * store or a whole workflow bucket and sorts in memory, so an index would buy
+ * nothing and would need a v13 to add it to the five stores that have indexes
+ * already. Filtering happens in {@link ownedBy}.
+ */
+export const OWNER_FIELD = 'ownerId';
+
+/**
+ * The stores a row's owner is recorded in, and the ONLY stores v12 touches.
+ *
+ * Exactly the workflow-scoped ones. The global libraries - `skills`, `prompts`,
+ * `connections`, `connectors`, `eval-suites`, `eval-runs` and `chat-threads` -
+ * are deliberately absent: Requirement 20.13 names the local library, the local
+ * run history and the usage panel, because credits are the unit those render and
+ * a surface mixing two payers reports a number belonging to nobody. A skill or a
+ * connection is a tool the person owns, not a thing the organisation paid for,
+ * and scoping one would hide a user's own work from them on a switch.
+ *
+ * The KEYCHAIN is absent for a stronger reason, stated in the design's rejected
+ * alternatives: a browser member has no keychain path at all, and scoping one
+ * would CREATE the artefact the "no customer credential on a build machine"
+ * principle forbids.
+ */
+export const OWNER_SCOPED_STORES = [
+  WORKFLOWS_STORE,
+  RUNS_STORE,
+  USAGE_STORE,
+  WORKFLOW_VERSIONS_STORE,
+  WORKFLOW_STATE_STORE,
+  WORKFLOW_BACKUP_STATE_STORE,
+] as const;
+
+/** A stored row, with or without the v12 owner stamp. */
+type OwnedRow = { [OWNER_FIELD]?: string | null };
+
+/**
+ * The owner a row belongs to, reading an ABSENT stamp as the personal account
+ * (Requirement 20.15).
+ *
+ * The same absent-is-ordinary discipline `workflow_backups.body_key` follows. It
+ * matters in two places at once: a row written by a build older than v12 in the
+ * window before the upgrade ran, and a row written by any future code path that
+ * forgets to stamp. Both read as the personal owner, which is the account that
+ * wrote them.
+ */
+function ownerOf(row: OwnedRow | undefined | null): string | null {
+  const owner = row?.[OWNER_FIELD];
+  return typeof owner === 'string' && owner.length > 0 ? owner : null;
+}
+
+/** True when `row` belongs to `owner`. */
+function ownedBy(row: OwnedRow | undefined | null, owner: string | null): boolean {
+  return ownerOf(row) === owner;
+}
+
+/**
+ * Strips the owner stamp off a row on its way out of the store.
+ *
+ * Only the WORKFLOWS store needs this, and it needs it badly: a `WorkflowSpec`
+ * is hashed (`canonicalSpecHashOf`) by the backup and proposal paths, and the
+ * worker hashes the spec IT was sent. An extra member riding along on a spec read
+ * out of the library would make every hash disagree with the worker's, which
+ * surfaces as a permanent `proposal_stale` or a backup that re-uploads forever.
+ * The run, usage and version rows are not hashed and already carry a stored-only
+ * `workflowKey` alongside, so they keep the stamp.
+ */
+function withoutOwner<T extends object>(row: T): T {
+  if (!(OWNER_FIELD in row)) return row;
+  const { [OWNER_FIELD]: _dropped, ...rest } = row as T & OwnedRow;
+  return rest as T;
+}
+
+/**
  * IndexedDB-backed persistence for workflow documents.
  *
  * IndexedDB is used (rather than localStorage) because workflow graphs can
@@ -151,8 +238,48 @@ export class IndexedDbStorageService {
   // Safe DI direction: `TelemetryService` is a leaf that injects only
   // `TauriService` and no storage service, so this edge cannot come back here.
   private readonly telemetry = inject(TelemetryService);
+  /**
+   * Which owner's rows this session reads and writes (Requirement 20.13).
+   *
+   * Safe from anywhere, which is what this service needs: `ActiveOwnerService`
+   * injects NOTHING at all and `scripts/check-capability-isolation.mjs` keeps it
+   * that way. Almost every service in the studio injects this one, so a storage
+   * edge into anything with dependencies of its own would put half the app in the
+   * injector path of the other half.
+   */
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   private dbPromise: Promise<IDBDatabase> | null = null;
+
+  /**
+   * The owner every row written in this session is stamped with, and the one every
+   * owner-scoped read filters on. `null` is the personal account.
+   *
+   * Read per call rather than cached, because a switch moves it mid-session and a
+   * cached value would keep a switched studio writing rows under the previous
+   * owner (Requirement 20.6).
+   */
+  private owner(): string | null {
+    return this.activeOwner.storageOwner();
+  }
+
+  /** Adds the owner stamp to a row on its way into an owner-scoped store. */
+  private stamped<T extends object>(row: T): T & OwnedRow {
+    return { ...row, [OWNER_FIELD]: this.owner() };
+  }
+
+  /**
+   * Keeps only the ACTIVE owner's rows (Requirements 20.13, 20.15).
+   *
+   * Filtering at the READ rather than deleting on switch is the decision that
+   * makes Requirement 20.9 possible at all: a switch is a change of VIEW, and a
+   * switch that pruned rows could not then present an owner's surfaces as they
+   * were when the user switched back.
+   */
+  private ownedRows<T extends object>(rows: readonly T[]): T[] {
+    const owner = this.owner();
+    return rows.filter(row => ownedBy(row as OwnedRow, owner));
+  }
 
   /**
    * Per-value / per-workflow retention bounds for the `workflow-state` store.
@@ -173,24 +300,52 @@ export class IndexedDbStorageService {
    */
   private readonly stateStats = new Map<string, StateScopeStats>();
 
-  async listWorkflows(): Promise<WorkflowSpec[]> {
-    const db = await this.open();
-    return this.request<WorkflowSpec[]>(
-      db.transaction(WORKFLOWS_STORE, 'readonly').objectStore(WORKFLOWS_STORE).getAll(),
-    );
+  /**
+   * The {@link stateStats} key for a state key: the ACTIVE owner plus the workflow
+   * scope, joined by a character no id can hold.
+   *
+   * Owner-qualified because the retention bounds are counted per owner
+   * (see {@link loadStateScope}), so a cache keyed on the scope alone would carry
+   * one owner's totals across a switch and evict against the wrong number.
+   */
+  private stateStatsKey(key: string): string {
+    return `${this.owner() ?? ''}\u0000${stateScopeOf(key)}`;
   }
 
+  /** The ACTIVE owner's library (Requirement 20.13), owner stamp stripped. */
+  async listWorkflows(): Promise<WorkflowSpec[]> {
+    const db = await this.open();
+    const rows = await this.request<WorkflowSpec[]>(
+      db.transaction(WORKFLOWS_STORE, 'readonly').objectStore(WORKFLOWS_STORE).getAll(),
+    );
+    return this.ownedRows(rows).map(withoutOwner);
+  }
+
+  /**
+   * One library entry, or undefined when it belongs to another owner.
+   *
+   * Scoped like the list, and for a reason worth stating: a workflow id is the key
+   * of a document TAB and of a deployment, so an id left over from the previous
+   * owner - in a restored session, a notification deep link, a backup record -
+   * must read as absent rather than resolving somebody else's workflow of the same
+   * name.
+   */
   async getWorkflow(id: string): Promise<WorkflowSpec | undefined> {
     const db = await this.open();
-    return this.request<WorkflowSpec | undefined>(
+    const row = await this.request<WorkflowSpec | undefined>(
       db.transaction(WORKFLOWS_STORE, 'readonly').objectStore(WORKFLOWS_STORE).get(id),
     );
+    if (row === undefined || !ownedBy(row as OwnedRow, this.owner())) return undefined;
+    return withoutOwner(row);
   }
 
   async saveWorkflow(spec: WorkflowSpec): Promise<void> {
     const db = await this.open();
     await this.request(
-      db.transaction(WORKFLOWS_STORE, 'readwrite').objectStore(WORKFLOWS_STORE).put(spec),
+      db
+        .transaction(WORKFLOWS_STORE, 'readwrite')
+        .objectStore(WORKFLOWS_STORE)
+        .put(this.stamped(spec)),
     );
   }
 
@@ -213,21 +368,25 @@ export class IndexedDbStorageService {
             store.index(RUNS_BY_WORKFLOW).getAll(workflowId ?? 'draft'),
           )
         : await this.request<RunRecord[]>(store.getAll());
-    return records.sort((a, b) => b.summary.startedAt - a.summary.startedAt);
+    return this.ownedRows(records).sort((a, b) => b.summary.startedAt - a.summary.startedAt);
   }
 
   async getRun(id: string): Promise<RunRecord | undefined> {
     const db = await this.open();
-    return this.request<RunRecord | undefined>(
+    const row = await this.request<RunRecord | undefined>(
       db.transaction(RUNS_STORE, 'readonly').objectStore(RUNS_STORE).get(id),
     );
+    return row !== undefined && ownedBy(row as OwnedRow, this.owner()) ? row : undefined;
   }
 
   /** Upserts a run record (used mid-run and again when the run settles). */
   async saveRun(record: RunRecord): Promise<void> {
     const db = await this.open();
     await this.request(
-      db.transaction(RUNS_STORE, 'readwrite').objectStore(RUNS_STORE).put(toStoredRun(record)),
+      db
+        .transaction(RUNS_STORE, 'readwrite')
+        .objectStore(RUNS_STORE)
+        .put(this.stamped(toStoredRun(record))),
     );
   }
 
@@ -268,14 +427,20 @@ export class IndexedDbStorageService {
     const rows = await this.request<StoredUsage[]>(
       store.index(USAGE_BY_STARTED).getAll(IDBKeyRange.lowerBound(since)),
     );
-    return rows.sort((a, b) => b.startedAt - a.startedAt);
+    // The usage panel is the DECISIVE case for owner scoping: credits are the unit
+    // it renders, so a panel mixing two payers reports a number belonging to
+    // neither (Requirement 20.13).
+    return this.ownedRows(rows).sort((a, b) => b.startedAt - a.startedAt);
   }
 
   /** Upserts a run's usage-ledger row and applies retention. */
   async saveUsage(entry: UsageLedgerEntry): Promise<void> {
     const db = await this.open();
     await this.request(
-      db.transaction(USAGE_STORE, 'readwrite').objectStore(USAGE_STORE).put(toStoredUsage(entry)),
+      db
+        .transaction(USAGE_STORE, 'readwrite')
+        .objectStore(USAGE_STORE)
+        .put(this.stamped(toStoredUsage(entry))),
     );
     await this.pruneUsage();
   }
@@ -452,7 +617,7 @@ export class IndexedDbStorageService {
     const versions = await this.request<WorkflowVersion[]>(
       store.index(WORKFLOW_VERSIONS_BY_WORKFLOW).getAll(workflowId),
     );
-    return versions.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+    return this.ownedRows(versions).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
   }
 
   /**
@@ -466,7 +631,7 @@ export class IndexedDbStorageService {
     const store = db
       .transaction(WORKFLOW_VERSIONS_STORE, 'readonly')
       .objectStore(WORKFLOW_VERSIONS_STORE);
-    const all = await this.request<WorkflowVersion[]>(store.getAll());
+    const all = this.ownedRows(await this.request<WorkflowVersion[]>(store.getAll()));
     const ids = new Set<string>();
     for (const version of all) {
       if (version.deployed) ids.add(version.workflowId);
@@ -480,7 +645,7 @@ export class IndexedDbStorageService {
       db
         .transaction(WORKFLOW_VERSIONS_STORE, 'readwrite')
         .objectStore(WORKFLOW_VERSIONS_STORE)
-        .put(version),
+        .put(this.stamped(version)),
     );
     await this.pruneWorkflowVersions(version.workflowId);
   }
@@ -505,23 +670,33 @@ export class IndexedDbStorageService {
   /** Every workflow this install has uploaded, for the settings surface. */
   async listBackupState(): Promise<WorkflowBackupState[]> {
     const db = await this.open();
-    return this.request<WorkflowBackupState[]>(
+    const rows = await this.request<WorkflowBackupState[]>(
       db
         .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readonly')
         .objectStore(WORKFLOW_BACKUP_STATE_STORE)
         .getAll(),
     );
+    return this.ownedRows(rows);
   }
 
-  /** What was last uploaded for one workflow, or undefined. */
+  /**
+   * What was last uploaded for one workflow, or undefined.
+   *
+   * Owner-scoped, and the consequence is the right one: after a switch the next
+   * upload for a workflow of the same id finds no row, so it carries no `If-Match`
+   * and the worker decides. That is safer than reusing a revision recorded against
+   * a DIFFERENT tenant's backup, which would answer `backup_conflict` and read as
+   * a broken feature.
+   */
   async getBackupState(workflowId: string): Promise<WorkflowBackupState | undefined> {
     const db = await this.open();
-    return this.request<WorkflowBackupState | undefined>(
+    const row = await this.request<WorkflowBackupState | undefined>(
       db
         .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readonly')
         .objectStore(WORKFLOW_BACKUP_STATE_STORE)
         .get(workflowId),
     );
+    return row !== undefined && ownedBy(row as OwnedRow, this.owner()) ? row : undefined;
   }
 
   async saveBackupState(state: WorkflowBackupState): Promise<void> {
@@ -530,7 +705,7 @@ export class IndexedDbStorageService {
       db
         .transaction(WORKFLOW_BACKUP_STATE_STORE, 'readwrite')
         .objectStore(WORKFLOW_BACKUP_STATE_STORE)
-        .put(state),
+        .put(this.stamped(state)),
     );
   }
 
@@ -639,12 +814,17 @@ export class IndexedDbStorageService {
     this.stateStats.clear();
   }
 
-  /** Requirements 12.1, 12.18, 12.20. An expired entry reads as absent. */
+  /**
+   * Requirements 12.1, 12.18, 12.20. An expired entry reads as absent.
+   *
+   * So does ANOTHER OWNER's entry (multi-organisation-phorma, Requirement 20.13),
+   * through {@link liveStateRow}. Read the note there for the one residual this
+   * store carries that the others do not.
+   */
   async getState(key: string): Promise<StateEntry | undefined> {
     return this.stateTransaction('readonly', async store => {
-      const row = await this.request<StoredStateEntry | undefined>(store.get(key));
-      const now = Date.now();
-      return row === undefined || isExpiredState(row, now) ? undefined : toStateEntry(row);
+      const row = await this.liveStateRow(store, key, Date.now());
+      return row === undefined ? undefined : toStateEntry(row);
     });
   }
 
@@ -668,13 +848,13 @@ export class IndexedDbStorageService {
     // Size is settled BEFORE the transaction opens, so a rejected write leaves
     // the stored value untouched (Requirement 12.16).
     const bytes = assertStateValueFits(key, value, maxBytes);
-    const scope = stateScopeOf(key);
+    const scope = this.stateStatsKey(key);
     try {
       await this.stateTransaction('readwrite', async store => {
         const now = Date.now();
         const live = await this.liveStateRow(store, key, now);
         const stats = await this.makeStateRoom(store, key, bytes, now, live);
-        await this.request(store.put(toStoredState(key, value, bytes, ttlSec, now)));
+        await this.request(store.put(toStoredState(key, value, bytes, ttlSec, now, this.owner())));
         this.stateStats.set(scope, stats);
       });
     } catch (error) {
@@ -686,10 +866,15 @@ export class IndexedDbStorageService {
 
   /** Requirement 12.22. Deleting an absent key resolves without an error. */
   async deleteState(key: string): Promise<void> {
-    const scope = stateScopeOf(key);
+    const scope = this.stateStatsKey(key);
     try {
       await this.stateTransaction('readwrite', async store => {
         const now = Date.now();
+        // The RAW row first, because a foreign row must not be deleted
+        // (Requirement 20.9) and `liveStateRow` cannot tell "absent" from
+        // "somebody else's" - which is exactly what it is for on every other path.
+        const stored = await this.request<StoredStateEntry | undefined>(store.get(key));
+        if (stored !== undefined && !ownedBy(stored, this.owner())) return;
         const live = await this.liveStateRow(store, key, now);
         await this.request(store.delete(key));
         const stats = this.stateStats.get(scope);
@@ -715,8 +900,9 @@ export class IndexedDbStorageService {
       // Keys are strings, so `[prefix, prefix + \uffff]` is exactly the prefix
       // range: no code unit a key can hold sorts above \uffff.
       const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+      const owner = this.owner();
       await this.cursor(store.openCursor(range), row => {
-        if (!isExpiredState(row, now)) entries.push(toStateEntry(row));
+        if (!isExpiredState(row, now) && ownedBy(row, owner)) entries.push(toStateEntry(row));
         return entries.length < cap;
       });
       return entries;
@@ -737,7 +923,7 @@ export class IndexedDbStorageService {
     options?: { ttlSec?: number },
   ): Promise<boolean> {
     const bytes = assertStateValueFits(key, value, this.stateBounds.maxValueBytes);
-    const scope = stateScopeOf(key);
+    const scope = this.stateStatsKey(key);
     try {
       return await this.stateTransaction('readwrite', async store => {
         const now = Date.now();
@@ -746,7 +932,7 @@ export class IndexedDbStorageService {
         const matches = expected === undefined ? live === undefined : live?.value === expected;
         if (!matches) return false;
         const stats = await this.makeStateRoom(store, key, bytes, now, live);
-        await this.request(store.put(toStoredState(key, value, bytes, options?.ttlSec, now)));
+        await this.request(store.put(toStoredState(key, value, bytes, options?.ttlSec, now, this.owner())));
         this.stateStats.set(scope, stats);
         return true;
       });
@@ -756,14 +942,28 @@ export class IndexedDbStorageService {
     }
   }
 
-  /** The stored row for `key` when it exists and has not expired. */
+  /**
+   * The stored row for `key` when it exists, has not expired, and belongs to the
+   * ACTIVE owner.
+   *
+   * THE ONE RESIDUAL, stated here rather than left to be discovered: `key` is this
+   * store's PRIMARY key and it is `{workflowId}::{key}`, with no owner segment. So
+   * two owners holding the same workflow id AND the same state key share one row,
+   * and a write under one replaces it. Putting the owner in the key instead would
+   * have made v12 a key REWRITE rather than an added field, and a destructive
+   * migration is not a trade worth making for a collision that needs the same
+   * workflow to exist under two owners (a restore or an import) - in which case
+   * the state genuinely is the same workflow's. Every read is still owner-scoped,
+   * so no owner ever sees another's value.
+   */
   private async liveStateRow(
     store: IDBObjectStore,
     key: string,
     now: number,
   ): Promise<StoredStateEntry | undefined> {
     const row = await this.request<StoredStateEntry | undefined>(store.get(key));
-    return row === undefined || isExpiredState(row, now) ? undefined : row;
+    if (row === undefined || isExpiredState(row, now)) return undefined;
+    return ownedBy(row, this.owner()) ? row : undefined;
   }
 
   /**
@@ -780,9 +980,14 @@ export class IndexedDbStorageService {
     now: number,
     live: StoredStateEntry | undefined,
   ): Promise<StateScopeStats> {
+    // TWO keys, and they are not interchangeable: `scope` is the workflow segment
+    // the `by-workflow` INDEX is keyed on, and `statsKey` is the owner-qualified
+    // cache key. Passing the cache key to the index read would match nothing and
+    // the bound would never be reached.
     const scope = stateScopeOf(key);
+    const statsKey = this.stateStatsKey(key);
     const { maxKeys, maxTotalBytes } = this.stateBounds;
-    const cached = this.stateStats.get(scope);
+    const cached = this.stateStats.get(statsKey);
     if (cached !== undefined) {
       const projected: StateScopeStats = {
         keys: cached.keys + (live === undefined ? 1 : 0),
@@ -816,7 +1021,17 @@ export class IndexedDbStorageService {
     return { keys, bytes };
   }
 
-  /** Live rows of one workflow scope; deletes every expired row it passes. */
+  /**
+   * Live rows of one workflow scope BELONGING TO THE ACTIVE OWNER; deletes every
+   * expired row of that owner it passes.
+   *
+   * Scoped on both counts deliberately. Retention counts only the active owner's
+   * keys and bytes, because the bound is per workflow scope and a scope now means
+   * "this owner's copy of this workflow"; and the expired-row sweep skips another
+   * owner's rows, because a write under one owner must delete nothing of
+   * another's (Requirement 20.9). An expired foreign row is swept by its own
+   * owner's next write.
+   */
   private async loadStateScope(
     store: IDBObjectStore,
     scope: string,
@@ -825,8 +1040,10 @@ export class IndexedDbStorageService {
     const rows = await this.request<StoredStateEntry[]>(
       store.index(WORKFLOW_STATE_BY_WORKFLOW).getAll(scope),
     );
+    const owner = this.owner();
     const live: StoredStateEntry[] = [];
     for (const row of rows) {
+      if (!ownedBy(row, owner)) continue;
       if (isExpiredState(row, now)) await this.request(store.delete(row.key));
       else live.push(row);
     }
@@ -905,7 +1122,14 @@ export class IndexedDbStorageService {
   private async pruneUsage(): Promise<void> {
     const db = await this.open();
     const store = db.transaction(USAGE_STORE, 'readwrite').objectStore(USAGE_STORE);
-    const rows = await this.request<StoredUsage[]>(store.index(USAGE_BY_STARTED).getAll());
+    // Retention is applied PER OWNER, on the owner whose row was just written.
+    // Two reasons, and the second is the load-bearing one: the row cap is a cap on
+    // what a surface renders, and that surface shows one owner; and a write under
+    // one owner must never delete another owner's row (Requirement 20.9), which an
+    // unscoped 5000-row cap would do the moment the two together crossed it.
+    const rows = this.ownedRows(
+      await this.request<StoredUsage[]>(store.index(USAGE_BY_STARTED).getAll()),
+    );
     const cutoff = Date.now() - USAGE_MAX_AGE_MS;
     const doomed = [
       ...rows.filter(row => row.startedAt < cutoff),
@@ -930,7 +1154,7 @@ export class IndexedDbStorageService {
   private open(): Promise<IDBDatabase> {
     this.dbPromise ??= new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = event => {
         const db = request.result;
         if (!db.objectStoreNames.contains(WORKFLOWS_STORE)) {
           db.createObjectStore(WORKFLOWS_STORE, { keyPath: 'id' });
@@ -990,6 +1214,30 @@ export class IndexedDbStorageService {
         if (!db.objectStoreNames.contains(WORKFLOW_BACKUP_STATE_STORE)) {
           db.createObjectStore(WORKFLOW_BACKUP_STATE_STORE, { keyPath: 'workflowId' });
         }
+        // ── v12: the owner stamp (Requirements 20.13, 20.14) ─────────────────
+        //
+        // Unlike every block above this one is a RECORD-LEVEL migration, and it is
+        // the only step in this feature with no server-side rollback: it runs on
+        // the user's machine on first launch of the new build. Three properties
+        // make it safe to run exactly once and never again:
+        //
+        //  - It only ADDS a field. Nothing is deleted, no key changes, and no
+        //    existing value is rewritten, so a row is readable by the previous
+        //    build too (an unknown member is ignored on read).
+        //  - It stamps `null`, the PERSONAL account - which is the Owner_Id in
+        //    force before this feature existed, because nothing could be addressed
+        //    but the account's own data. The literal is written rather than left
+        //    absent so the upgrade is OBSERVABLE: "every row now carries a stamp"
+        //    is a thing a test can assert, where "nothing changed" is not.
+        //    Requirement 20.15 still holds independently, in `ownerOf`.
+        //  - It runs inside the version-change transaction the browser already
+        //    opened, so a failure anywhere aborts the whole upgrade and leaves the
+        //    store at v11 rather than half-stamped.
+        //
+        // Guarded on `oldVersion` so a FRESH install does no work: there are no
+        // rows, and running a cursor over six empty stores on first launch would
+        // be pure ceremony.
+        migrateOwnerStamp(request.transaction, db, event.oldVersion);
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => {
@@ -1018,6 +1266,68 @@ export class IndexedDbStorageService {
         reject(request.error ?? new Error('IndexedDB request failed.'));
       };
     });
+  }
+}
+
+/**
+ * The v12 upgrade step (Requirement 20.14), guard included.
+ *
+ * EXPORTED so a test can drive the real thing against a store seeded at v11 in a
+ * database of its own. That is not a convenience: this is the only irreversible
+ * step in the feature - it runs on the user's machine on first launch and no
+ * server deploy rolls it back - and verifying it against an EMPTY store would
+ * assert nothing at all, while verifying it against the shared production
+ * database would need a version-change transaction against connections other
+ * specs still hold open.
+ *
+ * The guard is inside rather than at the call site for the same reason: a test
+ * that re-implemented `oldVersion > 0 && oldVersion < 12` would be checking its own
+ * copy of the condition.
+ */
+export function migrateOwnerStamp(
+  transaction: IDBTransaction | null,
+  db: IDBDatabase,
+  oldVersion: number,
+): void {
+  // A FRESH install does no work: there are no rows, and walking six empty stores
+  // on first launch would be pure ceremony. `oldVersion === 0` is that case.
+  if (transaction === null || oldVersion === 0 || oldVersion >= 12) return;
+  stampOwner(transaction, db);
+}
+
+/**
+ * Stamps every existing row in the owner-scoped stores with the personal
+ * Owner_Id, inside the version-change transaction (Requirement 20.14).
+ *
+ * Synchronous on purpose, and it has to be: nothing may be awaited inside an
+ * `onupgradeneeded` handler, because the version-change transaction auto-commits
+ * the moment control returns to the event loop for anything other than an
+ * IndexedDB request. So this opens a cursor per store and chains the writes off
+ * the cursor's own `onsuccess`, which keeps the transaction alive until the walk
+ * finishes. A failure anywhere aborts it, which is what keeps the upgrade
+ * all-or-nothing.
+ *
+ * A store this build has not created yet is skipped rather than assumed - a
+ * partial upgrade from an old version reaches here with a different set of stores
+ * than the constant lists.
+ *
+ * A row that ALREADY carries a stamp is left alone. That cannot happen on a
+ * v11-to-v12 upgrade, and it is what makes the walk safe if it is ever reached
+ * from a later version.
+ */
+function stampOwner(transaction: IDBTransaction, db: IDBDatabase): void {
+  for (const name of OWNER_SCOPED_STORES) {
+    if (!db.objectStoreNames.contains(name)) continue;
+    const cursorRequest = transaction.objectStore(name).openCursor();
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (cursor === null) return;
+      const row = cursor.value as OwnedRow | null;
+      if (row !== null && typeof row === 'object' && !(OWNER_FIELD in row)) {
+        cursor.update({ ...row, [OWNER_FIELD]: null });
+      }
+      cursor.continue();
+    };
   }
 }
 
@@ -1080,6 +1390,15 @@ interface StoredStateEntry {
   bytes: number;
   /** Absolute epoch-ms expiry, `null` for the never-expiring namespaces. */
   expiresAt: number | null;
+  /**
+   * The owner the entry belongs to (Requirement 20.13). Absent reads as personal.
+   *
+   * A state key is `{workflowId}::{key}`, and a workflow id is unique per owner
+   * rather than globally - a restored backup, or two organisations built from one
+   * template, can put the same id under two owners. So the owner is part of the
+   * scope for retention as well as for reads.
+   */
+  [OWNER_FIELD]?: string | null;
 }
 
 /** Strips anything that is not connection metadata before it reaches storage. */
@@ -1129,6 +1448,7 @@ function toStoredState(
   bytes: number,
   ttlSec: number | undefined,
   now: number,
+  owner: string | null,
 ): StoredStateEntry {
   const ttl = resolveStateTtlSec(key, ttlSec);
   return {
@@ -1138,6 +1458,7 @@ function toStoredState(
     updatedAt: now,
     bytes,
     expiresAt: ttl === undefined ? null : now + ttl * 1000,
+    [OWNER_FIELD]: owner,
   };
 }
 

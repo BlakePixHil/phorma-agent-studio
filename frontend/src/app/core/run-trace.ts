@@ -22,6 +22,20 @@ export interface TraceOptions {
 }
 
 /**
+ * Who settled a gate, when the host recorded one (multi-organisation
+ * Requirement 10.5). Empty for every local run and every gate no human answered,
+ * so an unattributed outcome reads exactly as it did before this existed.
+ *
+ * The id is rendered WHOLE and never shortened: two members of one organisation
+ * can share a long prefix, and a truncated id that resolves to either of them is
+ * worse than a long one.
+ */
+function settledBy(actor: string | undefined, verb = 'by'): string {
+  if (!actor) return '';
+  return verb === 'by' ? ` by ${actor}` : ` (${verb} by ${actor})`;
+}
+
+/**
  * Maps one run event to its Runs-panel trace entry — the single source of
  * icons, labels, and tones shared by the LIVE trace
  * (`RunControllerService.apply`) and the run-history detail view, so a past
@@ -113,7 +127,7 @@ export function describeRunEvent(
     case 'approval-resolved':
       return {
         icon: event.approved ? 'ti ti-thumb-up' : 'ti ti-thumb-down',
-        label: event.approved ? 'Approved' : 'Rejected',
+        label: `${event.approved ? 'Approved' : 'Rejected'}${settledBy(event.actor)}`,
         tone: event.approved ? 'success' : 'warning',
         kind: 'event',
       };
@@ -148,7 +162,10 @@ export function describeRunEvent(
     case 'wait-resolved':
       return {
         icon: 'ti ti-bolt',
-        label: `Event "${event.correlationKey}" arrived`,
+        label: `Event "${event.correlationKey}" arrived${settledBy(event.actor, 'delivered')}`,
+        // The actor goes in the LABEL here and not the detail, because the detail
+        // is the event payload and the copy button hands it over verbatim - a
+        // provenance line appended to it would corrupt what the user copied.
         detail: event.eventPayload || undefined,
         tone: 'success',
         kind: 'event',

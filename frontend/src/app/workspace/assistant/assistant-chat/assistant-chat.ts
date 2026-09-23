@@ -144,6 +144,18 @@ export class AssistantChat {
 
   protected readonly agentLocked = computed(() => !this.phormaCloud.subscribed());
 
+  /**
+   * True when this view may OFFER a purchase (multi-organisation-phorma,
+   * Requirement 19.7).
+   *
+   * BOTH upsells in this view read it - the plan-proposal "have it built for you"
+   * link and the Agent-mode composer hint. False while an organisation owner is
+   * active, because Phorma Labs invoices it and `/api/checkout` refuses that owner
+   * with `billing_managed`. The copy stays; only the purchase goes, and the plan is
+   * still the deliverable either way.
+   */
+  protected readonly selfServeBilling = computed(() => this.phormaCloud.selfServeBilling());
+
   constructor() {
     // Keep the conversation pinned to the bottom as turns stream in.
     effect(() => {

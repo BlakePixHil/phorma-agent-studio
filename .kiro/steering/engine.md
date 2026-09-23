@@ -78,7 +78,7 @@ Design intent and requirement numbering for all of the above live in
   case that pins CONTENTS.
 - Never mirror a production constant table into a spec as an "oracle". A copy shares the bug you are
   hunting: an `egress.spec.ts` copy of `PROVIDER_HOSTS` passed with a hostile hostname in both.
-- `npm run test:e2e` runs all 11 scenario scripts (`test/run-all.mjs`). Do not add a scenario script
+- `npm run test:e2e` runs all 12 scenario scripts (`test/run-all.mjs`). Do not add a scenario script
   without it being picked up there - `vitest.config.ts` excludes `test/**`, so `npm test` will not
   run it and a crash before the first assertion looks like silence.
 - Scenario tests are `test/*.e2e.mts`, run individually with `npx -y tsx engine/test/<name>.e2e.mts`

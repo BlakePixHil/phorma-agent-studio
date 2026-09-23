@@ -1,0 +1,111 @@
+:host { display: contents; }
+
+/* A real dialog, so tier 80 (expanded panels 75, confirm 85, palette 90). The
+   confirm summoned from the footer therefore paints on top of this. */
+.phorma-proposals {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px;
+  background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+}
+
+/* The CARD never scrolls: header and footer hold their size and the body is the
+   one scroll container, or a short viewport lets the body spill over the actions. */
+.phorma-proposals__card {
+  width: min(940px, 100%); height: min(660px, calc(100vh - 48px)); display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden;
+  border: 1px solid var(--phorma-overlay-border, rgba(255, 255, 255, .12)); border-radius: 10px;
+  background: var(--p-content-background, rgba(20, 22, 30, .95));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .4); color: var(--p-text-color, #f8fafc);
+}
+
+.phorma-proposals__header {
+  display: flex; gap: 14px; align-items: flex-start; flex-shrink: 0; padding: 20px;
+  border-bottom: 1px solid var(--phorma-overlay-border);
+}
+.phorma-proposals__header > div { flex: 1; }
+
+h2, h3, h4 { margin: 0; }
+h2 { font-size: 15px; font-weight: 700; }
+h3 { font-size: 13px; }
+h4 { font-size: 11px; font-weight: 700; color: var(--p-text-muted-color); text-transform: uppercase; letter-spacing: .04em; }
+.phorma-proposals__header p, .phorma-proposals__review-header p { margin: 5px 0 0; color: var(--p-text-muted-color); font-size: 12px; }
+
+.phorma-proposals__close {
+  width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--p-text-muted-color); cursor: pointer;
+}
+.phorma-proposals__close:hover { background: color-mix(in srgb, var(--p-text-color) 7%, transparent); color: var(--p-text-color); }
+
+.phorma-proposals__body { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
+.phorma-proposals__queue { overflow: auto; padding: 10px; border-right: 1px solid var(--phorma-overlay-border); }
+
+.phorma-proposals__row {
+  width: 100%; display: flex; align-items: center; gap: 9px; padding: 10px;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit;
+  text-align: left; cursor: pointer;
+}
+.phorma-proposals__row:hover { background: color-mix(in srgb, var(--p-primary-color) 7%, transparent); }
+.phorma-proposals__row--selected {
+  border-color: color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+  background: color-mix(in srgb, var(--p-primary-color) 11%, transparent);
+}
+.phorma-proposals__row-icon {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: color-mix(in srgb, var(--phorma-prop-color, var(--p-primary-color)) 14%, transparent);
+  color: var(--phorma-prop-color, var(--p-primary-color));
+}
+/* Status colour coding: pending=amber (it wants a human), published=green,
+   rejected=red, superseded=muted. */
+.phorma-proposals__row[data-status='pending'] { --phorma-prop-color: #fbbf24; }
+.phorma-proposals__row[data-status='published'] { --phorma-prop-color: #34d399; }
+.phorma-proposals__row[data-status='rejected'] { --phorma-prop-color: #ef4444; }
+.phorma-proposals__row[data-status='superseded'] { --phorma-prop-color: #94a3b8; }
+.phorma-proposals__row-meta { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; font-size: 11px; color: var(--p-text-muted-color); }
+.phorma-proposals__row-title { font-size: 12px; font-weight: 650; color: var(--p-text-color); }
+.phorma-proposals__count { padding: 2px 6px; border-radius: 999px; background: color-mix(in srgb, var(--p-primary-color) 14%, transparent); color: var(--p-primary-color); font-size: 10px; font-weight: 700; }
+
+.phorma-proposals__review { min-width: 0; overflow: auto; padding: 18px; display: flex; flex-direction: column; }
+.phorma-proposals__review-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-shrink: 0; padding-bottom: 14px; }
+.phorma-proposals__reason { display: flex; gap: 8px; margin: 0 0 12px; font-size: 12px; color: var(--p-text-muted-color); }
+
+.phorma-proposals__changes { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.phorma-proposals__changes li {
+  display: flex; gap: 9px; align-items: flex-start; padding: 9px 10px;
+  border: 1px solid var(--phorma-overlay-border); border-radius: 7px;
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent); font-size: 12px; line-height: 1.45;
+}
+.phorma-proposals__changes li i { margin-top: 2px; }
+.phorma-proposals__changes li[data-kind='added'] i { color: var(--phorma-accent-green, #34d399); }
+.phorma-proposals__changes li[data-kind='removed'] i { color: var(--phorma-accent-red, #ef4444); }
+.phorma-proposals__changes li[data-kind='changed'] i { color: var(--phorma-accent-amber, #fbbf24); }
+.phorma-proposals__changes li[data-kind='moved'] i { color: var(--p-primary-color); }
+
+.phorma-proposals__prompt { margin-top: 12px; flex-shrink: 0; }
+.phorma-proposals__prompt summary { font-size: 12px; font-weight: 650; cursor: pointer; }
+.phorma-proposals__prompt-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-top: 10px; }
+.phorma-proposals__markdown {
+  margin-top: 6px; padding: 10px; border: 1px solid var(--phorma-overlay-border); border-radius: 7px;
+  background: color-mix(in srgb, var(--p-text-color) 3%, transparent); font-size: 12px; line-height: 1.5;
+}
+.phorma-proposals__markdown :first-child { margin-top: 0; }
+.phorma-proposals__markdown :last-child { margin-bottom: 0; }
+
+.phorma-proposals__empty { display: flex; align-items: center; gap: 7px; padding: 14px 8px; color: var(--p-text-muted-color); font-size: 12px; line-height: 1.5; }
+.phorma-proposals__empty--large { flex: 1 0 auto; min-height: 0; justify-content: center; flex-direction: column; text-align: center; }
+.phorma-proposals__empty--large i { font-size: 24px; }
+
+.phorma-proposals__actions {
+  display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; padding: 14px 20px;
+  border-top: 1px solid var(--phorma-overlay-border);
+}
+/* A destructive action is secondary chrome that goes red on hover only - a footer
+   carrying `severity="danger"` reads as a warning about the whole dialog. */
+.phorma-proposals__btn--danger.p-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 55%, transparent);
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+@media (max-width: 680px) {
+  .phorma-proposals__body { grid-template-columns: 1fr; grid-template-rows: 180px minmax(0, 1fr); }
+  .phorma-proposals__queue { border-right: 0; border-bottom: 1px solid var(--phorma-overlay-border); }
+  .phorma-proposals__prompt-pair { grid-template-columns: 1fr; }
+}

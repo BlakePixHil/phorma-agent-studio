@@ -13,6 +13,8 @@
 
 import type { ToolDefinition } from '@phorma/engine';
 
+import type { CapabilityLevel } from '../capabilities';
+
 /** Whether an action reads studio state or writes it. */
 export type ActionAccess = 'read' | 'write';
 
@@ -91,6 +93,23 @@ export interface StudioAction {
   surface: ActionSurface;
   access: ActionAccess;
   risk: ActionRisk;
+  /**
+   * The minimum Capability_Level this action requires
+   * (multi-organisation-phorma Requirement 8.1).
+   *
+   * DATA, not a decision. The comparison happens once, in
+   * `StudioActionRegistryService.available`, through `CapabilityService.allows` -
+   * the same seam `PanelTab.minLevel` goes through. An absent value reads as the
+   * least capable level, and that default lives INSIDE the capability module
+   * rather than here, so no call site carries a level literal
+   * (Requirement 7.4).
+   *
+   * Declared on EVERY entry even where it repeats the default, because the field
+   * is what says the tier was considered. `risk` and `minLevel` are orthogonal
+   * (Requirement 8.6): `risk` asks the user, `minLevel` decides whether the
+   * action is offered at all, and neither substitutes for the other.
+   */
+  minLevel?: CapabilityLevel;
   params?: Record<string, ActionParam>;
   /** True when the action mutates the canvas graph (Edit_Session coverage). */
   graphEdit?: boolean;

@@ -11,6 +11,7 @@ import {
   type ModelRequest,
 } from '@phorma/engine';
 
+import { ActiveOwnerService } from './active-owner.service';
 import { loadLayout } from './layout-storage';
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
 import { PhormaCloudService } from './phorma-cloud.service';
@@ -37,6 +38,12 @@ export class ModelTransportService {
   private readonly tauri = inject(TauriService);
   private readonly settings = inject(SettingsService);
   private readonly phormaCloud = inject(PhormaCloudService);
+  // A DI LEAF (it injects nothing at all), which is why it is safe here: this
+  // service sits ON the known NG0200 cycle. It supplies the `X-Phorma-Owner`
+  // header every hosted inference call carries beside its bearer, so a member
+  // running locally is metered against the ORGANISATION when that is the active
+  // owner (multi-organisation-phorma, Requirement 20.4).
+  private readonly activeOwner = inject(ActiveOwnerService);
   // Safe DI direction even though this service sits on the known NG0200 cycle:
   // `TelemetryService` is a leaf that injects only `TauriService`, so it cannot
   // reach back into `RunControllerService`.
@@ -54,7 +61,9 @@ export class ModelTransportService {
     // RunControllerService. The value rarely changes and is re-read on every
     // create() call, so it stays current enough.
     const cloudBaseUrl = loadPhormaCloudUrl();
-    const composite = new CompositeModelClient(byoClient, this.phormaCloud, cloudBaseUrl);
+    const composite = new CompositeModelClient(byoClient, this.phormaCloud, cloudBaseUrl, () =>
+      this.activeOwner.ownerHeader(),
+    );
     // The engine's `FetchModelClient` cannot count anything itself — it is pure
     // TypeScript with no Angular — so the studio-side transport seam counts for
     // it. Wrapping the composite (not each inner client) is what keeps one
@@ -378,11 +387,16 @@ class CompositeModelClient implements ModelClient {
     private readonly byo: ModelClient,
     private readonly phormaCloud: PhormaCloudService,
     private readonly cloudBaseUrl: string,
+    private readonly ownerHeader: () => Record<string, string>,
   ) {}
 
   stream(request: ModelRequest): AsyncIterable<ModelChunk> {
     if (request.provider === 'phorma-cloud') {
-      return new PhormaCloudModelClient(this.phormaCloud, this.cloudBaseUrl).stream(request);
+      return new PhormaCloudModelClient(
+        this.phormaCloud,
+        this.cloudBaseUrl,
+        this.ownerHeader,
+      ).stream(request);
     }
     return this.byo.stream(request);
   }
@@ -441,6 +455,7 @@ class PhormaCloudModelClient implements ModelClient {
   constructor(
     private readonly phormaCloud: PhormaCloudService,
     private readonly cloudBaseUrl: string,
+    private readonly ownerHeader: () => Record<string, string>,
   ) {}
 
   async *stream(request: ModelRequest): AsyncIterable<ModelChunk> {
@@ -460,6 +475,9 @@ class PhormaCloudModelClient implements ModelClient {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${jwt}`,
+        // The active owner, beside the bearer. EMPTY for a personal account, so a
+        // solo install sends exactly the request it has always sent.
+        ...this.ownerHeader(),
       },
       body: wire.body,
     });

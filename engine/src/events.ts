@@ -52,6 +52,24 @@ export interface RunScope {
  */
 export type RunFailureCode = string;
 
+/**
+ * Who settled a human-in-the-loop gate, when the HOST knows and chose to say.
+ *
+ * Supplied by the host, never by the engine: `requestApproval`, `requestInput`
+ * and `waitForEvent` are promises, and a promise carries a value rather than an
+ * identity. The cloud host knows the authenticated caller that settled a gate and
+ * stamps it onto the resolved event on its way out
+ * (multi-organisation Requirement 10.5), which is what puts the acting member in
+ * the run record without a table of its own. The local host leaves it absent -
+ * there is exactly one person at the machine.
+ *
+ * An OPAQUE string for the same three reasons {@link RunFailureCode} is: the
+ * engine cannot import an identity contract it has no dependency on, a deployed
+ * worker is routinely a different version than the studio reading it, and nothing
+ * in the engine reads this - it is transported, never interpreted.
+ */
+export type RunGateActor = string;
+
 export type RunNodeState =
   | 'idle'
   | 'queued'
@@ -83,12 +101,16 @@ type RunEventPayload =
   | { type: 'tool-call'; runId: string; nodeId: string; toolNodeId: string; name: string; arguments: string; at: number }
   | { type: 'tool-result'; runId: string; nodeId: string; toolNodeId: string; name: string; result: string; isError: boolean; at: number }
   | { type: 'approval-required'; runId: string; requestId: string; nodeId: string; message: string; payload: string; at: number }
-  | { type: 'approval-resolved'; runId: string; requestId: string; nodeId: string; approved: boolean; at: number }
+  | { type: 'approval-resolved'; runId: string; requestId: string; nodeId: string; approved: boolean;
+      /** See {@link RunGateActor}. */
+      actor?: RunGateActor; at: number }
   // Ask User: the run suspends and surfaces a question to a human, who
   // types a free-text response that is merged into the payload for the
   // downstream agent.
   | { type: 'ask-required'; runId: string; requestId: string; nodeId: string; nodeName: string; question: string; payload: string; at: number }
-  | { type: 'ask-resolved'; runId: string; requestId: string; nodeId: string; response: string; at: number }
+  | { type: 'ask-resolved'; runId: string; requestId: string; nodeId: string; response: string;
+      /** See {@link RunGateActor}. */
+      actor?: RunGateActor; at: number }
   // ForEach loop lifecycle: one loop-started, one loop-iteration per item,
   // one loop-completed (with per-item failure summary) per loop execution.
   | { type: 'loop-started'; runId: string; nodeId: string; nodeName: string; total: number; at: number }
@@ -97,7 +119,9 @@ type RunEventPayload =
   // Wait-for-Event: the run suspends until an external event with a matching
   // correlation key arrives (webhook, e-sign callback, manual injection).
   | { type: 'wait-started'; runId: string; nodeId: string; nodeName: string; correlationKey: string; message: string; payload: string; at: number }
-  | { type: 'wait-resolved'; runId: string; nodeId: string; correlationKey: string; eventPayload: string; at: number }
+  | { type: 'wait-resolved'; runId: string; nodeId: string; correlationKey: string; eventPayload: string;
+      /** See {@link RunGateActor}. */
+      actor?: RunGateActor; at: number }
   // Nested workflow lifecycle. Child interior events carry the full scope
   // path while these events describe the boundary at the current frame.
   | { type: 'subworkflow-started'; runId: string; nodeId: string; nodeName: string; workflowId: string; workflowName: string; depth: number; input: string; at: number }

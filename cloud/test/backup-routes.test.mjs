@@ -96,7 +96,14 @@ function statementsOf(file) {
     .filter(statement => statement.length > 0);
 }
 
-for (const file of ['0001_init.sql', '0003_billing.sql', '0004_billing_ordering.sql', '0005_workflow_backups.sql']) {
+for (const file of [
+  '0001_init.sql',
+  '0003_billing.sql',
+  '0004_billing_ordering.sql',
+  '0005_workflow_backups.sql',
+  // 0006 adds the nullable `body_key` column the metadata store now selects.
+  '0006_organisations.sql',
+]) {
   for (const statement of statementsOf(file)) {
     await DB.prepare(statement).run();
   }
@@ -114,13 +121,24 @@ const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
 
 const base64url = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-function mintToken(sub) {
+function mintToken(sub, claims = {}) {
   const seconds = Math.floor(Date.now() / 1000);
   const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-backup-test' })}.${base64url(
-    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600 },
+    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600, ...claims },
   )}`;
   const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
   return `${signing}.${signature}`;
+}
+
+/**
+ * A session token for one member of one organisation.
+ *
+ * The organisation arrives as a VERIFIED claim, which is the only way it can: a
+ * request field naming an owner would be a "read someone else's backups"
+ * parameter.
+ */
+function mintOrgToken(sub, orgId) {
+  return mintToken(sub, { org_id: orgId, org_role: 'org:admin' });
 }
 
 // --- Environment ----------------------------------------------------------
@@ -638,6 +656,130 @@ console.log('\nA local delete cannot reach the cloud');
   check('the body is still there', (await BACKUPS.get(bodyKey('user_local', 'wf-keep', 1))) !== null, 'gone');
   check('and so is the original revision', before !== null);
   check('the metadata row survives', (await api('/api/backups', { token: 'user_local' })).body?.backups?.length === 1);
+}
+
+// ══ 8. Whose backups (multi-organisation-phorma, Requirements 4.6, 4.9) ════
+//
+// Feature: multi-organisation-phorma, Property 10: Every owner-scoped read
+// returns exactly the caller's owner's set.
+//
+// The tenant on this surface is the RESOLVED owner, so an organisation is one set
+// of backups, one tier cap and one read-access window. Keying it on the caller
+// would give every member a private set: two colleagues backing up the same
+// workflow would produce two independent revision chains, each convinced it was
+// the only one, and `If-Match` - the whole concurrency control here - would never
+// see the conflict it exists to catch.
+
+console.log('\nBackups belong to the resolved owner, not the member (Requirements 4.6, 4.9)');
+{
+  const ORG = 'org_backup_alpha';
+  const MEMBER_ONE = 'user_backup_one';
+  const MEMBER_TWO = 'user_backup_two';
+
+  // ONE tenants row, the organisation's. Neither member has one of their own,
+  // which is the common case: a member who never subscribed personally.
+  await seedTenant(ORG, { tier: 'pro' });
+
+  const orgOne = mintOrgToken(MEMBER_ONE, ORG);
+  const orgTwo = mintOrgToken(MEMBER_TWO, ORG);
+
+  const uploaded = await api('/api/backups/wf-org', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${orgOne}` },
+    body: bodyFor('wf-org'),
+  });
+  check(
+    "a member uploads against the ORGANISATION's plan",
+    uploaded.status === 200 && uploaded.body?.revision === 1,
+    JSON.stringify(uploaded.body),
+  );
+  // Would be a 402 `no_subscription` if the row were looked up by the caller: the
+  // member has no tenants row at all.
+  check(
+    'the body landed under the organisation prefix',
+    (await BACKUPS.get(bodyKey(ORG, 'wf-org', 1))) !== null,
+    'missing',
+  );
+  check(
+    "and NOT under the uploading member's own prefix",
+    (await BACKUPS.get(bodyKey(MEMBER_ONE, 'wf-org', 1))) === null,
+    'a personal-prefixed object exists',
+  );
+
+  const listedTwo = await api('/api/backups', {
+    headers: { Authorization: `Bearer ${orgTwo}` },
+  });
+  check(
+    'a DIFFERENT member lists the same backup',
+    listedTwo.status === 200 &&
+      (listedTwo.body?.backups ?? []).map(entry => entry.workflowId).join(',') === 'wf-org',
+    JSON.stringify(listedTwo.body),
+  );
+  check(
+    "and reads the organisation's tier cap, not a default",
+    listedTwo.body?.cap === 100,
+    String(listedTwo.body?.cap),
+  );
+  const download = await api('/api/backups/wf-org/1', {
+    headers: { Authorization: `Bearer ${orgTwo}` },
+  });
+  check(
+    'and can download the revision a colleague uploaded',
+    download.status === 200 && download.body?.spec?.id === 'wf-org',
+    JSON.stringify(download.body?.error),
+  );
+
+  // `If-Match` is now a real concurrency control ACROSS members, which it could
+  // not be if each of them had their own chain.
+  const stale = await api('/api/backups/wf-org', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${orgTwo}`, 'If-Match': '0' },
+    body: bodyFor('wf-org'),
+  });
+  check(
+    "one member's stale revision loses to the other's write",
+    stale.status === 409 && stale.body?.code === 'backup_conflict',
+    JSON.stringify(stale.body),
+  );
+
+  // The same human, signed in with NO organisation, is a different owner: no
+  // subscription of their own, so the surface refuses rather than showing the
+  // organisation's backups.
+  const personal = await api('/api/backups', { token: MEMBER_ONE });
+  check(
+    "the member's personal owner sees none of the organisation's backups",
+    personal.status === 402 && personal.body?.code === 'no_subscription',
+    `${personal.status} ${JSON.stringify(personal.body)}`,
+  );
+
+  // And another organisation, which IS provisioned, sees an empty list rather
+  // than ours.
+  await seedTenant('org_backup_beta');
+  const outsider = await api('/api/backups', {
+    headers: { Authorization: `Bearer ${mintOrgToken('user_backup_beta', 'org_backup_beta')}` },
+  });
+  check(
+    "another organisation's list is empty, not ours",
+    outsider.status === 200 && (outsider.body?.backups ?? []).length === 0,
+    JSON.stringify(outsider.body),
+  );
+
+  // Property 37: an account in no organisation behaves exactly as before. The
+  // sections above already drive that shape throughout - this pins the equality
+  // explicitly, because "unchanged" is the claim that is easiest to lose.
+  await seedTenant('user_backup_solo');
+  const soloUpload = await upload('user_backup_solo', 'wf-solo');
+  const soloList = await api('/api/backups', { token: 'user_backup_solo' });
+  check(
+    'a personal owner still keys its own backups by its own id',
+    soloUpload.status === 200 && (await BACKUPS.get(bodyKey('user_backup_solo', 'wf-solo', 1))) !== null,
+    JSON.stringify(soloUpload.body),
+  );
+  check(
+    'and lists exactly them',
+    (soloList.body?.backups ?? []).map(entry => entry.workflowId).join(',') === 'wf-solo',
+    JSON.stringify(soloList.body?.backups),
+  );
 }
 
 console.error = realConsoleError;

@@ -24,6 +24,10 @@ const HOTSPOT_LIMIT = 10;
  * `credits` for the Phorma Cloud-billed share, `usd` for the bring-your-own
  * share, with `estimated` flagged when the USD figure came from the pricing
  * table rather than provider accounting. Never a single blended number.
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): both reads are
+ * operator - `read.usage` is an operator capability and the Usage panel carries no
+ * minimum. What a run cost is exactly the thing an operator is answerable for.
  */
 @Injectable({ providedIn: 'root' })
 export class UsageActionsService {
@@ -40,6 +44,7 @@ export class UsageActionsService {
         surface: 'usage',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           period: {
             type: 'string',
@@ -62,6 +67,7 @@ export class UsageActionsService {
         surface: 'usage',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           period: {
             type: 'string',

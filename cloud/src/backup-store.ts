@@ -31,6 +31,19 @@
  * The tenant id is the FIRST segment so a prefix list is naturally scoped to one
  * account, which is what makes the retention prune and delete-all possible
  * without a second index.
+ *
+ * ## Why every method takes a PREFIX rather than an owner and a workflow id
+ *
+ * Because the owner in the key and the owner in the metadata row are allowed to
+ * differ. An ownership claim moves `workflow_backups.tenant_id` into an
+ * organisation and rewrites NO R2 object (Requirement 4.7), recording the prefix
+ * that was in force on the row's `body_key` column. So the caller resolves the
+ * prefix once, through {@link bodyPrefixFor}, and hands it down.
+ *
+ * The signature is the enforcement. A method that still took `(tenantId,
+ * workflowId)` would silently derive the NEW owner's prefix for a transferred row
+ * and answer "that revision is no longer retained" for a body that is sitting
+ * safely in the bucket, with no type error anywhere.
  */
 
 import { decryptBytes, encryptBytes } from './tenants';
@@ -88,15 +101,10 @@ export class BackupBodyStore {
    * `json` is the SERIALIZED spec, so the caller owns what exactly gets backed up
    * and this owns only how it is stored.
    */
-  async put(
-    tenantId: string,
-    workflowId: string,
-    revision: number,
-    json: string,
-  ): Promise<void> {
+  async put(prefix: string, revision: number, json: string): Promise<void> {
     const compressed = await gzip(new TextEncoder().encode(json));
     const sealed = await encryptBytes(compressed, this.secret);
-    await this.bucket.put(bodyKey(tenantId, workflowId, revision), sealed, {
+    await this.bucket.put(`${prefix}${revision}`, sealed, {
       // Recorded so an operator reading the bucket can tell what an opaque object
       // is without decrypting it. Deliberately NOTHING about the workflow itself:
       // a name here would leak through a bucket listing that the body encrypts.
@@ -112,8 +120,8 @@ export class BackupBodyStore {
    * here" and "this revision is here and we cannot read it" need different
    * answers, and the second one is an incident.
    */
-  async get(tenantId: string, workflowId: string, revision: number): Promise<string | null> {
-    const object = await this.bucket.get(bodyKey(tenantId, workflowId, revision));
+  async get(prefix: string, revision: number): Promise<string | null> {
+    const object = await this.bucket.get(`${prefix}${revision}`);
     if (!object) return null;
     const sealed = new Uint8Array(await object.arrayBuffer());
     const compressed = await decryptBytes(sealed, this.secret);
@@ -128,8 +136,7 @@ export class BackupBodyStore {
    * ahead of the bodies, and a restore list that promised a body it cannot serve
    * is worse than a shorter honest one.
    */
-  async revisions(tenantId: string, workflowId: string): Promise<number[]> {
-    const prefix = `${bodyPrefix(tenantId, workflowId)}`;
+  async revisions(prefix: string): Promise<number[]> {
     const listed = await this.bucket.list({ prefix, limit: 1000 });
     return listed.objects
       .map(object => Number(object.key.slice(prefix.length)))
@@ -144,27 +151,19 @@ export class BackupBodyStore {
    * The newest revision is ALWAYS retained regardless of `keep`, so a
    * misconfigured cap can never leave a workflow with a metadata row and no body.
    */
-  async prune(
-    tenantId: string,
-    workflowId: string,
-    keep: number,
-  ): Promise<number[]> {
-    const all = await this.revisions(tenantId, workflowId);
+  async prune(prefix: string, keep: number): Promise<number[]> {
+    const all = await this.revisions(prefix);
     const doomed = all.slice(Math.max(1, keep));
     if (doomed.length === 0) return [];
-    await Promise.all(
-      doomed.map(revision => this.bucket.delete(bodyKey(tenantId, workflowId, revision))),
-    );
+    await Promise.all(doomed.map(revision => this.bucket.delete(`${prefix}${revision}`)));
     return doomed;
   }
 
   /** Deletes every revision of one workflow. Returns how many went. */
-  async deleteWorkflow(tenantId: string, workflowId: string): Promise<number> {
-    const all = await this.revisions(tenantId, workflowId);
+  async deleteWorkflow(prefix: string): Promise<number> {
+    const all = await this.revisions(prefix);
     if (all.length === 0) return 0;
-    await Promise.all(
-      all.map(revision => this.bucket.delete(bodyKey(tenantId, workflowId, revision))),
-    );
+    await Promise.all(all.map(revision => this.bucket.delete(`${prefix}${revision}`)));
     return all.length;
   }
 
@@ -176,19 +175,25 @@ export class BackupBodyStore {
    * a user reaches for on privacy grounds, and leaving an orphaned object behind
    * would make the promise false.
    */
-  async deleteTenant(tenantId: string): Promise<number> {
-    const prefix = `backup/${tenantId}/`;
-    let removed = 0;
-    let cursor: string | undefined;
-    do {
-      const listed = await this.bucket.list({ prefix, limit: 1000, cursor });
-      if (listed.objects.length > 0) {
-        await Promise.all(listed.objects.map(object => this.bucket.delete(object.key)));
-        removed += listed.objects.length;
-      }
-      cursor = listed.truncated ? listed.cursor : undefined;
-    } while (cursor);
-    return removed;
+  async deleteTenant(tenantId: string, extraPrefixes: readonly string[] = []): Promise<number> {
+    // `extraPrefixes` carries the stored `body_key` of every row this tenant held,
+    // because an ownership claim leaves an object under the PREVIOUS owner's prefix
+    // (Requirement 4.7) and a scan of `backup/{tenantId}/` would walk straight past
+    // it. Deduplicated by KEY rather than by prefix, since a tenant's own prefix and
+    // a stored one routinely overlap.
+    const prefixes = [...new Set([`backup/${tenantId}/`, ...extraPrefixes])];
+    const doomed = new Set<string>();
+    for (const prefix of prefixes) {
+      let cursor: string | undefined;
+      do {
+        const listed = await this.bucket.list({ prefix, limit: 1000, cursor });
+        for (const object of listed.objects) doomed.add(object.key);
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    }
+    if (doomed.size === 0) return 0;
+    await Promise.all([...doomed].map(key => this.bucket.delete(key)));
+    return doomed.size;
   }
 }
 
@@ -202,6 +207,23 @@ export function bodyPrefix(tenantId: string, workflowId: string): string {
 /** The one place a body key is shaped. */
 export function bodyKey(tenantId: string, workflowId: string, revision: number): string {
   return `${bodyPrefix(tenantId, workflowId)}${revision}`;
+}
+
+/**
+ * Where one metadata row's bodies actually live: the STORED prefix, or the derived
+ * one when there is none (Requirement 4.7).
+ *
+ * The single fallback in the codebase, so "a NULL `body_key` means derive it" is
+ * one expression rather than a rule every call site has to remember. A row written
+ * before the column existed, and every row an ordinary upload writes, both land on
+ * the derived value - which is what makes the column backfill-free.
+ */
+export function bodyPrefixFor(record: {
+  tenantId: string;
+  workflowId: string;
+  bodyKey: string | null;
+}): string {
+  return record.bodyKey ?? bodyPrefix(record.tenantId, record.workflowId);
 }
 
 // ── Compression ──────────────────────────────────────────────────────────────

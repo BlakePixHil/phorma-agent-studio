@@ -32,43 +32,87 @@ phorma-agent-studio/
 - `frontend/src/app/shared/` - confirm dialog, expanded panel dialog, markdown, toast, icons,
   info popover, directives.
 - `frontend/src/app/workspace/` - canvas plus one folder per feature surface: palette, prompt,
-  properties, runs, evals, usage, portal, skills, workflows, assistant, command-palette, cloud,
-  connections, onboarding, settings.
+  properties, runs, evals, usage, portal, skills, workflows, cloud-library, assistant,
+  command-palette, cloud, connections, onboarding, settings.
 - `frontend/src/styles.scss` - CSS variables, theme surfaces, and the shared utility classes
   (`.phorma-panel-icon-btn`, `.phorma-input-icon-btn`, `.phorma-btn-content`, `.phorma-icon-spin`).
 
 Panels register themselves as tabs in `DEFAULT_TABS` (`core/panel-registry.service.ts`) with
-`{id, side, order}`. Both sidebars receive every pane template in `app.html`; only tabs matching
-`sideTabs()` render - which means **two instances of every panel body are in the DOM at once**.
-Consequences: element ids must be scoped, and DOM queries in tests must filter for the visible
-one (`getBoundingClientRect().width > 0`).
+`{id, side, order, visible}` plus an optional `minLevel`. Both sidebars receive every pane template
+in `app.html`; only tabs matching `sideTabs()` render - which means **two instances of every panel
+body are in the DOM at once**. Consequences: element ids must be scoped, and DOM queries in tests
+must filter for the visible one (`getBoundingClientRect().width > 0`).
+
+`minLevel` is a declared minimum `CapabilityLevel` and is DATA: the only comparison happens in the
+`leftTabs` / `rightTabs` computeds, through `CapabilityService.allows(tab.minLevel)`, so restriction
+is subtractive rather than conditional. Filter in the COMPUTED, never in `_tabs` - `loadTabs()`
+merges the saved side, order and visibility onto `DEFAULT_TABS` and an effect persists `_tabs`, so
+dropping an entry there would delete it from the user's saved layout and a member later promoted
+would lose their arrangement. A surface that OFFERS tabs to the user (the Window menu) reads
+`allowedTabs()`, which keeps hidden-but-allowed tabs; `tabs()` stays the unfiltered record.
+`scripts/check-capability-isolation.mjs` fails on a level token compared anywhere outside
+`core/capabilities.ts` and `core/capability.service.ts`, and permits a `minLevel:` declaration.
 
 ## Admin dashboard layout (`admin/`)
 
-Two concerns behind one shell: five telemetry aggregate views, and a Spend view over the billing
-route family.
+Four concerns behind one shell: five telemetry aggregate views, a Spend view over the billing route
+family, an Organisations view over the organisation management family, and an Impersonation view that
+is BOTH the only way to read a customer's account as that customer and the record of every time
+anybody did.
 
 - `admin/src/app/core/admin-api.ts` - the ONE transport. Owns the session-token funnel (the branded
-  `SessionToken`, `SESSION_TOKEN_RESOLVER`, `clerkSessionTokenResolver`), the `AdminResult` union, and
-  the two auth signals (`forbidden`, `sessionRejected`). Both feature services go through it, because
-  one operator allowlist gates both prefixes on the Worker.
-- `telemetry-api.service.ts` and `billing-api.service.ts` - a prefix plus typed methods each, nothing
-  more. The telemetry one RE-EXPORTS everything from `admin-api.ts` so the views and specs that
-  already imported those names from it keep working.
-- `core/models.ts` and `core/billing-models.ts` - response shapes, each a structural twin of its
-  Worker module. `models.ts` bodies carry no identity by construction; `billing-models.ts` bodies name
-  tenants on purpose. Do not merge them.
+  `SessionToken`, `SESSION_TOKEN_RESOLVER`, `clerkSessionTokenResolver`), the `AdminResult` union, the
+  two auth signals (`forbidden`, `sessionRejected`) and `ACT_AS_HEADER`. All four feature services go
+  through it, because one operator allowlist gates all four prefixes on the Worker. Four entry points -
+  `get(url, range)` for a ranged aggregate, `read(url, params)` for a read that is not about a window,
+  `mutate(method, url, {body, params})` for a write, `sendActingAs(url, ownerId, params)` for a read
+  served as ANOTHER owner - and ONE private `send`, so the bearer header is still built in exactly one
+  place. That matters most on the write half, where a blank bearer would be a membership change rather
+  than a blank card, and on the act-as half, where a stray header is honoured SILENTLY.
+  `sendActingAs` is GET-only and has no `mutate` twin: the Worker refuses every other method, so a
+  write control would exist only to be refused.
+- `telemetry-api.service.ts`, `billing-api.service.ts`, `org-api.service.ts` and
+  `impersonation-api.service.ts` - a prefix plus typed methods each, nothing more. None of them
+  validates or maps anything: the Worker owns every refusal. The telemetry one RE-EXPORTS everything
+  from `admin-api.ts` so the views and specs that already imported those names from it keep working.
+  The impersonation one is the only service that calls `sendActingAs`, and it is the only one whose two
+  methods read two DIFFERENT route families - the `/api/admin/*` audit, and `/api/deployments` as the
+  customer.
+- `core/models.ts`, `core/billing-models.ts`, `core/org-models.ts` and `core/impersonation-models.ts` -
+  response shapes, each a structural twin of its Worker module, and each with a DIFFERENT disclosure
+  contract: `models.ts` bodies carry no identity by construction, `billing-models.ts` bodies name
+  paying tenants on purpose, `org-models.ts` bodies name individual PEOPLE by Clerk user id because
+  "who is in this organisation and at what level" is not answerable without them, and
+  `impersonation-models.ts` bodies name a person AND WHAT THEY READ, which is the strongest of the
+  four. Do not merge them.
 - `views/` - one folder per view. The nav (`app.ts` `VIEW_NAV`) and the router (`app.routes.ts`) DERIVE
   the five telemetry entries from `TELEMETRY_ROUTES`, so a sixth aggregate route cannot compile without
-  a nav entry and a loader. The Spend view is appended EXPLICITLY, because it reads two API routes and
-  so has no single route to derive a path from. Its view id is `spend`, deliberately not `costs`, so one
-  word does not mean both a URL segment and one of the two routes behind it.
+  a nav entry and a loader. Spend, Organisations and Impersonation are appended EXPLICITLY, because
+  each reads several API routes and so has no single route to derive a path from. Their view ids are
+  `spend`, `organisations` and `impersonation`, deliberately not `costs`, `members` or `audit`, so one
+  word does not mean both a URL segment and one of the things behind it. Impersonation is LAST in the
+  nav because it is the surface an operator should reach for least often: every use of it names a
+  person in a permanent record.
+- Organisations is the dashboard's only WRITE surface, and the only surface in the whole product that
+  writes membership (Requirement 13.7 of `multi-organisation-phorma`). Two conventions it establishes:
+  a destructive action is a TWO-STEP inline arm-then-confirm, because this package has no
+  `ConfirmDialogService` and the repo has zero `p-dialog`; and a write reports the WORKER's own
+  sentence, never a local one, because the two answers an operator must act on - `role_unknown` and
+  `org_partial_write` - are only distinguishable from the Worker's body.
 - Auth surfaces in `auth/`: `signed-out` (no Clerk session), `session-rejected` (a token we sent was
   refused - 401), `not-authorized` (403). Three screens because the remedies differ, and the shell
   orders them in that sequence.
 - Every shared class already exists in `admin/src/styles.scss` (`.admin-view`, `.admin-grid`,
   `.admin-card`, `.admin-stat`, `.admin-table`, `.admin-footnote`, `.admin-columns`). A new view should
-  add no SCSS; the budget is 1.5MB warning against ~791kB.
+  add no SCSS; the budget is 1.5MB warning against ~842kB. Three exceptions exist and all three are
+  component-scoped `styles:` blocks with a stated reason: Spend's muted look for a figure that could not
+  be READ, and the form rows plus id line in BOTH Organisations and Impersonation, because the
+  dashboard was read-only until Organisations and no shared form class exists yet. Those form rules are
+  now duplicated in exactly two views, which is the agreed ceiling: a THIRD view needing a form
+  promotes them into `styles.scss` rather than copying them again.
+  Watch out for one trap in an inline `styles:` or `template:` block: a BACKTICK inside a comment
+  terminates the template literal, and Angular reports it as
+  `Failed to resolve @Component.styles to a string` with no line number.
 
 ## Structural twins - keep in sync
 
@@ -78,11 +122,40 @@ twins, not shared imports:
 - `engine/src/types.ts` and `frontend/src/app/core/workflow.model.ts`
 - `cloud/src/telemetry-admin.ts` and `admin/src/app/core/models.ts`
 - `cloud/src/billing-admin.ts` and `admin/src/app/core/billing-models.ts`
+- `cloud/src/impersonation.ts` and `admin/src/app/core/impersonation-models.ts` - the audit READ half
+  only. `ACT_AS_HEADER` is also twinned, but into `admin/src/app/core/admin-api.ts` rather than the
+  model file, because it is a property of the transport and one place builds a request. Everything
+  else in the worker module is worker-only by design: the two refusal codes, the guard, the
+  substitution and the audit write. `SupportDeploymentRow` there is a THIRD independent declaration of
+  a shape `cloud/src/deployments.ts` and `frontend/src/app/core/deployments.model.ts` already twin -
+  accepted, because impersonation lives in `admin/` and nowhere else, so that package has to name the
+  shape it reads.
+- `cloud/src/org-admin.ts` and `admin/src/app/core/org-models.ts` - the WIRE half only.
+  `OrgAdminRefusalCode`, `UNPAID_ORG_STATUS`, the Clerk role mapping and every handler are
+  worker-only. Deliberately NOT twinned: the Capability_Level VOCABULARY. The worker reports
+  `levels` and `tiers` on every read and the dashboard renders what it is told, because a third
+  independent copy of the level tokens would have no test comparing all three -
+  `cloud/test/capabilities.test.mjs` compares exactly two. A `level` is a plain `string` in the
+  dashboard on purpose.
+- `cloud/src/capabilities.ts` and `frontend/src/app/core/capabilities.ts` - the `CapabilityLevel`
+  tokens, the `Capability` tokens, `CAPABILITIES_BY_LEVEL` and `atLeast`. `CLERK_ROLE_LEVELS` is
+  WORKER-ONLY and deliberately not twinned: a role claim exists only on a verified credential, and
+  the studio is TOLD its level by `/api/me`. `cloud/test/capabilities.test.mjs` loads both modules
+  and compares behaviour, not text, so a one-sided edit fails there rather than drifting.
 - `cloud/src/deployments.ts` and `frontend/src/app/core/deployments.model.ts`
 - `cloud/src/backup-routes.ts` and `frontend/src/app/core/backup.model.ts`
 - `cloud/src/notifications.ts` and `frontend/src/app/core/notifications.model.ts` - the WIRE half
   only. Everything below `NotificationsResponse` in the studio file (`StudioNotification`,
   `NotificationKind`, `PendingActionRow`) is studio-only and has no worker counterpart by design.
+  `NotificationsResponse.proposals` is part of the wire half and its element type lives in the
+  PROPOSAL twin below, not restated here.
+- `cloud/src/proposals.ts` and `frontend/src/app/core/proposals.model.ts` - `ProposalStatus`,
+  `ProposalSummary`, `ProposalConnectionRef`, `ProposalNotice` and the four append-only refusal
+  codes (`proposal_scope`, `proposal_stale`, `proposal_conflict`, `proposal_unencrypted`). The WIRE
+  half only: `ProposalSubmitOutcome` and the label/icon helpers below it in the studio file are
+  studio-only, and `ProposalStore`, `scopeViolations`, `doomedProposals` and `canonicalSpecHashOf`
+  are worker-only. A status or a code is persisted in D1 and rendered by a studio that may be three
+  versions old, so both sets are append-only: never rename or repurpose one.
 - `frontend/public/logo.svg` and `PHORMA_MARK_SVG` in `cloud/src/brand-page.ts` - `cloud/` cannot
   import from `frontend/`, so the brand mark is hand-copied. A brand change edits both.
 
@@ -136,10 +209,23 @@ execute. All three assistant modes dispatch through it: Agent mode as live tools
 2. Delegate the executor to the Owning_Service. The registry never reimplements a capability.
 3. Pick the tier: `confirm` for credit spend, deletion, deploy, and settings or connection writes;
    `silent` for reads and local reversible document edits.
+4. Declare `minLevel`, the minimum `CapabilityLevel`. It is ORTHOGONAL to the tier: the tier asks the
+   user, `minLevel` decides whether the action is offered at all. Match the owning panel's
+   `DEFAULT_TABS` minimum where there is one - evals, skills, connections and portal are `builder`
+   for their reads too. The one comparison lives in `StudioActionRegistryService.available()` as
+   `capability.allows(action.minLevel)`; never `?? 'operator'` at a call site, which
+   `scripts/check-capability-isolation.mjs` fails on. Omitting the field is a UI defect, not a
+   security one (the worker re-gates), and
+   `studio-actions/studio-action-registry.capability.spec.ts` fails on it.
 
 Nothing else changes. The Agent-mode tool list, the Plan apply path and the system prompts are all
-derived (`toolDefinitions`, `plan-op.ts`, `summarizeActions`). An action service must not inject
-`WorkflowBuilderService` or `AssistantChatService` - the registry sits downstream of them.
+derived (`toolDefinitions`, `plan-op.ts`, `summarizeActions`), and each of those reads `available()`,
+so the capability filter narrows all of them at once. The ONE thing not derived from an entry is the
+Plan output format's five shorthand op forms (`add`, `connect`, `update`, `remove`, `disconnect`):
+they are aliases for graph actions, so `PLAN_OP_FORMS` in `core/workflow-builder-prompt.ts` maps each
+to its action id and must stay a twin of `LEGACY_OP_ACTIONS` in `studio-actions/plan-op.ts`. An
+action service must not inject `WorkflowBuilderService` or `AssistantChatService` - the registry sits
+downstream of them.
 
 Panel state is READ ON DEMAND. Do not embed eval suites, run records, prompt bodies, usage rows,
 skills, connections, portal configuration or settings values into a system prompt; expose a
@@ -252,3 +338,13 @@ must not inject `CloudService`**. Read the Phorma Cloud base URL with `loadPhorm
 `core/phorma-cloud-url.ts` - a leaf module that also owns `PHORMA_CLOUD_DEFAULT_URL` and migrates
 installs off retired hosts. `WorkflowVersionsService` deliberately injects only storage for the
 same reason.
+
+`CapabilityService` (`core/capability.service.ts`) is the strictest case: it injects **nothing at
+all**, and `scripts/check-capability-isolation.mjs` keeps it that way. `PanelRegistryService`
+injects it and the layout shell reads that registry at startup, so anything it reached would be
+constructed during the first frame. The resolved level is PUSHED in through `resolveFrom(level)` by
+whoever already holds the verified `/api/me` answer - the same settable-seam idiom as
+`RunControllerService.remoteApprovalSender` and `NotificationCenterService.deepLinkHandler` - which
+is also what makes a mid-session level change one signal write with no reload. Do not add
+`ClerkService` here: `user$` emits `null` for a signed-in desktop install, and `ClerkService` itself
+injects `Router`.

@@ -109,6 +109,19 @@
                 </button>
               </p>
             }
+
+            <!-- Someone else's change, waiting on this reviewer. The review surface
+                 itself is a deferred dialog, so this is a link to it and not the
+                 surface (multi-organisation-phorma Requirements 12.6, 18.4). -->
+            @if (proposals.pending(); as pending) {
+              <p class="phorma-cloud__note">
+                <i class="ti ti-git-pull-request" aria-hidden="true"></i>
+                A change is waiting for your review.
+                <button type="button" class="phorma-cloud__link" (click)="reviewProposals()">
+                  Review it
+                </button>
+              </p>
+            }
           </section>
         }
 

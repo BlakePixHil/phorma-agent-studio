@@ -1,0 +1,122 @@
+<div class="phorma-cloud-library">
+  <div class="phorma-cloud-library__head">
+    <span class="phorma-cloud-library__label">Deployed</span>
+    <button
+      pButton
+      type="button"
+      class="phorma-panel-icon-btn"
+      severity="secondary"
+      [text]="true"
+      size="small"
+      [disabled]="deployments.loading()"
+      aria-label="Refresh the deployed workflow list"
+      title="Refresh"
+      (click)="refresh()"
+    >
+      <i
+        class="ti ti-refresh"
+        [class.phorma-icon-spin]="deployments.loading()"
+        aria-hidden="true"
+      ></i>
+    </button>
+  </div>
+
+  <!--
+    A failed read reports itself and keeps whatever rows we already had. It must
+    NEVER fall through to the empty state: "this organisation has no deployments"
+    is the one answer that stops somebody looking for the workflow they came here
+    to run (Requirement 9.8).
+  -->
+  @if (deployments.error(); as message) {
+    <div class="phorma-cloud-library__failure" role="status">
+      <p class="phorma-cloud-library__failure-body">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        <span>
+          Could not read your organisation's deployed workflows: {{ message }}
+        </span>
+      </p>
+      @if (rows().length > 0) {
+        <p class="phorma-cloud-library__failure-note">
+          The list below is the last one we were able to load.
+        </p>
+      }
+      <button
+        pButton
+        type="button"
+        class="phorma-cloud-library__btn"
+        severity="secondary"
+        [outlined]="true"
+        size="small"
+        [disabled]="deployments.loading()"
+        (click)="refresh()"
+      >
+        <i class="ti ti-refresh" aria-hidden="true"></i>
+        <span>Try again</span>
+      </button>
+    </div>
+  }
+
+  @if (rows().length > 0) {
+    <ul class="phorma-cloud-library__list">
+      @for (row of rows(); track row.workflowId) {
+        <li>
+          <app-panel-card (click)="open(row)">
+            <i card-icon class="ti ti-cloud-network" aria-hidden="true"></i>
+            <ng-container card-meta>
+              <span class="phorma-card__title">{{ row.workflowName }}</span>
+              <span class="phorma-card__sub">
+                Deployed {{ row.deployedAt | date: 'MMM d, y' }}
+                <!--
+                  Credits, never dollars, and a null is NOT a zero: it means this
+                  worker binds no ledger, so rendering "0 credits" would say a
+                  running deployment is free.
+                -->
+                @if (row.creditsSpent !== null) {
+                  · {{ row.creditsSpent }}
+                  {{ row.creditsSpent === 1 ? 'credit' : 'credits' }} this month
+                } @else {
+                  · spend unavailable
+                }
+                @if (row.cronArmed) {
+                  <span class="phorma-cloud-library__badge" title="Runs on its own schedule">
+                    <i class="ti ti-clock-play" aria-hidden="true"></i> Scheduled
+                  </span>
+                }
+              </span>
+            </ng-container>
+            <ng-container card-actions>
+              <i
+                class="ti"
+                [class.ti-loader-2]="busy(row)"
+                [class.phorma-icon-spin]="busy(row)"
+                [class.ti-chevron-right]="!busy(row)"
+                aria-hidden="true"
+              ></i>
+            </ng-container>
+          </app-panel-card>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (showEmpty()) {
+    <div class="phorma-cloud-library__placeholder">
+      <i class="ti ti-cloud-off" aria-hidden="true"></i>
+      <p>
+        Nothing is deployed in your organisation yet.<br />
+        A builder publishes a workflow before it appears here.
+      </p>
+    </div>
+  }
+
+  @if (deployments.loading() && rows().length === 0) {
+    <p class="phorma-cloud-library__loading">
+      <i class="ti ti-loader-2 phorma-icon-spin" aria-hidden="true"></i>
+      <span>Reading your organisation's deployed workflows.</span>
+    </p>
+  }
+
+  <p class="phorma-cloud-library__foot">
+    These open read-only, exactly as deployed. Run one, watch it and answer its gates.
+  </p>
+</div>

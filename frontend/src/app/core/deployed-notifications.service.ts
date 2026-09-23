@@ -41,6 +41,7 @@
 
 import { inject, Injectable, InjectionToken, signal, type OnDestroy } from '@angular/core';
 
+import { ActiveOwnerService } from './active-owner.service';
 import { DesktopAuthService } from './desktop-auth.service';
 import { NotificationsService } from './notifications.service';
 import { PhormaCloudService } from './phorma-cloud.service';
@@ -52,7 +53,11 @@ import {
   type CloudScopeResolver,
 } from './deploy/cloud-dispatch';
 import type { CloudTransport } from './deploy/cloud-transport';
-import { notificationsFromNotice, pendingRowsFromNotice } from './notification-projection';
+import {
+  notificationFromProposal,
+  notificationsFromNotice,
+  pendingRowsFromNotice,
+} from './notification-projection';
 import type {
   ApprovalPayload,
 } from './deploy/deploy-targets';
@@ -112,6 +117,10 @@ export class DeployedNotificationsService implements OnDestroy {
   private readonly desktopAuth = inject(DesktopAuthService);
   private readonly store = inject(NotificationsService);
   private readonly config = inject(NOTIFICATION_POLL_CONFIG);
+  // A DI LEAF - it injects nothing at all - so this edge is safe even on the
+  // transport path. It supplies the `X-Phorma-Owner` header this service's
+  // `fetch-bearer` transport sends beside its bearer.
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private consecutiveFailures = 0;
@@ -198,6 +207,32 @@ export class DeployedNotificationsService implements OnDestroy {
   async refresh(): Promise<void> {
     this.consecutiveFailures = 0;
     await this.pollNow();
+  }
+
+  /**
+   * Re-scopes the poll to the ACTIVE owner (multi-organisation-phorma,
+   * Requirement 20.6).
+   *
+   * Called by `OwnerSwitchService` after the owner signal has moved and after
+   * `NotificationsService.resetForOwner()` has re-read that owner's cursor - the
+   * ORDER is load-bearing, because the poll below reads the store's marker as its
+   * `?since=` value, so polling first would ask the new owner's deployments a
+   * question about the previous owner's reading history.
+   *
+   * Everything derived from the previous owner goes: the live pending list (a gate
+   * in an organisation's Durable Object, which this session can no longer verify),
+   * the unreachable list and the truncation flag (both are statements about the
+   * previous owner's registry), and the last error. The backoff resets too, because
+   * a switch is an explicit user action and is a better signal than our failure
+   * count - the same reasoning `refresh()` carries.
+   */
+  resetForOwner(): void {
+    this.consecutiveFailures = 0;
+    this.pending.set([]);
+    this.unreachable.set([]);
+    this.truncated.set(false);
+    this.error.set(null);
+    if (this.active) void this.pollNow();
   }
 
   /**
@@ -315,6 +350,33 @@ export class DeployedNotificationsService implements OnDestroy {
     const now = Date.now();
 
     const notifications = deployments.flatMap(notice => notificationsFromNotice(notice, now));
+
+    // The caller's own decided proposals (multi-organisation-phorma,
+    // Requirement 12.11). ACCUMULATED with the run notifications rather than
+    // replaced like the pending rows, because a decision is history: it is merged
+    // idempotently on the proposal id, which is what lets the worker keep
+    // re-reporting it until the read marker passes it.
+    //
+    // The name comes from the deployment notice when one is present in this
+    // response, and falls back to the workflow id: a proposal can be decided for a
+    // workflow that reported nothing this tick, and a row reading "Your change to
+    // "undefined"" would be worse than one naming the id.
+    const names = new Map(deployments.map(notice => [notice.workflowId, notice.workflowName]));
+    for (const proposal of Array.isArray(response.proposals) ? response.proposals : []) {
+      if (!proposal?.proposalId || !proposal.workflowId) continue;
+      notifications.push(
+        notificationFromProposal({
+          proposalId: proposal.proposalId,
+          workflowId: proposal.workflowId,
+          status: proposal.status === 'published' ? 'published' : 'rejected',
+          reason: proposal.reason ?? null,
+          at: typeof proposal.at === 'number' ? proposal.at : 0,
+          workflowName: names.get(proposal.workflowId) ?? proposal.workflowId,
+          now,
+        }),
+      );
+    }
+
     if (notifications.length > 0) this.store.add(notifications);
 
     // Wholesale replacement, ordered longest-waiting first across every
@@ -379,6 +441,10 @@ export class DeployedNotificationsService implements OnDestroy {
         'Content-Type': 'application/json',
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      // The ACTIVE owner, beside the bearer (multi-organisation-phorma,
+      // Requirement 20.6). The fan-out reads the resolved owner's `deploy:`
+      // registry, so this is what decides whose settled runs the bell reports.
+      Object.assign(headers, this.activeOwner.ownerHeader());
       const response = await fetch(url, { method: init.method, headers, body: init.body });
       return { status: response.status, ok: response.ok, body: await response.text() };
     },

@@ -9,11 +9,17 @@
  * about that list staying correct and owner-scoped.
  *
  * Reached with the same Map-backed `ctx.storage` stub `portal-cleanup.test.mjs`
- * uses, so no worker and no Miniflare socket is spent on it.
+ * uses, so no worker and no Miniflare socket is spent on it. The last section
+ * drives the real `GET /api/deployments` over that same stub, because the thing
+ * under test there - which owner the read is scoped to - needs a verified identity
+ * and a registry and nothing else. Authorization is not stubbed: an RSA keypair is
+ * generated here and the public half handed over as `CLERK_JWT_KEY`, so
+ * `@clerk/backend` verifies each session token for real on its offline path.
  *
  * Run: npx -y tsx cloud/test/deployment-registry.test.mjs
  */
 
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import { registerHooks } from 'node:module';
 
 import fc from 'fast-check';
@@ -33,6 +39,26 @@ registerHooks({
 const { PortalIndex, DEFAULT_DEPLOYMENT_OWNER, deploymentOwner } = await import(
   '../src/portal-registry.ts'
 );
+const { handleDeploymentsRequest } = await import('../src/deployments.ts');
+
+// ── A real Clerk session token ──────────────────────────────────────────────
+
+const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+const base64url = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+/** An RS256 session JWT, optionally carrying organisation claims. */
+function mintClerkToken(sub, claims = {}) {
+  const seconds = Math.floor(Date.now() / 1000);
+  const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-registry-test' })}.${base64url(
+    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600, ...claims },
+  )}`;
+  const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
+  return `${signing}.${signature}`;
+}
 
 let failures = 0;
 function check(name, condition, detail) {
@@ -327,6 +353,101 @@ console.log('\nProperty: enumeration never crosses an owner boundary');
     { numRuns: 200 },
   );
   check('every listDeployments row carries the requested ownerId', true);
+}
+
+// ── GET /api/deployments: the read over that key space ──────────────────────
+//
+// Feature: multi-organisation-phorma, Property 10: Every owner-scoped read
+// returns exactly the caller's owner's set.
+//
+// The route is driven here rather than in a Miniflare suite because everything it
+// needs is already in this file: a Map-backed `PortalIndex` and a verified
+// identity. With no `DB` binding the spend columns are null, which is the answer
+// Requirement 5.5 wants on a worker with no ledger, so no D1 and no loopback
+// socket is spent to assert the scoping.
+
+console.log('\nGET /api/deployments lists exactly the resolved owner (Requirement 4.4)');
+{
+  const ORG = 'org_reg_alpha';
+  const MEMBER = 'user_reg_member';
+
+  /** Drives the real route against a Map-backed registry. */
+  async function listDeploymentsRoute({ records, token, env: extraEnv = {} }) {
+    const { index } = newIndex();
+    for (const entry of records) await index.registerDeployment(entry);
+    const url = new URL('https://worker.example/api/deployments');
+    const response = await handleDeploymentsRequest(
+      new Request(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} }),
+      {
+        PortalIndex: { idFromName: () => ({}), get: () => index },
+        PHORMA_MODE: 'hosted',
+        CLERK_SECRET_KEY: 'sk_test_clerk_not_used_offline',
+        CLERK_JWT_KEY,
+        ...extraEnv,
+      },
+      url,
+      (body, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    return { status: response.status, body: await response.json() };
+  }
+
+  const records = [
+    record({ ownerId: ORG, workflowId: 'wf-org-1', workflowName: 'Shared triage' }),
+    record({ ownerId: ORG, workflowId: 'wf-org-2', workflowName: 'Shared payroll' }),
+    record({ ownerId: MEMBER, workflowId: 'wf-personal' }),
+    record({ ownerId: 'org_reg_beta', workflowId: 'wf-beta' }),
+  ];
+
+  const asMember = await listDeploymentsRoute({
+    records,
+    token: mintClerkToken(MEMBER, { org_id: ORG, org_role: 'org:admin' }),
+  });
+  check('a member of the organisation is answered', asMember.status === 200, String(asMember.status));
+  // Both directions, because only one of them is a leak: the organisation's set is
+  // complete, AND nothing outside it is present. A route scoped by `auth.userId`
+  // would answer an EMPTY list here - no leak, and no deployments either, which
+  // reads as "you have deployed nothing" about workflows that are running cron.
+  check(
+    'it lists exactly the organisation\'s deployments',
+    asMember.body.deployments.map(entry => entry.workflowId).sort().join(',') ===
+      'wf-org-1,wf-org-2',
+    JSON.stringify(asMember.body.deployments.map(entry => entry.workflowId)),
+  );
+
+  // The SAME human's personal credential is a different owner, not a subset.
+  const asPerson = await listDeploymentsRoute({ records, token: mintClerkToken(MEMBER) });
+  check(
+    'the same account with no organisation claim lists only its own',
+    asPerson.body.deployments.map(entry => entry.workflowId).join(',') === 'wf-personal',
+    JSON.stringify(asPerson.body.deployments.map(entry => entry.workflowId)),
+  );
+
+  // Property 37: BYO is byte-identical. No credential at all, one owner, and the
+  // records live under the `default` literal exactly as they did before.
+  const byo = await listDeploymentsRoute({
+    records: [
+      record({ ownerId: DEFAULT_DEPLOYMENT_OWNER, workflowId: 'wf-byo' }),
+      record({ ownerId: ORG, workflowId: 'wf-org-1' }),
+    ],
+    token: null,
+    env: { PHORMA_MODE: undefined, CLERK_SECRET_KEY: undefined, CLERK_JWT_KEY: undefined },
+  });
+  check('an open BYO worker answers with no credential', byo.status === 200, String(byo.status));
+  check(
+    'and lists the single default owner\'s deployments',
+    byo.body.deployments.map(entry => entry.workflowId).join(',') === 'wf-byo',
+    JSON.stringify(byo.body.deployments.map(entry => entry.workflowId)),
+  );
+  // "Cannot tell" and "spent nothing" stay distinguishable: no D1 means null.
+  check(
+    'a worker with no ledger reports null spend rather than zero',
+    byo.body.deployments[0].creditsSpent === null && byo.body.deployments[0].runsThisMonth === null,
+    JSON.stringify(byo.body.deployments[0]),
+  );
 }
 
 /** Stable serialization of the whole store, for byte-identity comparisons. */

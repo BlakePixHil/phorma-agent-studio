@@ -1,0 +1,277 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1. The owner seam in the worker, with no behaviour change": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057549631
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057568553
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790059027275
+      }
+    ],
+    "2. Org-scoped addressing and the ownership claim path": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057549758
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790064507297
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790068431235
+      }
+    ],
+    "3. Org-scope the remaining owner consumers": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057549860
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790068443809
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790072604554
+      }
+    ],
+    "15. Personal and organisation billing stay separate": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057549946
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790072609258
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790075242985
+      }
+    ],
+    "4. The capability contract as a twinned pair": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550009
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057572697
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790060172350
+      }
+    ],
+    "5. Server-side role enforcement": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550058
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790060187183
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790062826891
+      }
+    ],
+    "6. The studio capability seam and its guard": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550112
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790060191848
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790064501683
+      }
+    ],
+    "7. Capability-gate the studio action registry": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550205
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790064512242
+      },
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790068425452
+      }
+    ],
+    "8. Cloud library mode": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550254
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790075255433
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790077023927
+      }
+    ],
+    "9. Run, watch and approve as a member": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550308
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790077036050
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790080139019
+      }
+    ],
+    "10. The proposal store": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550376
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790080144566
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790083285866
+      }
+    ],
+    "11. Propose and publish, including the Canonical_Spec_Hash soundness fix": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550428
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790083291790
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790087489946
+      }
+    ],
+    "12. Org and member management in the admin console": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550486
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790087501393
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790091398572
+      }
+    ],
+    "13. Read-only audited impersonation": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550531
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790091405108
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790095976328
+      }
+    ],
+    "16. Owner switching": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550579
+      },
+      {
+        "executionId": "cf7eebd3-b212-4e39-8099-cc015ee00cc8",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790095982357
+      },
+      {
+        "executionId": "aa87a69b-7889-4582-bbc6-5ecc154239bc",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790112104963
+      }
+    ],
+    "14. Per-workflow pricing preparation": [
+      {
+        "executionId": "a5b9e6fd-18a1-47a5-b3c1-b987d19576c2",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790057550637
+      },
+      {
+        "executionId": "aa87a69b-7889-4582-bbc6-5ecc154239bc",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790112110368
+      },
+      {
+        "executionId": "aa87a69b-7889-4582-bbc6-5ecc154239bc",
+        "chatSessionId": "sess_f138b0a2-2eeb-4531-9fa2-07ce1e138c88",
+        "timestamp": 1790113963194
+      }
+    ]
+  }
+}

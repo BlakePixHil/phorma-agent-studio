@@ -472,6 +472,29 @@ export function portalIndex(env: PortalRegistryEnv): DurableObjectStub<PortalInd
 }
 
 /**
+ * The Durable Object name the GATEWAY gives one owner's workflow instance
+ * (Requirement 2.1).
+ *
+ * THE ENCODING IS LOAD-BEARING, and it is not obvious. `index.ts` builds
+ * `{ownerId}:{workflowId}` and then writes it into the path as
+ * `encodeURIComponent(scoped)`, while partyserver's `routePartykitRequest` takes
+ * the instance name straight out of `pathname.split('/')` WITHOUT decoding it. So
+ * the name workerd actually hashes is the percent-encoded one - `org_a%3Awf-x`,
+ * never `org_a:wf-x` - and `idFromName` of the two strings yields two DIFFERENT
+ * Durable Objects. Measured against the real deploy bundle, not inferred.
+ *
+ * Anything that reaches an owner's instance BY NAME rather than through the
+ * gateway therefore has to go through here, or it silently addresses a blank
+ * instance: no error, no log line, just an empty answer.
+ *
+ * In BYO mode there is no owner prefix and so nothing to encode, which is why
+ * this has never mattered there.
+ */
+export function workflowAgentInstance(ownerId: string | null, workflowId: string): string {
+  return ownerId ? encodeURIComponent(`${ownerId}:${workflowId}`) : workflowId;
+}
+
+/**
  * The DO instance name a portal's runs execute under.
  *
  * Session scoping is the answer to the single-run concurrency limit: one
@@ -480,13 +503,41 @@ export function portalIndex(env: PortalRegistryEnv): DurableObjectStub<PortalInd
  * session instance can never collide with a workflow instance. In hosted mode
  * the owner prefix mirrors the gateway's `{userId}:{workflowId}` scheme, which
  * keeps tenant isolation structural even though the visitor has no JWT.
+ *
+ * NOTE, and do not "tidy" this into {@link workflowAgentInstance}: this name is
+ * UNENCODED, so in hosted mode it does not agree with the name the gateway gives
+ * the owner's own instance. A session instance is only ever reached by this
+ * function and by `purgeSessionInstance`, which are consistent with each other, so
+ * sessions work - but the same is not true of `portalOwnerInstance` below. See the
+ * note there.
+ *
+ * Renaming these would move which Durable Object a live hosted portal session
+ * reads, so it is not a drive-by change. The third call site that built the raw
+ * form, `askInstance` in `notifications.ts`, WAS fixed - it is reached only by a
+ * poll that returns a fresh answer every tick, so there was no live state to move.
  */
 export function portalSessionInstance(record: PublishRecord, sessionId: string): string {
   const prefix = record.ownerId ? `${record.ownerId}:` : '';
   return `${prefix}${record.workflowId}#s${sessionId}`;
 }
 
-/** The owner's primary instance for a published workflow (no session suffix). */
+/**
+ * The owner's primary instance for a published workflow (no session suffix).
+ *
+ * KNOWN DISCREPANCY, left as it is rather than changed here: in HOSTED mode this
+ * returns the unencoded `{ownerId}:{workflowId}`, which is not the name the gateway
+ * gave that instance (see {@link workflowAgentInstance}). Anything reaching the
+ * owner's instance through this name therefore finds a blank one.
+ *
+ * `askInstance` in `notifications.ts` had the same defect and is now fixed. This
+ * one is NOT, and the difference is what is at stake: the notification fan-out is
+ * a poll whose answer is re-derived every tick, so correcting its name changed
+ * nothing but which instance it reads; a PUBLISHED PORTAL is live, and the
+ * instance this function names is where a visitor's conversation is already
+ * running. Moving it needs its own reproduction, its own tests and a decision
+ * about sessions in flight, so it needs its own task rather than a drive-by fix.
+ * BYO is unaffected: with no owner prefix there is nothing to encode.
+ */
 export function portalOwnerInstance(record: PublishRecord): string {
   const prefix = record.ownerId ? `${record.ownerId}:` : '';
   return `${prefix}${record.workflowId}`;

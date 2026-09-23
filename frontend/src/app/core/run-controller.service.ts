@@ -37,6 +37,7 @@ import {
   type NotifyTrigger,
   type WorkflowNotificationPolicy,
 } from './data-path-settings';
+import { CapabilityService } from './capability.service';
 import { DataFetchService } from './data-fetch.service';
 import { FixtureStoreService } from './fixture-store.service';
 import { ModelTransportService } from './model-transport.service';
@@ -197,6 +198,10 @@ export class RunControllerService {
   // those lives in `NotificationCenterService`, which only components inject.
   private readonly notifications = inject(NotificationsService);
   private readonly pricing = inject(ModelPricingService);
+  // The safest edge in this file: `CapabilityService` injects NOTHING, and
+  // `scripts/check-capability-isolation.mjs` keeps it that way, so it cannot reach
+  // back into the cycle. Read by `start()` alone.
+  private readonly capability = inject(CapabilityService);
   private readonly tauri = inject(TauriService);
   private readonly connectionStore = inject(ConnectionStoreService);
   private readonly dataFetch = inject(DataFetchService);
@@ -314,6 +319,23 @@ export class RunControllerService {
    */
   remoteQuestionSender: ((requestId: string, response: string) => void) | null = null;
 
+  /**
+   * Starts the ACTIVE document's deployment instead of the local engine.
+   *
+   * Installed by the shell (`CloudService.runDeployedActive`), not injected: this
+   * service is the far side of the known NG0200 cycle, so it may not reach
+   * `CloudService` - the same settable-seam idiom as the three remote senders above
+   * and `NotificationCenterService.deepLinkHandler`.
+   *
+   * Consulted by {@link start} only for a Cloud_Library session, and that pairing is
+   * the point: such a session has no local library, no provider key and a read-only
+   * deployed document, so a local run is not a lesser outcome but a wrong one
+   * (multi-organisation Requirement 10.1). Putting the choice in `start` rather
+   * than at each button means the Runs panel, the toolbar, the F5 accelerator and
+   * the assistant's `run_start` action cannot disagree about where Run goes.
+   */
+  deployedRunLauncher: ((input: string) => void) | null = null;
+
   readonly running = computed(() => {
     const phase = this.terminal.phase();
     return (
@@ -352,6 +374,14 @@ export class RunControllerService {
    */
   start(): void {
     if (this.running()) return;
+    // A Cloud_Library session runs the DEPLOYMENT, never the local engine - see
+    // {@link deployedRunLauncher}. Before the graph checks below, because a
+    // deployed spec opened read-only is somebody else's graph and its trigger node
+    // is the worker's business, not this validator's.
+    if (this.capability.cloudLibraryOnly() && this.deployedRunLauncher) {
+      this.deployedRunLauncher(this.runInput().trim());
+      return;
+    }
     const portableSpec = this.workflow.exportActiveSpec();
     const graph = portableSpec?.graph ?? this.workflow.graph();
     if (graph.nodes.length === 0) {
@@ -1194,7 +1224,9 @@ export class RunControllerService {
    */
   private raiseBillingToast(error: string, code?: string): void {
     const remedy = remedyForRunFailure(error, code);
-    const notice = refusalNotice(remedy);
+    // The code travels on, because `contact-support` is shared by two refusals that
+    // need two different sentences - see `refusalNotice`.
+    const notice = refusalNotice(remedy, code);
     if (!notice) return;
     this.toast.error(
       notice.summary,

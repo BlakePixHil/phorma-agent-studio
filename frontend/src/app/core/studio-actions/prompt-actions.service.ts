@@ -27,6 +27,13 @@ import {
  * `prompt_write` applies the patch to any node whose data declares a `prompt`
  * field rather than agent nodes only - the old `isAgentNode` gate silently
  * discarded prompt patches aimed at other kinds (Requirement 9.3, 9.4).
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): rewriting a
+ * node's prompt is the `edit.prompt` capability, so `prompt_write` and
+ * `prompt_library_apply` sit at the editor level - prompt text is the canonical
+ * thing an editor changes. Reading is open. `prompt_library_save` is the
+ * exception at builder: it PERSISTS a new entry to the local prompt library,
+ * which a member working out of the cloud does not have (Requirement 9.4).
  */
 @Injectable({ providedIn: 'root' })
 export class PromptActionsService {
@@ -45,6 +52,7 @@ export class PromptActionsService {
         surface: 'prompts',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           nodeId: { type: 'string', description: 'Node id (preferred).' },
           nodeName: { type: 'string', description: 'Display name, when the id is unknown.' },
@@ -61,6 +69,7 @@ export class PromptActionsService {
         surface: 'prompts',
         access: 'write',
         risk: 'silent',
+        minLevel: 'editor',
         graphEdit: true,
         params: {
           nodeId: { type: 'string', description: 'Node id (preferred).' },
@@ -83,6 +92,7 @@ export class PromptActionsService {
         surface: 'prompts',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           query: { type: 'string', description: 'Optional name/description/tag filter.' },
         },
@@ -96,6 +106,7 @@ export class PromptActionsService {
         surface: 'prompts',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: { promptId: { type: 'string', description: 'Prompt id.', required: true } },
         activity: () => 'Reading a library prompt',
         run: args => this.readLibrary(args),
@@ -108,6 +119,7 @@ export class PromptActionsService {
         surface: 'prompts',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         params: {
           name: { type: 'string', description: 'Library entry name.', required: true },
           content: { type: 'string', description: 'Markdown prompt body.' },
@@ -126,6 +138,7 @@ export class PromptActionsService {
         surface: 'prompts',
         access: 'write',
         risk: 'silent',
+        minLevel: 'editor',
         graphEdit: true,
         params: {
           promptId: { type: 'string', description: 'Library prompt id.', required: true },

@@ -224,3 +224,33 @@
     }
   }
 }
+
+// Owner switcher (multi-organisation Requirement 20.2). A named control rather
+// than an icon, because the whole point is knowing which account a Deploy will
+// reach WITHOUT opening anything. The label is clamped rather than allowed to
+// grow: an organisation name is arbitrary text and the toolbar's right edge is
+// shared with the bell and the account control.
+:host ::ng-deep .phorma-toolbar__owner.p-button {
+  -webkit-app-region: no-drag;
+  padding: 0 0.5rem;
+  height: 1.75rem;
+  max-width: 12rem;
+}
+.phorma-toolbar__owner-body {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.857rem; // 12px against the 14px root - never 12/16.
+}
+.phorma-toolbar__owner-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// The active owner in the popup list. A weight and a tint rather than a check
+// glyph on the left, so every row's label starts at the same x.
+:host ::ng-deep .phorma-toolbar__owner-item--active > .p-menu-item-content {
+  color: var(--p-primary-color);
+  font-weight: 600;
+}

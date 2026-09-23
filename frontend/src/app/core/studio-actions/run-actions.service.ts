@@ -27,6 +27,13 @@ const RUN_LIST_LIMIT = 20;
  * Starting a run spends model credits, so it is confirm-tier
  * (Requirement 6.1); the rest of the transport controls are silent because the
  * user can see and undo them from the toolbar.
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): every action
+ * here is at the operator level, and this surface is the reason that level
+ * exists. `run.trigger`, `run.monitor` and `run.answer_gate` are all operator
+ * capabilities, as are `read.runs`, `read.traces` and `read.notifications`.
+ * Answering a gate is the one WRITE an operator holds, and it stays confirm-tier:
+ * a capability is not a confirmation (Requirement 8.6).
  */
 @Injectable({ providedIn: 'root' })
 export class RunActionsService {
@@ -50,6 +57,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'operator',
         params: {
           input: { type: 'string', description: 'Task text handed to the trigger node.' },
         },
@@ -69,6 +77,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Pausing or resuming the run',
         run: () => this.pauseOrResume(),
       },
@@ -79,6 +88,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Stepping the run',
         run: () => this.step(),
       },
@@ -89,6 +99,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Stopping the run',
         run: () => this.stop(),
       },
@@ -100,6 +111,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Resetting the run session',
         run: () => this.reset(),
       },
@@ -110,6 +122,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           nodeId: { type: 'string', description: 'Node id.', required: true },
         },
@@ -124,6 +137,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'operator',
         params: {
           requestId: { type: 'string', description: 'Pending approval request id.', required: true },
           approved: {
@@ -145,6 +159,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           requestId: { type: 'string', description: 'Pending question request id.', required: true },
           response: { type: 'string', description: 'The answer text.', required: true },
@@ -160,6 +175,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Reading the run state',
         run: () => this.readState(),
       },
@@ -171,6 +187,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           activeWorkflowOnly: {
             type: 'boolean',
@@ -189,6 +206,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: { runId: { type: 'string', description: 'Run id.', required: true } },
         activity: () => 'Reading a run record',
         run: args => this.read(args),
@@ -201,6 +219,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         params: { runId: { type: 'string', description: 'Run id.', required: true } },
         activity: () => 'Loading a past run onto the canvas',
         run: args => this.loadHistorical(args),
@@ -222,6 +241,7 @@ export class RunActionsService {
         surface: 'runs',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Reading notifications',
         run: () => this.readNotifications(),
       },
@@ -236,6 +256,7 @@ export class RunActionsService {
         // user may not be looking at, in a workflow they may not have open, with
         // effects (a payment, an email, a filing) the studio cannot undo.
         risk: 'confirm',
+        minLevel: 'operator',
         params: {
           requestId: {
             type: 'string',

@@ -457,9 +457,9 @@
                          this is an update-card action and never a Subscribe CTA
                          (requirement 17). Its own component, so this sheet gains
                          no bytes against the 22kB anyComponentStyle budget. -->
-                    @if (needsPhormaCloudSubscription() && phormaCloud.pastDue()) {
+                    @if (offerPhormaCloudSubscription() && phormaCloud.pastDue()) {
                       <app-past-due-notice />
-                    } @else if (needsPhormaCloudSubscription()) {
+                    } @else if (offerPhormaCloudSubscription()) {
                       <div class="phorma-settings__subscribe">
                         <p class="phorma-settings__subscribe-title">
                           <i class="ti ti-cloud" aria-hidden="true"></i>
@@ -956,7 +956,10 @@
                                     [class.phorma-settings__quota-fill--warn]="(phormaCloud.creditsFraction() ?? 0) > 0.85"
                                   ></span>
                                 </div>
-                                @if (phormaCloud.lowOnCredits()) {
+                                <!-- The quota rows above are a READING and stay for
+                                     every owner (requirement 19.8). This is a
+                                     PURCHASE, so it goes for an organisation owner. -->
+                                @if (phormaCloud.lowOnCredits() && phormaCloud.selfServeBilling()) {
                                   <p-button
                                     styleClass="phorma-settings__btn phorma-settings__buy-credits"
                                     [outlined]="true"
@@ -971,14 +974,30 @@
                           </div>
                           <!-- Dunning banner. Stripe emails too, but the studio is
                                where the user notices runs stopped, so the remedy
-                               belongs here (requirement 17). -->
-                          @if (phormaCloud.pastDue()) {
+                               belongs here (requirement 17). Absent for an
+                               organisation owner: its remedy is the Billing Portal,
+                               which `billing_managed` refuses. -->
+                          @if (phormaCloud.pastDue() && phormaCloud.selfServeBilling()) {
                             <app-past-due-notice />
+                          }
+                          <!-- WHY THE MISSING ACTIONS ARE LEGIBLE (requirement 19.8).
+                               An organisation's plan and credits are read-only above
+                               and every purchase surface below is absent, so without
+                               this sentence the page reads as a broken account rather
+                               than as somebody else's bill. No new class: the shared
+                               note style carries it. -->
+                          @if (!phormaCloud.selfServeBilling()) {
+                            <p class="phorma-settings__note phorma-settings__note--info" role="status">
+                              <i class="ti ti-building" aria-hidden="true"></i>
+                              Phorma Labs manages billing for this organisation. Its plan and
+                              credits are shown above; contact support to change them.
+                            </p>
                           }
                           <!-- Plan selection lives here rather than in a modal: a
                                required dialog before a user can pay works against
                                "defaults must be runnable". Own component, own
-                               stylesheet - this sheet has no budget left. -->
+                               stylesheet - this sheet has no budget left. The
+                               component renders nothing for an organisation owner. -->
                           <app-plan-cards />
                         } @else {
                           <p class="phorma-settings__note">

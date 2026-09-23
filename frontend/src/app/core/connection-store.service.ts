@@ -12,6 +12,7 @@ import {
   type ResolvedConnection,
 } from '@phorma/engine';
 
+import { CapabilityService } from './capability.service';
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { TauriService } from './tauri.service';
 import { WorkflowStateService } from './workflow-state.service';
@@ -71,6 +72,16 @@ export const NO_KEYCHAIN_MESSAGE =
   'Connections need the desktop app or a deployed worker — browser preview cannot hold credentials.';
 
 /**
+ * What a Cloud_Library session is told instead (multi-organisation Requirement 9.5).
+ *
+ * A separate message because the remedy is different: this host may well HAVE a
+ * keychain, and the answer is not "install the desktop app" but "the credential
+ * belongs to the organisation, so it goes to the organisation's vault".
+ */
+export const CLOUD_LIBRARY_SECRET_MESSAGE =
+  'Connection secrets for this organisation are stored in its cloud vault, not on this machine.';
+
+/**
  * The stand-in value for one connection secret. Carries the connection id, which
  * is what lets {@link ConnectionStoreService.credentialsFor} recover the
  * credential reference from a request the engine built without ever seeing a
@@ -108,6 +119,9 @@ export class ConnectionStoreService implements ConnectionStore {
   private readonly db = inject(IndexedDbStorageService);
   private readonly tauri = inject(TauriService);
   private readonly state = inject(WorkflowStateService);
+  // `CapabilityService` injects nothing at all, so this edge adds no DI risk on a
+  // service the run path reaches.
+  private readonly capability = inject(CapabilityService);
 
   /**
    * Metadata of every connection resolved in this session, keyed by id. Holds
@@ -152,7 +166,39 @@ export class ConnectionStoreService implements ConnectionStore {
    * succeed on a host with no keychain to receive it.
    */
   get secretsSupported(): boolean {
-    return this.tauri.isDesktop;
+    return this.keychainAvailable;
+  }
+
+  /**
+   * Whether an OS keychain may be reached at all for a connection secret.
+   *
+   * Two independent reasons it may not be, and the second is the point of this
+   * getter (multi-organisation Requirement 9.5):
+   *
+   * - There is no keychain: a browser build has none, which is the existing
+   *   `TauriService.isDesktop` gate.
+   * - There is one, and it is the WRONG place. A Cloud_Library session
+   *   (`operator` or `editor`) works out of an organisation's cloud account, so its
+   *   connection secret values go to `POST /api/connection-secrets` and into that
+   *   organisation's `SecretVault`. The gate is written EXPLICITLY even though the
+   *   keychain already sits behind `isDesktop`, because the case it exists for is a
+   *   builder on desktop who is an editor in another organisation: that person has
+   *   a keychain, and writing somebody else's organisation credential into it is
+   *   exactly what must not happen.
+   *
+   * The desktop keychain contract is unchanged either way: the webview still sees
+   * only a boolean for a stored key, and no raw value is added to any response or
+   * signal (Requirement 17.5).
+   */
+  private get keychainAvailable(): boolean {
+    return this.tauri.isDesktop && !this.capability.cloudLibraryOnly();
+  }
+
+  /** Why a keychain path is refused, so a call site reports the real remedy. */
+  private keychainRefusal(): Error {
+    return new Error(
+      this.tauri.isDesktop ? CLOUD_LIBRARY_SECRET_MESSAGE : NO_KEYCHAIN_MESSAGE,
+    );
   }
 
   /**
@@ -171,7 +217,7 @@ export class ConnectionStoreService implements ConnectionStore {
    * the value itself. Rejects when the host has no keychain to write to.
    */
   async writeSecret(connectionId: string, secretKey: string, value: string): Promise<void> {
-    if (!this.secretsSupported) throw new Error(NO_KEYCHAIN_MESSAGE);
+    if (!this.secretsSupported) throw this.keychainRefusal();
     await this.storeSecret(connectionId, secretKey, value);
   }
 
@@ -183,7 +229,7 @@ export class ConnectionStoreService implements ConnectionStore {
    * rather than write.
    */
   async clearSecret(connectionId: string, secretKey: string): Promise<void> {
-    if (!this.secretsSupported) throw new Error(NO_KEYCHAIN_MESSAGE);
+    if (!this.secretsSupported) throw this.keychainRefusal();
     await this.storeSecret(connectionId, secretKey, '');
   }
 
@@ -207,9 +253,11 @@ export class ConnectionStoreService implements ConnectionStore {
       );
     }
 
-    if (!this.tauri.isDesktop) {
-      // Requirement 3.8: no secret store worth trusting, so no resolution.
-      throw new Error(NO_KEYCHAIN_MESSAGE);
+    if (!this.keychainAvailable) {
+      // Requirement 3.8: no secret store worth trusting, so no resolution. A
+      // Cloud_Library session refuses here too - its credentials live in the
+      // organisation's vault and its runs happen in the cloud.
+      throw this.keychainRefusal();
     }
 
     const secretKeys = await this.assertDeclaredSecretsPresent(connection);
@@ -303,7 +351,7 @@ export class ConnectionStoreService implements ConnectionStore {
 
   /** One keychain presence check. An unreadable keychain reads as absent. */
   private async hasSecret(connectionId: string, secretKey: string): Promise<boolean> {
-    if (!this.tauri.isDesktop) return false;
+    if (!this.keychainAvailable) return false;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<boolean>('has_secret', {
@@ -314,8 +362,16 @@ export class ConnectionStoreService implements ConnectionStore {
     }
   }
 
-  /** Writes one connection secret to the keychain under `conn:{id}:{key}`. */
+  /**
+   * Writes one connection secret to the keychain under `conn:{id}:{key}`.
+   *
+   * The ONE keychain write in the studio, so the gate is repeated here rather than
+   * left to the public callers: the OAuth grant path stores its access token
+   * through this method too, and a second entry point that skipped the check is
+   * how a Cloud_Library session would end up with a credential on disk.
+   */
   private async storeSecret(connectionId: string, secretKey: string, value: string): Promise<void> {
+    if (!this.keychainAvailable) throw this.keychainRefusal();
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('set_secret', { key: connectionSecretName(connectionId, secretKey), value });
   }

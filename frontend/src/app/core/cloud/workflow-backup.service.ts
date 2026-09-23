@@ -32,6 +32,7 @@ import { Injectable, computed, effect, inject, signal, untracked } from '@angula
 
 import { canonicalJson, fnv1a } from '@phorma/engine';
 
+import { ActiveOwnerService } from '../active-owner.service';
 import { ConnectionStoreService } from '../connection-store.service';
 import { DesktopAuthService } from '../desktop-auth.service';
 import { IndexedDbStorageService } from '../indexed-db-storage.service';
@@ -96,6 +97,10 @@ export class WorkflowBackupService {
   private readonly settings = inject(SettingsService);
   private readonly connections = inject(ConnectionStoreService);
   private readonly toast = inject(ToastService);
+  // A DI LEAF - it injects nothing at all - so this edge is safe even on the
+  // transport path. It supplies the `X-Phorma-Owner` header this service's
+  // `fetch-bearer` transport sends beside its bearer.
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   /** The account's backups, from the last list refresh. */
   private readonly rows = signal<BackupSummary[]>([]);
@@ -546,6 +551,11 @@ export class WorkflowBackupService {
         'Content-Type': 'application/json',
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      // The ACTIVE owner, beside the bearer (multi-organisation-phorma,
+      // Requirement 20.4). `workflow_backups.tenant_id` keys on the resolved
+      // owner, so an organisation's backup must not be uploaded under a member's
+      // personal account.
+      Object.assign(headers, this.activeOwner.ownerHeader());
       const response = await fetch(url, { method: init.method, headers, body: init.body });
       return { status: response.status, ok: response.ok, body: await response.text() };
     },

@@ -11,12 +11,15 @@
 import {
   MAX_KEEP_RUNS,
   MAX_MAX_AGE_DAYS,
+  attributeGateActor,
   dataPathSettings,
+  gateActorKey,
   notificationDetail,
   notificationEndpoint,
   notificationTriggerFor,
   notificationWanted,
   resolveRunRetention,
+  resolvedGateKey,
 } from '../src/run-wiring.ts';
 
 const DEFAULT_KEEP = 50;
@@ -186,6 +189,115 @@ console.log('\nSettings');
     'a pushed retention block is read through',
     dataPathSettings({ settings: { retention: { keepRuns: 3 } } }).retention?.keepRuns === 3,
   );
+}
+
+// ── Who settled a gate (multi-organisation Requirement 10.5) ────────────────
+
+console.log('\nGate attribution');
+{
+  const at = 7;
+  const approvalResolved = (requestId, approved = true) => ({
+    type: 'approval-resolved',
+    runId: 'r1',
+    requestId,
+    nodeId: 'n1',
+    approved,
+    at,
+  });
+  const askResolved = (requestId) => ({
+    type: 'ask-resolved',
+    runId: 'r1',
+    requestId,
+    nodeId: 'n2',
+    response: 'Q1 FY26',
+    at,
+  });
+  const waitResolved = (correlationKey) => ({
+    type: 'wait-resolved',
+    runId: 'r1',
+    nodeId: 'n3',
+    correlationKey,
+    eventPayload: '{"signed":true}',
+    at,
+  });
+
+  // The key scheme. A bare id would attribute a correlation key that happens to
+  // equal a request id to the wrong gate, which is the whole reason for the prefix.
+  check(
+    'each gate kind keys on its own identity',
+    resolvedGateKey(approvalResolved('approval:x')) === gateActorKey('approval', 'approval:x') &&
+      resolvedGateKey(askResolved('ask:x')) === gateActorKey('question', 'ask:x') &&
+      resolvedGateKey(waitResolved('signed:J42')) === gateActorKey('event', 'signed:J42'),
+  );
+  check(
+    'a correlation key equal to a request id is a DIFFERENT gate',
+    resolvedGateKey(waitResolved('same')) !== resolvedGateKey(approvalResolved('same')),
+  );
+  check(
+    'an event that settles no gate has no key',
+    resolvedGateKey({ type: 'node-started', runId: 'r1', nodeId: 'n1', nodeName: 'A', at }) ===
+      null &&
+      resolvedGateKey({ type: 'approval-required', runId: 'r1', requestId: 'approval:x', nodeId: 'n1', message: 'm', payload: '', at }) ===
+        null,
+  );
+
+  // Stamping.
+  {
+    const actors = new Map([[gateActorKey('approval', 'approval:x'), 'user_ada']]);
+    const stamped = attributeGateActor(approvalResolved('approval:x', false), actors);
+    check(
+      'the acting id joins the outcome without disturbing it',
+      stamped.actor === 'user_ada' &&
+        stamped.approved === false &&
+        stamped.type === 'approval-resolved' &&
+        stamped.requestId === 'approval:x',
+      JSON.stringify(stamped),
+    );
+    check('the entry is CONSUMED, so a repeated gate is not re-attributed', actors.size === 0);
+    const again = attributeGateActor(approvalResolved('approval:x'), actors);
+    check(
+      'the second occurrence of the same request id is unattributed',
+      again.actor === undefined,
+      JSON.stringify(again),
+    );
+  }
+
+  {
+    const actors = new Map([
+      [gateActorKey('approval', 'approval:x'), 'user_ada'],
+      [gateActorKey('question', 'ask:x'), 'user_grace'],
+      [gateActorKey('event', 'signed:J42'), 'user_omar'],
+    ]);
+    check(
+      'three gates in one run are attributed independently',
+      attributeGateActor(approvalResolved('approval:x'), actors).actor === 'user_ada' &&
+        attributeGateActor(askResolved('ask:x'), actors).actor === 'user_grace' &&
+        attributeGateActor(waitResolved('signed:J42'), actors).actor === 'user_omar',
+    );
+    check('and each consumed exactly its own entry', actors.size === 0);
+  }
+
+  // The absent cases. Every one of these returns the SAME OBJECT, which is what
+  // keeps "nobody is recorded" byte-identical to the pre-feature event rather than
+  // a copy carrying `actor: undefined`.
+  {
+    const empty = new Map();
+    const event = approvalResolved('approval:x');
+    check('an empty actor map changes nothing', attributeGateActor(event, empty) === event);
+
+    const other = new Map([[gateActorKey('approval', 'approval:other'), 'user_ada']]);
+    check(
+      'a gate nobody settled is left alone, even with other gates attributed',
+      attributeGateActor(event, other) === event && other.size === 1,
+    );
+
+    const node = { type: 'node-completed', runId: 'r1', nodeId: 'n1', nodeName: 'A', output: 'o', at };
+    check(
+      'a non-gate event is never touched',
+      attributeGateActor(node, new Map([[gateActorKey('approval', 'approval:x'), 'user_ada']])) ===
+        node,
+    );
+  }
 }
 
 console.log(failures === 0 ? '\nAll run-wiring checks passed.\n' : `\n${failures} check(s) failed.\n`);

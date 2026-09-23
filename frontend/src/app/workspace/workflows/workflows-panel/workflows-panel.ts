@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DatePipe } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 
+import { CapabilityService } from '../../../core/capability.service';
+import { CloudLibrary } from '../../cloud-library/cloud-library';
 import { WorkflowBackupService } from '../../../core/cloud/workflow-backup.service';
 import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { WorkflowService } from '../../../core/workflow.service';
@@ -20,16 +22,34 @@ import { VersionHistoryDialogService } from '../version-history-dialog.service';
  * built-in template gallery. Click to open in a tab; templates open as
  * fresh unsaved copies; the trash affordance deletes from storage after
  * confirmation.
+ *
+ * In Cloud_Library mode (multi-organisation Requirement 9.1) it renders the
+ * organisation's DEPLOYED workflows instead, behind `@defer (on immediate)` so the
+ * surface costs the initial bundle nothing. A member has no local library to show
+ * and cannot save into one, so this is a replacement rather than an addition.
  */
 @Component({
   selector: 'app-workflows-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, ButtonModule, PanelCard],
+  imports: [DatePipe, ButtonModule, PanelCard, CloudLibrary],
   templateUrl: './workflows-panel.html',
   styleUrl: './workflows-panel.scss',
 })
 export class WorkflowsPanel {
   protected readonly workflow = inject(WorkflowService);
+  // `CapabilityService` injects nothing at all, so this edge cannot pull a member
+  // of the NG0200 run/model/cloud cycle into the panel.
+  private readonly capability = inject(CapabilityService);
+
+  /**
+   * Whether this session works out of the cloud only.
+   *
+   * Read straight off the capability seam rather than compared here: the one place
+   * a level decision is made is `CapabilityService`, and
+   * `scripts/check-capability-isolation.mjs` fails a level token compared anywhere
+   * else.
+   */
+  protected readonly cloudLibraryOnly = this.capability.cloudLibraryOnly;
   protected readonly versions = inject(WorkflowVersionsService);
   private readonly cloud = inject(CloudService);
   private readonly settings = inject(SettingsService);

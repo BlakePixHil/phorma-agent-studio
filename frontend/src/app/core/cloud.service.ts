@@ -31,6 +31,8 @@ import type { DeploymentSummary, DeploymentsResponse } from './deployments.model
 import { AwsDeployConfigService } from './deploy/aws-deploy-config.service';
 import { AwsRequestService } from './deploy/aws-request.service';
 
+import { ActiveOwnerService } from './active-owner.service';
+import { CapabilityService } from './capability.service';
 import { ConnectionStoreService } from './connection-store.service';
 import { DeployConfigService, BYO_CONFIG_FILENAME } from './deploy-config.service';
 import { DesktopAuthService } from './desktop-auth.service';
@@ -46,7 +48,8 @@ import { WorkflowService } from './workflow.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import { loadPhormaCloudUrl, savePhormaCloudUrl } from './phorma-cloud-url';
 import { ToastService } from '../shared/toast/toast.service';
-import { isAgentNode, type WorkflowSpec } from './workflow.model';
+import type { WorkflowSpec } from './workflow.model';
+import { graphsOf, materializeSpecDefaults } from './spec-defaults';
 import type {
   PortalMintResponse,
   PortalPublishResponse,
@@ -123,6 +126,16 @@ export class CloudService {
   // (`TauriService` + `McpOAuthService`), so it cannot close the cycle either -
   // and deliberately NOT `PhormaCloudService`, which injects THIS service.
   private readonly desktopAuth = inject(DesktopAuthService);
+  // Safe here for the strongest possible reason: `CapabilityService` injects
+  // NOTHING, and `scripts/check-capability-isolation.mjs` keeps it that way. Read
+  // by `provider` below - see the comment there for why a Cloud_Library session
+  // has no deploy target to resolve.
+  private readonly capability = inject(CapabilityService);
+
+  // Safe for the same reason, and guarded by the same script:
+  // `ActiveOwnerService` injects nothing at all. Read by `headers()` below, which
+  // is the ONE place a hosted request's owner is named.
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   /** Worker base URL, e.g. https://phorma-agent-studio-cloud.you.workers.dev */
   readonly workerUrl = signal(loadLayout('cloudWorkerUrl', ''));
@@ -146,8 +159,28 @@ export class CloudService {
   /** Phorma Cloud base URL (configurable for staging; defaults to prod). */
   readonly phormaCloudUrl = signal(loadPhormaCloudUrl());
 
-  /** The user's chosen deploy target (null until picked in Settings → Cloud). */
-  readonly provider = computed(() => this.settings.cloudProvider());
+  /**
+   * The deploy target every request, socket and command resolves against.
+   *
+   * Normally the user's chosen one (null until picked in Settings → Cloud). For a
+   * Cloud_Library session it is PINNED to Phorma Cloud, because such a session has
+   * no target to choose: a member never deploys, their workflows exist only as an
+   * organisation's hosted deployments, and Settings → Cloud is a builder surface
+   * they never reach. Left unpinned, `configured()` answers false and
+   * `effectiveWorkerUrl()` answers the empty BYO worker URL, so Run, Stop and the
+   * monitor socket all fail for the one session that has nothing else to run
+   * (multi-organisation Requirements 10.1, 10.3).
+   *
+   * Pinning HERE rather than at each call site is deliberate, and it is the same
+   * answer `DeploymentsService` and `DeployedNotificationsService` reached by
+   * pinning `DEPLOY_TARGETS.phorma`: the fact is "this session's runtime is the
+   * hosted one", and it belongs in the one place the target is resolved. It is a
+   * predicate call, never a level comparison - the decision stays inside
+   * `CapabilityService`.
+   */
+  readonly provider = computed(() =>
+    this.capability.cloudLibraryOnly() ? ('phorma' as const) : this.settings.cloudProvider(),
+  );
 
   /**
    * Base URL actually used for push/monitor, per the chosen provider.
@@ -212,6 +245,22 @@ export class CloudService {
   readonly deployedStatusWorkflowId = signal<string | null>(null);
   /** True while {@link refreshStatus} has a request in flight. */
   readonly statusLoading = signal(false);
+
+  /**
+   * Where a change goes when the caller may not deploy
+   * (multi-organisation-phorma, Requirement 12.1).
+   *
+   * A SETTABLE SEAM, installed by the shell, for the same reason
+   * `RunControllerService.deployedRunLauncher` and
+   * `NotificationCenterService.deepLinkHandler` are: the performer
+   * (`ProposalsService`) reaches `PhormaCloudService`, which injects this service,
+   * so an injection here would close the known NG0200 cycle through a new edge.
+   *
+   * Absent means "this build cannot submit a proposal", which
+   * {@link pushWorkflow} reports rather than falling back to a push - an editor's
+   * change must never reach a deployment by default.
+   */
+  specProposer: ((spec: WorkflowSpec) => Promise<boolean>) | null = null;
 
   private socket: WebSocket | null = null;
   /**
@@ -587,29 +636,30 @@ export class CloudService {
   // ── Push the active workflow spec ──────────────────────────────────────────
 
   /**
-   * Materializes the application default model into agents that inherit it.
-   * The cloud runtime has no access to the studio's settings, so inherited
-   * provider/model values are resolved into the spec at push time.
+   * Materializes the application default model into agents that inherit it, and
+   * refreshes attached skill bodies from the local library. The cloud runtime has
+   * no access to either, so both are resolved into the spec at push time.
+   *
+   * A THIN WRAPPER over `materializeSpecDefaults` (`core/spec-defaults.ts`),
+   * which is where the transform now lives so a service that must not inject
+   * this one can still compute a Canonical_Spec_Hash that agrees with the one the
+   * push path stores (Requirement 12.4).
+   *
+   * The two halves are deliberately on opposite sides of that seam. The default
+   * materialization is IN the hash transform; the skills refresh is OUT of it,
+   * because it is a library READ rather than a default and a member has no local
+   * skills library. The consequence, stated rather than discovered: the hash
+   * compares workflow CONFIGURATION, not attached skill CONTENT.
    */
   private materializeDefaults(spec: WorkflowSpec): WorkflowSpec {
-    const resolved = structuredClone(spec);
-    const graphs = [
-      resolved.graph,
-      ...Object.values(resolved.subWorkflows ?? {}).map(workflow => workflow.graph),
-    ];
-    for (const graph of graphs) {
-      // Deployed runs can't reach the studio libraries. Refresh skills and
-      // materialize inherited models in every graph in the embedded closure.
-      this.skillsLibrary.syncAttachedSkills(graph);
-      for (const node of graph.nodes) {
-        if (!isAgentNode(node)) continue;
-        if (!node.data.provider || !node.data.model) {
-          node.data.provider = this.settings.defaultProvider();
-          node.data.model = this.settings.defaultModel();
-          node.data.temperature ??= this.settings.defaultTemperature();
-        }
-      }
-    }
+    const resolved = materializeSpecDefaults(spec, {
+      provider: this.settings.defaultProvider(),
+      model: this.settings.defaultModel(),
+      temperature: this.settings.defaultTemperature(),
+    });
+    // Deployed runs can't reach the studio libraries, so every graph in the
+    // embedded closure gets its attached skill copies refreshed.
+    for (const graph of graphsOf(resolved)) this.skillsLibrary.syncAttachedSkills(graph);
     return resolved;
   }
 
@@ -631,6 +681,33 @@ export class CloudService {
     const rawSpec = source ?? this.workflow.exportActiveSpec();
     if (!rawSpec) return false;
     const spec = this.materializeDefaults(rawSpec);
+
+    // An editor may not deploy, so their push is a PROPOSAL and never a push
+    // (multi-organisation-phorma, Requirement 12.1). Routed here, past
+    // materialization, so the spec a builder reviews and the spec a push would
+    // have sent are the same bytes - a comparison against the deployed hash is
+    // only meaningful when both sides ran the same transform.
+    //
+    // A SEAM rather than an injection: `ProposalsService` reaches
+    // `PhormaCloudService`, so injecting it here would close the known NG0200
+    // cycle (`RunControllerService -> ModelTransportService -> PhormaCloudService
+    // -> CloudService`) through a new edge. The shell installs it, exactly as it
+    // installs `RunControllerService.deployedRunLauncher`.
+    //
+    // The test is the CAPABILITY, not a level: `deploy.push` is what a push needs,
+    // and naming it here keeps the one level comparison inside `CapabilityService`
+    // where `scripts/check-capability-isolation.mjs` requires it to stay.
+    if (!this.capability.can('deploy.push')) {
+      if (!this.specProposer) {
+        this.toast.warning(
+          'Submit for review',
+          'Your account can propose changes rather than deploy them, and this build cannot ' +
+            'submit one. Update the app and try again.',
+        );
+        return false;
+      }
+      return this.specProposer(spec);
+    }
     const base = this.instanceUrl(spec.id);
     if (!base) {
       this.toast.warning('Set the worker URL', 'Enter your deployed worker URL first.');
@@ -1239,6 +1316,49 @@ export class CloudService {
     }
   }
 
+  /**
+   * Runs the ACTIVE document's deployment and watches it - a member's Run
+   * (multi-organisation Requirements 10.1, 10.2, 10.3).
+   *
+   * Installed on `RunControllerService.deployedRunLauncher` by the shell, because
+   * the controller must not inject this service (it is the far side of the known
+   * NG0200 cycle). One seam, so the Runs panel button, the toolbar, F5 and the
+   * assistant's run action all reach the deployment rather than three of them
+   * starting a local run of a read-only spec.
+   *
+   * Two choices worth keeping. The monitor is attached FIRST, though ordering is a
+   * courtesy rather than a correctness requirement: the Durable Object replays its
+   * event log to a late-joining monitor, so a socket that opens mid-run catches up.
+   * And the trigger goes over HTTP rather than the socket's `trigger` frame
+   * precisely BECAUSE the socket may not be open yet - `triggerRemote` would report
+   * "not connected" for a run that was one await away from being watchable.
+   *
+   * Entitlement, metering and the credits split need nothing here: `trigger`
+   * resolves the instance's own `ownerId`, so a member's run is billed to the
+   * ORGANISATION's bucket, and its usage arrives as ordinary RunEvents.
+   */
+  async runDeployedActive(input: string): Promise<void> {
+    const workflowId = this.workflow.activeDoc()?.workflowId;
+    if (!workflowId) {
+      this.toast.warning(
+        'Open a deployed workflow',
+        'Pick one from your cloud library, then press Run.',
+      );
+      return;
+    }
+    if (!this.connected()) await this.connect(workflowId);
+    try {
+      await this.triggerHttp(workflowId, input);
+    } catch (error) {
+      // The worker's own sentence, verbatim: a refusal here is a quota, a lapsed
+      // subscription or a busy instance, and it knows which of the three.
+      this.toast.error(
+        'Could not start the run',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
   stopRemote(): void {
     this.send({ type: 'stop' });
   }
@@ -1424,7 +1544,11 @@ export class CloudService {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const token = await this.resolveAuthToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    return headers;
+    // The ACTIVE owner, beside the bearer (multi-organisation-phorma,
+    // Requirement 20.4). Empty for a personal account, and empty for a BYO target
+    // too - `X-Phorma-Owner` is ignored by a `shared` credential, so one code path
+    // covers both rather than a branch per target.
+    return { ...headers, ...this.activeOwner.ownerHeader() };
   }
 
   /**

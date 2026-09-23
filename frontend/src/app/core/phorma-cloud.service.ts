@@ -4,6 +4,14 @@ import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom } from 'rxjs';
 
 import { ToastService } from '../shared/toast/toast.service';
+import {
+  ActiveOwnerService,
+  PERSONAL_OWNER_LABEL,
+  shortOwnerLabel,
+  type OwnerChoice,
+} from './active-owner.service';
+import { isCapabilityLevel } from './capabilities';
+import { CapabilityService } from './capability.service';
 import { DesktopAuthService } from './desktop-auth.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { loadPhormaCloudUrl } from './phorma-cloud-url';
@@ -13,6 +21,42 @@ import { TelemetryService } from './telemetry.service';
 /** Profile + quota returned by the hosted control plane's `GET /api/me`. */
 export interface PhormaCloudProfile {
   id: string;
+  /**
+   * Whose data this session addresses: the organisation when the credential
+   * carries one, otherwise the account's own id (multi-organisation-phorma,
+   * Requirement 7.6).
+   *
+   * OPTIONAL because the field is ADDITIVE: a worker older than it omits it, and
+   * `id` is what it would have said anyway for an install with no organisation.
+   */
+  ownerId?: string;
+  /**
+   * The capability level the worker resolved for this session.
+   *
+   * A `string` rather than a `CapabilityLevel`, deliberately: this is parsed JSON
+   * from a server that may be newer than this build, so the token is validated
+   * with `isCapabilityLevel` before anything decides with it. Absent when the
+   * worker predates the field, and also when the worker could not resolve a level
+   * at all - `/api/me` is a read and never refuses over a membership question, so
+   * it omits the field instead (see `cloud/src/api.ts`). Both cases leave the
+   * studio on `CapabilityService`'s `admin` default.
+   */
+  level?: string;
+  /**
+   * The organisations this CALLER is a member of, and the level held in each
+   * (multi-organisation-phorma, Requirement 20.1).
+   *
+   * OPTIONAL and ADDITIVE like its two neighbours: a worker older than the field
+   * omits it, which reads as "no memberships" and renders no switching surface -
+   * exactly what every install did before this feature existed. Returned on BOTH
+   * `/api/me` branches including `provisioned: false`, which is the COMMON case
+   * for an organisation member who never subscribed personally.
+   *
+   * It does NOT include the personal account. The worker answers a question about
+   * memberships, and nobody is a member of themselves; `ActiveOwnerService`
+   * prepends the personal entry.
+   */
+  owners?: readonly { ownerId?: string; level?: string }[];
   provisioned: boolean;
   tier: string | null;
   status: 'active' | 'past_due' | 'canceled' | null;
@@ -159,6 +203,30 @@ export class PhormaCloudService {
   // here so a sign-in failure leaves its real cause somewhere a user can read it -
   // a toast cannot carry a URL or an exception message usefully.
   private readonly terminal = inject(TerminalOutputService);
+  /**
+   * The capability seam, and the DIRECTION is the point.
+   *
+   * `CapabilityService` injects nothing at all - `PanelRegistryService` injects IT
+   * and the layout shell reads that registry at startup, so it must reach no member
+   * of the NG0200 cycle this service sits on. It therefore cannot fetch `/api/me`
+   * for itself; the level is PUSHED to it from here, where the verified answer
+   * already arrives. Same settable-seam idiom as
+   * `RunControllerService.remoteApprovalSender` and
+   * `NotificationCenterService.deepLinkHandler`, and it is what makes a mid-session
+   * level change one signal write rather than a reload.
+   */
+  private readonly capability = inject(CapabilityService);
+
+  /**
+   * The active-owner seam, safe here for the same reason and by the same guard:
+   * `ActiveOwnerService` injects nothing at all.
+   *
+   * Two directions cross here, which is why it is worth naming. The owner LIST is
+   * pushed INTO it from the `/api/me` answer below, and the ACTIVE owner is read
+   * OUT of it - by `sessionToken`'s callers for the request header, and by
+   * {@link selfServeBilling} for the billing surfaces.
+   */
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   /**
    * Current Clerk user. Always null on desktop, and that is not a bug: the webview
@@ -220,6 +288,90 @@ export class PhormaCloudService {
 
   /** Subscription is active and the account can run workflows. */
   readonly subscribed = computed(() => this.profile()?.status === 'active');
+
+  /**
+   * The Clerk user id of whoever is signed in, by either credential route, or null.
+   *
+   * Needed because {@link selfServeBilling} compares an OWNER against a CALLER, and
+   * the two credentials keep the caller in different places: a browser build has a
+   * Clerk user, a desktop build has the subject decoded from its device token and
+   * `user()` is permanently null there.
+   */
+  private readonly callerUserId = computed(
+    () => this.user()?.id ?? this.desktopAuth.userId() ?? null,
+  );
+
+  /**
+   * True when SELF-SERVE BILLING applies to the active owner - that is, when the
+   * owner paying for hosted usage is this person's own personal account
+   * (multi-organisation-phorma, Requirement 19.7).
+   *
+   * Every purchase surface in the studio reads this and renders ABSENT when it is
+   * false: the five Subscribe CTAs, the plan cards and the credit packs. Absent and
+   * never disabled or refused - an organisation is invoiced by Phorma Labs, and a
+   * greyed-out Subscribe button reads as a broken app rather than as somebody else's
+   * responsibility. The worker agrees from the other side: `/api/checkout` and
+   * `/api/billing-portal` answer 403 `billing_managed` before any Stripe call, so a
+   * surface that slipped through would produce a refusal rather than a charge.
+   *
+   * ## How the owner is decided
+   *
+   * `/api/me` reports the RESOLVED owner as `ownerId`, which is the organisation
+   * when the verified credential names one and the account's own id otherwise. So
+   * this compares that against {@link callerUserId}. Three cases read as personal,
+   * and each is ordinary rather than a fallback:
+   *
+   *  - No profile yet (signed out, or before the first refresh). An organisation
+   *    only exists once the worker has said so, so there is nothing to suppress -
+   *    and suppressing here would delete the Subscribe CTA for every install during
+   *    startup.
+   *  - No `ownerId` field. An older worker omits it, and for an account in no
+   *    organisation it would have answered the caller's own id anyway.
+   *  - `ownerId` equal to the caller. The single-user install, unchanged.
+   *
+   * An owner we hold but cannot compare to a caller reads as NOT self-serve, which
+   * is the one fail-closed branch: it means the worker named an owner while this
+   * build cannot say whose it is, and offering to charge somebody in that state is
+   * the wrong guess. It is unreachable today, because a profile is only ever set
+   * while `signedIn()` is true and both credential routes carry a subject.
+   *
+   * ## What this deliberately does NOT read
+   *
+   * The DEPLOY TARGET. Settings > Cloud gates its plan cards on
+   * `settings.cloudProvider() === 'phorma'` because that whole panel is about the
+   * chosen target, but the other four CTAs are about the `phorma-cloud` MODEL
+   * provider, which bills subscription credits for LOCAL runs no matter where the
+   * user deploys - the same reason `DeploymentsService` and
+   * `DeployedNotificationsService` pin the Phorma target rather than dispatching on
+   * it. A subscriber whose deploy target is AWS still has a Phorma Cloud account, so
+   * folding the target in here would leave a BYO user with the `phorma-cloud`
+   * provider selected, no subscription, and no way to buy one.
+   *
+   * ## The ACTIVE owner, not only the reported one
+   *
+   * `ActiveOwnerService.activeOrgId()` is read FIRST, and it is the whole of the
+   * switch as far as billing is concerned: a null is the personal account and
+   * anything else is an organisation, decided locally and synchronously. That
+   * matters because a switch changes this the instant the signal moves, with no
+   * wait for the `/api/me` answer to come back - and a purchase CTA that stayed on
+   * screen for a round trip after switching into an organisation is a CTA somebody
+   * can press.
+   *
+   * The reported `ownerId` comparison stays BELOW it rather than being replaced by
+   * it, because the two answer different questions and both have to hold. The
+   * signal says which owner the studio is addressing; the profile says which owner
+   * the worker resolved. They disagree in exactly one case that matters - a browser
+   * session whose Clerk claim names an organisation the signal knows nothing about,
+   * which is what a `setActive` performed outside this app looks like - and in that
+   * case the worker's answer is the fact.
+   */
+  readonly selfServeBilling = computed(() => {
+    if (this.activeOwner.activeOrgId() !== null) return false;
+    const owner = this.profile()?.ownerId;
+    if (!owner) return true;
+    const caller = this.callerUserId();
+    return caller !== null && owner === caller;
+  });
 
   /**
    * The tenant has a subscription whose last payment FAILED.
@@ -546,7 +698,12 @@ export class PhormaCloudService {
       if (!bearer) throw new Error('Could not get a session token. Sign in again.');
 
       const response = await fetch(`${base}/api/me`, {
-        headers: { Authorization: `Bearer ${bearer}` },
+        // The ACTIVE owner beside the bearer (multi-organisation-phorma,
+        // Requirement 20.5). This is the request whose answer the whole switch is
+        // read from: the profile, the quota and the capability level all have to be
+        // the ones belonging to the owner the studio is working in, or a member
+        // would see the organisation's canvas beside their own plan.
+        headers: { Authorization: `Bearer ${bearer}`, ...this.activeOwner.ownerHeader() },
       });
       if (!response.ok) {
         // A 401 from the control plane means the session the studio holds is not
@@ -558,11 +715,83 @@ export class PhormaCloudService {
         const detail = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(detail?.error ?? `Phorma Cloud responded with HTTP ${response.status}.`);
       }
-      this.profile.set(normalizeProfile((await response.json()) as PhormaCloudProfile));
+      const profile = normalizeProfile((await response.json()) as PhormaCloudProfile);
+      this.profile.set(profile);
+      this.adoptCapabilityLevel(profile);
+      this.adoptOwners(profile);
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : String(error));
     } finally {
       this.loading.set(false);
     }
+  }
+
+  /**
+   * Pushes the level `/api/me` reported into {@link CapabilityService}
+   * (Requirements 7.6, 7.7).
+   *
+   * VALIDATED FIRST, because a level arrives as JSON: `isCapabilityLevel` is the
+   * contract's own guard, so a token this build does not know, a `null`, a number
+   * or an absent field are all one case here and NONE of them reaches the service.
+   * An unrecognised or absent value leaves the studio on its `admin` default, which
+   * is the documented compatibility behaviour - the same level a credential with no
+   * organisation claim resolves, and the same thing a worker predating the field
+   * produces.
+   *
+   * Only ever CALLED with a successful answer. A failed refresh must not move the
+   * level: going offline is not a demotion, and a poll that briefly fails would
+   * otherwise churn every capability-derived surface in the studio.
+   */
+  private adoptCapabilityLevel(profile: PhormaCloudProfile): void {
+    const level = profile.level;
+    if (isCapabilityLevel(level)) this.capability.resolveFrom(level);
+  }
+
+  /**
+   * Pushes the owner list `/api/me` reported into {@link ActiveOwnerService}
+   * (multi-organisation-phorma, Requirements 20.1, 20.3).
+   *
+   * The same settable-seam direction as {@link adoptCapabilityLevel}, and for the
+   * same reason: `ActiveOwnerService` is a DI leaf read on the transport path, so
+   * it cannot fetch anything for itself and this service already holds the
+   * verified answer.
+   *
+   * A malformed entry is DROPPED rather than rendered. The list arrives as JSON,
+   * so an entry with no `ownerId` is possible and would be an owner the switcher
+   * could offer and never address. An absent `owners` field therefore reads exactly
+   * like an empty one - an older worker and a solo account produce the same
+   * no-switching-surface outcome.
+   *
+   * Labels come from CLERK where Clerk has them: `user.organizationMemberships`
+   * carries the real organisation names in a browser build. A desktop install
+   * holds no Clerk session at all, so it falls back to a short form of the id -
+   * legible and honest, rather than a name invented client-side.
+   *
+   * Only ever CALLED with a successful answer, for the same reason the level is:
+   * going offline is not a change of membership, and a poll that briefly failed
+   * would otherwise drop a member back to their personal account mid-session.
+   */
+  private adoptOwners(profile: PhormaCloudProfile): void {
+    const names = new Map<string, string>();
+    for (const membership of this.user()?.organizationMemberships ?? []) {
+      const id = membership?.organization?.id;
+      const name = membership?.organization?.name;
+      if (typeof id === 'string' && typeof name === 'string' && name.length > 0) {
+        names.set(id, name);
+      }
+    }
+    const owners: OwnerChoice[] = [];
+    for (const entry of profile.owners ?? []) {
+      const orgId = entry?.ownerId;
+      if (typeof orgId !== 'string' || orgId.length === 0) continue;
+      owners.push({
+        orgId,
+        label: names.get(orgId) ?? shortOwnerLabel(orgId),
+        ...(typeof entry.level === 'string' ? { level: entry.level } : {}),
+      });
+    }
+    this.activeOwner.adoptOwners(owners);
+    const email = this.email();
+    this.activeOwner.setPersonalLabel(email ?? PERSONAL_OWNER_LABEL);
   }
 }

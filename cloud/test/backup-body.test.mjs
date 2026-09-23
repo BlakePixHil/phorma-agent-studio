@@ -19,6 +19,13 @@
  *    always among them - a prune that dropped the newest would leave a metadata row
  *    pointing at nothing (Requirement 10.13).
  *
+ * 5. **The prefix is addressed, not derived.** Every method takes the PREFIX a
+ *    row's bodies live under rather than an owner and a workflow id, because an
+ *    ownership claim moves the metadata row into an organisation and rewrites no R2
+ *    object (multi-organisation-phorma Requirement 4.7). `bodyPrefixFor` is the one
+ *    fallback for a row with no stored prefix, and the section below pins that a
+ *    transferred row still reads its bodies at their ORIGINAL keys.
+ *
  * ## Harness
  *
  * Miniflare's real R2 binding, reached from Node. `CompressionStream`,
@@ -34,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { Miniflare } from 'miniflare';
 import fc from 'fast-check';
 
-import { BackupBodyStore, bodyKey, bodyPrefix } from '../src/backup-store.ts';
+import { BackupBodyStore, bodyKey, bodyPrefix, bodyPrefixFor } from '../src/backup-store.ts';
 import { decryptBytes, encryptBytes } from '../src/tenants.ts';
 
 void dirname(fileURLToPath(import.meta.url));
@@ -63,6 +70,14 @@ const mf = new Miniflare({
 
 const BACKUPS = await mf.getR2Bucket('BACKUPS');
 const store = new BackupBodyStore({ BACKUPS, KEY_ENC_SECRET });
+
+/**
+ * The prefix a row with no stored `body_key` resolves to - which is what an
+ * ordinary upload writes, and what every row written before that column existed
+ * reads as. Spelled through the shipping helper rather than by string-building, so
+ * a change to the key shape moves both together.
+ */
+const at = (tenantId, workflowId) => bodyPrefixFor({ tenantId, workflowId, bodyKey: null });
 
 /** A realistically repetitive workflow spec. */
 function spec(id, nodes = 12) {
@@ -121,6 +136,19 @@ console.log('\nKey shape');
   // naturally scoped to one account - no second index needed for delete-all.
   check('the prefix scopes to one workflow', bodyPrefix('user_1', 'wf-a') === 'backup/user_1/wf-a/');
   check('the workflow prefix is inside the tenant prefix', bodyPrefix('user_1', 'wf-a').startsWith('backup/user_1/'));
+
+  // The one fallback in the codebase: a NULL `body_key` derives, a stored one is
+  // used verbatim. Both directions matter - deriving for a transferred row would
+  // make its bodies unreachable, and ignoring a NULL would need a backfill.
+  check(
+    'a row with no stored prefix derives one',
+    bodyPrefixFor({ tenantId: 'user_1', workflowId: 'wf-a', bodyKey: null }) === 'backup/user_1/wf-a/',
+  );
+  check(
+    'a row with a stored prefix uses it verbatim',
+    bodyPrefixFor({ tenantId: 'org_new', workflowId: 'wf-a', bodyKey: 'backup/user_old/wf-a/' }) ===
+      'backup/user_old/wf-a/',
+  );
 }
 
 // --- 3. Round trip -------------------------------------------------------
@@ -129,19 +157,19 @@ console.log('\nStore and read back');
 {
   const body = spec('wf-round');
   const json = JSON.stringify(body);
-  await store.put('user_1', 'wf-round', 1, json);
+  await store.put(at('user_1', 'wf-round'), 1, json);
 
-  const read = await store.get('user_1', 'wf-round', 1);
+  const read = await store.get(at('user_1', 'wf-round'), 1);
   check('the JSON comes back byte-identical', read === json, `${read?.length} vs ${json.length}`);
   check('and parses to the same spec', JSON.stringify(JSON.parse(read)) === json);
-  check('a revision that was never written reads null', (await store.get('user_1', 'wf-round', 9)) === null);
-  check('another tenant cannot read it', (await store.get('user_2', 'wf-round', 1)) === null);
+  check('a revision that was never written reads null', (await store.get(at('user_1', 'wf-round'), 9)) === null);
+  check('another tenant cannot read it', (await store.get(at('user_2', 'wf-round'), 1)) === null);
 }
 
 console.log('\nCompression happens BEFORE encryption');
 {
   const json = JSON.stringify(spec('wf-size', 40));
-  await store.put('user_1', 'wf-size', 1, json);
+  await store.put(at('user_1', 'wf-size'), 1, json);
   const object = await BACKUPS.get(bodyKey('user_1', 'wf-size', 1));
   const storedBytes = (await object.arrayBuffer()).byteLength;
 
@@ -158,7 +186,7 @@ console.log('\nCompression happens BEFORE encryption');
 console.log('\nNothing readable at rest');
 {
   const json = JSON.stringify(spec('wf-secret'));
-  await store.put('user_1', 'wf-secret', 1, json);
+  await store.put(at('user_1', 'wf-secret'), 1, json);
   const object = await BACKUPS.get(bodyKey('user_1', 'wf-secret', 1));
   const raw = Buffer.from(await object.arrayBuffer());
 
@@ -180,13 +208,13 @@ console.log('\nNothing readable at rest');
 
 console.log('\nA wrong key fails loudly, never as an empty backup');
 {
-  await store.put('user_1', 'wf-wrongkey', 1, JSON.stringify(spec('wf-wrongkey')));
+  await store.put(at('user_1', 'wf-wrongkey'), 1, JSON.stringify(spec('wf-wrongkey')));
   const otherKey = Buffer.alloc(32, 9).toString('base64');
   const wrong = new BackupBodyStore({ BACKUPS, KEY_ENC_SECRET: otherKey });
 
   let threw = false;
   try {
-    await wrong.get('user_1', 'wf-wrongkey', 1);
+    await wrong.get(at('user_1', 'wf-wrongkey'), 1);
   } catch {
     threw = true;
   }
@@ -204,9 +232,9 @@ console.log('\nProperty: backup body round trip (Requirement 10.12)');
       async (workflowId, nodes) => {
         const body = spec(workflowId, nodes);
         const json = JSON.stringify(body);
-        await store.put('user_prop', workflowId, 1, json);
-        const read = await store.get('user_prop', workflowId, 1);
-        await store.deleteWorkflow('user_prop', workflowId);
+        await store.put(at('user_prop', workflowId), 1, json);
+        const read = await store.get(at('user_prop', workflowId), 1);
+        await store.deleteWorkflow(at('user_prop', workflowId));
         if (read === null) return false;
         // Compared as PARSED specs, because that is what a restore consumes.
         return JSON.stringify(JSON.parse(read)) === json;
@@ -222,16 +250,16 @@ console.log('\nProperty: backup body round trip (Requirement 10.12)');
 console.log('\nRevisions');
 {
   for (const revision of [1, 2, 3]) {
-    await store.put('user_rev', 'wf-r', revision, JSON.stringify(spec('wf-r', revision)));
+    await store.put(at('user_rev', 'wf-r'), revision, JSON.stringify(spec('wf-r', revision)));
   }
-  const listed = await store.revisions('user_rev', 'wf-r');
+  const listed = await store.revisions(at('user_rev', 'wf-r'));
   check('revisions come back newest first', listed.join(',') === '3,2,1', listed.join(','));
-  check('an unknown workflow has no revisions', (await store.revisions('user_rev', 'wf-none')).length === 0);
+  check('an unknown workflow has no revisions', (await store.revisions(at('user_rev', 'wf-none'))).length === 0);
 
   // Read from R2 rather than from a D1 counter, so a half-completed prune cannot
   // make the list promise a body it cannot serve.
   await BACKUPS.delete(bodyKey('user_rev', 'wf-r', 2));
-  check('the list reflects what R2 actually holds', (await store.revisions('user_rev', 'wf-r')).join(',') === '3,1');
+  check('the list reflects what R2 actually holds', (await store.revisions(at('user_rev', 'wf-r'))).join(',') === '3,1');
 }
 
 console.log('\nProperty: retention keeps at most N and always the newest (10.13)');
@@ -243,11 +271,11 @@ console.log('\nProperty: retention keeps at most N and always the newest (10.13)
       async (uploads, keep) => {
         const workflowId = `wf-keep-${Math.random().toString(36).slice(2, 10)}`;
         for (let revision = 1; revision <= uploads; revision += 1) {
-          await store.put('user_keep', workflowId, revision, JSON.stringify(spec(workflowId, 2)));
-          await store.prune('user_keep', workflowId, keep);
+          await store.put(at('user_keep', workflowId), revision, JSON.stringify(spec(workflowId, 2)));
+          await store.prune(at('user_keep', workflowId), keep);
         }
-        const left = await store.revisions('user_keep', workflowId);
-        await store.deleteWorkflow('user_keep', workflowId);
+        const left = await store.revisions(at('user_keep', workflowId));
+        await store.deleteWorkflow(at('user_keep', workflowId));
         // At most `keep`, and the newest is present - a prune that dropped the
         // newest would leave a metadata row pointing at nothing.
         return left.length <= keep && left[0] === uploads;
@@ -261,39 +289,87 @@ console.log('\nProperty: retention keeps at most N and always the newest (10.13)
 {
   // A cap of 0 must still keep the newest: `Math.max(1, keep)` inside `prune`. A
   // misconfigured cap cannot be allowed to orphan a metadata row.
-  await store.put('user_zero', 'wf-z', 1, JSON.stringify(spec('wf-z', 2)));
-  await store.put('user_zero', 'wf-z', 2, JSON.stringify(spec('wf-z', 2)));
-  const pruned = await store.prune('user_zero', 'wf-z', 0);
-  check('pruning with keep=0 still leaves the newest', (await store.revisions('user_zero', 'wf-z')).join(',') === '2', JSON.stringify(pruned));
+  await store.put(at('user_zero', 'wf-z'), 1, JSON.stringify(spec('wf-z', 2)));
+  await store.put(at('user_zero', 'wf-z'), 2, JSON.stringify(spec('wf-z', 2)));
+  const pruned = await store.prune(at('user_zero', 'wf-z'), 0);
+  check('pruning with keep=0 still leaves the newest', (await store.revisions(at('user_zero', 'wf-z'))).join(',') === '2', JSON.stringify(pruned));
 }
 
 // --- 5. Deletion ---------------------------------------------------------
 
 console.log('\nDeletion');
 {
-  await store.put('user_dele', 'wf-a', 1, JSON.stringify(spec('wf-a', 2)));
-  await store.put('user_dele', 'wf-a', 2, JSON.stringify(spec('wf-a', 2)));
-  await store.put('user_dele', 'wf-b', 1, JSON.stringify(spec('wf-b', 2)));
+  await store.put(at('user_dele', 'wf-a'), 1, JSON.stringify(spec('wf-a', 2)));
+  await store.put(at('user_dele', 'wf-a'), 2, JSON.stringify(spec('wf-a', 2)));
+  await store.put(at('user_dele', 'wf-b'), 1, JSON.stringify(spec('wf-b', 2)));
 
-  check('deleteWorkflow reports how many bodies went', (await store.deleteWorkflow('user_dele', 'wf-a')) === 2);
-  check('every revision of that workflow is gone', (await store.revisions('user_dele', 'wf-a')).length === 0);
-  check('the sibling workflow survives', (await store.revisions('user_dele', 'wf-b')).length === 1);
-  check('deleteWorkflow is idempotent', (await store.deleteWorkflow('user_dele', 'wf-a')) === 0);
+  check('deleteWorkflow reports how many bodies went', (await store.deleteWorkflow(at('user_dele', 'wf-a'))) === 2);
+  check('every revision of that workflow is gone', (await store.revisions(at('user_dele', 'wf-a'))).length === 0);
+  check('the sibling workflow survives', (await store.revisions(at('user_dele', 'wf-b'))).length === 1);
+  check('deleteWorkflow is idempotent', (await store.deleteWorkflow(at('user_dele', 'wf-a'))) === 0);
 }
 
 {
-  await store.put('user_wipe', 'wf-a', 1, JSON.stringify(spec('wf-a', 2)));
-  await store.put('user_wipe', 'wf-b', 1, JSON.stringify(spec('wf-b', 2)));
-  await store.put('user_keepme', 'wf-c', 1, JSON.stringify(spec('wf-c', 2)));
+  await store.put(at('user_wipe', 'wf-a'), 1, JSON.stringify(spec('wf-a', 2)));
+  await store.put(at('user_wipe', 'wf-b'), 1, JSON.stringify(spec('wf-b', 2)));
+  await store.put(at('user_keepme', 'wf-c'), 1, JSON.stringify(spec('wf-c', 2)));
 
   // A prefix scan, not a loop over known ids: this is the "delete everything"
   // control a user reaches for on privacy grounds, and an object whose metadata row
   // was already gone must still go or the promise is false.
   const removed = await store.deleteTenant('user_wipe');
   check('deleteTenant removes every body it owns', removed === 2, String(removed));
-  check('nothing of that tenant is left', (await store.revisions('user_wipe', 'wf-a')).length === 0);
-  check("another tenant's bodies are untouched", (await store.revisions('user_keepme', 'wf-c')).length === 1);
+  check('nothing of that tenant is left', (await store.revisions(at('user_wipe', 'wf-a'))).length === 0);
+  check("another tenant's bodies are untouched", (await store.revisions(at('user_keepme', 'wf-c'))).length === 1);
   check('deleteTenant is idempotent', (await store.deleteTenant('user_wipe')) === 0);
+}
+
+console.log('\nA transferred row reads its bodies at their ORIGINAL keys (Requirement 4.7)');
+{
+  // The claim case, in the store alone: the bodies were written under the personal
+  // owner and the metadata row now names the organisation, with `body_key` frozen to
+  // the prefix that was in force. Nothing in R2 moved.
+  const legacyPrefix = bodyPrefix('user_claimer', 'wf-moved');
+  await store.put(legacyPrefix, 1, JSON.stringify(spec('wf-moved', 3)));
+  await store.put(legacyPrefix, 2, JSON.stringify(spec('wf-moved', 4)));
+
+  const transferred = { tenantId: 'org_claimed', workflowId: 'wf-moved', bodyKey: legacyPrefix };
+  check(
+    'the row resolves to the frozen prefix, not the new owner',
+    bodyPrefixFor(transferred) === legacyPrefix,
+    bodyPrefixFor(transferred),
+  );
+  check(
+    'both bodies are still readable',
+    (await store.revisions(bodyPrefixFor(transferred))).join(',') === '2,1',
+  );
+  check(
+    'and the newest one decrypts',
+    JSON.parse(await store.get(bodyPrefixFor(transferred), 2))?.id === 'wf-moved',
+  );
+  // The failure this signature exists to prevent: deriving from the row's OWN owner
+  // answers "not retained" for bodies that are sitting in the bucket.
+  check(
+    'deriving from the new owner would have found nothing',
+    (await store.revisions(bodyPrefix('org_claimed', 'wf-moved'))).length === 0,
+  );
+  // An upload after the claim lands beside them rather than opening a second key
+  // space under the new owner.
+  await store.put(bodyPrefixFor(transferred), 3, JSON.stringify(spec('wf-moved', 5)));
+  check(
+    'a post-claim upload joins the same key space',
+    (await store.revisions(bodyPrefixFor(transferred))).join(',') === '3,2,1',
+  );
+  check(
+    'and still nothing exists under the new owner',
+    (await store.revisions(bodyPrefix('org_claimed', 'wf-moved'))).length === 0,
+  );
+
+  // Delete-all for the new owner has to reach them, which is why the stored prefix
+  // is passed alongside the owner scan.
+  const removed = await store.deleteTenant('org_claimed', [legacyPrefix]);
+  check('delete-all reaches a claimed row\'s bodies', removed === 3, String(removed));
+  check('nothing is left', (await store.revisions(legacyPrefix)).length === 0);
 }
 
 // --- 6. The byte cipher itself -------------------------------------------

@@ -311,6 +311,13 @@ describe('telemetry call site: CloudService.pushWorkflow', () => {
     settings.cloudProvider.set(null);
     cloud.setWorkerUrl('');
     cloud.setToken('');
+    // The Phorma Cloud URL was named in the comment above and NOT reset, which
+    // made this file leak `WORKER_BASE` into `phorma.layout.phormaCloudUrl` for
+    // every later spec in the run. `workflow-backup.service.spec.ts` asserts its
+    // request URLs against `PHORMA_CLOUD_DEFAULT_URL`, so it failed whenever the
+    // random spec order put it after this one - a flake with no bad commit behind
+    // it. Empty resets to the default rather than storing an empty string.
+    cloud.setPhormaCloudUrl('');
     awsConfig.triggerApiUrl.set('');
     TestBed.flushEffects();
   });

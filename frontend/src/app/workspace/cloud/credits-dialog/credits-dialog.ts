@@ -46,8 +46,23 @@ export class CreditsDialog {
 
   protected readonly packs = CREDIT_PACKS;
 
-  /** Top-ups are subscriber-only. */
-  protected readonly canBuy = computed(() => this.phormaCloud.subscribed());
+  /**
+   * True when a top-up may be OFFERED at all (multi-organisation-phorma,
+   * Requirement 19.7).
+   *
+   * False while an organisation owner is active. The packs then disappear entirely
+   * rather than rendering disabled: an organisation's credits come from its tier,
+   * which Phorma Labs sets, and `/api/checkout` refuses that owner with
+   * `billing_managed` before any Stripe call. The dialog keeps its credit READING,
+   * which is the other half of requirement 19.8 - the balance is information, the
+   * pack is a purchase.
+   */
+  protected readonly selfServeBilling = computed(() => this.phormaCloud.selfServeBilling());
+
+  /** Top-ups are subscriber-only, and personal-owner-only. */
+  protected readonly canBuy = computed(
+    () => this.phormaCloud.subscribed() && this.selfServeBilling(),
+  );
 
   /** True once a checkout was started from here (arms the reopen affordance). */
   protected readonly checkoutAttempted = signal(false);

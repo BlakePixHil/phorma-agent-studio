@@ -170,6 +170,16 @@
                           ></i>
                           <span>{{ attachment.appliedAt ? 'Re-apply' : 'Apply to canvas' }}</span>
                         </button>
+                      } @else if (!selfServeBilling()) {
+                        <!-- An organisation owner is active and Phorma Labs invoices
+                             it, so there is no purchase to offer (requirement 19.7).
+                             The plan itself is still the deliverable, so the manual
+                             instructions stay. -->
+                        <span class="phorma-chat__proposal-manual">
+                          Expand a step for instructions. Phorma Labs manages your
+                          organisation's plan, so ask an organisation admin to have this built
+                          for you.
+                        </span>
                       } @else if (phormaCloud.pastDue()) {
                         <!-- Apply is locked by a FAILED PAYMENT, not by a missing
                              plan, so the link is the portal (requirement 17). -->
@@ -408,7 +418,14 @@
       <p class="phorma-chat__hint">{{ autoHint() }}</p>
     }
     @if (chat.mode() === 'agent' && agentLocked()) {
-      @if (phormaCloud.pastDue()) {
+      @if (!selfServeBilling()) {
+        <!-- Phorma Labs invoices this organisation, so the composer hint explains
+             the lock and offers no purchase (requirement 19.7). -->
+        <p class="phorma-chat__hint phorma-chat__hint--upsell">
+          Agent mode edits the canvas for you. Phorma Labs manages your organisation's plan -
+          ask an organisation admin to have it enabled.
+        </p>
+      } @else if (phormaCloud.pastDue()) {
         <!-- They have a plan; the remedy is a card update, not a purchase
              (requirement 17). -->
         <app-past-due-notice />

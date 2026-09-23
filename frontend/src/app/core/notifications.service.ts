@@ -31,8 +31,9 @@
  * {@link markAllRead} is the only thing that advances it.
  */
 
-import { computed, Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable, signal } from '@angular/core';
 
+import { ActiveOwnerService } from './active-owner.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import type { NotificationKind, StudioNotification } from './notifications.model';
 
@@ -53,6 +54,25 @@ export const NOTIFICATION_FEED_LIMIT = 200;
  */
 const READ_AT_KEY = 'notificationsReadAt';
 const MUTED_KINDS_KEY = 'notificationsMutedKinds';
+
+/**
+ * The read-marker key for one owner (multi-organisation-phorma,
+ * Requirement 20.6).
+ *
+ * The personal account keeps the ORIGINAL key, unsuffixed, so every existing
+ * install resumes from exactly the marker it saved - a suffix for everybody would
+ * have re-reported every retained notification once, to every user, on upgrade.
+ *
+ * Per owner rather than reset-on-switch, and that is what makes the switch
+ * REVERSIBLE (Requirement 20.9): the marker IS the poll cursor, so an owner-scoped
+ * one means switching back asks the worker the same question a session that had
+ * started there would ask. Carrying one marker across a switch is the sharp
+ * failure this closes - it silently suppresses the new owner's settled runs up to
+ * the previous owner's last-read time.
+ */
+function readAtKeyFor(orgId: string | null): string {
+  return orgId === null ? READ_AT_KEY : `${READ_AT_KEY}.${orgId}`;
+}
 
 /**
  * Every notification kind a user may turn off, and its label.
@@ -81,6 +101,16 @@ export function isMutableKind(kind: NotificationKind): boolean {
 
 @Injectable({ providedIn: 'root' })
 export class NotificationsService {
+  /**
+   * Which owner's feed and read marker this is (Requirement 20.6).
+   *
+   * The ONE injection this service is allowed, and it is allowed because
+   * `ActiveOwnerService` injects nothing at all - the same reason
+   * `CapabilityService` is safe to inject from anywhere. Everything the file
+   * header says about staying off the transport path still holds.
+   */
+  private readonly activeOwner = inject(ActiveOwnerService);
+
   /** Newest first. The order the bell renders, so it is stored that way. */
   private readonly feedState = signal<StudioNotification[]>([]);
 
@@ -92,7 +122,9 @@ export class NotificationsService {
    * over-reporting once is better than a first run that silently hides a
    * yesterday failure, and the merge dedupes anyway.
    */
-  private readonly readAtState = signal<number>(loadLayout(READ_AT_KEY, 0));
+  private readonly readAtState = signal<number>(
+    loadLayout(readAtKeyFor(this.activeOwner.activeOrgId()), 0),
+  );
 
   /** Kinds the user has switched off. */
   private readonly mutedState = signal<readonly NotificationKind[]>(
@@ -181,7 +213,7 @@ export class NotificationsService {
     // flush, and this value is a poll CURSOR as well as a read marker: killing the
     // app in that window would silently re-report everything the user just read.
     // Layout state can afford that; a cursor cannot.
-    saveLayout(READ_AT_KEY, next);
+    saveLayout(readAtKeyFor(this.activeOwner.activeOrgId()), next);
   }
 
   /**
@@ -199,6 +231,25 @@ export class NotificationsService {
   /** Empties the feed. Does not touch the read marker, for the reason above. */
   clear(): void {
     this.feedState.set([]);
+  }
+
+  /**
+   * Re-scopes the store to the ACTIVE owner (Requirement 20.6).
+   *
+   * Called by `OwnerSwitchService` after the owner signal has moved, so the marker
+   * it reloads is the new owner's. Two things happen and BOTH are required: the
+   * feed is emptied, because a deployed notification belongs to one owner's
+   * deployment and a local one to a run against one owner's credits; and the read
+   * marker is re-read from that owner's own key rather than reset, which is what
+   * makes switching back present the feed a session started there would have
+   * (Requirement 20.9).
+   *
+   * Muted kinds are deliberately NOT re-scoped: "do not tell me about stopped
+   * runs" is a preference of the PERSON, not of the owner they are working in.
+   */
+  resetForOwner(): void {
+    this.feedState.set([]);
+    this.readAtState.set(loadLayout(readAtKeyFor(this.activeOwner.activeOrgId()), 0));
   }
 
   /** True when the user has switched this kind off. */

@@ -86,6 +86,15 @@ jobs:
       - name: Telemetry service isolation
         run: node scripts/check-telemetry-isolation.mjs
 
+      # Same shape, same reason, a different leaf: `CapabilityService` is injected
+      # by `PanelRegistryService`, which the layout shell reads at startup, so an
+      # import that reaches the NG0200 run/model/cloud cycle is a blank screen in a
+      # user's app rather than a build error. This guard also fails on a
+      # CapabilityLevel token compared anywhere outside the capability module - a
+      # declared `minLevel` is data, a comparison is a decision.
+      - name: Capability service isolation
+        run: node scripts/check-capability-isolation.mjs
+
       - name: Admin dashboard conventions
         run: node scripts/check-admin-conventions.mjs
 
@@ -105,6 +114,12 @@ jobs:
       # ── cloud ───────────────────────────────────────────────────────────
       # `test:unit` deliberately, not `test`: the portal e2e needs a running
       # `wrangler dev` plus a local model, so it stays a manual command.
+      #
+      # ONE step for the whole chain, so a new cloud suite reaches CI by joining
+      # `test:unit` in `cloud/package.json` and nothing here changes. Add it to
+      # the D1-backed tail, behind a `node test/await-port-drain.mjs` barrier.
+      # Do NOT add a second step for it - that would run the suite twice and let
+      # the two lists drift.
       - name: Cloud unit tests
         run: npm run test:unit
         working-directory: cloud

@@ -16,15 +16,95 @@ user's own Cloudflare account and keys).
   bundling fails with "Could not resolve ai" otherwise.
 - Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.
   `check` runs no tests, so it alone is not verification. No Cloudflare account needed.
-  `npm test` = `test:unit`, 29 suites: projection, embed, deploy-config, connections, data-host,
+  `npm test` = `test:unit`, 41 suites: capabilities, projection, embed, deploy-config, connections, data-host,
   workflow-state, portal-cleanup, deployment-registry, notifications, run-wiring, status, releases, telemetry,
-  tenant-billing, entitlement, stripe, billing-routes, billing-admin, stripe-webhook, provisioning,
-  workspace-migration, backup-store, backup-body, backup-routes, plus four
+  tenant-billing, entitlement, stripe, auth-device, billing-routes, billing-admin, stripe-webhook, provisioning,
+  workspace-migration, backup-store, backup-body, backup-routes, owner-identity, role-gate,
+  organisation-isolation, ownership-claim, organisation-metering, organisation-billing, member-run,
+  proposals, org-admin, impersonation, owner-switching, plus four
   Miniflare suites (deploy-validation, connection-secrets, telemetry-ingest, telemetry-admin).
   `backup-store`, `backup-body` and `backup-routes` are D1/R2-proxy-backed like the billing family
-  and sit at the END of the chain behind a `node test/await-port-drain.mjs` barrier.
+  and sit near the END of the chain behind a `node test/await-port-drain.mjs` barrier;
+  `owner-identity`, `role-gate`, `organisation-isolation`, `ownership-claim`,
+  `organisation-metering`, `organisation-billing`, `member-run`, `proposals`, `org-admin`,
+  `impersonation` and `owner-switching` sit LAST, in that order, each behind a barrier of its own.
+  `owner-switching` is the owner-switch half of `/api/me` plus `X-Phorma-Owner` end to end, and its
+  two unrepeatable assertions are both about a SHAPE no function call can show: that `owners` is
+  identical on BOTH `/api/me` branches - the `provisioned: false` one is the common case for a member
+  who never subscribed personally, so a switcher fed only by the provisioned branch would be empty
+  for exactly the people who need it - and that one desktop token answers about two different owners
+  depending on the header, while a foreign organisation, an unparseable value and no header at all
+  produce three BYTE-IDENTICAL bodies. It compares whole bodies rather than statuses for that reason.
+  Its KV is an in-memory double so the absence of a cached membership LIST is observable: that list is
+  deliberately uncached, because a grant taking 60 seconds to appear in a switcher gets blamed on the
+  Super_Admin surface that just made it.
+  `impersonation` is the act-as header end to end over the real deploy bundle, and it stands two
+  harnesses in at once on purpose: the namespace WATCHER, because "the gateway refused before waking
+  anything" has to be an observation rather than a source read, and a gateway-free HTTP probe that
+  reaches an instance BY NAME, because the instance's own refusal is only visible with the gateway
+  out of the path. Its three unrepeatable assertions are the ones the feature's silence makes
+  invisible everywhere else: that an operator who ALSO holds a real `org:admin` membership writes
+  through the membership and is refused through the header (one credential, one allowlist entry, two
+  answers - without that pair every refusal is equally explained by "this operator is in nothing");
+  that an ignored header produces a byte-identical response to the same request without it, for a
+  non-operator, an unparseable value AND the same operator's `phd_` desktop token, with the audit
+  count unchanged; and that DROPPING `impersonation_audit` refuses the read with
+  `impersonation_unaudited` and serves no part of the resource. It also carries a narrow
+  `uncaughtException` swallow for `ECONNRESET`: answering an `Upgrade: websocket` dispatchFetch with
+  anything but a 101 - which the outright refusal does - leaves Miniflare's loopback socket reset and
+  Node raises on the raw handle AFTER every check has passed. Reproduced against a five-line worker
+  with no Phorma code in the path.
+  `org-admin` is the operator organisation and member management family end to end over real D1,
+  and its four unrepeatable assertions are all about a DIFFERENCE no single surface shows:
+  that the three `refuseNonOperator` rules hold on the NEW prefix (an allowlisted DESKTOP token is
+  403 there too); that creating an organisation makes NOT ONE OpenRouter call, which is the only
+  proof that `provisionTenantTier`'s `active`-only key gate is structural rather than documentary;
+  that a demotion and a REMOVAL each bite on the NEXT request, driven through a resolution BEFORE the
+  write so the KV cache is warm and a module invalidating nothing would fail; and that a half-applied
+  write is a reported 502 with its own code rather than a log line. Its KV is a recording DOUBLE
+  rather than Miniflare's, because those two assertions are about what was DELETED and when, and its
+  `fetch` stub records every Clerk and OpenRouter call WITH ITS BODY - `role` is the field that makes
+  a demotion out of `admin` real, since a mapped `org:admin` claim short-circuits the authoritative
+  table. Mutation-verified 2026-09-22: deleting either `invalidateMemberCache` call fails four
+  assertions each.
+  `proposals` is the proposal queue end to end over real D1 AND a real R2 bucket, and it stands two
+  bindings in on purpose: `PortalIndex` answers `getDeployment` (so a registry read FAILURE is
+  drivable, which must refuse rather than freeze a false live hash) and `WorkflowAgent` is a Proxy
+  that RECORDS every property read and throws - that recorder IS the assertion that creating a
+  proposal has no path to a deployment, which a source grep could not make. The PUBLISH sections swap
+  that trap for a stub namespace whose `acceptSpecPush` records the call and writes the registry
+  record a real accepted push would; emulating `syncDeployment` there is required rather than tidy,
+  or every second publish of one workflow reads as stale. Its other unrepeatable
+  assertion is that all four BACKUP destroy paths (revision prune, tombstone purge, retention sweep,
+  delete-all) run over the same bucket and leave every `proposal/` object in place.
+  `member-run` is the member half of the run path: a caller whose only level is `operator` (read from
+  an `org_members` row, because its `org:member` claim is deliberately UNMAPPED and so cannot
+  short-circuit) triggers the organisation's deployment, finds its suspended gate through
+  `GET /api/notifications`, settles it through `POST /approvals`, and the persisted run record then
+  names THAT member. It is the only suite that can see the WIRING of Requirement 10.5 - the pure
+  decision is driven in `run-wiring`, and deleting one `rememberGateActor` call or the emit tee's
+  `attributeGateActor` passes every pure check and fails exactly two assertions here. Its spec wires
+  a manual trigger into an approval gate so nothing needs a model, but the tenant row still carries
+  an encrypted runtime key: `resolveHostedInference` gates EVERY hosted trigger, and without one the
+  run refuses `no_runtime_key` and nothing after it is reachable. A connector id is a port id plus
+  the `-out` / `-in` suffix `portBaseId` strips, so a port whose own id ends in `-out` never resolves
+  and the run ends after the trigger with no gate at all - which is a silent pass for anything that
+  only asserts the run settled.
+  `organisation-billing` is Property 39: it drives `/api/provision`, the signed Stripe webhook and
+  `/api/checkout` over a personal owner and an organisation owner together and asserts that no
+  billing fact of one is observable as the other's. Its four unrepeatable assertions are that a
+  provisioned organisation reaches `active` with NOT ONE Stripe call, that a `credit_grants` row with
+  no `stripe_payment_id` is refused by the schema, that a `billing_managed` refusal leaves both
+  owners' rows byte-identical, and that `ownership-claim.ts`'s transfer statements name
+  `workflow_backups` and `usage` and nothing else. A stub that silences `console.log` would swallow
+  every PASS line, so it captures `warn`/`error` only, and its OpenRouter mint answers a DISTINCT
+  hash per call - one canned hash makes "the two owners hold two runtime keys" vacuously true.
+  `organisation-metering` drives `/api/infer` through the real router with member credentials, which
+  is the only way to see whose meter a route moved - it started life as a section of `entitlement`
+  and failed the CHAIN at iteration 20 on `connect EADDRINUSE` while passing in isolation, which is
+  what a barrier and a suite of its own are for.
   `tenant-billing`, `entitlement`, `billing-routes`, `billing-admin`, `stripe-webhook`,
-  `provisioning` and
+  `provisioning`, `owner-identity` and
   `workspace-migration` are also Miniflare-backed but take the D1
   binding straight out of the instance with `getD1Database` and never call `dispatchFetch`: a real
   local D1 with the real migrations applied,
@@ -83,8 +163,12 @@ user's own Cloudflare account and keys).
   `GET /api/notifications`: settled runs from the instance's own `runs` table filtered on `endedAt`
   (never `started_at`), its live pending gates, and `settingsIssues`. RPC and not an HTTP route,
   because a worker-to-DO `stub.fetch()` carries no bearer for `authorized()` to check - same reason
-  `purgeSelf` and `startPortalTurn` are RPC. It re-checks `ownerId` and returns empty for a portal
-  session instance.
+  `purgeSelf` and `startPortalTurn` are RPC. It re-checks `ownerId` against the stamp and THROWS on a
+  mismatch (the aggregator records that workflow in `unreachable` and discloses nothing), and returns
+  empty for a portal session instance. The throw is deliberate and is Property 4's positive control
+  for "the instance refuses ALONE" - do not soften it into an empty payload, which would make a
+  refusal indistinguishable from "nothing happened" and delete the only probe
+  `organisation-isolation.test.mjs` and `ownership-claim.test.mjs` have for the stamp.
 - `GET /usage?since=` serves the usage ledger in both hosted and BYO mode, written in the settle
   finally-block with 366 day / 5000 row retention.
 - `GET /workflow` on the DO reads the deployed spec back, which is what makes a deployment itself a
@@ -100,8 +184,13 @@ user's own Cloudflare account and keys).
   OpenRouter but bills plan credits). BYO deployments keep real provider names.
 - Historical run snapshots store a versioned envelope in the graph column and must still parse
   legacy raw graph JSON. Snapshots include optional `subWorkflows`.
-- `CloudService.materializeDefaults()` bakes app-level defaults (default model, tool rounds) into the
-  spec at push time, so no cloud change is needed when a new app default appears.
+- The studio bakes app-level defaults into the spec at PUSH time, so no cloud change is needed when a
+  new app default appears - and the worker never materializes anything. The transform is
+  `materializeSpecDefaults` in `frontend/src/app/core/spec-defaults.ts` (a pure leaf);
+  `CloudService.materializeDefaults()` is a thin wrapper that adds the local skills refresh, which
+  stays OUT of the hash. Consequence, stated: `DeploymentRecord.specHash` and
+  `canonicalSpecHashOf(spec)` compare workflow CONFIGURATION, not attached skill CONTENT, and every
+  hash any side compares is over an already-materialized spec.
 
 ## Tenancy and billing
 
@@ -171,9 +260,10 @@ user's own Cloudflare account and keys).
   `client_reference_id` only, because the fallback resolution paths can cost a Stripe read that can
   fail, and asking for a redelivery of an event we will never act on is a non-2xx over nothing.
 - **Every `/api/admin/*` surface shares ONE gate**, `refuseNonOperator` in `cloud/src/admin-auth.ts`,
-  which also owns `isOperator`, `noStoreResponder` and `readBearerToken`. There are two operator
-  route families now - `/api/admin/telemetry/*` (`telemetry-admin.ts`) and `/api/admin/billing/*`
-  (`billing-admin.ts`) - and both are mounted beside each other in `routeApiRequest`, ABOVE the
+  which also owns `isOperator`, `noStoreResponder` and `readBearerToken`. There are THREE operator
+  route families now - `/api/admin/telemetry/*` (`telemetry-admin.ts`), `/api/admin/billing/*`
+  (`billing-admin.ts`) and `/api/admin/organisations/*` (`org-admin.ts`) - and all three are mounted
+  beside each other in `routeApiRequest`, ABOVE the
   `store.enabled` gate, because each carries its own authorization and its own D1 handling. A new
   admin surface calls that gate; it never re-implements the 401/403 split. `telemetry-admin.ts` still
   exports `isTelemetryAdmin` as an alias of `isOperator` because `test/telemetry.test.mjs` and the
@@ -189,6 +279,81 @@ user's own Cloudflare account and keys).
   from not being an operator. The name is historical (telemetry was the only admin surface when it was
   created) and is deliberately NOT renamed: one allowlist, one door, and renaming a secret costs a
   window where one of the two surfaces 403s for everyone.
+- **`/api/admin/organisations/*` (`org-admin.ts`) is the ONLY surface in the worker that writes
+  membership.** Requirement 13.7 of `multi-organisation-phorma`: there is no organisation-facing member
+  management route in this release, so `member.manage` stays DECLARED in the capability contract and
+  exercised by no route - a released token is never renamed or repurposed. `role-gate.test.mjs`
+  asserts that ABSENCE as an inventory claim over its static scan, in both directions: no mutating
+  route whose path reads like a membership write sits outside this prefix, and `WRITE_ROUTES` declares
+  no such entry at any level.
+  Four routes: `GET list`, `POST create`, `GET|POST|DELETE members`, `POST tier`.
+  Three rules there are not negotiable. (1) **Clerk goes FIRST, then the `org_members` row.**
+  `resolveRole` consults `CLERK_ROLE_LEVELS` BEFORE the table and `org:admin` maps to `admin`, so on a
+  DEMOTION out of `admin` the Clerk role is what has to move first - write the row first and let the
+  PATCH fail and the claim keeps short-circuiting to `admin` while the row says `builder`, a demotion
+  in name only with a correct-looking row to prove it happened. The reverse partial fails CLOSED,
+  because an `org:member` claim is deliberately unmapped. (2) **A partial failure is REPORTED, never
+  logged**: 502 `org_clerk_failed` when nothing was written and 502 `org_partial_write` when one half
+  landed, because one half existing without the other is the state an operator most needs to see and
+  the one no later request can discover. Both codes are append-only. (3) **Every membership and level
+  write invalidates `orgmember:{orgId}:{userId}` IMMEDIATELY**, on the failing paths too, because a
+  demotion that takes 60 seconds to bite did not happen for 60 seconds and a REMOVAL that takes 60
+  seconds leaves a removed member addressing the organisation through `X-Phorma-Owner` for a minute
+  (Requirement 20.11). An unrecognised level token is 403 `role_unknown`, the Role_Gate's own token
+  reused rather than copied.
+  Creating an organisation provisions a `tenants` row at `UNPAID_ORG_TIER` (`none`, deliberately not
+  in `TIERS`) with `UNPAID_ORG_STATUS` (`canceled`) and NO runtime key. An absent `DB` here is 501
+  NAMING the binding, unlike the telemetry aggregates' empty answer: membership is the subject, and an
+  empty list would read as "this account has no organisations".
+- **Impersonation is read-only, audited, stateless, and lives in ONE module** (`impersonation.ts`,
+  Requirement 14 of `multi-organisation-phorma`). `X-Phorma-Act-As` is read in one place and
+  `impersonation_audit` is written and read in one place. `resolveOperator` (`admin-auth.ts`) is a
+  SEPARATE function from `refuseNonOperator`, whose deliberate `null`-means-proceed contract is
+  untouched: the gate hands back no identity, the resolver hands back the acting user id and refuses
+  nothing. Five rules that are not negotiable.
+  (1) **Null covers three cases that must be INDISTINGUISHABLE**: no header, a header from a
+  non-operator, and a value `isOwnerId` rejects. All three serve the caller's own owner with NO
+  refusal, so probing the header reveals nothing - the same discipline `X-Phorma-Owner` follows, and
+  the reason the two headers stay separate.
+  (2) **`applyImpersonation` moves EXACTLY ONE FIELD**, `ownerId`. `orgId`, `orgRole`, `userId` and
+  `kind` keep their verified values, so `resolveRole` still answers about the credential and an
+  impersonated READ is not refused `role_unknown` for the operator having no membership - substituting
+  `orgId` too deletes the read half of the feature. Consequence: anything comparing the addressed
+  owner reads `auth.ownerId`, never `resolveOwner(auth)`, which recomputes `orgId ?? userId` and
+  answers the operator's own account. `WorkflowAgent.enforceOwnership` reads the field for exactly
+  that reason.
+  (3) **Three independent enforcement layers.** `guardImpersonation` at the gateway AND at the top of
+  `routeApiRequest` refuses a WebSocket upgrade OUTRIGHT (a monitor socket accepts `approval`,
+  `question`, `event`, `trigger` and `stop`, so it is a write channel wearing a read's clothes) and
+  every non-GET with `impersonation_read_only`, before `routeAgentRequest` and before any route
+  dispatch. `requireCapability` refuses an impersonated write FIRST, before the level comparison, so
+  an operator who ALSO holds a real membership cannot write through the header - their membership is
+  the write path. `resolveHostedInference(store, id, { impersonated })` refuses a SIXTH append-only
+  token, `impersonation_read_only`, for any tenant state, so an impersonated request spends nothing
+  even if both layers above were bypassed. That third layer is unreachable today by construction, and
+  that is the point of it.
+  (4) **`requireCapability`'s `options.method` makes the refusal write-scoped and OMITTING IT FAILS
+  CLOSED.** Every control-plane call site is a write route and names nothing; `WorkflowAgent` serves
+  both through one gate and passes its method; the socket path passes none on purpose.
+  (5) **The audit write is AWAITED and a failure REFUSES the request** with `impersonation_unaudited`,
+  never `ctx.waitUntil` - a `waitUntil` failure cannot refuse a request, and an unaudited impersonated
+  read must never happen. One row per ACCEPTED request, none for one refused or ignored, and `path`
+  carries NO query string. Do not "optimise" it into a background write: one D1 write on the request
+  path is affordable precisely because impersonation is a support action measured in dozens per day.
+  `GET /api/admin/impersonation` is the FOURTH operator prefix, read-only, `refuseNonOperator`-gated.
+  Only three control-plane reads honour the substituted owner and the list is exported as
+  `IMPERSONATED_READ_PATHS` (`api.ts`): `/api/me`, `/api/deployments`, `/api/notifications`.
+  `/api/backups` and `GET /api/proposals` are deliberately NOT among them. `X-Phorma-Act-As` must stay
+  in BOTH `Access-Control-Allow-Headers` lists (`corsHeaders` in `index.ts` and `json()` in
+  `workflow-agent.ts`) - a header missing there is dropped by the BROWSER and the request arrives
+  looking exactly like one that never carried it.
+- **One provisioning path, two callers.** `provisionTenantTier` (`tenants.ts`) holds the three steps -
+  `upsertTenant`, read the row BACK, reconcile the runtime key only for an `active` tenant - and both
+  `POST /api/provision` and `POST /api/admin/organisations/tier` call it. Requirement 19.5 names
+  provisioning as the only way an organisation becomes entitled, which is a claim about ONE path
+  rather than about two that happen to agree, and the `active`-only gate `reconcileRuntimeKey`
+  documents as the caller's is now structural. There is still NO credit-grant path and there must not
+  be one: a higher ceiling is a TIER change (Requirement 19.10).
 - `/api/admin/billing/*` is a SEPARATE prefix from the telemetry aggregates, not a sixth aggregate
   route, and the reason is a privacy contract rather than tidiness: telemetry bodies carry no
   `install_id` by construction and fold groups under five installs into `other`, while these bodies
@@ -217,13 +382,26 @@ user's own Cloudflare account and keys).
   `WorkflowAgent.trigger()` both call it - the DO used to carry a second copy of the checks, and two
   copies is how a top-up ends up raising the ceiling for a local run and not a deployed one. It
   returns `{ key, tenant }` or `{ status, error, code }`, so `'status' in result` still discriminates
-  and the shape is still assignable where `StripeRefusal` is expected. The five `code` tokens
+  and the shape is still assignable where `StripeRefusal` is expected. The seven `code` tokens
   (`no_subscription`, `subscription_past_due`, `runs_exhausted`, `credits_exhausted`,
-  `no_runtime_key`) are an APPEND-ONLY wire contract the studio branches on: add one, never rename or
-  repurpose one. `past_due` must stay a distinct refusal from unsubscribed - the remedy is the billing
+  `no_runtime_key`, `impersonation_read_only`, `workflow_not_entitled`) are an APPEND-ONLY wire
+  contract the studio branches
+  on: add one, never rename or repurpose one. The sixth is checked FIRST, before any read, and is a
+  property of the CALLER rather than of the tenant - it is the third layer of the impersonation
+  read-only rule, not a billing state. `past_due` must stay a distinct refusal from unsubscribed - the remedy is the billing
   portal, not a Subscribe CTA - and it deprovisions nothing, so a `past_due` tenant keeps tier, data
   and runtime key. The prose stays matchable too (`credits exhausted`, `subscription`), because an
   older studio falls back to a regex when the code is absent.
+  The SEVENTH is RESERVED and is returned by nothing (Requirement 15.4 of
+  `multi-organisation-phorma`): `entitlement.test.mjs` greps `cloud/src/` and fails if
+  `workflow_not_entitled` appears anywhere but the union declaration and its doc comment, so wiring
+  it up without also wiring up the policy fails a test. It exists because the gate now takes
+  `options.workflowId` - `/api/infer` reads it off an ADDITIVE optional body field and
+  `WorkflowAgent.trigger` passes `this.state.spec.id` - which nothing reads, deliberately: there is
+  no workflow catalogue, no per-workflow meter and no entitlement table, and per-workflow pricing
+  later is then a policy change inside this one function rather than a signature change across two
+  call sites and a wire contract. A future workflow SKU arrives as price METADATA the way `tier`
+  does, never as a client-supplied price id, so `BILLING_LOOKUP_KEYS` stays as it is.
 - Grants RAISE the ceiling, they never reduce recorded usage: `effectiveCostUsdLimit` /
   `effectiveCreditsLimit` = tier allowance + `grantPool()`. The allowance is spent FIRST, so
   `recordRun` takes the tenant's `tier` (required, both callers already hold it) and draws
@@ -299,7 +477,131 @@ user's own Cloudflare account and keys).
   the stored hash's own `workspace_id` plus the deterministic `runtimeKeyName(id)` orphan sweep -
   never a local ledger, because a key minted and not stored is unrecoverable and invisible except by
   its name. `cloud/scripts/` is excluded from the installer in `scripts/check-deploy-bundle.mjs`.
-- `tenants.id` IS the Clerk user id, and `isClerkUserId` (`tenants.ts`) guards WRITE paths only:
+- **The owner seam.** `auth.ts` answers "who is asking" (`userId`, `kind`) AND "whose data is this"
+  (`orgId`, `ownerId`, `orgRole`). Read `auth.ownerId`, or call `resolveOwner(auth)` for a context you
+  synthesised; never re-derive `orgId ?? userId`. `ownerIdIsAddressable` is the colon guard and lives
+  BESIDE the resolver, because a resolver that can return a refusal is one every caller must
+  discriminate. `resolveRole(env, auth)` is the one level seam: no organisation claim resolves `admin`
+  (which is what keeps a solo install byte-identical), a mapped `CLERK_ROLE_LEVELS` claim
+  short-circuits, and `org_members` is the AUTHORITATIVE source behind the same 60s KV cache
+  `getTenant` uses (`orgmember:{orgId}:{userId}`; a HIT is cached, a MISS never is). A `device`
+  credential carries no organisation claim on purpose - `device-auth.ts`'s `phd_` payload gains
+  nothing - so it names one per request with `X-Phorma-Owner`, confirmed against `org_members` by
+  `resolveRequestedOwner`. That is a different header from `X-Phorma-Act-As`, which is an operator
+  naming somebody else's owner. A `shared` credential ignores the header outright.
+  `X-Phorma-Owner` is READ in one place and ADOPTED in one place: `adoptRequestedOwner` is called from
+  `verifyRequest`, so every authenticated `/api/*` route and the HTTP gateway inherit it together.
+  It moves TWO fields, `orgId` and `ownerId` - unlike `applyImpersonation`, which moves exactly one -
+  because a confirmed membership is a fact about the CALLER, so `resolveRole` must answer about the
+  organisation and `refuseManagedBilling` must refuse its checkout. It returns the context UNCHANGED
+  for every other case, so an install that never sends the header is byte-identical. A WebSocket
+  upgrade is NOT covered and cannot be: `WebSocket` carries no request header, so a monitor socket
+  follows the verified claim alone.
+  `GET /api/me` REPORTS all three answers as ADDITIVE fields - `ownerId`, `level` and `owners` - which
+  is the studio's only source for any of them; `CapabilityService` and `ActiveOwnerService` are both DI
+  leaves and are pushed whatever this route says. `owners` is resolved from `org_members` by `user_id`
+  (what `idx_org_members_user` exists for) and is keyed on the VERIFIED caller, never the resolved
+  owner: an organisation cannot switch, and an operator impersonating a customer therefore sees their
+  OWN memberships there and learns nothing about the customer's. It is returned on BOTH branches, is
+  NOT KV-cached, and an unrecognised level token is dropped rather than offered. `level` is OMITTED when `resolveRole` answers `{ unknown: true }`: a read never refuses
+  over a membership question, an absent field is the same shape an older worker sends, and the
+  studio's `isCapabilityLevel` guard rejects an absent and an unrecognised value identically. The
+  refusal for an unresolvable role belongs on the WRITE path, in `requireCapability`.
+- **Every owner consumer reads the RESOLVED owner, and there are exactly two exceptions.** The
+  Secret_Vault instance name, the `deploy:` registry prefix on both the deployments list and the
+  notification fan-out, `workflow_backups.tenant_id` plus the R2 backup prefix, and every `usage`
+  row, `quotas` rollup and `credit_grants` draw all key on `auth.ownerId`, so one `tenants` row per
+  owner is the single quota bucket and a member's run is entitled and metered against the
+  ORGANISATION. Keying the entitlement gate and the ledger write differently is the defect to watch
+  for: a run is then metered against a ceiling it was never checked against, and no single-surface
+  test can see it (`organisation-metering.test.mjs` asserts both halves per call). The two
+  exceptions are Stripe's: `/api/checkout` and `/api/billing-portal` pass `auth.userId` on every
+  line, because an organisation is invoiced by Phorma Labs and an `org_` id must never reach Stripe.
+- **Self-serve billing is a PERSONAL-account capability, and the refusal is not the Role_Gate's.**
+  `refuseManagedBilling` (`api.ts`) answers 403 `billing_managed` at the TOP of `POST /api/checkout`
+  and `POST /api/billing-portal`, above the level gate and above the catalogue lookup, so no Stripe
+  object of any kind can exist for an organisation owner. It is NOT in `requireCapability` because an
+  organisation admin resolves `admin` - a gate comparing levels alone admits them. `WRITE_ROUTES`
+  therefore records both routes as `admin` PLUS a personal-owner condition. It reads `auth.orgId`
+  rather than comparing `ownerId` with `userId`: the verified claim is the fact, and those two
+  expressions differ for a `device` credential. An organisation reaches an entitled state through
+  `/api/provision` alone, and a higher ceiling is a TIER change - there is no comp-credit path and
+  there must not be one, because `credit_grants.stripe_payment_id` is `NOT NULL UNIQUE` and a grant
+  without a payment would have to weaken the thing that makes a grant idempotent.
+- **The Role_Gate is the third question, and it is the SECURITY BOUNDARY.** `requireCapability(env,
+  auth, required, respond)` in `cloud/src/role-gate.ts` is the ONE capability check; discriminate with
+  `'level' in result`, the same idiom as `'status' in gate`. Every write route calls it naming its level
+  as a LITERAL, and `WRITE_ROUTES` + `requiredLevelFor(method, path)` are the DATA declaration of what
+  each write requires - `cloud/test/role-gate.test.mjs` drives every entry against a real route and
+  statically scans `api.ts` and `workflow-agent.ts` for a mutating literal the table does not answer, so
+  a NEW WRITE ROUTE SHIPS WITH A TABLE ENTRY AND A PROBE or the suite fails. Reads are open to every
+  level including `operator`; the boundary is between organisations, not within one. Three rules that
+  are not negotiable. (1) Never derive a covered route's required level from the path inside a
+  dispatch - two path matchers for one dispatch is how one starts admitting what the other refuses; the
+  table's only runtime role is the FAIL-CLOSED backstop in `WorkflowAgent.onRequest`, which refuses a
+  mutating method the table does not mention at `ROLE_GATE_FALLBACK_LEVEL` (`admin`). (2) An
+  unresolvable role is `role_unknown`, never a substituted `operator` - `operator` can trigger a run,
+  which spends the owner's credits, so there is no safe minimum. (3) A DO level refusal DRAINS the
+  request body first (`refuseLevel`), or an unread request stream wedges the caller's next request on
+  that socket.
+- **Two independent isolation layers over the resolved owner.** The gateway in `index.ts` rewrites an
+  instance name to `${resolveOwner(auth)}:${instance}` and 403s a foreign prefix BEFORE
+  `routeAgentRequest`, so no Durable Object is woken - `organisation-isolation.test.mjs` proves that
+  by watching `idFromName` rather than by reading the source. `WorkflowAgent.enforceOwnership`
+  compares the stamp against `resolveOwner(auth)` and must be able to refuse ALONE, because the RPC
+  entry points (`notificationsSince`, `purgeSelf`, `startPortalTurn`, `claimOwnership`) never pass
+  through the gateway. `ownerIdIsAddressable` gates both, plus ONE gate above every authenticated
+  `/api/*` route (`refuseUnaddressableOwner` in `api.ts`, below the Stripe webhook branch) answering
+  `owner_invalid`.
+- **A WorkflowAgent instance name is PERCENT-ENCODED in hosted mode.** `index.ts` writes
+  `encodeURIComponent('{owner}:{workflowId}')` into the path and partyserver's `routePartykitRequest`
+  hashes the path segment WITHOUT decoding it, so `org_a:wf` and `org_a%3Awf` are two different
+  Durable Objects. Anything reaching an owner's instance by name goes through
+  `workflowAgentInstance` (`portal-registry.ts`) or it silently addresses a blank instance - no error,
+  no log line, an empty answer. Measured against the real deploy bundle, 2026-09-14.
+  `askInstance` (`notifications.ts`) was one of those call sites and is FIXED - the notification
+  fan-out addressed blank instances in hosted mode, so the feed read as "nothing has happened".
+  KNOWN DEFECT, still open: `portalOwnerInstance` builds the RAW form, so in hosted mode a published
+  portal reads a blank instance. Not fixed here because the fix moves which DO a live hosted portal
+  reads and needs its own reproduction and migration thought. BYO is unaffected (no owner prefix,
+  nothing to encode). The doc comment names it.
+- **The ownership claim** is `POST /api/deployments/{workflowId}/claim` in `ownership-claim.ts`,
+  mounted after `handleDeploymentsRequest` and ABOVE the `store.enabled` gate with its own two 404s,
+  because that gate answers 501 naming a binding and BYO must see the route as ABSENT. Order is
+  load-bearing: the `workflow_backups` collision pre-check, then the `claimOwnership` RPC (one
+  `setState` replace, then a write-then-remove registry move), then ONE `DB.batch` moving
+  `workflow_backups` and `usage`, then the `ownership_claims` row, which LOGS on failure rather than
+  refusing. `quotas`, `tenants`, `credit_grants` and `stripe_customer_id` are deliberately NOT moved.
+  The transfer is keyed on the ACTING USER as the source so a retry after a failed batch converges.
+  Refusal codes `claim_not_owner` / `claim_unowned` / `claim_conflict` are append-only.
+  OPEN GAP: a Durable Object name is fixed at creation, so a claimed deployment keeps living at
+  `{actingUserId}:{workflowId}` while the organisation addresses `{orgId}:{workflowId}` - a different,
+  blank instance. Ownership moves correctly; ADDRESSING what you now own needs a design decision.
+- **`workflow_backups.body_key` is the stored R2 prefix, and NULL means derive it.** One fallback,
+  `bodyPrefixFor` in `backup-store.ts`; every `BackupBodyStore` method takes that PREFIX rather than
+  an owner and a workflow id, which is the enforcement - a method still taking `(tenantId,
+  workflowId)` would derive the new owner's prefix for a claimed row and report a body that is sitting
+  in the bucket as no longer retained. A claim freezes the prefix with
+  `body_key = COALESCE(body_key, ?)`, so no R2 object is ever rewritten and every body stays readable
+  at its original key. `deleteTenant` takes the stored prefixes alongside the owner scan for the same
+  reason.
+- **A `connection.close()` from `onConnect` is NOT delivered**, measured against the real deploy
+  bundle: the client socket stays at `readyState === 1` and goes on being served. So the monitor
+  socket's authorization is the PER-FRAME guard at the top of `WorkflowAgent.onMessage`, which reads the
+  level `onConnect` recorded through `connection.setState` (partyserver's hibernation attachment, kept
+  under `__user` beside its own `__pk`, so it survives an eviction for as long as the socket). An absent
+  level refuses. Never store a token there - a credential in a socket attachment is a credential in
+  Durable Object storage. Every `ControlFrame` (`approval`, `question`, `event`, `trigger`, `stop`)
+  writes state, so this is a write path and Requirement 6.2 covers it.
+- `tenants.id` IS the Clerk user id or an organisation id, and the classifier TRIO is deliberate:
+  `isOwnerId` accepts `user_` and `org_`, `isClerkUserId` stays NARROWER and stays the predicate for
+  anything that genuinely means a human - in particular the three Stripe-supplied id paths, because an
+  organisation is invoiced by Phorma Labs and an `org_` id can never legitimately arrive from Stripe -
+  and `isOrgId` is the narrowest, for the organisation management routes, which take an `orgId` and a
+  `userId` as two SEPARATE parameters of one write. Validating both with `isOwnerId` would let a
+  swapped pair through, and a membership row keyed `(user_x, org_y)` resolves for nobody, ever, with
+  nothing logged about it. All three are WRITE-path only.
+- `isClerkUserId` (`tenants.ts`) guards WRITE paths only:
   `/api/provision` and the two Stripe-supplied id paths. Never re-validate an id read out of
   `tenants` - rows hand-provisioned before that check can hold an id it rejects, and refusing to
   resolve one would strand a real payment. A bad id on a write creates an orphan row `/api/me` can
@@ -309,7 +611,13 @@ user's own Cloudflare account and keys).
   customer id (a plain UNIQUE enforces the same thing, the `WHERE` clause documents that an unmapped
   tenant is the steady state), the `idx_usage_tenant_run` repair that finally makes `recordRun`'s
   documented idempotency real, `stripe_events` and `credit_grants`. `0004_billing_ordering.sql` adds
-  the per-field clocks. Both ARE now applied remotely (verified 2026-09-09 -
+  the per-field clocks. `0006_organisations.sql` is the organisation schema (`org_members`,
+  `workflow_proposals` with its partial unique index, `ownership_claims`, `impersonation_audit`, and
+  the nullable `workflow_backups.body_key`), written COMPLETE in one change on purpose: a migration is
+  recorded as applied by FILENAME, so anything appended after a remote apply silently never runs, and
+  only `org_members` is read by the code that shipped with it. It also carries the one ALTER in the
+  set, so like 0003 it is NOT self-healing - never hand-run it through `d1 execute`, and a later schema
+  change goes in 0007. Both billing ones ARE now applied remotely (verified 2026-09-09 -
   `npx wrangler d1 migrations list phorma-cloud --env hosted --remote` answers "No migrations to
   apply!"); that command is the only trustworthy answer to the question, so run it rather than
   believing a line of prose. One SQLite trap in there is worth carrying forward: `stripe_events.id` declares
@@ -371,9 +679,10 @@ user's own Cloudflare account and keys).
   a real secret file committable.
 - A deployed run resolves a connection secret from worker env FIRST, then from the `SecretVault`
   Durable Object (`POST /api/connection-secrets`, AES-GCM under `KEY_ENC_SECRET`, one instance per
-  owner: `secrets:{userId}` hosted, `secrets:default` BYO). The vault is the only ingestion path a
-  hosted tenant has, since `wrangler secret put` needs their own account. `MCP_*` bearers are still
-  env-only. Spec: `.kiro/specs/deployed-credential-vault/`.
+  owner: `secrets:{ownerId}` hosted, `secrets:default` BYO - so an organisation's members share ONE
+  vault and a credential stored by one colleague resolves on a run another one deployed). The vault is
+  the only ingestion path a hosted tenant has, since `wrangler secret put` needs their own account.
+  `MCP_*` bearers are still env-only. Spec: `.kiro/specs/deployed-credential-vault/`.
 - Adding a Durable Object class means a binding + migration tag in `wrangler.jsonc` top level AND
   `env.hosted` AND `DeployConfigService`'s generated override, which REPLACES the committed config
   on every BYO deploy. `cloud/test/deploy-config.test.mjs` derives the expected class list from
@@ -408,6 +717,80 @@ the surface is ABSENT on a BYO worker rather than broken.
   row is the only index of which R2 objects belong to a tenant, so the reverse order orphans them.
 - Operator steps this code cannot do for itself: `npx wrangler r2 bucket create phorma-backups` and
   `npx wrangler d1 migrations apply phorma-cloud --env hosted --remote`.
+
+## Workflow proposals (hosted only)
+
+Spec: `.kiro/specs/multi-organisation-phorma/` Requirement 11. An editor's change is held as a
+PROPOSAL and a builder's publish is what moves the deployed graph. Three modules:
+`proposals.ts` (the wire contract, the pure decisions and the D1 `ProposalStore`),
+`proposal-store.ts` (`ProposalBodyStore`, the R2 half) and `proposal-routes.ts` (`/api/proposals/*`).
+Metadata is `workflow_proposals` from `0006_organisations.sql`; NO migration was added for it.
+
+- `/api/proposals/*` sits ABOVE the `store.enabled` gate with its own TWO 404s, so BYO sees the
+  surface as ABSENT rather than as a missing binding. That makes three placements in `api.ts` with
+  three different answers: `/api/deployments` above and answering, `/api/backups` below and 501
+  naming a binding, `/api/proposals` above and 404.
+- **The single-pending invariant is a DATABASE constraint.** `idx_proposals_pending` is PARTIAL on
+  `(owner_id, workflow_id) WHERE status = 'pending'`, so creation is ONE `DB.batch` that supersedes
+  then inserts: a lost race violates the index and the whole batch rolls back. Every transition is a
+  conditional `UPDATE ... WHERE status = ? AND revision = ?` whose `meta.changes` is the
+  single-winner signal; zero changed rows is 409 `proposal_conflict` CARRYING THE CURRENT REVISION.
+  A read-then-write here lets both reviewers through - mutation-verified, it answers "2 winners".
+  The revision is therefore REQUIRED in the request body, never looked up server-side.
+- Four refusal codes, APPEND-ONLY: `proposal_scope`, `proposal_stale`, `proposal_conflict`,
+  `proposal_unencrypted`. The first two are declared with the set and answered by the publish work.
+- Bodies are `JSON -> gzip -> AES-GCM -> R2` through `encryptBytes`/`decryptBytes`, in the EXISTING
+  `BACKUPS` bucket under `proposal/{owner}/{workflow}/{proposalId}`. The PREFIX is the isolation:
+  `BackupBodyStore.deleteTenant` scans `backup/{tenantId}/` and `prune`/`deleteWorkflow` enumerate
+  `bodyPrefix`, so no backup destroy path can reach a proposal body and no backup read can serve one.
+  No `KEY_ENC_SECRET` refuses `proposal_unencrypted` and stores NOTHING.
+- **No code path from this surface to a `WorkflowAgent`**, and that absence is the whole of "an
+  editor's change is a proposal": `ProposalRoutesEnv` does not even carry the binding. The one DO it
+  reads is `PortalIndex.getDeployment`, for the live spec hash it FREEZES into the row - a registry
+  read failure refuses 502 rather than freezing "nothing was deployed".
+- Order: the row is claimed BEFORE the body is written, so a refused proposal stores nothing; a body
+  write that fails after the row lands is 502 and a read of the missing body is 404, never 500.
+- Retention keeps the ten most recent NON-PENDING rows per workflow and NEVER the pending one.
+  `ORDER BY id` (the rowid), never `created_at` - two rows from one pass tie to the millisecond.
+  `proposal_id` is what travels on the wire, so a rowid is never in a URL. ONE destroying path
+  (`runProposalRetention`), named at each of its three call sites.
+- Publishing is a SETTABLE SEAM (`ProposalPublisher`), not a call, and `api.ts` INSTALLS one built by
+  `createProposalPublisher` (`proposal-publish.ts`). That is what lets both halves hold at once: the
+  route still has no path to a `WorkflowAgent`, and a publish still runs the ordinary push path. With
+  no performer installed the route answers 501 and leaves the row pending, because a `published`
+  status recording a deploy that never happened is worse than a route saying it cannot yet - drive
+  that case by calling `handleProposalRequest` with empty deps, not through the router.
+- **ONE push path, two entrances.** `WorkflowAgent.applySpecPush(spec, fallbackOwnerId)` is private
+  and holds the whole of it (validation against the same connection inventory, cron re-arm, owner
+  stamp, `setState`, `syncDeployment`); `POST /workflow` calls it, and so does the public
+  `acceptSpecPush(ownerId, spec)` RPC a publish uses. RPC and not `stub.fetch()` for the documented
+  reason, and it re-checks the owner against the stamp and refuses a portal session instance exactly
+  as `notificationsSince` does. It returns a `SpecPushOutcome` rather than throwing on a refused push,
+  because "refused" is the case that leaves the proposal `pending`.
+- Staleness is the publisher's, and its source is `PortalIndex.getDeployment().specHash` - written by
+  `syncDeployment` on every accepted push, so it is the hash of what is really deployed and costs one
+  storage read. A difference is 409 `proposal_stale` carrying the CURRENT hash; a registry read
+  FAILURE is 502, never a staleness answer.
+- **Scope is checked at CREATION, and the baseline is authenticated rather than trusted.**
+  `scopeViolations(live, proposed)` (pure, in `proposals.ts`) treats the node id set, each node's
+  `kind`, the edge set WITH its port wiring and the sub-workflow id set - plus the same three rules
+  inside each sub-workflow graph - as STRUCTURE, and everything else as an editor's business. A
+  caller below `builder` must send the deployed spec as `liveSpec`, and it is only used once
+  `canonicalSpecHashOf(liveSpec)` equals the registry hash: that is how the check runs without waking
+  a deployment (Requirement 11.10 stays intact). An absent baseline fails CLOSED with a 400 naming the
+  field; a mismatched one is `proposal_stale`. A non-empty result is 403 `proposal_scope` NAMING each
+  change, capped at `SCOPE_VIOLATIONS_REPORTED` with the true count beside it.
+- The author's notification is an ADDITIVE `proposals` field on `NotificationsResponse`, filled by
+  `ProposalStore.outcomesForAuthor(ownerId, authorUserId, since)` - a D1 read scoped by owner AND
+  author, so a reviewer is never told about their own decision. It is a query rather than a fifth
+  fan-out because the fact is in D1, and it degrades to absent on a BYO worker, an anonymous caller or
+  a failed read rather than failing the deployment feed it rides along with.
+- `WRITE_ROUTES` carries the three proposal writes FIRST, before the suffix-anchored Durable Object
+  entries: `matchWriteRoute` returns the first match and `/\/publish$/` also matches
+  `/api/proposals/{id}/{proposalId}/publish`. Both are `builder`, so nothing is mis-gated - the order
+  is what keeps each entry answering the route it was written for.
+- OPERATOR: `KEY_ENC_SECRET` must be set and `BACKUPS` must be bound, or proposals refuse and store
+  nothing. No new secret, no new bucket, no new binding.
 
 ## Browser-facing pages (`cloud/src/brand-page.ts`)
 

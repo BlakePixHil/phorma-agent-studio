@@ -157,6 +157,46 @@
     <app-notification-bell />
     <span class="phorma-toolbar-divider"></span>
     <!--
+      Owner switcher (multi-organisation Requirement 20). ABSENT entirely for an
+      account with no membership - `canSwitch()` is `owners().length > 1` - so a
+      solo install looks exactly as it did before this feature existed.
+
+      Its own control rather than an item inside the account menu, because the
+      browser account control is `<clerk-user-button>` and that popover is Clerk's,
+      not ours: there is no branch-independent menu to put an item in. It also has
+      to NAME the active owner without being opened, since the whole point is
+      knowing which account a Deploy will reach before pressing Deploy.
+
+      No `@defer` here on purpose: a `p-button` and a `p-menu` are both already in
+      this component's imports, so the switcher adds no module to the initial
+      bundle and there is nothing to defer.
+    -->
+    @if (ownerSwitch.canSwitch()) {
+      <p-button
+        [text]="true"
+        severity="secondary"
+        size="small"
+        styleClass="phorma-toolbar__owner"
+        [pTooltip]="ownerTooltip()"
+        tooltipPosition="bottom"
+        (onClick)="ownerMenuRef.toggle($event)"
+        ariaLabel="Switch account"
+      >
+        <span class="phorma-toolbar__owner-body">
+          <i
+            [class]="
+              ownerSwitch.activeOwner$().orgId === null ? 'ti ti-user' : 'ti ti-building'
+            "
+            aria-hidden="true"
+          ></i>
+          <span class="phorma-toolbar__owner-label">{{ ownerSwitch.activeOwner$().label }}</span>
+          <i class="ti ti-chevron-down" aria-hidden="true"></i>
+        </span>
+      </p-button>
+      <p-menu #ownerMenuRef [model]="ownerMenu()" [popup]="true" appendTo="body" />
+      <span class="phorma-toolbar-divider"></span>
+    }
+    <!--
       Account control (far right). Three states, not two, because the desktop
       build signs in through the browser handoff and Clerk never loads a user
       there - so `<clerk-user-button>` would render an empty box for an account

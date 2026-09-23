@@ -22,6 +22,11 @@
       </header>
 
       <div class="phorma-credits__body">
+        <!-- The packs are ABSENT for an organisation owner, never disabled: Phorma
+             Labs sets an organisation's ceiling through its tier, so there is nothing
+             here to buy (requirement 19.7). The credit reading in the header above
+             stays, because a balance is information. -->
+        @if (selfServeBilling()) {
         <div class="phorma-credits__packs">
           @for (pack of packs; track pack.id) {
             <div class="phorma-credits__pack">
@@ -46,8 +51,15 @@
             </div>
           }
         </div>
+        }
 
-        @if (canBuy()) {
+        @if (!selfServeBilling()) {
+          <p class="phorma-credits__note">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            Phorma Labs manages your organisation's credits. Ask an organisation admin to
+            raise its plan if you need more.
+          </p>
+        } @else if (canBuy()) {
           <p class="phorma-credits__note">
             <i class="ti ti-info-circle" aria-hidden="true"></i>
             Credits never expire and are spent only after your monthly allowance runs out.
@@ -69,7 +81,9 @@
       </div>
 
       <footer class="phorma-credits__actions">
-        @if (!canBuy() && !phormaCloud.pastDue()) {
+        <!-- "See plans" is a route to the plan cards, which are themselves absent for
+             an organisation owner, so it would be a dead end. -->
+        @if (selfServeBilling() && !canBuy() && !phormaCloud.pastDue()) {
           <p-button
             styleClass="phorma-credits__btn"
             size="small"

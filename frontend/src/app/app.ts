@@ -19,6 +19,8 @@ import { DeployedNotificationsService } from './core/deployed-notifications.serv
 import { CloudService } from './core/cloud.service';
 import { RunControllerService } from './core/run-controller.service';
 import { PhormaCloudService } from './core/phorma-cloud.service';
+import { ProposalsService } from './core/proposals.service';
+import { ToastService } from './shared/toast/toast.service';
 import { BottomTerminal } from './layout/terminal/bottom-terminal';
 import { TerminalOutputService } from './core/terminal-output.service';
 import { AgentsPalette } from './workspace/palette/agents-palette/agents-palette';
@@ -41,6 +43,7 @@ import { PromptDialog } from './workspace/prompt/prompt-dialog/prompt-dialog';
 import { PropertiesDialog } from './workspace/properties/properties-dialog/properties-dialog';
 import { EvalsDialog } from './workspace/evals/evals-dialog/evals-dialog';
 import { UsageDialog } from './workspace/usage/usage-dialog/usage-dialog';
+import { ProposalReviewDialog } from './workspace/proposals/proposal-review-dialog/proposal-review-dialog';
 import { SkillsPanel } from './workspace/skills/skills-panel/skills-panel';
 import { ConnectionsPanel } from './workspace/connections/connections-panel/connections-panel';
 import { ConnectionEditorDialog } from './workspace/connections/connection-editor-dialog/connection-editor-dialog';
@@ -87,6 +90,7 @@ import { Toast } from './shared/toast/toast';
     PropertiesDialog,
     EvalsDialog,
     UsageDialog,
+    ProposalReviewDialog,
     SkillsPanel,
     SkillEditorDialog,
     ConnectionsPanel,
@@ -129,6 +133,9 @@ export class App {
   private readonly cloud = inject(CloudService);
   private readonly runController = inject(RunControllerService);
   private readonly phormaCloud = inject(PhormaCloudService);
+  // The proposal performer `CloudService` may not inject - see `wireProposals`.
+  private readonly proposals = inject(ProposalsService);
+  private readonly toast = inject(ToastService);
 
   protected readonly title = signal('Phorma Agent Studio');
 
@@ -147,6 +154,72 @@ export class App {
     // it swallows every failure so startup continues without it (5.7).
     this.telemetry.bootstrap();
     this.wireNotifications();
+    // Where Run goes for a Cloud_Library session. Installed here for the same
+    // reason the deep-link handler is: `RunControllerService` may not inject
+    // `CloudService`, and the shell is the one place that holds both
+    // (multi-organisation Requirement 10.1).
+    this.runController.deployedRunLauncher = input => void this.cloud.runDeployedActive(input);
+    this.wireProposals();
+  }
+
+  /**
+   * Where an editor's change goes (multi-organisation-phorma, Requirement 12.1).
+   *
+   * `CloudService` must not inject `ProposalsService` - that service reaches
+   * `PhormaCloudService`, which injects `CloudService`, so the edge would close the
+   * known NG0200 cycle. The shell holds both, exactly as it does for
+   * `RunControllerService.deployedRunLauncher`.
+   *
+   * The toast is HERE rather than in the service because this is the one place
+   * that knows a submission came from a push attempt: `ProposalsService` reports an
+   * outcome, and what to say about a refusal depends on what the user was trying to
+   * do. Each refusal gets its own remedy - a scope refusal names the structural
+   * change, and the other two are things to retry rather than things to fix.
+   */
+  private wireProposals(): void {
+    // Saving a propose-only document goes through the PUSH path, which is what
+    // materializes the application defaults before the submission - a proposal
+    // whose agents still inherited would deploy unresolved on publish. So this seam
+    // deliberately points at `pushWorkflow`, whose own capability branch then routes
+    // it to the proposer below.
+    this.workflow.proposeActive = () => this.cloud.pushWorkflow();
+
+    this.cloud.specProposer = async spec => {
+      const outcome = await this.proposals.submit(spec);
+      if (outcome.ok) {
+        this.toast.success(
+          'Sent for review',
+          'A builder in your organisation can publish this change.',
+        );
+        return true;
+      }
+      if (outcome.kind === 'scope') {
+        const listed = outcome.violations.join('; ');
+        this.toast.error(
+          'A builder has to make this change',
+          outcome.violations.length > 0
+            ? `Your account can change settings and prompts, not the shape of the workflow: ${listed}.`
+            : 'Your account can change settings and prompts, not the shape of the workflow.',
+        );
+        return false;
+      }
+      if (outcome.kind === 'stale') {
+        this.toast.warning(
+          'The deployed workflow moved',
+          'Somebody deployed a different version. Re-open it and make the change again.',
+        );
+        return false;
+      }
+      if (outcome.kind === 'conflict') {
+        this.toast.warning(
+          'Somebody else submitted first',
+          'Re-open the workflow and submit your change again.',
+        );
+        return false;
+      }
+      this.toast.error('Could not send for review', outcome.error);
+      return false;
+    };
   }
 
   /**

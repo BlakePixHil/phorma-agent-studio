@@ -68,12 +68,23 @@ export type BillingRemedy =
 
 /**
  * The code-to-remedy map, keyed by `HostedInferenceRefusalCode` from
- * `cloud/src/tenants.ts`.
+ * `cloud/src/tenants.ts` plus `billing_managed` from `cloud/src/api.ts`.
  *
  * A plain record and not a union-keyed one on purpose: the wire contract is
  * append-only and the studio must accept a token it has never heard of, so the
  * lookup has to be total over `string`. Read through `hasOwnProperty`, or
  * `'constructor'` resolves to an inherited value.
+ *
+ * `billing_managed` is the one entry that is NOT an inference refusal: it comes off
+ * `/api/checkout` and `/api/billing-portal` when the active owner is an
+ * organisation, which Phorma Labs invoices (multi-organisation-phorma,
+ * Requirement 19.4). Its remedy is `contact-support` because there is genuinely
+ * nothing for this user to press - a plan or credit change for an organisation is a
+ * conversation, and every purchase surface is ABSENT for that owner rather than
+ * refused (Requirement 19.7), so reaching this code at all means something got past
+ * a `selfServeBilling()` gate. The copy still has to be right for when it does: a
+ * user who sees a raw refusal and concludes their payment failed is the outcome
+ * this map exists to prevent.
  */
 export const HOSTED_REFUSAL_REMEDIES: Readonly<Record<string, BillingRemedy>> = {
   no_subscription: 'subscribe',
@@ -81,6 +92,7 @@ export const HOSTED_REFUSAL_REMEDIES: Readonly<Record<string, BillingRemedy>> = 
   runs_exhausted: 'upgrade-plan',
   credits_exhausted: 'buy-credits',
   no_runtime_key: 'contact-support',
+  billing_managed: 'contact-support',
 };
 
 /**
@@ -165,7 +177,22 @@ export interface RefusalNotice {
  * Every string obeys the credits-not-dollars rule: a remedy is described in
  * credits, plans and cards, never in a dollar figure.
  */
-export function refusalNotice(remedy: BillingRemedy): RefusalNotice | null {
+export function refusalNotice(remedy: BillingRemedy, code?: string | null): RefusalNotice | null {
+  // `contact-support` is the one remedy two codes share, and they are NOT the same
+  // sentence: `no_runtime_key` is an internal fault on a paid account, while
+  // `billing_managed` means the account is fine and somebody else pays for it. The
+  // remedy (no button) is identical, so the code is what picks the prose - passed
+  // only where a caller still holds it. Absent reads as the runtime-key case, which
+  // is the one that has ever reached a run.
+  if (remedy === 'contact-support' && code === 'billing_managed') {
+    return {
+      summary: 'Phorma Labs manages this billing',
+      detail:
+        "Your organisation's plan and credits are billed by Phorma Labs, so there is nothing " +
+        'to buy here. Contact support to change them.',
+      label: null,
+    };
+  }
   switch (remedy) {
     case 'buy-credits':
       // Unchanged from the pre-code toast, deliberately: this is the one path

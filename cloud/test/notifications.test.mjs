@@ -26,11 +26,15 @@
  * Authorization is NOT stubbed. Hosted cases mint a real `phd_` device token and
  * let `verifyBearer` verify it, which is a genuine HMAC round trip with no Clerk
  * and no JWKS fetch - so the identity the route scopes by is the identity a real
- * request would produce.
+ * request would produce. Organisation cases mint a real RS256 Clerk session token
+ * carrying an `org_id` claim, verified against a locally generated `CLERK_JWT_KEY`
+ * on `@clerk/backend`'s offline path, for the same reason: the owner this route
+ * fans out over has to come from a VERIFIED claim, not from a test double.
  *
  * Run: npx -y tsx cloud/test/notifications.test.mjs
  */
 
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import { registerHooks } from 'node:module';
 
 import fc from 'fast-check';
@@ -56,14 +60,51 @@ const {
   projectSettledRun,
   terminalNoticeStatus,
 } = await import('../src/notifications.ts');
-const { PortalIndex } = await import('../src/portal-registry.ts');
+const { PortalIndex, workflowAgentInstance } = await import('../src/portal-registry.ts');
 const { mintDeviceToken } = await import('../src/device-auth.ts');
 
 const RUNS = { numRuns: 200 };
 const AUTH_SECRET = 'test-device-secret-value';
 
+// ── A real Clerk session token, for the organisation cases ──────────────────
+
+const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+const base64url = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+/** An RS256 session JWT, optionally carrying organisation claims. */
+function mintClerkToken(sub, claims = {}) {
+  const seconds = Math.floor(Date.now() / 1000);
+  const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-notifications-test' })}.${base64url(
+    { sub, iat: seconds - 60, nbf: seconds - 60, exp: seconds + 3600, ...claims },
+  )}`;
+  const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
+  return `${signing}.${signature}`;
+}
+
 /** "Send no Authorization header at all", distinguishable from "not specified". */
 const NO_BEARER = Symbol('no-bearer');
+
+/**
+ * The Durable Object name a hosted instance really has.
+ *
+ * PERCENT-ENCODED, and every behaviour map below is keyed with it rather than with
+ * the readable colon form on purpose. `index.ts` writes
+ * `encodeURIComponent('{owner}:{workflowId}')` into the path and partyserver
+ * hashes that segment WITHOUT decoding it, so `org_a:wf` and `org_a%3Awf` are two
+ * DIFFERENT Durable Objects. The fan-out built the raw form for its entire
+ * shipped life, which in hosted mode meant every RPC hit a blank instance that
+ * answered an empty payload successfully - a feed that said "nothing has happened"
+ * with nothing in the log to contradict it.
+ *
+ * Keying the doubles this way is what makes that a LOUD failure: a regression to
+ * the raw form misses every entry here, so the run checks below go empty rather
+ * than one dedicated assertion going red.
+ */
+const hostedName = (ownerId, workflowId) => workflowAgentInstance(ownerId, workflowId);
 
 let failures = 0;
 function check(name, condition, detail) {
@@ -171,6 +212,7 @@ async function callRoute({
   since,
   mode = 'byo',
   userId = 'user_1',
+  orgId,
   bearer,
 } = {}) {
   const storage = mapStorage();
@@ -185,7 +227,12 @@ async function callRoute({
     },
     WorkflowAgent: agents,
     ...(mode === 'hosted'
-      ? { PHORMA_MODE: 'hosted', PHORMA_AUTH_SECRET: AUTH_SECRET }
+      ? {
+          PHORMA_MODE: 'hosted',
+          PHORMA_AUTH_SECRET: AUTH_SECRET,
+          CLERK_SECRET_KEY: 'sk_test_clerk_not_used_offline',
+          CLERK_JWT_KEY,
+        }
       : {}),
   };
 
@@ -194,6 +241,10 @@ async function callRoute({
     token = null;
   } else if (bearer !== undefined) {
     token = bearer;
+  } else if (orgId !== undefined) {
+    // A Clerk session token rather than a device one: only a verified claim can
+    // carry an organisation, which is the whole point of the owner seam.
+    token = mintClerkToken(userId, { org_id: orgId, org_role: 'org:admin' });
   } else if (mode === 'hosted') {
     token = await mintDeviceToken(AUTH_SECRET, userId, Date.now() / 1000);
   }
@@ -294,14 +345,18 @@ console.log('\nTenant isolation');
       record({ ownerId: 'user_2', workflowId: 'wf-theirs', workflowName: 'Theirs' }),
     ],
     behaviour: {
-      'user_1:wf-mine': { runs: [run()], pending: [], issues: [] },
-      'user_2:wf-theirs': { runs: [run({ runId: 'leak' })], pending: [], issues: [] },
+      [hostedName('user_1', 'wf-mine')]: { runs: [run()], pending: [], issues: [] },
+      [hostedName('user_2', 'wf-theirs')]: {
+        runs: [run({ runId: 'leak' })],
+        pending: [],
+        issues: [],
+      },
     },
   });
 
   check(
     'only the caller\'s own deployment is asked',
-    agents.asked.length === 1 && agents.asked[0] === 'user_1:wf-mine',
+    agents.asked.length === 1 && agents.asked[0] === hostedName('user_1', 'wf-mine'),
     agents.asked.join(', '),
   );
   check(
@@ -311,8 +366,22 @@ console.log('\nTenant isolation');
   );
   check(
     'the instance name carries the hosted owner prefix',
-    agents.calls[0].name === 'user_1:wf-mine',
+    agents.calls[0].name === hostedName('user_1', 'wf-mine'),
     agents.calls[0].name,
+  );
+  // THE regression this pair exists for. The name the gateway gave the instance is
+  // the percent-encoded one, so asking for the readable colon form addresses a
+  // Durable Object that has never run anything - and it answers 200 with empty
+  // state, so the only symptom is a feed that is quietly always calm.
+  check(
+    'the name is the PERCENT-ENCODED form the gateway hashed',
+    agents.asked[0] === 'user_1%3Awf-mine',
+    agents.asked.join(', '),
+  );
+  check(
+    'and never the raw colon form, which is a different Durable Object',
+    !agents.asked.includes('user_1:wf-mine'),
+    agents.asked.join(', '),
   );
   check(
     'the verified owner is passed to the instance for its own re-check',
@@ -321,18 +390,140 @@ console.log('\nTenant isolation');
   );
 }
 
+// ── The owner is the ORGANISATION for a member ──────────────────────────────
+//
+// Feature: multi-organisation-phorma, Property 10: Every owner-scoped read
+// returns exactly the caller's owner's set.
+//
+// The registry prefix and the instance stamp are both the RESOLVED owner, so a
+// route that scoped this fan-out by `auth.userId` would not leak anything - it
+// would answer an empty feed to every member of every organisation, for
+// deployments that are right there under a prefix nobody asked for. An empty feed
+// reads as "nothing is wrong", which is the worst possible way for this route to
+// fail.
+
+console.log('\nThe fan-out owner is the organisation, not the member (Requirement 4.5)');
+{
+  const ORG = 'org_notify_alpha';
+  const { agents, body } = await callRoute({
+    mode: 'hosted',
+    userId: 'user_notify_member',
+    orgId: ORG,
+    records: [
+      record({ ownerId: ORG, workflowId: 'wf-org', workflowName: 'Shared triage' }),
+      // The same human's personal owner, and another organisation. Neither is part
+      // of this answer.
+      record({ ownerId: 'user_notify_member', workflowId: 'wf-personal' }),
+      record({ ownerId: 'org_notify_beta', workflowId: 'wf-beta' }),
+    ],
+    behaviour: {
+      [hostedName(ORG, 'wf-org')]: { runs: [run()], pending: [], issues: [] },
+      [hostedName('user_notify_member', 'wf-personal')]: {
+        runs: [run({ runId: 'personal-leak' })],
+        pending: [],
+        issues: [],
+      },
+      [hostedName('org_notify_beta', 'wf-beta')]: {
+        runs: [run({ runId: 'beta-leak' })],
+        pending: [],
+        issues: [],
+      },
+    },
+  });
+
+  check(
+    'exactly the organisation\'s deployment is asked',
+    agents.asked.length === 1 && agents.asked[0] === hostedName(ORG, 'wf-org'),
+    agents.asked.join(', '),
+  );
+  check(
+    'the organisation is what the instance is asked to re-check',
+    agents.calls[0].ownerId === ORG,
+    agents.calls[0].ownerId,
+  );
+  check(
+    'the organisation\'s deployment IS reported',
+    body.deployments.length === 1 && body.deployments[0].workflowId === 'wf-org',
+    JSON.stringify(body.deployments),
+  );
+  // Two directions, because only one of them is a leak and the other is the bug
+  // this change fixes: nothing from another owner appears, and the answer is not
+  // empty either.
+  check(
+    'neither the personal nor the other organisation\'s run appears',
+    !JSON.stringify(body).includes('leak'),
+    JSON.stringify(body),
+  );
+}
+
+{
+  // The same human, signed in with NO organisation, sees their personal
+  // deployments and none of the organisation's (Requirement 4.13's personal half).
+  const { agents, body } = await callRoute({
+    mode: 'hosted',
+    userId: 'user_notify_member',
+    orgId: undefined,
+    bearer: mintClerkToken('user_notify_member'),
+    records: [
+      record({ ownerId: 'org_notify_alpha', workflowId: 'wf-org' }),
+      record({ ownerId: 'user_notify_member', workflowId: 'wf-personal', workflowName: 'Mine' }),
+    ],
+    behaviour: {
+      [hostedName('org_notify_alpha', 'wf-org')]: {
+        runs: [run({ runId: 'org-leak' })],
+        pending: [],
+        issues: [],
+      },
+      [hostedName('user_notify_member', 'wf-personal')]: {
+        runs: [run()],
+        pending: [],
+        issues: [],
+      },
+    },
+  });
+  check(
+    'a personal credential resolves the personal owner',
+    agents.asked.length === 1 && agents.asked[0] === hostedName('user_notify_member', 'wf-personal'),
+    agents.asked.join(', '),
+  );
+  check(
+    'and sees nothing of the organisation it is a member of',
+    !JSON.stringify(body).includes('org-leak'),
+    JSON.stringify(body),
+  );
+}
+
 {
   // BYO instances are named by the bare workflow id, because `index.ts` only
   // applies the owner prefix in hosted mode. Asking for `default:wf-a` there
   // would address a Durable Object that has never existed, and every deployment
   // would read as empty rather than as an error.
-  const { agents } = await callRoute({
+  const { agents, body } = await callRoute({
     records: [record({ ownerId: 'default', workflowId: 'wf-a' })],
+    behaviour: { 'wf-a': { runs: [run()], pending: [], issues: [] } },
   });
   check(
     'a BYO instance is asked by its bare workflow id',
     agents.asked.length === 1 && agents.asked[0] === 'wf-a',
     agents.asked.join(', '),
+  );
+  // Property 37: BYO is byte-identical. There is no owner prefix, so there is
+  // nothing to encode and nothing about the organisation work reaches this path -
+  // `default` must never appear in an instance name.
+  check(
+    'and the default owner literal never reaches an instance name',
+    !agents.asked.some(name => name.includes('default')),
+    agents.asked.join(', '),
+  );
+  check(
+    'the single BYO owner is what the instance is asked to re-check',
+    agents.calls[0].ownerId === 'default',
+    agents.calls[0].ownerId,
+  );
+  check(
+    'and a BYO deployment with news is reported',
+    body.deployments.length === 1 && body.deployments[0].workflowId === 'wf-a',
+    JSON.stringify(body.deployments),
   );
 }
 
@@ -347,8 +538,8 @@ console.log('\nAn unreachable instance is named, never silently empty');
       record({ workflowId: 'wf-down', workflowName: 'Evicted' }),
     ],
     behaviour: {
-      'user_1:wf-ok': { runs: [run()], pending: [], issues: [] },
-      'user_1:wf-down': new Error('RPC failed: instance unreachable'),
+      [hostedName('user_1', 'wf-ok')]: { runs: [run()], pending: [], issues: [] },
+      [hostedName('user_1', 'wf-down')]: new Error('RPC failed: instance unreachable'),
     },
   });
 
@@ -369,8 +560,8 @@ console.log('\nAn unreachable instance is named, never silently empty');
     mode: 'hosted',
     records: [record({ workflowId: 'wf-1' }), record({ workflowId: 'wf-2' })],
     behaviour: {
-      'user_1:wf-1': new Error('down'),
-      'user_1:wf-2': new Error('down'),
+      [hostedName('user_1', 'wf-1')]: new Error('down'),
+      [hostedName('user_1', 'wf-2')]: new Error('down'),
     },
   });
   check('a total outage reports no deployments', body.deployments.length === 0);
@@ -388,8 +579,12 @@ console.log('\nDeployments with nothing to report are omitted');
       record({ workflowId: 'wf-loud' }),
     ],
     behaviour: {
-      'user_1:wf-quiet': emptyNotice(),
-      'user_1:wf-loud': { runs: [], pending: [], issues: ['Schedule "Nightly" was not armed.'] },
+      [hostedName('user_1', 'wf-quiet')]: emptyNotice(),
+      [hostedName('user_1', 'wf-loud')]: {
+        runs: [],
+        pending: [],
+        issues: ['Schedule "Nightly" was not armed.'],
+      },
     },
   });
   check(
@@ -412,7 +607,7 @@ console.log('\nIdentity is stitched from the registry record');
   const { body } = await callRoute({
     mode: 'hosted',
     records: [record({ workflowId: 'wf-a', workflowName: 'Invoice triage' })],
-    behaviour: { 'user_1:wf-a': { runs: [run()], pending: [], issues: [] } },
+    behaviour: { [hostedName('user_1', 'wf-a')]: { runs: [run()], pending: [], issues: [] } },
   });
   const entry = body.deployments[0];
   check('the workflow id is the registry id', entry.workflowId === 'wf-a', entry.workflowId);
@@ -485,12 +680,13 @@ console.log('\nThe fan-out cap');
   check('a capped answer says so', body.truncated === true, String(body.truncated));
   check(
     'the cap keeps the most recently updated deployments',
-    agents.asked.includes('user_1:wf-0') && agents.asked.includes(`user_1:wf-${NOTIFY_FANOUT_MAX - 1}`),
+    agents.asked.includes(hostedName('user_1', 'wf-0')) &&
+      agents.asked.includes(hostedName('user_1', `wf-${NOTIFY_FANOUT_MAX - 1}`)),
     agents.asked.join(', '),
   );
   check(
     'the oldest deployment past the cap is the one dropped',
-    agents.asked.includes(`user_1:wf-${NOTIFY_FANOUT_MAX + 4}`) === false,
+    agents.asked.includes(hostedName('user_1', `wf-${NOTIFY_FANOUT_MAX + 4}`)) === false,
   );
 }
 
@@ -530,7 +726,7 @@ await fc.assert(
 
       const behaviour = {};
       for (const entry of unique) {
-        behaviour[`user_1:${entry.workflowId}`] = entry.reachable
+        behaviour[hostedName('user_1', entry.workflowId)] = entry.reachable
           ? entry.hasNews
             ? { runs: [run({ runId: `r-${entry.workflowId}` })], pending: [], issues: [] }
             : emptyNotice()

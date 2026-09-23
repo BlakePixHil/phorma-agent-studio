@@ -3,6 +3,7 @@ import { Injectable, computed, inject } from '@angular/core';
 import type { ToolDefinition } from '@phorma/engine';
 
 import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
+import { CapabilityService } from '../capability.service';
 import { TauriService } from '../tauri.service';
 import type { WorkflowGraph } from '../workflow.model';
 import { ConnectionActionsService } from './connection-actions.service';
@@ -88,6 +89,11 @@ export class StudioActionRegistryService {
   private readonly settingsActions = inject(SettingsActionsService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly tauri = inject(TauriService);
+  // `CapabilityService` injects NOTHING at all, and
+  // `scripts/check-capability-isolation.mjs` keeps it that way - so this edge
+  // cannot pull a member of the NG0200 run/model/cloud cycle into a registry that
+  // already sits downstream of it.
+  private readonly capability = inject(CapabilityService);
 
   /** Every registered Studio_Action, keyed by id. */
   private readonly index = computed(() => {
@@ -127,9 +133,39 @@ export class StudioActionRegistryService {
   /**
    * The actions available to a mode. Ask mode gets the read-only subset
    * (Requirement 5.5); Plan and Agent get everything.
+   *
+   * The capability clause is SUBTRACTIVE and lives here rather than in
+   * {@link index}, for the same reason `PanelRegistryService` filters in its
+   * computeds: the index is the record of what the studio can do, and a level
+   * change must not edit it - {@link byId} still has to resolve an id the caller
+   * cannot run, or {@link execute} could not tell "no such action" from "not for
+   * you" (multi-organisation-phorma Requirements 7.3, 8.2).
+   *
+   * `allows(action.minLevel)` and never `atLeastLevel(action.minLevel ?? ...)`: the
+   * absent-means-least-capable default belongs inside the capability module, or
+   * this line carries a level literal Requirement 7.4 forbids.
+   *
+   * Every derived surface reads THIS method, which is what makes one declared
+   * field narrow the Agent-mode tool list, the Plan-mode op set and the prompt
+   * catalogue together (Requirements 8.2, 8.3).
    */
   available(access: ActionAccess | 'all'): StudioAction[] {
-    return access === 'all' ? this.all() : this.all().filter(action => action.access === access);
+    return this.all().filter(
+      action =>
+        (access === 'all' || action.access === access) &&
+        this.capability.allows(action.minLevel),
+    );
+  }
+
+  /**
+   * The ids {@link available} returns, as a set.
+   *
+   * Exists for the callers that need to narrow something OTHER than a list of
+   * entries - the Plan prompt's legacy op shorthands, whose five forms map onto
+   * graph actions rather than being registry entries themselves.
+   */
+  availableIds(access: ActionAccess | 'all'): ReadonlySet<string> {
+    return new Set(this.available(access).map(action => action.id));
   }
 
   /** Tool definitions derived from the registry (Requirement 3.1). */
@@ -211,6 +247,16 @@ export class StudioActionRegistryService {
       return this.reject(
         `"${action.label}" changes the studio, which Ask mode cannot do. Switch to Plan or Agent mode.`,
       );
+    }
+
+    // Defence in depth, the same shape as the Ask-mode check above: gating is
+    // ABSENCE, so an action above the level was never offered - but a model can
+    // name any id it likes, and a chat thread persisted before a demotion can
+    // replay a plan op that names one (multi-organisation-phorma Requirement 8.2).
+    // Not the security boundary: the worker re-gates every action that reaches a
+    // route through the Role_Gate (Requirement 8.5).
+    if (!this.capability.allows(action.minLevel)) {
+      return this.reject(`"${action.label}" is not available to this account.`);
     }
 
     const validated = validateArgs(action, rawArgs);

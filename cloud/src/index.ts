@@ -22,7 +22,7 @@
 
 import { routeAgentRequest } from 'agents';
 
-import { verifyBearer, verifyRequest, isHosted } from './auth';
+import { verifyBearer, verifyRequest, isHosted, ownerIdIsAddressable, resolveOwner } from './auth';
 import {
   handleApiRequest,
   handleBillingReturnRequest,
@@ -30,6 +30,12 @@ import {
   type ApiEnv,
 } from './api';
 import { handleDeviceAuthPage } from './device-auth-routes';
+import {
+  ACT_AS_HEADER,
+  guardImpersonation,
+  resolveImpersonation,
+  type ImpersonationEnv,
+} from './impersonation';
 import { handleReleaseRequest, type ReleaseEnv } from './releases';
 import { handlePortalEmbedScript, handlePortalRequest } from './portal';
 import { PortalIndex } from './portal-registry';
@@ -54,7 +60,14 @@ function corsHeaders(env: Env, request: Request): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    // `X-Phorma-Act-As` is listed because the admin dashboard is a BROWSER app and
+    // a header missing from this list is dropped by the preflight, not by us - the
+    // request then arrives without it and is served as the operator's own owner,
+    // which is indistinguishable from "the header was ignored" and is exactly the
+    // failure impersonation's silence makes hard to spot. `WorkflowAgent`'s own
+    // `json()` carries a SECOND copy of this list; the two can drift, so a header
+    // added here is added there too.
+    'Access-Control-Allow-Headers': `Authorization, Content-Type, ${ACT_AS_HEADER}`,
     ...(origin !== '*' ? { Vary: 'Origin' } : {}),
   };
 }
@@ -143,19 +156,83 @@ export default {
           request.headers.get('Upgrade')?.toLowerCase() === 'websocket'
             ? await verifyBearer(env, url.searchParams.get('token'))
             : await verifyRequest(env, request);
-        if (!auth?.userId) {
+        // WHOSE DATA, not who is asking. `resolveOwner` is `orgId ?? userId`, so
+        // the prefix below is the ORGANISATION for a member and the account for
+        // everybody else - and a member of two organisations addresses two
+        // disjoint instance namespaces with one credential (Requirement 2.1).
+        //
+        // In hosted mode a `shared` credential cannot exist (`verifyBearer` fails
+        // closed), so a null owner here is exactly the null `userId` this branch
+        // already refused.
+        const owner = auth ? resolveOwner(auth) : null;
+        if (!auth || !owner) {
           return new Response(JSON.stringify({ error: 'Unauthorized.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...cors },
           });
         }
+        // The colon guard, BEFORE any key is addressed (Requirement 1.8). An owner
+        // id is opaque, and the one structural fact anything may know about it is
+        // that `${owner}:${instance}` is how an instance is named - so a
+        // colon-bearing owner is refused rather than truncated, escaped or
+        // rewritten, and no Durable Object is woken under it.
+        if (!ownerIdIsAddressable(owner)) {
+          return new Response(
+            JSON.stringify({
+              error: 'This account cannot be addressed. Contact support.',
+              code: 'owner_invalid',
+            }),
+            { status: 403, headers: { 'Content-Type': 'application/json', ...cors } },
+          );
+        }
+
+        // ── Impersonation, the FIRST of three enforcement layers ──────────────
+        //
+        // When it resolves, the prefix below becomes the IMPERSONATED owner, so an
+        // operator addresses a customer's instances exactly as that customer's
+        // members do - and the guard has already refused anything that is not a
+        // plain GET, BEFORE `routeAgentRequest` runs, so no Durable Object of
+        // theirs is ever woken by a write (Requirement 14.7).
+        //
+        // The WebSocket upgrade is refused OUTRIGHT by the guard rather than
+        // treated as the GET it technically is: the monitor socket accepts
+        // `approval`, `question`, `event`, `trigger` and `stop` frames, so it is a
+        // write channel wearing a read's clothes.
+        //
+        // Null covers three cases that are INDISTINGUISHABLE from here: no header,
+        // a header from somebody who is not an operator, and a header carrying a
+        // value `isOwnerId` rejects. All three fall through to the caller's own
+        // owner with no refusal (Requirement 14.4).
+        const impersonation = await resolveImpersonation(request, env as ImpersonationEnv);
+        if (impersonation) {
+          const refused = await guardImpersonation(
+            request,
+            url,
+            impersonation,
+            env as ImpersonationEnv,
+            (body, status = 200) =>
+              new Response(JSON.stringify(body), {
+                status,
+                headers: { 'Content-Type': 'application/json', ...cors },
+              }),
+          );
+          if (refused) return refused;
+        }
+        const effectiveOwner = impersonation?.ownerId ?? owner;
 
         const rest = url.pathname.slice(AGENT_PATH_PREFIX.length);
         const [rawInstance, ...restPath] = rest.split('/');
         const instance = decodeURIComponent(rawInstance ?? '');
-        const prefix = `${auth.userId}:`;
+        const prefix = `${effectiveOwner}:`;
         // Callers may send either the bare workflow id or an already-prefixed
         // name (their own prefix only — anything else is forbidden).
+        //
+        // This branch returns BEFORE `routeAgentRequest`, which is the property
+        // that matters most about it (Requirement 2.2): a foreign owner's instance
+        // is never woken, so no handler of any kind runs against it and an
+        // inverted check inside the instance could not leak it even if there were
+        // one. `WorkflowAgent.enforceOwnership` is the SECOND, independent layer,
+        // for the paths that never pass through here at all - the RPC entry points.
         if (instance.includes(':') && !instance.startsWith(prefix)) {
           return new Response(JSON.stringify({ error: 'Forbidden.' }), {
             status: 403,

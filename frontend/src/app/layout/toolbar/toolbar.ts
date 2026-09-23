@@ -26,6 +26,7 @@ import { CloudDialogService } from '../../workspace/cloud/cloud-dialog.service';
 import { PhormaCloudService } from '../../core/phorma-cloud.service';
 import { SettingsDialogService } from '../../workspace/settings/settings-dialog.service';
 import { CommandPaletteService } from '../../core/command-palette.service';
+import { OwnerSwitchService } from '../../core/owner-switch.service';
 import { UpdateService } from '../../core/update.service';
 import { ToastService } from '../../shared/toast/toast.service';
 import { VersionHistoryDialogService } from '../../workspace/workflows/version-history-dialog.service';
@@ -82,6 +83,15 @@ export class Toolbar {
   private readonly selection = inject(SelectionService);
   private readonly toast = inject(ToastService);
   private readonly versionHistory = inject(VersionHistoryDialogService);
+  /**
+   * The owner switcher (multi-organisation-phorma, Requirement 20).
+   *
+   * Injected by a COMPONENT, which is the only thing allowed to inject it: it
+   * reaches the confirm rail, the document tabs, three notification services and
+   * `/api/me`, so it sits well above the transport path. The bare signal lives in
+   * `ActiveOwnerService`, which is a DI leaf.
+   */
+  protected readonly ownerSwitch = inject(OwnerSwitchService);
 
   /**
    * Current Clerk user (null until Clerk loads / when signed out, and ALWAYS null
@@ -177,6 +187,37 @@ export class Toolbar {
       },
     ];
   });
+
+  /**
+   * The owner switcher's menu: the personal account plus every membership
+   * (multi-organisation-phorma, Requirements 20.1, 20.12).
+   *
+   * Offers ONLY memberships that already exist. There is no "create organisation"
+   * and no "join" item, and there must not be - the Super_Admin route family is
+   * the only party that creates an organisation or assigns a member to one, which
+   * is also why `ngx-clerk`'s own organisation switcher is deliberately not used
+   * here.
+   *
+   * The active owner carries a check icon as well as being named on the trigger,
+   * so the current scope is legible from the keyboard and not only by reading the
+   * button beside it.
+   */
+  protected readonly ownerMenu = computed<MenuItem[]>(() =>
+    this.ownerSwitch.owners().map(owner => ({
+      label: owner.label,
+      icon: owner.orgId === null ? 'ti ti-user' : 'ti ti-building',
+      styleClass:
+        owner.orgId === this.ownerSwitch.activeOwner$().orgId
+          ? 'phorma-toolbar__owner-item--active'
+          : undefined,
+      command: () => void this.ownerSwitch.switchTo(owner.orgId),
+    })),
+  );
+
+  /** Tooltip for the owner switcher, naming what a deploy would reach. */
+  protected readonly ownerTooltip = computed(
+    () => `Working in ${this.ownerSwitch.activeOwner$().label}. Click to switch account.`,
+  );
 
   /** Tooltip for the toolbar Update button, reflecting the update state. */
   protected readonly updateTooltip = computed(() => {
@@ -745,15 +786,19 @@ export class Toolbar {
     {
       label: 'Window',
       items: [
-        // Every panel tab, grouped by the side it lives on. Visible tabs get
-        // a checkmark; clicking toggles visibility (hiding a tab removes it
-        // from its sidebar, showing reveals + activates it).
-        ...this.panels.tabs()
+        // Every panel tab this session may open, grouped by the side it lives
+        // on. Visible tabs get a checkmark; clicking toggles visibility (hiding
+        // a tab removes it from its sidebar, showing reveals + activates it).
+        //
+        // `allowedTabs` rather than `tabs`: the sidebars subtract a tab above the
+        // resolved capability level, so offering it here would be a menu entry
+        // that ticks itself and changes nothing on screen.
+        ...this.panels.allowedTabs()
           .filter(t => t.side === 'left')
           .sort((a, b) => a.order - b.order)
           .map(tab => this.windowTabItem(tab)),
         { separator: true },
-        ...this.panels.tabs()
+        ...this.panels.allowedTabs()
           .filter(t => t.side === 'right')
           .sort((a, b) => a.order - b.order)
           .map(tab => this.windowTabItem(tab)),

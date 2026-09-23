@@ -181,6 +181,15 @@
     <app-usage-dialog />
   }
 
+  <!--
+    ── Proposal review (multi-organisation-phorma Requirement 12.6) ──
+    Deferred for the same reason: it pulls the markdown pipeline for the prompt
+    preview, and a reviewer opens it rarely (Requirement 18.4).
+  -->
+  @defer (on immediate) {
+    <app-proposal-review-dialog />
+  }
+
   <!-- ── Skill editor (create/edit library skills — EPIC 6) ── -->
   <app-skill-editor-dialog />
 

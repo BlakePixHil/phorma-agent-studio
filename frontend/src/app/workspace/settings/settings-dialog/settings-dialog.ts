@@ -275,6 +275,21 @@ export class SettingsDialog {
     () => this.settings.defaultProvider() === 'phorma-cloud' && !this.phormaCloud.subscribed(),
   );
 
+  /**
+   * True when this page should OFFER that subscription (multi-organisation-phorma,
+   * Requirement 19.7).
+   *
+   * Separate from {@link needsPhormaCloudSubscription}, which is about the provider
+   * and stays the predicate for the model picker, the key warning and the Test
+   * button. This one adds the owner: while an organisation owner is active, Phorma
+   * Labs is billing it, so the CTA and the `past_due` notice are both ABSENT rather
+   * than disabled - a Subscribe button that the worker then refuses with
+   * `billing_managed` reads as broken.
+   */
+  protected readonly offerPhormaCloudSubscription = computed(
+    () => this.needsPhormaCloudSubscription() && this.phormaCloud.selfServeBilling(),
+  );
+
   /** Bedrock model ids fetched from the mantle catalog for the current region. */
   protected readonly bedrockModels = signal<string[]>([]);
   /** True while auto-fetching Bedrock models for the model dropdown. */

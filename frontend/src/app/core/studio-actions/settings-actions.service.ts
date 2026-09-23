@@ -39,6 +39,12 @@ const NAVIGABLE_TABS = [
  * secrets out: API keys and integration credentials live in bespoke custom
  * templates with no `SettingDef`, so they are unreachable from here by
  * construction (Requirement 6.5).
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): `settings_write`
+ * is builder, because the declared settings include the cloud provider, the worker
+ * URL and the default model - configuration of how everything ships and what it
+ * costs. Reading them is open, and so is `navigate_panel`, which shows the user a
+ * panel they already have.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsActionsService {
@@ -55,6 +61,7 @@ export class SettingsActionsService {
         surface: 'settings',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           pageId: { type: 'string', description: 'Limit to one settings page id.' },
           query: { type: 'string', description: 'Filter by setting id, label or keyword.' },
@@ -70,6 +77,7 @@ export class SettingsActionsService {
         surface: 'settings',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           settingId: { type: 'string', description: 'Setting id.', required: true },
           value: {
@@ -98,6 +106,7 @@ export class SettingsActionsService {
         surface: 'navigation',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           tabId: {
             type: 'string',
@@ -116,9 +125,17 @@ export class SettingsActionsService {
    * Reveals and activates a tab, honouring the side it currently lives on and
    * expanding that sidebar if the user collapsed it. Shared with the registry's
    * post-action panel reveal (Requirement 8.6).
+   *
+   * Reads `allowedTabs()` rather than `tabs()`, for the same reason the Window
+   * menu does: `tabs()` is the record of the user's arrangement and holds every
+   * entry regardless of level, so revealing off it would let `navigate_panel`
+   * report that it opened a panel the sidebar then filters straight back out. A
+   * level that allows the tab sees no change at all, and a level that does not
+   * gets the same "no such panel" answer it would get for a typo - which, from
+   * inside that studio, is the honest answer.
    */
   reveal(tabId: string): boolean {
-    const tab = this.panels.tabs().find(item => item.id === tabId);
+    const tab = this.panels.allowedTabs().find(item => item.id === tabId);
     if (!tab) return false;
     this.panels.setActive(tab.side, tabId);
     if (tab.side === 'left') this.panels.collapsedLeft.set(false);

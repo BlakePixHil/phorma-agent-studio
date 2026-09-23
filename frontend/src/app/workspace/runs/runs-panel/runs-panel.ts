@@ -378,7 +378,14 @@ export class RunsPanel {
     this.runController.runInput.set((event.target as HTMLTextAreaElement | null)?.value ?? '');
   }
 
-  /** Run — local engine, or the deployed instance while cloud-connected. */
+  /**
+   * Run — local engine, or the deployed instance while cloud-connected.
+   *
+   * A Cloud_Library member needs no branch here: `start()` routes to the deployed
+   * launcher the shell installed, so this button, the toolbar, F5 and the
+   * assistant's `run_start` action all reach the deployed instance rather than
+   * three of them starting a local run of a read-only spec.
+   */
   protected run(): void {
     if (this.cloud.connected()) {
       this.cloud.triggerRemote(this.runController.runInput().trim());

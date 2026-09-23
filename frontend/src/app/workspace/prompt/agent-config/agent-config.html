@@ -121,9 +121,9 @@
     </div>
     <!-- A past_due tenant HAS a plan, so they get the update-card notice rather
          than an offer to buy a second subscription (requirement 17). -->
-    @if (needsPhormaCloudSubscription() && phormaCloudPastDue()) {
+    @if (offerPhormaCloudSubscription() && phormaCloudPastDue()) {
       <app-past-due-notice />
-    } @else if (needsPhormaCloudSubscription()) {
+    } @else if (offerPhormaCloudSubscription()) {
       <div class="phorma-prompt__subscribe">
         <p class="phorma-prompt__subscribe-title">
           <i class="ti ti-cloud" aria-hidden="true"></i>

@@ -1,11 +1,17 @@
 /**
  * The operator gate every `/api/admin/*` surface shares.
  *
- * There are now two of them - `/api/admin/telemetry/*` (product aggregates) and
- * `/api/admin/billing/*` (cost and revenue) - and they must be the SAME door.
- * This module exists because the alternative is two authorization
- * implementations for one privilege, which is how one of them starts admitting
- * what the other refuses.
+ * There are now four of them - `/api/admin/telemetry/*` (product aggregates),
+ * `/api/admin/billing/*` (cost and revenue), `/api/admin/organisations/*` (org and
+ * member management) and `/api/admin/impersonation` (the impersonation audit) -
+ * and they must be the SAME door. This module exists because the alternative is
+ * four authorization implementations for one privilege, which is how one of them
+ * starts admitting what the others refuse.
+ *
+ * Two exports answer the gate question, and the difference matters:
+ * {@link refuseNonOperator} decides whether a route may run and hands back NO
+ * identity, while {@link resolveOperator} hands back the acting user id and
+ * refuses nothing. See the doc comment on each.
  *
  * ## The gate, in the order it decides
  *
@@ -135,6 +141,45 @@ export async function refuseNonOperator(
   }
 
   return null;
+}
+
+/**
+ * The operator's identity, or `null` when the caller is not one
+ * (Requirement 14.1).
+ *
+ * A SEPARATE function rather than a change to {@link refuseNonOperator}, whose
+ * `null`-means-proceed contract stays exactly as it is. That contract exists
+ * because no admin route needs to know WHICH operator is asking, and handing back
+ * an identity nobody uses would invite a route to start scoping by it - a
+ * different feature with different requirements. Impersonation IS that feature: it
+ * needs the acting user id, because every accepted impersonated request records it
+ * in `impersonation_audit`.
+ *
+ * It reuses {@link readBearerToken}, `verifyRequest` and {@link isOperator}, so
+ * the gate's non-negotiable rules hold here identically: an absent bearer is not
+ * an operator, a non-`clerk` credential is not an operator (so a long-lived `phd_`
+ * desktop token sitting in a laptop keychain can never impersonate,
+ * Requirement 14.3), and an absent or whitespace-only allowlist means NO operator
+ * rather than every caller.
+ *
+ * It answers `null` rather than a `Response` on purpose: the one caller
+ * (`resolveImpersonation` in `impersonation.ts`) must refuse nothing, because a
+ * request from a non-operator carrying an act-as header is served as the caller's
+ * own owner with no refusal and no distinguishing response (Requirement 14.4).
+ */
+export async function resolveOperator(
+  request: Request,
+  env: AdminAuthEnv,
+): Promise<{ userId: string } | null> {
+  if (readBearerToken(request) === null) return null;
+
+  const auth = await verifyRequest(env, request);
+  if (auth === null || auth.kind !== 'clerk') return null;
+  if (!isOperator(env.TELEMETRY_ADMIN_USER_IDS, auth.userId)) return null;
+
+  // `isOperator` is false for a null user id, so this is a narrowing rather than
+  // an assumption.
+  return { userId: auth.userId as string };
 }
 
 /**

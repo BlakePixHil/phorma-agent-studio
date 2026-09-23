@@ -48,6 +48,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ClerkService } from 'ngx-clerk';
 import { firstValueFrom, timeout } from 'rxjs';
 
+import { ActiveOwnerService } from './active-owner.service';
 import type { CreditPack } from './credit-packs';
 import { DesktopAuthService } from './desktop-auth.service';
 import { McpOAuthService } from './mcp-oauth.service';
@@ -180,6 +181,12 @@ export class BillingService {
   // `TauriService` and `McpOAuthService`, so it reaches nothing on the NG0200
   // cycle. Required rather than convenient - see `signedIn` below.
   private readonly desktopAuth = inject(DesktopAuthService);
+  // A DI LEAF - it injects nothing at all. Here so a billing call names the same
+  // owner every other hosted call does: the worker refuses an organisation's
+  // checkout with `billing_managed`, and a refusal is a far better outcome than a
+  // Checkout Session opened against a member's personal card because the header
+  // was missing on this one route (multi-organisation-phorma, Requirement 19.4).
+  private readonly activeOwner = inject(ActiveOwnerService);
 
   /**
    * Clerk's user, read as a signal for the same reason `PhormaCloudService`
@@ -291,7 +298,11 @@ export class BillingService {
       const path = request.kind === 'checkout' ? '/api/checkout' : '/api/billing-portal';
       const response = await fetch(`${base}${path}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          'Content-Type': 'application/json',
+          ...this.activeOwner.ownerHeader(),
+        },
         // The portal route reads no body; sending `{}` keeps one code path and
         // matches the JSON content type the header already claims.
         body: JSON.stringify(request.kind === 'checkout' ? { lookupKey: request.lookupKey } : {}),

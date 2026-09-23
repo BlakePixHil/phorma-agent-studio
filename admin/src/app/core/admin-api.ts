@@ -8,10 +8,11 @@ import type { DateRange } from './models';
 /**
  * The one transport every `/api/admin/*` surface in this dashboard shares.
  *
- * There are two of them now - the telemetry aggregates and the billing cost and
- * revenue reads - and they must behave identically about credentials, because
- * they sit behind the SAME operator allowlist on the Worker (`admin-auth.ts`
- * there). Two request paths would be two chances to send a blank bearer.
+ * There are four of them now - the telemetry aggregates, the billing cost and
+ * revenue reads, organisation and member management, and the impersonation audit -
+ * and they must behave identically about credentials, because they all sit behind
+ * the SAME operator allowlist on the Worker (`admin-auth.ts` there). Four request
+ * paths would be four chances to send a blank bearer.
  *
  * Two requirements shape the design, and both are enforced structurally rather
  * than by discipline at each call site:
@@ -46,6 +47,15 @@ import type { DateRange } from './models';
  * Both seams a test needs are injected: {@link SESSION_TOKEN_RESOLVER} for the
  * token and Angular's `HttpClient` for the transport.
  */
+
+/**
+ * The header an operator names another owner with. Twin of `ACT_AS_HEADER` in
+ * `cloud/src/impersonation.ts`.
+ *
+ * Declared here rather than in a feature model file because it is a property of the
+ * TRANSPORT: one place builds a request, so one place knows this name.
+ */
+export const ACT_AS_HEADER = 'X-Phorma-Act-As';
 
 // --- The session token -----------------------------------------------------
 
@@ -215,16 +225,82 @@ export class AdminRequestService {
   readonly sessionRejected = this.sessionRejectedState.asReadonly();
 
   /**
-   * The single gate. Resolves the session token FIRST and returns early when
-   * there is none, so the no-session case never reaches `send` (10.3).
+   * The single gate for a RANGED read. Resolves the session token FIRST and
+   * returns early when there is none, so the no-session case never reaches `send`
+   * (10.3).
    *
    * `url` is absolute and already includes the route; the caller owns its own
-   * prefix, which is what lets one transport serve two route families.
+   * prefix, which is what lets one transport serve three route families.
    */
   async get<T>(url: string, range: DateRange): Promise<AdminResult<T>> {
+    return this.read<T>(url, { from: range.from, to: range.to });
+  }
+
+  /**
+   * A read with whatever query parameters it needs, or none.
+   *
+   * Exists because the organisation family is not a date-ranged aggregate: "who is
+   * in this organisation" is not a question about a window, and sending `from` and
+   * `to` to a route that ignores them would make the request shape a lie about
+   * what the answer depends on. {@link get} is now this with the range filled in,
+   * so there is still exactly ONE place a bearer header is built.
+   */
+  async read<T>(url: string, params: Record<string, string> = {}): Promise<AdminResult<T>> {
     const token = toSessionToken(await this.safeResolveToken());
     if (token === null) return NO_SESSION;
-    return this.send<T>(url, range, token);
+    return this.send<T>('GET', url, token, { params });
+  }
+
+  /**
+   * A READ served as ANOTHER owner, through the same funnel (Requirement 14.12).
+   *
+   * Impersonation is reachable from this dashboard and from nowhere else: the studio
+   * offers no surface for it at all. So this is the ONE method that sets
+   * `X-Phorma-Act-As`, and it goes through the same branded {@link SessionToken}
+   * gate and the same private `send` as every other call - which is what makes the
+   * two guarantees that matter here INHERITED rather than reimplemented. A blank
+   * bearer still does not typecheck, and the 401-versus-403 split still holds.
+   *
+   * That split matters MORE here, not less: an operator impersonating against a
+   * misconfigured deployment must be told the Worker rejected the session, never
+   * told to sign in again - because signing in again cannot fix a Worker verifying a
+   * different Clerk instance, and they would try it forever.
+   *
+   * GET only, with no method parameter, because the Worker refuses every other
+   * method with `impersonation_read_only` before dispatching anything. A `mutate`
+   * twin would be a control that exists only to be refused.
+   */
+  async sendActingAs<T>(
+    url: string,
+    ownerId: string,
+    params: Record<string, string> = {},
+  ): Promise<AdminResult<T>> {
+    const token = toSessionToken(await this.safeResolveToken());
+    if (token === null) return NO_SESSION;
+    return this.send<T>('GET', url, token, { params, actingAs: ownerId });
+  }
+
+  /**
+   * A WRITE, through the same funnel.
+   *
+   * The organisation family is the first admin surface that writes anything, and
+   * it goes through this method rather than reaching for `HttpClient` itself for
+   * exactly the reason the read path is funnelled: 10.2 and 10.3 are about every
+   * ISSUED request, and a second request-building site would be a second chance to
+   * send a blank bearer - on the half of the surface where the consequence is a
+   * membership change rather than a blank card.
+   *
+   * No caching concern and no range: a write names its own subject in the body or
+   * the query string.
+   */
+  async mutate<T>(
+    method: 'POST' | 'DELETE',
+    url: string,
+    options: { body?: unknown; params?: Record<string, string> } = {},
+  ): Promise<AdminResult<T>> {
+    const token = toSessionToken(await this.safeResolveToken());
+    if (token === null) return NO_SESSION;
+    return this.send<T>(method, url, token, options);
   }
 
   /** A resolver that throws is a missing token, not a dashboard error. */
@@ -237,19 +313,37 @@ export class AdminRequestService {
   }
 
   /**
-   * The ONLY place a request is built. Requires a `SessionToken`, so the bearer
-   * header is always present and never empty (10.2).
+   * The ONLY place a request is built, for every method and every route family.
+   * Requires a `SessionToken`, so the bearer header is always present and never
+   * empty (10.2).
    */
   private async send<T>(
+    method: 'GET' | 'POST' | 'DELETE',
     url: string,
-    range: DateRange,
     token: SessionToken,
+    options: { body?: unknown; params?: Record<string, string>; actingAs?: string } = {},
   ): Promise<AdminResult<T>> {
     try {
       const value = await firstValueFrom(
-        this.http.get<T>(url, {
-          headers: new HttpHeaders({ Authorization: `Bearer ${token}` }),
-          params: new HttpParams({ fromObject: { from: range.from, to: range.to } }),
+        this.http.request<T>(method, url, {
+          headers: new HttpHeaders({
+            Authorization: `Bearer ${token}`,
+            // Present only when a caller asked to act as somebody. The Worker reads
+            // it in ONE place and ignores it for anyone who is not an operator, with
+            // no refusal and no distinguishing response - so a stray one here would
+            // fail silently rather than loudly, which is why exactly one method sets
+            // it.
+            ...(options.actingAs === undefined
+              ? {}
+              : { [ACT_AS_HEADER]: options.actingAs }),
+          }),
+          params: new HttpParams({ fromObject: options.params ?? {} }),
+          // Passed only when there is one: `HttpClient` sends a `Content-Type` for
+          // a present body, and a DELETE carrying an empty body would trip the
+          // Worker's CORS preflight header list for no reason.
+          ...(options.body === undefined ? {} : { body: options.body }),
+          observe: 'body' as const,
+          responseType: 'json' as const,
         }),
       );
       // A success clears BOTH auth states: whatever was wrong is no longer wrong,

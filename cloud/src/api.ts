@@ -1,13 +1,17 @@
 /**
  * Phorma Cloud control-plane routes (`/api/*`) — hosted mode only.
  *
- *   GET  /api/me             (Clerk JWT)   → tenant profile + quota snapshot
+ *   GET  /api/me             (Clerk JWT)   → tenant profile + quota snapshot, plus
+ *                                            the resolved `ownerId`, the capability
+ *                                            `level` and the caller's `owners`
+ *                                            (all three additive)
  *   POST /api/checkout       (Clerk JWT)   → `{ lookupKey }` → Stripe Checkout `{ url }`
  *   POST /api/billing-portal (Clerk JWT)   → Stripe Billing Portal `{ url }`
  *   POST /api/stripe/webhook (HMAC)        → the ONLY writer of subscription state
- *   POST /api/provision      (admin token) → create/upgrade a tenant and bring its
- *                                            OpenRouter runtime key into line with
- *                                            the tier (patch the cap, or mint)
+ *   POST /api/provision      (admin token) → create/upgrade a tenant - a personal
+ *                                            OR an organisation owner - and bring
+ *                                            its OpenRouter runtime key into line
+ *                                            with the tier (patch the cap, or mint)
  *   POST /api/deactivate     (admin token) → disable a tenant + its runtime key,
  *                                            REPORTING whether the key was retired
  *
@@ -30,7 +34,25 @@
 
 import { isConnectionId, workerSecretName } from '@phorma/engine';
 
-import { verifyRequest, isHosted, type AuthEnv } from './auth';
+// `resolveRole` is the ONE level seam (Requirement 6.2). `/api/me` reports what it
+// answers; it never re-derives a level, and it deliberately does not reach for
+// `requireCapability` from `./role-gate`, which is the WRITE gate and answers with
+// a refusal `Response`.
+import {
+  listMemberships,
+  ownerIdIsAddressable,
+  resolveOwner,
+  resolveRole,
+  verifyRequest,
+  isHosted,
+  type AuthContext,
+  type AuthEnv,
+} from './auth';
+// The Role_Gate is ONE seam (Requirement 6.1). Every write route below names the
+// level it requires as a literal and calls it; none of them re-implements a level
+// comparison, and the declaration of what each one requires lives beside the
+// table in `role-gate.ts` so the suite can drive every entry.
+import { requireCapability } from './role-gate';
 import { secretVault, SECRET_VAULT_MAX_VALUE_CHARS, type SecretVaultEnv } from './secret-vault';
 import {
   resolveCataloguePrice,
@@ -40,8 +62,11 @@ import {
 } from './stripe';
 import { handleDeviceAuthApi, type DeviceAuthEnv } from './device-auth-routes';
 import { handleDeploymentsRequest, type DeploymentsEnv } from './deployments';
+import { handleOwnershipClaimRequest, type OwnershipClaimEnv } from './ownership-claim';
 import { handleNotificationsRequest, type NotificationsEnv } from './notifications';
 import { handleBackupRequest, type BackupRoutesEnv } from './backup-routes';
+import { handleProposalRequest, type ProposalRoutesEnv } from './proposal-routes';
+import { createProposalPublisher, type ProposalPublishEnv } from './proposal-publish';
 import { handleStripeWebhookRequest } from './stripe-webhook';
 import {
   BILLING_ADMIN_PREFIX,
@@ -49,6 +74,18 @@ import {
   type BillingAdminEnv,
 } from './billing-admin';
 import { BRAND_PAGE_CSP, brandPageDocument } from './brand-page';
+import {
+  applyImpersonation,
+  guardImpersonation,
+  handleImpersonationAdminRequest,
+  resolveImpersonation,
+  type ImpersonationEnv,
+} from './impersonation';
+import {
+  handleOrgAdminRequest,
+  ORG_ADMIN_PREFIX,
+  type OrgAdminEnv,
+} from './org-admin';
 import {
   handleTelemetryAdminRequest,
   TELEMETRY_ADMIN_PREFIX,
@@ -60,8 +97,8 @@ import {
   currentMonth,
   disableTenantRuntimeKey,
   encryptString,
-  isClerkUserId,
-  reconcileRuntimeKey,
+  isOwnerId,
+  provisionTenantTier,
   resolveHostedInference,
   toOpenRouterModel,
   type TenantEnv,
@@ -86,14 +123,43 @@ export type ApiEnv = AuthEnv &
   SecretVaultEnv &
   TelemetryAdminEnv &
   BillingAdminEnv &
+  OrgAdminEnv &
+  ImpersonationEnv &
   StripeEnv &
   DeviceAuthEnv &
   DeploymentsEnv &
   NotificationsEnv &
-  BackupRoutesEnv;
+  OwnershipClaimEnv &
+  BackupRoutesEnv &
+  ProposalRoutesEnv &
+  ProposalPublishEnv;
 
 /** JSON responder bound to the current request's CORS headers. */
 type Respond = (body: unknown, status?: number) => Response;
+
+/**
+ * The control-plane reads that serve an operator's IMPERSONATED owner rather than
+ * their own (Requirement 14.5's read half).
+ *
+ * ENUMERABLE on purpose, rather than "every GET". Every `/api/*` GET made while
+ * impersonating is refused-or-audited by `guardImpersonation`, so the audit is
+ * complete either way; what this list bounds is which answers are ABOUT the
+ * customer. Three, and they are the three questions support actually opens with:
+ * what plan and credits does this account have (`/api/me`), what is it running
+ * (`/api/deployments`), and what failed or is waiting (`/api/notifications`).
+ *
+ * Deliberately NOT here: `/api/backups` and `GET /api/proposals`. Both sit beside
+ * writes on surfaces whose whole subject is changing a customer's workflow, and
+ * neither answers a support question that the three above leave open. They resolve
+ * the OPERATOR's own owner while impersonating, which reads as an empty account -
+ * honest, and the direction a reviewer would want. Adding one is a one-line change
+ * plus an entry here; it is not something to do by accident.
+ */
+export const IMPERSONATED_READ_PATHS: readonly string[] = [
+  '/api/me',
+  '/api/deployments',
+  '/api/notifications',
+];
 
 /**
  * A `Connection.secretKeys` entry is an operator-typed field name. Bound it
@@ -110,8 +176,10 @@ const SECRET_KEY_PATTERN = /^[A-Za-z0-9_.\-]{1,64}$/;
  *   POST   → `{ connectionId, secretKey, value }`, encrypted here and stored.
  *   DELETE → `?connectionId=&secretKey=`, idempotent.
  *
- * The owner scope is the VERIFIED identity, never a request field, so one
- * tenant cannot address another's vault (hosted mode). BYO deployments have a
+ * The owner scope is the RESOLVED owner off the VERIFIED identity, never a
+ * request field, so one owner cannot address another's vault (hosted mode) and
+ * every member of an organisation writes into the SAME vault
+ * (multi-organisation-phorma, Requirements 4.1, 4.2). BYO deployments have a
  * single owner and share the default vault.
  */
 async function handleConnectionSecretRequest(
@@ -155,10 +223,26 @@ async function handleConnectionSecretRequest(
     );
   }
 
-  const vault = secretVault(env, auth.userId);
+  // The RESOLVED owner, not the caller (Requirement 4.1). A member of an
+  // organisation reads and writes the organisation's vault, which is what makes a
+  // credential entered by one colleague usable by a deployed run another one
+  // pushed. `auth.ownerId` is null only for a `shared` credential, and
+  // `secretVaultName` folds that to `secrets:default` exactly as before.
+  const vault = secretVault(env, auth.ownerId);
 
   if (request.method === 'GET') {
     return respond({ secrets: await vault.entries() });
+  }
+
+  // A connection secret VALUE write is the `editor` capability (Requirement 6.5):
+  // changing a credential inside an existing graph, not changing the graph. The
+  // listing above is a READ and stays open to every level, which is why the gate
+  // sits below it rather than at the top of this function. A method outside these
+  // two still falls through to the 405 below - a refusal about capability would
+  // be the wrong answer to a request this surface does not serve.
+  if (request.method === 'POST' || request.method === 'DELETE') {
+    const gate = await requireCapability(env, auth, 'editor', respond);
+    if (gate instanceof Response) return gate;
   }
 
   const body =
@@ -602,6 +686,89 @@ export async function handleApiRequest(
   }
 }
 
+/**
+ * 403 `owner_invalid` when the caller's resolved owner cannot be used as a key
+ * segment, or null when there is nothing to refuse (Requirement 1.8).
+ *
+ * `ownerIdIsAddressable` is the guard and it lives beside `resolveOwner` rather
+ * than inside it, because a resolver that can return a refusal is a resolver every
+ * caller has to discriminate. Nothing here truncates, escapes or rewrites the
+ * value: an owner id is opaque, and the single structural fact anything is allowed
+ * to know about it is that a colon separates an owner from what it addresses.
+ *
+ * Three things it deliberately does NOT do:
+ *
+ *  - It does not answer for a request carrying no bearer. An anonymous BYO caller
+ *    has no owner to judge, and a missing credential is each route's own 401.
+ *  - It does not answer for a credential that fails verification, for the same
+ *    reason: turning "your token is invalid" into a 403 about your account would
+ *    be a new answer to an old question.
+ *  - It does not read the `X-Phorma-Owner` header. That header is confirmed
+ *    against membership by `resolveRequestedOwner`, and its parser already refuses
+ *    a colon outright, so an organisation it can resolve is addressable by
+ *    construction.
+ */
+async function refuseUnaddressableOwner(
+  request: Request,
+  env: ApiEnv,
+  respond: Respond,
+): Promise<Response | null> {
+  const header = request.headers.get('Authorization') ?? '';
+  if (!header.startsWith('Bearer ')) return null;
+  const auth = await verifyRequest(env, request);
+  if (!auth || ownerIdIsAddressable(resolveOwner(auth))) return null;
+  return respond(
+    { error: 'This account cannot be addressed. Contact support.', code: 'owner_invalid' },
+    403,
+  );
+}
+
+/**
+ * The refusal code the self-serve billing routes answer for an organisation owner
+ * (Requirement 19.12). APPEND-ONLY, like every other refusal token on this wire.
+ */
+export type BillingOwnerRefusalCode = 'billing_managed';
+
+/**
+ * 403 `billing_managed` when the caller's credential names an organisation, or
+ * null when self-serve billing applies (Requirements 19.4, 19.7).
+ *
+ * Called at the TOP of `POST /api/checkout` and `POST /api/billing-portal`, before
+ * the catalogue lookup and before any Stripe call, so a refusal cannot leave a
+ * Stripe Customer, a Checkout Session or a portal session behind.
+ *
+ * DELIBERATELY NOT PART OF THE ROLE_GATE, and this is the sentence worth keeping:
+ * an organisation admin resolves `admin`, so a gate that only compared LEVELS
+ * would admit them. This refusal is about WHICH OWNER IS PAYING, not about what
+ * the caller may do. `WRITE_ROUTES` records both routes as `admin` plus this
+ * personal-owner condition for the same reason - the level is half the gate.
+ *
+ * It reads `auth.orgId` rather than comparing `auth.ownerId` with `auth.userId`:
+ * the claim is the fact, and the two expressions differ for a `device` credential,
+ * whose `ownerId` is its own subject by construction (see `resolveOwner`).
+ *
+ * An organisation reaches an entitled state through `/api/provision` instead,
+ * which writes the tier verbatim with no Stripe object anywhere - exactly what it
+ * already does for the sales-led enterprise tier (Requirement 19.5). There is no
+ * comp-credit path and there must not be one: `credit_grants.stripe_payment_id` is
+ * `NOT NULL UNIQUE`, which is what makes a grant idempotent on the PAYMENT, so a
+ * grant with no payment would have to weaken it. A higher ceiling is a TIER
+ * change, which `reconcileRuntimeKey` already turns into a limit patch on the
+ * existing key (Requirement 19.10).
+ */
+function refuseManagedBilling(auth: AuthContext, respond: Respond): Response | null {
+  if (!auth.orgId) return null;
+  return respond(
+    {
+      error:
+        'Phorma Labs manages billing for this organisation. Contact support to change its ' +
+        'plan or credits.',
+      code: 'billing_managed' satisfies BillingOwnerRefusalCode,
+    },
+    403,
+  );
+}
+
 async function routeApiRequest(
   request: Request,
   env: ApiEnv,
@@ -639,6 +806,48 @@ async function routeApiRequest(
   const webhook = await handleStripeWebhookRequest(request, env, url, respond);
   if (webhook) return webhook;
 
+  // ── The colon guard, for the whole control plane (Requirement 1.8) ─────────
+  //
+  // One place, above every authenticated route, because the routes below address
+  // the resolved owner as a KEY SEGMENT in four different stores: the Secret_Vault
+  // instance name, the `deploy:` registry prefix, the R2 backup prefix and a D1
+  // `tenant_id`. A guard per consumer is a guard somebody adds four times and
+  // forgets on the fifth.
+  //
+  // BELOW the webhook branch on purpose: Stripe authenticates by HMAC over the raw
+  // body and presents no bearer, so it must never meet a credential check. This
+  // gate reads no body at all, but the ordering is still the one to keep.
+  //
+  // It costs one extra token verification on an authenticated `/api/*` request,
+  // which is the same price `refuseNonOperator` already pays on the operator
+  // families, and `@clerk/backend`'s offline path is a signature check with no
+  // network call.
+  const unaddressable = await refuseUnaddressableOwner(request, env, respond);
+  if (unaddressable) return unaddressable;
+
+  // ── Impersonation, for the whole control plane (Requirement 14) ─────────────
+  //
+  // Resolved ONCE here, beside the colon guard, for the same reason that guard is
+  // here: the routes below each resolve an owner for themselves, and a policy
+  // applied per route is a policy somebody adds to four of them and forgets on the
+  // fifth. A request reaches either this layer or the agent gateway in `index.ts`,
+  // never both, so exactly one audit row is written per accepted impersonated
+  // request (Requirement 14.8).
+  //
+  // `guardImpersonation` refuses every non-GET with 403 `impersonation_read_only`
+  // BEFORE any route is dispatched, and refuses the request outright when its audit
+  // row cannot be written - so an unaudited impersonated read never happens. It
+  // therefore also covers the three operator families below, harmlessly: an
+  // operator reading a dashboard while acting as somebody is recorded doing it.
+  //
+  // Which READS honour the substituted owner is deliberately enumerable rather
+  // than universal - see {@link IMPERSONATED_READ_PATHS}.
+  const impersonation = await resolveImpersonation(request, env);
+  if (impersonation) {
+    const refused = await guardImpersonation(request, url, impersonation, env, respond);
+    if (refused) return refused;
+  }
+
   // ── /api/connection-secrets — credential ingestion for DEPLOYED runs ──────
   // Deliberately ABOVE the hosted-bindings gate: this is the one control-plane
   // surface a BYO deployment needs too, because `wrangler secret put` is a
@@ -672,8 +881,23 @@ async function routeApiRequest(
   //
   // Also deliberately not gated on subscription (Requirement 5.6): a lapsed
   // subscriber is exactly who needs to stop a cron deployment.
-  const deployments = await handleDeploymentsRequest(request, env, url, respond);
+  //
+  // One of the three reads that honour an operator's act-as owner
+  // ({@link IMPERSONATED_READ_PATHS}): "what is this customer running" is the first
+  // question support asks, and answering it from the operator's own empty account
+  // would be worse than refusing.
+  const deployments = await handleDeploymentsRequest(request, env, url, respond, impersonation);
   if (deployments) return deployments;
+
+  // ── POST /api/deployments/{id}/claim - move a deployment into an organisation
+  //
+  // Immediately after the deployments READ and ABOVE the `store.enabled` gate,
+  // which is why the module carries its own two 404s: the gate answers 501 naming
+  // a missing binding, and Requirement 3.10 wants a flat 404 in BYO mode instead.
+  // A separate module rather than a branch inside `deployments.ts`, because a claim
+  // is a write with its own gate, its own audit and its own failure vocabulary.
+  const claim = await handleOwnershipClaimRequest(request, env, url, respond);
+  if (claim) return claim;
 
   // ── GET /api/notifications - what happened, and what is waiting ────────────
   //
@@ -687,8 +911,30 @@ async function routeApiRequest(
   // subscription, which is where that product decision belongs; refusing at the
   // worker would also hide a cron deployment's failures from a lapsed subscriber
   // who is still paying for the runs.
-  const notifications = await handleNotificationsRequest(request, env, url, respond);
+  //
+  // The second read that honours an act-as owner: "what failed for them, and what
+  // is waiting on somebody" is the other half of the first support question.
+  const notifications = await handleNotificationsRequest(request, env, url, respond, impersonation);
   if (notifications) return notifications;
+
+  // ── /api/proposals/* - an editor's change, held for a builder ──────────────
+  //
+  // ABOVE the `store.enabled` gate and carrying its own two 404s, like the claim
+  // route. It needs the hosted D1 and R2 exactly as `/api/backups` does, but the
+  // answer for a BYO worker differs: a proposal queue is meaningless on a
+  // single-owner deployment, so the surface must be ABSENT rather than report a
+  // missing binding (Requirements 11.12, 16.6). That makes three placements in
+  // this file with three different answers - see the module header there.
+  //
+  // The publisher is INSTALLED here rather than imported there, and that is the
+  // whole reason both halves of Requirement 11.10 and Requirement 12.7 can hold at
+  // once: `proposal-routes.ts` has no path to a `WorkflowAgent`, and a publish
+  // runs the ordinary push path. The route holds a performer; this file knows what
+  // one is (`proposal-publish.ts`).
+  const proposals = await handleProposalRequest(request, env, url, respond, {
+    publish: createProposalPublisher(env),
+  });
+  if (proposals) return proposals;
 
   // ── /api/admin/telemetry/* — owner-only telemetry aggregates (9.1) ─────────
   // Also deliberately ABOVE the hosted-bindings gate: this surface carries its
@@ -723,6 +969,41 @@ async function routeApiRequest(
     );
   }
 
+  // ── /api/admin/organisations/* — operator-only org and member management ───
+  // The THIRD room behind the same door (`admin-auth.ts`), mounted beside the
+  // other two and ABOVE the hosted-bindings gate for the same reason: its own
+  // authorization, its own D1 handling.
+  //
+  // Unlike the two above it, an absent `DB` here is a 501 NAMING the binding
+  // rather than an empty answer. Membership is the whole subject of this family,
+  // and an empty list would read as "this account has no organisations", which is
+  // a different statement from "this worker cannot answer".
+  //
+  // This prefix is the ONLY surface in the worker that writes membership
+  // (Requirement 13.7). `cloud/test/role-gate.test.mjs` asserts that absence
+  // statically, so an organisation-facing member write cannot appear elsewhere
+  // without failing a test.
+  if (url.pathname.startsWith(ORG_ADMIN_PREFIX)) {
+    return (
+      (await handleOrgAdminRequest(request, env, url, respond)) ??
+      respond({ error: 'Not found.' }, 404)
+    );
+  }
+
+  // ── GET /api/admin/impersonation — the append-only impersonation audit ─────
+  // The FOURTH room behind the same door (`admin-auth.ts`), mounted beside the
+  // other three and ABOVE the hosted-bindings gate for the same reason.
+  //
+  // A prefix of its own rather than a sixth telemetry aggregate, for the reason
+  // billing and organisations have one: a telemetry body carries no install id by
+  // construction, while this body names identified PEOPLE on purpose - "who read
+  // this customer's data, and when" is not answerable without the ids.
+  //
+  // Read-only by construction: there is no write route here, and nothing in this
+  // worker updates or deletes a row of that table (Requirement 14.11).
+  const impersonationAudit = await handleImpersonationAdminRequest(request, env, url, respond);
+  if (impersonationAudit) return impersonationAudit;
+
   const store = new TenantStore(env);
   if (!store.enabled) {
     return respond({ error: 'Control plane unavailable: hosted bindings missing.' }, 501);
@@ -730,13 +1011,89 @@ async function routeApiRequest(
 
   // ── GET /api/me — the signed-in tenant's profile + quota ──────────────────
   if (request.method === 'GET' && url.pathname === '/api/me') {
-    const auth = await verifyRequest(env, request);
-    if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
+    const verified = await verifyRequest(env, request);
+    if (!verified?.userId) return respond({ error: 'Unauthorized.' }, 401);
+    // The third read that honours an act-as owner
+    // ({@link IMPERSONATED_READ_PATHS}): an operator supporting a customer needs to
+    // see the plan, the credits and the level the customer's own studio sees, which
+    // is the whole of "exactly as its members see it". `userId` stays the
+    // OPERATOR's, because it answers who is asking rather than whose data this is.
+    const auth = applyImpersonation(verified, impersonation);
 
-    const tenant = await store.getTenant(auth.userId);
+    // ── The owner and the level, both ADDITIVE (Requirement 7.6) ────────────
+    //
+    // Additive in the strict sense: every field that was here keeps its name, its
+    // type and its value, so an older studio ignores these two and an older worker
+    // omitting them leaves a studio on its `admin` default - which is the same
+    // level a credential with no organisation claim resolves anyway, so the
+    // compatibility path and the ordinary path agree.
+    //
+    // `ownerId` is the RESOLVED owner, read off the context rather than re-derived:
+    // `orgId ?? userId` exists once, in `auth.ts`. For a `device` credential naming
+    // an organisation through `X-Phorma-Owner` that is the ORGANISATION, because
+    // `verifyRequest` adopts a header-named owner once membership is confirmed
+    // (`adoptRequestedOwner`) - so this route reports the owner the studio is
+    // actually addressing, which is what makes a desktop switch observable.
+    //
+    // WHAT AN UNRESOLVABLE ROLE REPORTS: the field is OMITTED. `/api/me` is a READ,
+    // and reads stay open to every level (Requirement 6.3), so it must not answer
+    // 403 `role_unknown` the way a write does - a profile poll is how the studio
+    // learns its plan and its credits, and refusing it would blank the account card
+    // over a membership question. Omitted rather than `level: null`, for two
+    // reasons: the studio's `isCapabilityLevel` guard rejects both identically, so
+    // the choice costs nothing there, and an absent field is exactly what an older
+    // worker sends, so there is ONE shape to handle rather than two. The refusal
+    // that matters still happens where it belongs - every write goes through
+    // `requireCapability`, which answers `role_unknown` and fails closed.
+    //
+    // WHICH TENANT ROW IS READ: the RESOLVED owner's (Requirements 4.9, 19.6). One
+    // `tenants` row per owner is the single quota bucket, so a member sees the
+    // ORGANISATION's tier, run count and credits - the same numbers
+    // `resolveHostedInference` gates their run on. Reading the member's own row here
+    // would show a plan nobody is spending against, and `past_due` on a personal row
+    // would render a warning about a subscription that has nothing to do with the
+    // work in front of them. `id` is therefore the owner on both branches, because
+    // `id` has always meant "the `tenants` primary key this answer is about"; for an
+    // account in no organisation it is the userId exactly as before.
+    const ownerId = auth.ownerId ?? verified.userId;
+    const [tenant, role, memberships] = await Promise.all([
+      store.getTenant(ownerId),
+      resolveRole(env, auth),
+      // ── `owners`, the THIRD additive field (Requirement 20.1) ─────────────
+      //
+      // Keyed on the VERIFIED caller, never on the resolved owner: the question
+      // this answers is "which owners may this person switch between", and an
+      // organisation cannot switch. That is also what keeps it honest under
+      // impersonation - the list belongs to whoever is holding the credential, so
+      // an operator reading a customer's profile sees their OWN memberships here
+      // and is told nothing about the customer's.
+      listMemberships(env, verified.userId),
+    ]);
+    // WHILE IMPERSONATING, THE LEVEL IS OMITTED. `resolveRole` answers about the
+    // VERIFIED credential - `applyImpersonation` moves the owner and leaves the
+    // claims alone - so reporting it here would state the OPERATOR's level over
+    // their own account beside a plan and a credit balance belonging to somebody
+    // else. Omitted rather than invented, and it is the same absent-field shape an
+    // unresolvable role already produces, so the dashboard needs no second case.
+    const identity = {
+      ownerId: auth.ownerId,
+      ...(impersonation === null && 'level' in role ? { level: role.level } : {}),
+      // Spread into BOTH branches below, and the `provisioned: false` one is the
+      // reason this is a shared object rather than two literals: a member who
+      // never subscribed personally has no `tenants` row of their own, so that
+      // branch is the COMMON case for an organisation member and a switcher fed
+      // only by the provisioned branch would be empty for exactly the people who
+      // need it.
+      owners: memberships.map(membership => ({
+        ownerId: membership.orgId,
+        level: membership.level,
+      })),
+    };
+
     if (!tenant) {
       return respond({
-        id: auth.userId,
+        id: ownerId,
+        ...identity,
         provisioned: false,
         tier: null,
         status: null,
@@ -751,6 +1108,7 @@ async function routeApiRequest(
     ]);
     return respond({
       id: tenant.id,
+      ...identity,
       provisioned: true,
       tier: tenant.tier,
       status: tenant.status,
@@ -798,6 +1156,22 @@ async function routeApiRequest(
   if (request.method === 'POST' && url.pathname === '/api/infer') {
     const auth = await verifyRequest(env, request);
     if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
+    // Both the entitlement gate and the ledger write below are keyed on the
+    // RESOLVED owner (multi-organisation-phorma, Requirements 4.8, 4.9, 4.10,
+    // 19.6): a member's local run is allowed on the ORGANISATION's entitlement,
+    // spends the organisation's runtime key, and lands in the organisation's
+    // `usage` rows, quota rollup and grant pool. Keying either half on the caller
+    // would refuse every member who never subscribed personally, and keying only
+    // ONE of them on the owner would meter a run against a ceiling it was not
+    // checked against.
+    const ownerId = auth.ownerId ?? auth.userId;
+
+    // `operator` (Requirement 6.7): this route spends the owner's credits, which
+    // is the same thing triggering a run does, so it carries the same level.
+    // ABOVE the entitlement gate, because "you may not do this" and "your account
+    // has no credits left" are different answers and the caller's remedy differs.
+    const role = await requireCapability(env, auth, 'operator', respond);
+    if (role instanceof Response) return role;
 
     const body = (await request.json().catch(() => null)) as {
       model?: string;
@@ -809,12 +1183,37 @@ async function routeApiRequest(
       streamOptions?: unknown;
       usage?: unknown;
       tools?: unknown[];
+      /**
+       * Which workflow this call is spending on, when the caller knows
+       * (multi-organisation-phorma Requirement 15.2). ADDITIVE and OPTIONAL in both
+       * directions: an older worker ignores it, an older studio omits it, and
+       * nothing below branches on it - it is carried into the entitlement gate and
+       * read by nothing in this release. A call from assistant chat or the Ctrl+P
+       * builder belongs to no workflow, so absent is an ordinary answer rather than
+       * a malformed request, and it is NOT validated into a 400 for that reason.
+       */
+      workflowId?: unknown;
     } | null;
     if (!body?.model || !Array.isArray(body.messages)) {
       return respond({ error: 'Body must include model + messages.' }, 400);
     }
+    // Anything that is not a non-empty string reads as "the caller did not name
+    // one", which is the same answer as an older studio that cannot.
+    const workflowId =
+      typeof body.workflowId === 'string' && body.workflowId.length > 0
+        ? body.workflowId
+        : undefined;
 
-    const gate = await resolveHostedInference(store, auth.userId);
+    // `impersonated` is the THIRD independent layer of the read-only rule
+    // (Requirement 14.6). It is unreachable from here today - this route is a POST,
+    // so `guardImpersonation` above already refused it, and `requireCapability`
+    // would refuse it again - and that is exactly why it is passed: the gate is the
+    // last line, and it must spend nothing for an impersonated caller no matter
+    // which layer above it was bypassed or changed.
+    const gate = await resolveHostedInference(store, ownerId, {
+      workflowId,
+      impersonated: impersonation !== null,
+    });
     // `code` travels in the body alongside the message (requirement 19). It is
     // additive - a studio that predates it still reads `error` and still matches
     // its existing prose regex (requirement 20) - and it is what lets a newer
@@ -867,7 +1266,7 @@ async function routeApiRequest(
       meterInferenceStream(
         meterStream,
         store,
-        auth.userId,
+        ownerId,
         // The tier the gate just resolved, not a second read: `recordRun` needs it
         // to know which monthly allowance this cost is measured against before it
         // draws on any purchased grant (requirement 24).
@@ -912,6 +1311,21 @@ async function routeApiRequest(
     // "charge someone else's account" parameter.
     if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
 
+    // Self-serve billing is a PERSONAL-account capability (Requirement 19.4).
+    // FIRST, above the level gate and above the catalogue lookup, so no Stripe
+    // object of any kind can exist for an organisation owner. Placed here rather
+    // than in the Role_Gate because an organisation admin resolves `admin`, so a
+    // gate that only compared levels would admit them - see
+    // `refuseManagedBilling`.
+    const managed = refuseManagedBilling(auth, respond);
+    if (managed) return managed;
+
+    // `admin` (Requirement 6.6). The level is only HALF of this route's gate: the
+    // other half is the personal-owner condition refused just above, which
+    // `WRITE_ROUTES` records alongside the level for the same reason.
+    const gate = await requireCapability(env, auth, 'admin', respond);
+    if (gate instanceof Response) return gate;
+
     const body = (await request.json().catch(() => null)) as { lookupKey?: unknown } | null;
 
     // The whole catalogue gate: allowlist, then one active price by lookup key,
@@ -921,6 +1335,14 @@ async function routeApiRequest(
     const price = await resolveCataloguePrice(env, body?.lookupKey);
     if ('status' in price) return respond({ error: price.error }, price.status);
 
+    // `auth.userId`, NOT the resolved owner, on every line of this route
+    // (multi-organisation-phorma, Requirement 4.12). Self-serve checkout is a
+    // PERSONAL-account capability: an organisation is invoiced by Phorma Labs and
+    // reaches an entitled state through `/api/provision` alone, so an `org_` id can
+    // never legitimately reach Stripe - not as a `client_reference_id`, not as
+    // customer metadata, and not as a customer we would then create. The refusal
+    // that makes that true for an organisation ADMIN, who resolves `admin` and so
+    // passes the gate above, is `billing_managed` and lands with task 15.
     const tenant = await store.getTenant(auth.userId);
     const customer = await resolveStripeCustomer(env, store, auth.userId, tenant);
     if ('status' in customer) return respond({ error: customer.error }, customer.status);
@@ -985,6 +1407,19 @@ async function routeApiRequest(
     const auth = await verifyRequest(env, request);
     if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
 
+    // The personal-owner half of the gate, first and for the same reason as on
+    // `/api/checkout`: an organisation has no Stripe customer to manage, so a
+    // portal session for one would be a page about nothing even if the level
+    // admitted the caller (Requirement 19.4).
+    const managed = refuseManagedBilling(auth, respond);
+    if (managed) return managed;
+
+    // `admin` plus that personal owner, exactly as `/api/checkout` above.
+    const gate = await requireCapability(env, auth, 'admin', respond);
+    if (gate instanceof Response) return gate;
+
+    // `auth.userId` and not the resolved owner, for the reason spelled out on
+    // `/api/checkout`: a Stripe customer belongs to a personal account only.
     const tenant = await store.getTenant(auth.userId);
     const mapped = tenant?.stripeCustomerId;
     let customerId = mapped && STRIPE_CUSTOMER_ID.test(mapped) ? mapped : null;
@@ -1031,17 +1466,27 @@ async function routeApiRequest(
       rotateKey?: boolean;
     } | null;
     if (!body?.tenantId) return respond({ error: 'tenantId is required.' }, 400);
-    // Requirement 1, task 8.4. `tenants.id` IS the Clerk user id, so a typo here
-    // creates a row `/api/me` can never find - and nothing downstream notices,
-    // because an orphan tenant is indistinguishable from a user who has not signed
-    // in yet. Refused on this WRITE path only; a read never re-validates an id,
-    // since a legacy row provisioned before this check may hold one that fails it.
-    if (!isClerkUserId(body.tenantId)) {
+    // Requirement 1, task 8.4. `tenants.id` IS the OWNER id, so a typo here creates
+    // a row `/api/me` can never find - and nothing downstream notices, because an
+    // orphan tenant is indistinguishable from a user who has not signed in yet.
+    // Refused on this WRITE path only; a read never re-validates an id, since a
+    // legacy row provisioned before this check may hold one that fails it.
+    //
+    // `isOwnerId` and not `isClerkUserId`, and this is the ONLY call site that
+    // moved (multi-organisation-phorma, Requirements 1.9, 4.11, 19.5). An
+    // organisation is invoiced by Phorma Labs rather than through Stripe, so this
+    // admin route is the one and only way an `org_` tenant row comes into existence
+    // - `/api/checkout` refuses an organisation owner outright. The three
+    // Stripe-supplied id paths in `stripe-webhook.ts` deliberately STAY on the
+    // narrower `isClerkUserId`: widening a classifier on third-party input buys
+    // nothing when an `org_` id can never legitimately arrive from Stripe.
+    if (!isOwnerId(body.tenantId)) {
       return respond(
         {
           error:
-            'tenantId must be a Clerk user id (user_...). It is the tenant primary key, so a ' +
-            'value of any other shape would create an account nobody can reach.',
+            'tenantId must be a Clerk user id (user_...) or an organisation id (org_...). It is ' +
+            'the tenant primary key, so a value of any other shape would create an account ' +
+            'nobody can reach.',
         },
         400,
       );
@@ -1049,26 +1494,33 @@ async function routeApiRequest(
 
     const tier = body.tier ?? 'starter';
 
-    // The ROW first, the key second. That ordering is what makes re-running this
-    // endpoint an upgrade rather than a re-provision: `reconcileRuntimeKey` reads
-    // the row it is reconciling, so it sees the new tier and patches the existing
-    // key's USD limit (requirement 37) instead of minting a second key and leaking
-    // the first (requirement 38). `rotateKey: true` is the deliberate override, for
-    // a workspace migration or a compromised key.
-    await store.upsertTenant({
+    // The ROW first, the key second, through the ONE provisioning seam
+    // (`provisionTenantTier` in `tenants.ts`). That ordering is what makes
+    // re-running this endpoint an upgrade rather than a re-provision:
+    // `reconcileRuntimeKey` reads the row it is reconciling, so it sees the new
+    // tier and patches the existing key's USD limit (requirement 37) instead of
+    // minting a second key and leaking the first (requirement 38).
+    // `rotateKey: true` is the deliberate override, for a workspace migration or a
+    // compromised key.
+    //
+    // The three steps moved into `tenants.ts` when the organisation management
+    // route family became a second writer of a tenant's tier
+    // (multi-organisation-phorma task 12): Requirement 19.5 names provisioning as
+    // the only way an organisation becomes entitled, which is a claim about ONE
+    // path rather than about two that happen to agree.
+    const provisioned = await provisionTenantTier(env, store, {
       id: body.tenantId,
       email: body.email ?? null,
       tier,
       status: 'active',
+      rotate: body.rotateKey === true,
     });
-    const tenant = await store.getTenant(body.tenantId);
-    if (!tenant) {
+    if (!provisioned) {
       // The row was written a statement ago, so this is a D1 fault rather than a
       // caller error, and reporting it beats minting a key with nowhere to live.
-      console.error(`Tenant ${body.tenantId} was provisioned but could not be read back.`);
       return respond({ error: 'The tenant was written but could not be read back.' }, 500);
     }
-    const key = await reconcileRuntimeKey(env, store, tenant, { rotate: body.rotateKey === true });
+    const { tenant, key } = provisioned;
 
     return respond({
       ok: true,
@@ -1120,6 +1572,7 @@ async function routeApiRequest(
 async function meterInferenceStream(
   stream: ReadableStream<Uint8Array>,
   store: TenantStore,
+  /** The RESOLVED owner, which is what `usage.tenant_id` means (Requirement 4.8). */
   tenantId: string,
   tier: string,
   runId: string,

@@ -20,12 +20,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import process from 'node:process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Miniflare } from 'miniflare';
+
+import { withLoopbackRetry } from './miniflare-loopback.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cloudRoot = join(here, '..');
@@ -88,6 +91,34 @@ function worker(bindings) {
 }
 
 const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` };
+
+// ── A real Clerk session token, for the hosted organisation section ─────────
+//
+// Authorization is never stubbed: the public half of a locally generated keypair
+// is handed to the worker as `CLERK_JWT_KEY`, so `@clerk/backend` verifies every
+// token for real on its offline path with no JWKS fetch. The owner a vault is
+// addressed by has to come from a VERIFIED claim, which is the only way an
+// organisation can reach this code at all.
+
+const { publicKey: CLERK_JWT_KEY, privateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+const base64url = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+function mintClerkToken(sub, claims = {}) {
+  const seconds = Math.floor(Date.now() / 1000);
+  const signing = `${base64url({ alg: 'RS256', typ: 'JWT', kid: 'phorma-vault-test' })}.${base64url({
+    sub,
+    iat: seconds - 60,
+    nbf: seconds - 60,
+    exp: seconds + 3600,
+    ...claims,
+  })}`;
+  const signature = createSign('RSA-SHA256').update(signing).sign(privateKey).toString('base64url');
+  return `${signing}.${signature}`;
+}
 
 async function vaultRequest(mf, method, body, headers = authHeaders) {
   const url =
@@ -253,6 +284,136 @@ console.log('\nA protected worker with an encryption key');
       'the inventory reports it missing again',
       final.connections?.[0]?.secretsPresent === 0,
       JSON.stringify(final.connections),
+    );
+  } finally {
+    await mf.dispose();
+  }
+}
+
+// ── 4: the vault is addressed by the OWNER, not by the caller ──────────────
+//
+// Feature: multi-organisation-phorma, Property 10: Every owner-scoped read
+// returns exactly the caller's owner's set.
+//
+// A credential is a property of the ACCOUNT, and for an organisation the account
+// is the organisation. Two facts are load-bearing and neither is a leak:
+//
+//  - one member stores a credential and ANOTHER member's deployed run resolves
+//    it, which is the only reason a shared workspace can run an authenticated
+//    node at all (Requirement 4.2);
+//  - the first push is the hard case. The inventory is read BEFORE `POST
+//    /workflow` stamps an owner, so the vault fallback comes from the request. If
+//    that fallback is the caller rather than the resolved owner, the member
+//    pushing reads their PERSONAL vault, every shared secret reads as missing, and
+//    the push is refused with a message naming credentials a colleague had already
+//    stored.
+console.log('\nA hosted organisation shares ONE vault across its members');
+{
+  const ORG = 'org_vault_alpha';
+  const MEMBER_ONE = mintClerkToken('user_vault_one', { org_id: ORG, org_role: 'org:admin' });
+  const MEMBER_TWO = mintClerkToken('user_vault_two', { org_id: ORG, org_role: 'org:admin' });
+  /** The same human as MEMBER_ONE, signed in with no organisation. */
+  const PERSONAL = mintClerkToken('user_vault_one');
+  const OUTSIDER = mintClerkToken('user_vault_beta', {
+    org_id: 'org_vault_beta',
+    org_role: 'org:admin',
+  });
+
+  const mf = withLoopbackRetry(
+    worker({
+      PHORMA_MODE: 'hosted',
+      CLERK_SECRET_KEY: 'sk_test_clerk_not_used_offline',
+      CLERK_JWT_KEY,
+      KEY_ENC_SECRET,
+    }),
+  );
+  const headersFor = token => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
+
+  try {
+    // Member one stores the credential.
+    const stored = await vaultRequest(
+      mf,
+      'POST',
+      { connectionId: CONNECTION_ID, secretKey: 'apiKey', value: 'org-shared-secret' },
+      headersFor(MEMBER_ONE),
+    );
+    check('a member may store a credential (200)', stored.status === 200, JSON.stringify(stored.body));
+
+    // Member two, a different human with the same organisation claim, sees it.
+    const asTwo = await vaultRequest(mf, 'GET', {}, headersFor(MEMBER_TWO));
+    check(
+      'a DIFFERENT member of the same organisation sees the entry',
+      asTwo.body?.secrets?.length === 1 && asTwo.body.secrets[0].name === EXPECTED_NAME,
+      JSON.stringify(asTwo.body),
+    );
+    check(
+      'and still never the value',
+      !JSON.stringify(asTwo.body).includes('org-shared-secret'),
+      JSON.stringify(asTwo.body),
+    );
+
+    // The same human's PERSONAL owner is a different vault. Not a refusal: a
+    // personal account is a first-class owner that simply holds nothing here.
+    const asPersonal = await vaultRequest(mf, 'GET', {}, headersFor(PERSONAL));
+    check(
+      "the storing member's own personal vault is empty",
+      asPersonal.status === 200 && (asPersonal.body?.secrets ?? []).length === 0,
+      JSON.stringify(asPersonal.body),
+    );
+    const asOutsider = await vaultRequest(mf, 'GET', {}, headersFor(OUTSIDER));
+    check(
+      "and another organisation's vault is empty too",
+      asOutsider.status === 200 && (asOutsider.body?.secrets ?? []).length === 0,
+      JSON.stringify(asOutsider.body),
+    );
+
+    // THE first-push case. Member TWO pushes, so nothing about this instance has
+    // ever seen member one - and the inventory is read before the owner is stamped.
+    const instance = 'wf-vault-org';
+    const agentUrl = `http://localhost/agents/workflow-agent/${instance}`;
+    const metadata = await mf.dispatchFetch(`${agentUrl}/connections`, {
+      method: 'POST',
+      headers: headersFor(MEMBER_TWO),
+      body: JSON.stringify({ connections: [CONNECTION] }),
+    });
+    check('a member can push connection metadata', metadata.status === 200, String(metadata.status));
+
+    const inventory = await (
+      await mf.dispatchFetch(`${agentUrl}/connections`, { headers: headersFor(MEMBER_TWO) })
+    ).json();
+    check(
+      "the first-push inventory resolves the ORGANISATION's vault",
+      inventory.connections?.[0]?.secretsPresent === 1,
+      JSON.stringify(inventory.connections),
+    );
+    check(
+      'so nothing is reported missing to the member who pushed',
+      JSON.stringify(inventory.connections?.[0]?.missingSecretKeys) === '[]',
+      JSON.stringify(inventory.connections?.[0]),
+    );
+    check(
+      'and the inventory never carries the value',
+      !JSON.stringify(inventory.connections).includes('org-shared-secret'),
+      JSON.stringify(inventory.connections),
+    );
+
+    // The negative control, so the check above cannot be passing because every
+    // vault answers: the same push read by a personal credential of a member finds
+    // nothing. A different instance id, because the first push has now stamped the
+    // organisation onto `wf-vault-org` and a personal caller would be refused there.
+    const personalAgent = 'http://localhost/agents/workflow-agent/wf-vault-personal';
+    await mf.dispatchFetch(`${personalAgent}/connections`, {
+      method: 'POST',
+      headers: headersFor(PERSONAL),
+      body: JSON.stringify({ connections: [CONNECTION] }),
+    });
+    const personalInventory = await (
+      await mf.dispatchFetch(`${personalAgent}/connections`, { headers: headersFor(PERSONAL) })
+    ).json();
+    check(
+      "a personal owner's first push reads its own empty vault",
+      personalInventory.connections?.[0]?.secretsPresent === 0,
+      JSON.stringify(personalInventory.connections),
     );
   } finally {
     await mf.dispose();

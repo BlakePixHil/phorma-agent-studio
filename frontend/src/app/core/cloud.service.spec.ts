@@ -269,7 +269,18 @@ type PhormaPinnedOperation =
   | 'backup-delete'
   | 'backup-delete-all'
   | 'list-notifications'
-  | 'approve';
+  | 'approve'
+  // The five proposal operations. `ProposalsService` pins the Phorma table for the
+  // same reason `DeploymentsService` does: a review queue belongs to an
+  // ORGANISATION, which is a Phorma Cloud concept, so a subscriber deploying to
+  // AWS still reviews proposals against the hosted worker. `CloudService`
+  // dispatches none of them - an editor's push routes through the
+  // `specProposer` seam, which is a call INTO that service and not a dispatch.
+  | 'proposal-list'
+  | 'proposal-create'
+  | 'proposal-detail'
+  | 'proposal-publish'
+  | 'proposal-reject';
 
 const PHORMA_PINNED_OPERATIONS = new Set<CloudOperation>([
   'read-spec',
@@ -282,6 +293,11 @@ const PHORMA_PINNED_OPERATIONS = new Set<CloudOperation>([
   'backup-delete-all',
   'list-notifications',
   'approve',
+  'proposal-list',
+  'proposal-create',
+  'proposal-detail',
+  'proposal-publish',
+  'proposal-reject',
 ]);
 
 /** Everything this suite drives: every operation `CloudService` dispatches. */
@@ -351,6 +367,11 @@ function contextFor(op: CloudOperation): CloudEndpointContext {
     case 'backup-delete-all':
     case 'list-notifications':
     case 'approve':
+    case 'proposal-list':
+    case 'proposal-create':
+    case 'proposal-detail':
+    case 'proposal-publish':
+    case 'proposal-reject':
       throw new Error(`${op} is dispatched by a Phorma-pinned service, not CloudService.`);
   }
 }

@@ -17,6 +17,15 @@
  * only the hosted deployment has. On a BYO worker this whole surface is ABSENT
  * rather than broken, and those users get the file-based library export instead.
  *
+ * ## Whose backups
+ *
+ * The RESOLVED owner, so an organisation's members share one set of backups, one
+ * tier cap and one read-access window (multi-organisation-phorma, Requirements
+ * 4.6, 4.9). Bodies land under `backup/{ownerId}/{workflowId}/{revision}` - except
+ * on a row that was CLAIMED, whose frozen `body_key` keeps pointing at the prefix
+ * in force when it was written, which is why every `BackupBodyStore` call below
+ * goes through `bodyPrefixFor` rather than re-deriving a prefix.
+ *
  * ## Reads and writes are gated differently
  *
  * Writing needs an ACTIVE subscription. Reading survives a lapse for 90 days
@@ -45,7 +54,7 @@ import {
   tombstoneDaysRemaining,
   type BackupRecord,
 } from './backups';
-import { BackupBodyStore, type BackupBodyEnv } from './backup-store';
+import { BackupBodyStore, bodyPrefixFor, type BackupBodyEnv } from './backup-store';
 import { TenantStore, tierLimits, type TenantEnv, type TenantRecord } from './tenants';
 
 /** Prefix this module answers. */
@@ -139,7 +148,16 @@ export async function handleBackupRequest(
 
   const auth = await verifyRequest(env, request);
   if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
-  const tenantId = auth.userId;
+  // The RESOLVED owner is the tenant here (multi-organisation-phorma,
+  // Requirements 4.6, 4.9): `workflow_backups.tenant_id`, the `backup/{tenantId}/`
+  // R2 prefix and the `tenants` row that supplies the tier cap and the read-access
+  // window are all keyed on it. Scoping this by `auth.userId` would give every
+  // member of an organisation a private set of backups, a private cap and a
+  // private answer to "is this workflow backed up".
+  //
+  // `?? auth.userId` is a type narrowing, not a fallback: `auth.ownerId` is
+  // `orgId ?? userId` and the line above has already proved `userId` is present.
+  const tenantId = auth.ownerId ?? auth.userId;
 
   const tenants = new TenantStore(env);
   const meta = new BackupStore(env);
@@ -210,9 +228,12 @@ export async function handleBackupRequest(
   // the rows go - and the body sweep is a prefix scan anyway, so an object whose
   // row was already gone still goes.
   if (request.method === 'DELETE' && segments.length === 0) {
-    const ids = await meta.deleteAllForTenant(tenantId);
-    const removedBodies = await bodies.deleteTenant(tenantId);
-    return respond({ ok: true, workflows: ids.length, bodies: removedBodies });
+    const removedRows = await meta.deleteAllForTenant(tenantId);
+    // Each row's resolved prefix goes with the scan, because a row this tenant
+    // CLAIMED keeps its bodies under the previous owner's prefix (Requirement 4.7)
+    // and `backup/{tenantId}/` would not reach them.
+    const removedBodies = await bodies.deleteTenant(tenantId, removedRows.map(bodyPrefixFor));
+    return respond({ ok: true, workflows: removedRows.length, bodies: removedBodies });
   }
 
   if (!isBackupWorkflowId(segments[0])) {
@@ -229,7 +250,7 @@ export async function handleBackupRequest(
     return respond({
       workflowId,
       current: record.revision,
-      revisions: await bodies.revisions(tenantId, workflowId),
+      revisions: await bodies.revisions(bodyPrefixFor(record)),
     });
   }
 
@@ -244,7 +265,7 @@ export async function handleBackupRequest(
 
     let json: string | null;
     try {
-      json = await bodies.get(tenantId, workflowId, revision);
+      json = await bodies.get(bodyPrefixFor(record), revision);
     } catch (error) {
       // Decryption failed on an object that IS there. Distinct from a 404 on
       // purpose - this is an incident, not a missing revision - and the vendor
@@ -289,7 +310,7 @@ export async function handleBackupRequest(
           409,
         );
       }
-      const removedBodies = await bodies.deleteWorkflow(tenantId, workflowId);
+      const removedBodies = await bodies.deleteWorkflow(bodyPrefixFor(record));
       await meta.hardDelete(tenantId, workflowId);
       return respond({ ok: true, purged: true, bodies: removedBodies });
     }
@@ -413,8 +434,12 @@ async function uploadRevision(
   }
 
   const revision = claim.record.revision;
+  // The claimed row's own prefix, so an upload to a CLAIMED workflow keeps writing
+  // beside the revisions that are already there rather than starting a second key
+  // space under the new owner (Requirement 4.7).
+  const prefix = bodyPrefixFor(claim.record);
   try {
-    await stores.bodies.put(tenant.id, workflowId, revision, canonical);
+    await stores.bodies.put(prefix, revision, canonical);
   } catch (error) {
     // The revision is claimed but its body is missing. Reported rather than
     // rolled back: the next upload claims revision+1 and stores correctly, and
@@ -425,9 +450,7 @@ async function uploadRevision(
 
   // The first of the three destroying paths, and the only automatic one.
   // Best-effort: a failed prune costs storage, not correctness.
-  const pruned = await stores.bodies
-    .prune(tenant.id, workflowId, REVISIONS_KEPT)
-    .catch(() => [] as number[]);
+  const pruned = await stores.bodies.prune(prefix, REVISIONS_KEPT).catch(() => [] as number[]);
 
   return respond({
     ok: true,
@@ -548,7 +571,7 @@ export async function runBackupRetention(
   let failed = 0;
   for (const entry of expired) {
     try {
-      await bodies.deleteWorkflow(entry.tenantId, entry.workflowId);
+      await bodies.deleteWorkflow(bodyPrefixFor(entry));
       await meta.hardDelete(entry.tenantId, entry.workflowId);
       swept += 1;
     } catch (error) {

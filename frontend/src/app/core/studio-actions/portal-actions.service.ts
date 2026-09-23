@@ -28,6 +28,11 @@ const BLOCKER_MESSAGES: Record<string, string> = {
  * (Requirement 6.1). Access keys are deliberately NOT mintable from here: the
  * worker only ever shows a minted key once, and a key that scrolls past in a
  * chat transcript is a leaked key (Requirement 6.5).
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): both actions are
+ * builder - `portal.manage`, and the Portal PANEL carries the same minimum.
+ * Reading is gated with writing here, unlike the runs surface, because the read
+ * reports the public address and the access key labels of a live endpoint.
  */
 @Injectable({ providedIn: 'root' })
 export class PortalActionsService {
@@ -44,6 +49,7 @@ export class PortalActionsService {
         surface: 'portal',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Reading the portal configuration',
         run: () => this.read(),
       },
@@ -55,6 +61,7 @@ export class PortalActionsService {
         surface: 'portal',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           published: {
             type: 'boolean',

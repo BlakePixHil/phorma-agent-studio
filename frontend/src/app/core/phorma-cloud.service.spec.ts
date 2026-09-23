@@ -24,11 +24,14 @@
  *    auth one.
  */
 
+import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ClerkService } from 'ngx-clerk';
 import { ReplaySubject } from 'rxjs';
 
 import { ToastService } from '../shared/toast/toast.service';
+import { CapabilityService } from './capability.service';
+import { PanelRegistryService } from './panel-registry.service';
 import {
   DesktopAuthService,
   subjectOf,
@@ -460,6 +463,374 @@ describe('PhormaCloudService handoff outcomes', () => {
 
     expect(entry?.severity).toBe('success');
     expect(entry?.detail).toBe('owner@example.com');
+  });
+});
+
+/**
+ * The capability push (multi-organisation-phorma, Requirements 7.6, 7.7).
+ *
+ * `CapabilityService` injects nothing, so it cannot fetch its own level - this
+ * service holds the verified `/api/me` answer and pushes it. That makes THIS the
+ * only place the wire value is turned into a capability decision, and the two ways
+ * it can go wrong are opposite:
+ *
+ * - A level that arrives and is NOT adopted leaves an operator looking at builder
+ *   surfaces whose every write the worker then refuses.
+ * - A value adopted WITHOUT validation is a capability decision made from
+ *   unvalidated JSON. `atLeast` fails closed on a token it does not know, so a
+ *   typo or a newer worker's fifth level would subtract every builder surface from
+ *   a session that should have kept them - a blank-looking studio, with nothing in
+ *   the console to say why.
+ *
+ * So each case asserts the DERIVED surfaces, not just `level()`: the panel registry
+ * is what a user actually sees change.
+ *
+ * **Validates: Requirements 7.6, 7.7**
+ */
+describe('PhormaCloudService capability push', () => {
+  /**
+   * `PanelRegistryService` reads and writes `phorma.layout.*` at construction and
+   * persists through an `effect`, so a case starts from a cleared namespace rather
+   * than from whatever an earlier spec file left behind - and leaves none behind
+   * itself.
+   */
+  function clearLayout(): void {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('phorma.layout.')) localStorage.removeItem(key);
+    }
+  }
+
+  beforeEach(clearLayout);
+  afterEach(clearLayout);
+
+  /**
+   * A signed-in browser build whose `/api/me` answers whatever `next()` hands back:
+   * a `Response` verbatim, or a body to wrap in a 200.
+   *
+   * Not `harness()` above, which stubs `fetch` with an empty object. And ONE spy per
+   * spec by construction: `spyOn` throws on a second install of the same method, so
+   * a case that needs several answers varies them through `next` rather than by
+   * rebuilding the harness.
+   */
+  function meHarness(next: () => unknown): {
+    cloud: PhormaCloudService;
+    capability: CapabilityService;
+    panels: PanelRegistryService;
+  } {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TauriService, useValue: { isDesktop: false } },
+        { provide: ClerkService, useValue: clerkStub({ user: { id: 'user_x' }, token: 'jwt' }) },
+        { provide: DesktopAuthService, useValue: desktopStub() },
+        { provide: TelemetryService, useValue: { recordError: () => undefined } },
+      ],
+    });
+    spyOn(window, 'fetch').and.callFake(async () => {
+      const answer = next();
+      return answer instanceof Response
+        ? answer
+        : new Response(JSON.stringify(answer), { status: 200 });
+    });
+    return {
+      cloud: TestBed.inject(PhormaCloudService),
+      capability: TestBed.inject(CapabilityService),
+      panels: TestBed.inject(PanelRegistryService),
+    };
+  }
+
+  /** A minimal `/api/me` body, with whatever identity fields a case is about. */
+  const profileBody = (identity: Record<string, unknown>) => ({
+    id: 'user_x',
+    provisioned: false,
+    tier: null,
+    status: null,
+    quota: null,
+    ...identity,
+  });
+
+  /** Every tab id the two sidebars would render. */
+  const rendered = (panels: PanelRegistryService): string[] =>
+    [...panels.leftTabs(), ...panels.rightTabs()].map(tab => tab.id);
+
+  it('adopts a level from /api/me and recomputes the derived surfaces', async () => {
+    const { cloud, capability, panels } = meHarness(() =>
+      profileBody({ ownerId: 'org_acme', level: 'operator' }),
+    );
+    for (const tab of panels.tabs()) panels.showTab(tab.id);
+    expect(rendered(panels)).toContain('connections');
+
+    await cloud.refresh();
+
+    expect(capability.level()).toBe('operator');
+    // The seam is only worth anything if a surface moved: the builder tabs are
+    // subtracted with no reload and no component-level conditional.
+    expect(capability.cloudLibraryOnly()).toBe(true);
+    for (const id of ['skills', 'connections', 'evals', 'portal']) {
+      expect(rendered(panels)).not.toContain(id);
+    }
+    // And the profile still carries the owner, so a later surface can name it.
+    expect(cloud.profile()?.ownerId).toBe('org_acme');
+  });
+
+  it('leaves the studio on its admin default for a value it does not recognise', async () => {
+    const { cloud, capability, panels } = meHarness(() => profileBody({ level: 'superadmin' }));
+    for (const tab of panels.tabs()) panels.showTab(tab.id);
+
+    await cloud.refresh();
+
+    // `isCapabilityLevel` refuses it, so the service never sees it - which is the
+    // difference between "we do not know your level" and "you have none".
+    expect(capability.level()).toBe('admin');
+    expect(capability.cloudLibraryOnly()).toBe(false);
+    expect(rendered(panels)).toContain('connections');
+  });
+
+  it('leaves the default in place when the worker omits the field entirely', async () => {
+    // An older worker, and also a caller whose role the worker could not resolve:
+    // `/api/me` omits the field rather than refusing, because it is a read.
+    const { cloud, capability, panels } = meHarness(() => profileBody({ ownerId: 'org_acme' }));
+    for (const tab of panels.tabs()) panels.showTab(tab.id);
+
+    await cloud.refresh();
+
+    expect(capability.level()).toBe('admin');
+    expect(rendered(panels)).toContain('evals');
+    expect(cloud.profile()?.level).toBeUndefined();
+  });
+
+  it('never adopts a value that is not a declared token, and never clears one it holds', async () => {
+    // The field is parsed JSON, so `null`, a number, an object and an array are one
+    // case here, and none of them may reach a capability decision. Asserted against
+    // a level ALREADY resolved rather than against the default, because "stayed at
+    // admin" would also hold for an implementation that wrote every value through
+    // and happened to start there.
+    let level: unknown = 'operator';
+    const { cloud, capability } = meHarness(() => profileBody({ level }));
+
+    await cloud.refresh();
+    expect(capability.level()).toBe('operator');
+
+    for (const bogus of ['superadmin', 'OPERATOR', '', null, 3, { level: 'admin' }, ['admin']]) {
+      level = bogus;
+
+      await cloud.refresh();
+
+      expect(capability.level()).withContext(JSON.stringify(bogus)).toBe('operator');
+    }
+  });
+
+  it('does not move the level when the refresh fails', async () => {
+    // A flag rather than a queue of responses: a `Response` body can only be read
+    // once, and the answer must not depend on how many times the service happened
+    // to poll.
+    let failing = false;
+    const { cloud, capability } = meHarness(() =>
+      failing
+        ? new Response(JSON.stringify({ error: 'nope' }), { status: 500 })
+        : profileBody({ level: 'operator' }),
+    );
+
+    await cloud.refresh();
+    expect(capability.level()).toBe('operator');
+
+    failing = true;
+    await cloud.refresh();
+
+    // Going offline is not a demotion, and it is not a promotion either: a failed
+    // poll must leave the last resolved level exactly where it was.
+    expect(capability.level()).toBe('operator');
+    expect(cloud.error()).toBeTruthy();
+  });
+
+  it('applies the same level twice without recomputing a derived surface', async () => {
+    const { cloud, capability } = meHarness(() => profileBody({ level: 'editor' }));
+    let recomputes = 0;
+    const derived = computed(() => {
+      recomputes += 1;
+      return capability.level();
+    });
+
+    await cloud.refresh();
+    expect(derived()).toBe('editor');
+    const after = recomputes;
+
+    // The studio polls `/api/me` on a schedule and on focus, so a repeat answer
+    // must not churn every capability-derived surface in the app.
+    await cloud.refresh();
+    await cloud.refresh();
+
+    expect(derived()).toBe('editor');
+    expect(recomputes).toBe(after);
+  });
+});
+
+/**
+ * `selfServeBilling` (multi-organisation-phorma, Requirement 19.7).
+ *
+ * The one predicate behind all seven purchase surfaces in the studio - the five
+ * Subscribe CTAs, the plan cards and the credit packs - so it fails in two opposite
+ * and equally bad ways:
+ *
+ * - TOO PERMISSIVE and an organisation member is offered a Subscribe button the
+ *   worker then refuses with `billing_managed`. A button that ends in a refusal
+ *   reads as a broken app, which is the whole thing requirement 19.7 exists to stop.
+ * - TOO STRICT and a solo user cannot buy anything. Note that the states most likely
+ *   to be got wrong are the EMPTY ones: signed out, before the first `/api/me`, and
+ *   against a worker too old to send `ownerId`. All three are ordinary and all three
+ *   must read as personal.
+ *
+ * `meHarness` is reused because `ownerId` is a `/api/me` field: the value has to
+ * arrive through a real refresh rather than be written into a signal, or the spec
+ * would be about the signal.
+ *
+ * **Validates: Requirement 19.7**
+ */
+describe('PhormaCloudService selfServeBilling', () => {
+  function clearLayout(): void {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('phorma.layout.')) localStorage.removeItem(key);
+    }
+  }
+
+  beforeEach(clearLayout);
+  afterEach(clearLayout);
+
+  /** A signed-in BROWSER build whose `/api/me` answers `body`. */
+  function browserHarness(body: () => unknown): PhormaCloudService {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TauriService, useValue: { isDesktop: false } },
+        { provide: ClerkService, useValue: clerkStub({ user: { id: 'user_x' }, token: 'jwt' }) },
+        { provide: DesktopAuthService, useValue: desktopStub() },
+        { provide: TelemetryService, useValue: { recordError: () => undefined } },
+      ],
+    });
+    spyOn(window, 'fetch').and.callFake(
+      async () => new Response(JSON.stringify(body()), { status: 200 }),
+    );
+    return TestBed.inject(PhormaCloudService);
+  }
+
+  const meBody = (identity: Record<string, unknown>) => ({
+    id: 'user_x',
+    provisioned: true,
+    tier: 'starter',
+    status: 'active',
+    quota: null,
+    ...identity,
+  });
+
+  it('is true before any profile exists, so a signed-out install can still subscribe', () => {
+    const cloud = browserHarness(() => meBody({}));
+
+    // An organisation only exists once the worker has said so. Suppressing here
+    // would delete the Subscribe CTA for every install during startup.
+    expect(cloud.profile()).toBeNull();
+    expect(cloud.selfServeBilling()).toBe(true);
+  });
+
+  it('is true for a personal owner', async () => {
+    const cloud = browserHarness(() => meBody({ ownerId: 'user_x' }));
+
+    await cloud.refresh();
+
+    expect(cloud.selfServeBilling()).toBe(true);
+  });
+
+  it('is true when the worker is too old to report an owner at all', async () => {
+    const cloud = browserHarness(() => meBody({}));
+
+    await cloud.refresh();
+
+    // The field is ADDITIVE, and for an account in no organisation it would have
+    // answered the caller's own id anyway - so absent is ordinary, not unknown.
+    expect(cloud.profile()?.ownerId).toBeUndefined();
+    expect(cloud.selfServeBilling()).toBe(true);
+  });
+
+  it('is FALSE for an organisation owner', async () => {
+    // `id` is the organisation too, because `/api/me` reads the resolved owner's
+    // tenant row - so comparing `ownerId` with `id` would answer "personal" here.
+    // The caller is what it has to be compared against.
+    const cloud = browserHarness(() => meBody({ id: 'org_acme', ownerId: 'org_acme' }));
+
+    await cloud.refresh();
+
+    expect(cloud.selfServeBilling()).toBe(false);
+  });
+
+  it('follows the owner in both directions within one session', async () => {
+    let owner = 'org_acme';
+    const cloud = browserHarness(() => meBody({ id: owner, ownerId: owner }));
+
+    await cloud.refresh();
+    expect(cloud.selfServeBilling()).toBe(false);
+
+    // A switch back to the personal account must restore every purchase surface,
+    // with no reload - which is what makes this a computed rather than a flag.
+    owner = 'user_x';
+    await cloud.refresh();
+    expect(cloud.selfServeBilling()).toBe(true);
+  });
+
+  it('reads the DESKTOP subject, where there is no Clerk user to compare against', async () => {
+    TestBed.resetTestingModule();
+    const desktop = desktopStub({ signedIn: true, token: 'phd_token' });
+    // `desktopStub` answers null for `userId`; this install knows who it is.
+    desktop.userId = () => 'user_desktop';
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TauriService, useValue: { isDesktop: true } },
+        { provide: ClerkService, useValue: clerkStub() },
+        { provide: DesktopAuthService, useValue: desktop },
+        { provide: TelemetryService, useValue: { recordError: () => undefined } },
+      ],
+    });
+    let owner = 'user_desktop';
+    spyOn(window, 'fetch').and.callFake(
+      async () =>
+        new Response(JSON.stringify(meBody({ id: owner, ownerId: owner })), { status: 200 }),
+    );
+    const cloud = TestBed.inject(PhormaCloudService);
+
+    await cloud.refresh();
+    // Clerk is permanently null on desktop, so a comparison that read only
+    // `user()?.id` would answer "cannot tell" for every packaged install and hide
+    // billing from every desktop subscriber.
+    expect(cloud.user()).toBeNull();
+    expect(cloud.selfServeBilling()).toBe(true);
+
+    owner = 'org_acme';
+    await cloud.refresh();
+    expect(cloud.selfServeBilling()).toBe(false);
+  });
+
+  it('fails closed for an owner it cannot compare to a caller', async () => {
+    TestBed.resetTestingModule();
+    // Signed in by the desktop credential, but the subject is unknown - an owner we
+    // hold and cannot attribute. Offering to charge somebody here is the wrong guess.
+    const desktop = desktopStub({ signedIn: true, token: 'phd_token' });
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TauriService, useValue: { isDesktop: true } },
+        { provide: ClerkService, useValue: clerkStub() },
+        { provide: DesktopAuthService, useValue: desktop },
+        { provide: TelemetryService, useValue: { recordError: () => undefined } },
+      ],
+    });
+    spyOn(window, 'fetch').and.callFake(
+      async () =>
+        new Response(JSON.stringify(meBody({ id: 'org_acme', ownerId: 'org_acme' })), {
+          status: 200,
+        }),
+    );
+    const cloud = TestBed.inject(PhormaCloudService);
+
+    await cloud.refresh();
+
+    expect(cloud.selfServeBilling()).toBe(false);
   });
 });
 

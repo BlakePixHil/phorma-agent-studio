@@ -29,6 +29,23 @@ const VERSION_LIST_LIMIT = 20;
  * cannot roll back, so both are confirm-tier and report `revertable: false`
  * (Requirements 6.1, 7.4). Running wrangler needs the desktop shell, so that
  * action is guarded through {@link TauriService} (Requirements 10.4, 10.5).
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1). Three lines run
+ * through this surface, and they are not the same line:
+ *
+ * - READING is open: listing the library, reading a workflow, listing versions,
+ *   reading the deploy state and listing deployments are all `read.workflows` or
+ *   `read.runs`. `workflow_open` is here too - opening a document changes
+ *   nothing, and a member with no local library simply has nothing to open.
+ * - `workflow_save` is EDITOR, not builder. An editor's whole job is changing
+ *   values inside an existing graph, and a change they cannot persist is not a
+ *   change. Minting a NEW workflow is `workflow_create`, which is builder.
+ * - Everything that alters the graph wholesale, ships it, or destroys stored
+ *   copies is BUILDER: `version_restore` (a whole-graph replacement),
+ *   `deploy_workflow` and `deploy_provision_worker` (`deploy.push`),
+ *   `workflow_delete` and `deployment_undeploy` (`deploy.delete`), and the four
+ *   backup actions, which read and write the LOCAL library a member working out
+ *   of the cloud does not have (Requirement 9.4).
  */
 @Injectable({ providedIn: 'root' })
 export class WorkflowActionsService {
@@ -52,6 +69,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Listing saved workflows',
         run: () => this.list(),
       },
@@ -63,6 +81,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Reading the active workflow',
         run: () => this.readActive(),
       },
@@ -74,6 +93,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           workflowId: {
             type: 'string',
@@ -99,6 +119,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           workflowId: { type: 'string', description: 'Library workflow id.', required: true },
         },
@@ -113,6 +134,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Creating a new workflow',
         run: () => this.create(),
       },
@@ -124,6 +146,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'silent',
+        minLevel: 'editor',
         activity: () => `Saving "${this.workflow.activeName()}"`,
         run: () => this.save(),
       },
@@ -135,6 +158,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           workflowId: { type: 'string', description: 'Library workflow id.', required: true },
         },
@@ -151,6 +175,7 @@ export class WorkflowActionsService {
         surface: 'versions',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         params: {
           limit: { type: 'number', description: `Maximum rows (default ${VERSION_LIST_LIMIT}).` },
         },
@@ -165,6 +190,7 @@ export class WorkflowActionsService {
         surface: 'versions',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           versionId: { type: 'string', description: 'Version id.', required: true },
         },
@@ -181,6 +207,7 @@ export class WorkflowActionsService {
         surface: 'deploy',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Reading the deployment state',
         run: () => this.readDeployState(),
       },
@@ -192,6 +219,7 @@ export class WorkflowActionsService {
         surface: 'deploy',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         confirmSummary: () =>
           `Deploy "${this.workflow.activeName()}" to ${this.cloud.effectiveWorkerUrl() || 'the configured cloud runtime'}? It becomes live for triggers and schedules.`,
         activity: () => `Deploying "${this.workflow.activeName()}"`,
@@ -205,6 +233,7 @@ export class WorkflowActionsService {
         surface: 'deploy',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         requiresDesktop: true,
         confirmSummary: () =>
           'Run wrangler to deploy the Cloudflare worker from your local cloud/ folder? This changes live infrastructure in your Cloudflare account.',
@@ -231,6 +260,7 @@ export class WorkflowActionsService {
         surface: 'deploy',
         access: 'read',
         risk: 'silent',
+        minLevel: 'operator',
         activity: () => 'Listing cloud deployments',
         run: () => this.listDeployments(),
       },
@@ -242,6 +272,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Listing cloud backups',
         run: () => this.listBackups(),
       },
@@ -253,6 +284,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           workflowId: { type: 'string', description: 'Backed-up workflow id.', required: true },
           revision: {
@@ -273,6 +305,7 @@ export class WorkflowActionsService {
         surface: 'deploy',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           workflowId: { type: 'string', description: 'Deployed workflow id.', required: true },
         },
@@ -289,6 +322,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           workflowId: { type: 'string', description: 'Backed-up workflow id.', required: true },
         },
@@ -305,6 +339,7 @@ export class WorkflowActionsService {
         surface: 'workflows',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           workflowId: { type: 'string', description: 'Backed-up workflow id.', required: true },
         },

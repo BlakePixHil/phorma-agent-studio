@@ -30,6 +30,8 @@ import { SettingsDialogService } from '../../settings/settings-dialog.service';
 import { WorkflowService } from '../../../core/workflow.service';
 import { WorkflowVersionsService } from '../../../core/workflow-versions.service';
 import { diffWorkflowSpecs } from '../../../core/workflow-diff';
+import { ProposalsService } from '../../../core/proposals.service';
+import { ProposalReviewDialogService } from '../../proposals/proposal-review-dialog.service';
 import { DEPLOY_TARGETS, type DeployTargetId } from '../../../core/deploy/deploy-targets';
 import { summarizeDeploySpec, type DeploySummary } from './deploy-readiness';
 
@@ -73,6 +75,9 @@ export class CloudDialog {
   private readonly connectionStore = inject(ConnectionStoreService);
   private readonly selection = inject(SelectionService);
   private readonly versions = inject(WorkflowVersionsService);
+  // The review queue for this workflow, and the deferred surface that renders it.
+  protected readonly proposals = inject(ProposalsService);
+  private readonly proposalReview = inject(ProposalReviewDialogService);
 
   private readonly card = viewChild<ElementRef<HTMLElement>>('card');
 
@@ -254,6 +259,11 @@ export class CloudDialog {
         this.cloud.deployedStatusWorkflowId.set(null);
         if (workflowId) void this.cloud.refreshStatus(workflowId);
         if (workflowId) void this.versions.load(workflowId);
+        // The review queue, so a change waiting on this reviewer is visible on the
+        // surface they open to deploy - which is where they would otherwise
+        // silently deploy over it (Requirement 12.6). Hosted-only, so it is read
+        // for the Phorma target alone.
+        if (workflowId && this.provider() === 'phorma') void this.proposals.refresh(workflowId);
         this.cloud.lastPushFindings.set([]);
         void this.connectionStore
           .list()
@@ -327,6 +337,19 @@ export class CloudDialog {
   /** Saves the open draft so it has a library id a deploy can address. */
   protected async saveWorkflow(): Promise<void> {
     await this.workflow.saveActive('manual');
+  }
+
+  /**
+   * Opens the deferred review surface on this workflow's queue
+   * (multi-organisation-phorma, Requirement 12.6).
+   *
+   * This dialog only ever LINKS to it: the review surface is behind
+   * `@defer (on immediate)` in `app.html` so the initial bundle does not carry it,
+   * and this dialog is not deferred.
+   */
+  protected reviewProposals(): void {
+    const workflowId = this.workflow.activeDoc()?.workflowId;
+    if (workflowId) this.proposalReview.open(workflowId);
   }
 
   protected refreshStatus(): void {

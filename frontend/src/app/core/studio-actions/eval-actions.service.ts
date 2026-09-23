@@ -21,6 +21,13 @@ const MATCHERS: readonly EvalMatcher[] = ['exact', 'contains', 'llm-judge'];
  * reported defect landed on: "create an eval for me" used to funnel into
  * `add_node` and drop a node on the canvas. `eval_create_suite` now handles it
  * through {@link EvalService}, leaving the graph untouched (Requirement 8.2).
+ *
+ * Declared minimums (multi-organisation-phorma Requirement 8.1): the WHOLE
+ * surface is builder, reads included, and that is deliberate rather than
+ * over-restrictive. `eval.manage` is a builder capability, and the Evals PANEL
+ * carries `minLevel: 'builder'` in `DEFAULT_TABS` - so offering an operator an
+ * eval read would answer about a surface their studio does not show them, and
+ * the panel reveal after the action would do nothing.
  */
 @Injectable({ providedIn: 'root' })
 export class EvalActionsService {
@@ -38,6 +45,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Listing eval suites',
         run: () => this.listSuites(),
       },
@@ -49,6 +57,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         params: { suiteId: { type: 'string', description: 'Suite id.', required: true } },
         activity: () => 'Reading an eval suite',
         run: args => this.readSuite(args),
@@ -61,6 +70,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         params: { name: { type: 'string', description: 'Suite name.', required: true } },
         activity: args => `Creating eval suite "${argStr(args, 'name') ?? ''}"`,
         run: args => this.createSuite(args),
@@ -73,6 +83,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         params: {
           suiteId: { type: 'string', description: 'Suite id.', required: true },
           name: { type: 'string', description: 'Case name.', required: true },
@@ -106,6 +117,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         params: {
           suiteId: { type: 'string', description: 'Suite id.', required: true },
           caseId: { type: 'string', description: 'Case id.', required: true },
@@ -125,6 +137,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           suiteId: { type: 'string', description: 'Suite id.', required: true },
           caseId: { type: 'string', description: 'Case id.', required: true },
@@ -141,6 +154,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: { suiteId: { type: 'string', description: 'Suite id.', required: true } },
         confirmSummary: args =>
           `Delete eval suite "${this.suiteName(argStr(args, 'suiteId'))}" and its run history? This cannot be undone.`,
@@ -155,6 +169,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'confirm',
+        minLevel: 'builder',
         params: {
           suiteId: { type: 'string', description: 'Suite id.', required: true },
           environment: {
@@ -178,6 +193,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'write',
         risk: 'silent',
+        minLevel: 'builder',
         activity: () => 'Cancelling the eval run',
         run: () => this.cancelRun(),
       },
@@ -189,6 +205,7 @@ export class EvalActionsService {
         surface: 'evals',
         access: 'read',
         risk: 'silent',
+        minLevel: 'builder',
         params: { suiteId: { type: 'string', description: 'Suite id.', required: true } },
         activity: () => 'Reading eval results',
         run: args => this.readResults(args),

@@ -70,6 +70,23 @@ export interface BackupRecord {
   updatedAt: string;
   /** Non-null means a tombstone: bodies retained, still restorable. */
   deletedAt: string | null;
+  /**
+   * The R2 object PREFIX this row's bodies live under, or null to derive it
+   * (Requirement 4.7).
+   *
+   * `bodyKey()` puts the owner FIRST (`backup/{owner}/{workflowId}/{revision}`),
+   * which is what makes a per-owner prefix scan possible - and also what would
+   * force copying every object on an ownership change. Storing the prefix in force
+   * for this row means an ownership claim changes `tenant_id` and leaves every
+   * stored object exactly where it is.
+   *
+   * NULL is ORDINARY, not a gap: it reads as `bodyPrefix(tenantId, workflowId)`, so
+   * every row written before this column existed keeps resolving and no backfill is
+   * needed - the same absent-is-ordinary discipline `stripe_customer_id` follows.
+   * An upload therefore still writes NULL, and an ownership claim is the only thing
+   * that populates it, by freezing the prefix that was in force at that moment.
+   */
+  bodyKey: string | null;
 }
 
 /** What one upload attempt did. */
@@ -110,7 +127,7 @@ export class BackupStore {
     const rows = await this.db
       .prepare(
         `SELECT tenant_id, workflow_id, name, revision, spec_hash, size_bytes,
-                saved_at, updated_at, deleted_at
+                saved_at, updated_at, deleted_at, body_key
            FROM workflow_backups
           WHERE tenant_id = ?
           ORDER BY deleted_at IS NOT NULL, updated_at DESC`,
@@ -125,7 +142,7 @@ export class BackupStore {
     const row = await this.db
       .prepare(
         `SELECT tenant_id, workflow_id, name, revision, spec_hash, size_bytes,
-                saved_at, updated_at, deleted_at
+                saved_at, updated_at, deleted_at, body_key
            FROM workflow_backups
           WHERE tenant_id = ? AND workflow_id = ?`,
       )
@@ -211,6 +228,9 @@ export class BackupStore {
           savedAt: next.savedAt,
           updatedAt: now,
           deletedAt: null,
+          // An upload never writes a stored prefix: NULL reads as the derived one,
+          // and that is what keeps the column backfill-free.
+          bodyKey: null,
         },
       };
     }
@@ -301,11 +321,15 @@ export class BackupStore {
    * the only index of which R2 keys belong to a tenant, so dropping the rows
    * first would orphan every object.
    */
-  async deleteAllForTenant(tenantId: string): Promise<string[]> {
-    const ids = (await this.list(tenantId)).map(record => record.workflowId);
-    if (ids.length === 0) return [];
+  async deleteAllForTenant(tenantId: string): Promise<BackupRecord[]> {
+    // Whole RECORDS rather than ids, because a row's bodies may live under a
+    // previous owner's prefix (`body_key`), and after this delete there is nothing
+    // left to read that prefix from. A prefix scan of `backup/{tenantId}/` alone
+    // would leave those objects behind and make the delete-everything promise false.
+    const records = await this.list(tenantId);
+    if (records.length === 0) return [];
     await this.db.prepare(`DELETE FROM workflow_backups WHERE tenant_id = ?`).bind(tenantId).run();
-    return ids;
+    return records;
   }
 
   /**
@@ -315,20 +339,23 @@ export class BackupStore {
   async expiredTombstones(
     now = Date.now(),
     limit = 500,
-  ): Promise<{ tenantId: string; workflowId: string }[]> {
+  ): Promise<{ tenantId: string; workflowId: string; bodyKey: string | null }[]> {
     const cutoff = new Date(now - TOMBSTONE_WINDOW_MS).toISOString();
     const rows = await this.db
       .prepare(
-        `SELECT tenant_id, workflow_id
+        `SELECT tenant_id, workflow_id, body_key
            FROM workflow_backups
           WHERE deleted_at IS NOT NULL AND deleted_at <= ?
           LIMIT ?`,
       )
       .bind(cutoff, limit)
-      .all<{ tenant_id: string; workflow_id: string }>();
+      .all<{ tenant_id: string; workflow_id: string; body_key: string | null }>();
+    // `body_key` travels with the row, because the sweep deletes bodies BEFORE the
+    // row and the row is the only place the stored prefix exists.
     return (rows.results ?? []).map(row => ({
       tenantId: row.tenant_id,
       workflowId: row.workflow_id,
+      bodyKey: row.body_key,
     }));
   }
 
@@ -406,6 +433,7 @@ interface BackupRow {
   saved_at: string;
   updated_at: string;
   deleted_at: string | null;
+  body_key: string | null;
 }
 
 function toRecord(row: BackupRow): BackupRecord {
@@ -419,5 +447,9 @@ function toRecord(row: BackupRow): BackupRecord {
     savedAt: row.saved_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+    // `?? null` so an absent value and a stored NULL are indistinguishable here:
+    // both mean "derive the prefix", and the fallback lives in exactly one place
+    // (`bodyPrefixFor` in `backup-store.ts`).
+    bodyKey: row.body_key ?? null,
   };
 }

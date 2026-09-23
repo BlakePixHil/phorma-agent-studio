@@ -16,7 +16,9 @@ import {
   RANGE_PRESET_DAYS,
   type RangePresetDays,
 } from './core/date-range.service';
+import { IMPERSONATION_VIEW_ID } from './core/impersonation-models';
 import { TELEMETRY_ROUTES, type DateRange, type TelemetryRoute } from './core/models';
+import { ORG_VIEW_ID } from './core/org-models';
 
 /** One header nav entry. `route` is the URL path segment. */
 export interface ViewNavItem {
@@ -39,16 +41,26 @@ const NAV_LABELS: Record<TelemetryRoute, { label: string; icon: string }> = {
 };
 
 /**
- * The view nav: the five telemetry aggregates, then the spend view.
+ * The view nav: the five telemetry aggregates, then spend, organisations and
+ * impersonation.
  *
- * Spend is appended explicitly because it is not a telemetry aggregate - it reads
- * the billing route family and has no single API route to derive a path from. Last
- * in the order deliberately: it is the operator's money view, consulted
- * occasionally, while the telemetry views are the daily ones.
+ * The three tail entries are appended explicitly because none of them is a
+ * telemetry aggregate - each reads its own route family and has no single API route
+ * to derive a path from. Deriving the five from `TELEMETRY_ROUTES` still holds the
+ * property that matters: a sixth aggregate route cannot compile without a nav
+ * entry and a loader.
+ *
+ * Order is by how often an operator opens them: the telemetry views are daily,
+ * spend is occasional, organisations is the one consulted when a customer is
+ * onboarded or somebody's reach changes, and impersonation is LAST because it is
+ * the one an operator should reach for least often - it is a support action that
+ * names a person in a permanent record every time it is used.
  */
 export const VIEW_NAV: readonly ViewNavItem[] = [
   ...TELEMETRY_ROUTES.map((route) => ({ route, ...NAV_LABELS[route] })),
   { route: BILLING_VIEW_ID, label: 'Spend', icon: 'ti-cash' },
+  { route: ORG_VIEW_ID, label: 'Organisations', icon: 'ti-building-community' },
+  { route: IMPERSONATION_VIEW_ID, label: 'Impersonation', icon: 'ti-eye' },
 ];
 
 /**

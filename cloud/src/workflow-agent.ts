@@ -43,7 +43,8 @@
 
 import { Agent, type Connection, type ConnectionContext } from 'agents';
 
-import { verifyBearer, verifyRequest, isHosted, type AuthContext } from './auth';
+import { verifyBearer, verifyRequest, isHosted, resolveOwner, type AuthContext } from './auth';
+import { ACT_AS_HEADER, applyImpersonation, resolveImpersonation } from './impersonation';
 import {
   OPENROUTER_SLUG_PREFIX,
   TenantStore,
@@ -68,6 +69,18 @@ import {
   type PublishRecord,
 } from './portal-registry';
 import { mintPortalToken, type PortalTokenRecord } from './portal-auth';
+// The Role_Gate is ONE seam (Requirement 6.1). This file consumes it; it never
+// re-implements a level comparison and never derives a required level from the
+// request path - see `role-gate.ts` for why the table is not the dispatch.
+import {
+  ROLE_GATE_FALLBACK_LEVEL,
+  isMutatingMethod,
+  requireCapability,
+  requiredLevelFor,
+  roleForbidden,
+  type AuthorizedCaller,
+} from './role-gate';
+import { atLeast, isCapabilityLevel, type CapabilityLevel } from './capabilities';
 // The notification CONTRACT and every pure decision behind it live in one
 // dependency-free module, exactly as `run-wiring.ts` owns the decisions about a
 // pushed spec; this file owns the effects they describe (the SQL and the maps).
@@ -101,12 +114,15 @@ import {
   NOTIFY_DETAIL_CHARS,
   NOTIFY_MAX_ATTEMPTS,
   NOTIFY_TIMEOUT_MS,
+  attributeGateActor,
   dataPathSettings,
+  gateActorKey,
   notificationDetail,
   notificationEndpoint,
   notificationTriggerFor,
   notificationWanted,
   resolveRunRetention,
+  type GateKind,
   type NotifyTrigger,
   type RunRetention,
   type WorkflowNotificationPolicy,
@@ -149,6 +165,7 @@ import {
   type PortalTriggerData,
   type PortalTurn,
   type PortalValidation,
+  type CapabilityFinding,
   // Aliased: `Connection` is already the partyserver WebSocket type in here.
   type Connection as DataConnection,
   type DataFetcher,
@@ -244,7 +261,35 @@ interface RunUsage {
   costUsd: number;
 }
 
+/**
+ * What {@link WorkflowAgent.claimOwnership} decided (Requirement 3.12).
+ *
+ * The two refusal codes are the ones only the instance can answer, because only
+ * the instance holds the stamp. `claim_conflict` belongs to the worker's
+ * `workflow_backups` pre-check and is never returned from here - it has to refuse
+ * BEFORE this RPC runs, or the claim would already have half-applied.
+ *
+ * `previousOwnerId` is carried on success so the caller can move the D1 rows and
+ * write the audit row without a second read, and so `alreadyOwned` and a fresh
+ * claim have the same shape.
+ */
+export type ClaimOwnershipResult =
+  | { ok: true; alreadyOwned: boolean; previousOwnerId: string }
+  | { ok: false; code: 'claim_not_owner' | 'claim_unowned' };
 
+/**
+ * What one run of the push path did, for whichever entrance asked.
+ *
+ * An OUTCOME rather than a `Response`, because the two entrances answer in
+ * different currencies: `POST /workflow` serializes it, and the `acceptSpecPush`
+ * RPC hands it to a proposal publish which must be able to leave the proposal
+ * `pending` on a refusal (Requirement 12.8). `findings` travels on a refusal so
+ * the caller can put the host's authoritative capability findings in front of
+ * whoever tried to deploy.
+ */
+export type SpecPushOutcome =
+  | { ok: true; name: string }
+  | { ok: false; status: number; error: string; findings?: CapabilityFinding[] };
 
 interface WorkflowAgentState {
   spec: WorkflowSpec | null;
@@ -313,6 +358,32 @@ type ControlFrame =
   | { type: 'question'; requestId: string; response: string }
   | { type: 'trigger'; input?: string }
   | { type: 'stop' };
+
+/**
+ * What a monitor socket remembers about the caller that opened it.
+ *
+ * EVERY frame in {@link ControlFrame} writes state, so the socket needs an
+ * identity of its own rather than borrowing the one that opened it
+ * (Requirement 6.2). Written once by `onConnect` through `connection.setState`,
+ * which is partyserver's hibernation attachment (stored under `__user`, beside
+ * its own `__pk` metadata), so the decision survives a Durable Object eviction
+ * for exactly as long as the socket does.
+ *
+ * Only the RESOLVED level and the caller's user id are stored, never the token: a
+ * credential in a socket attachment is a credential in Durable Object storage. An
+ * id is not a credential - it authorizes nothing and is exactly what Requirement
+ * 10.5 wants recorded when a frame on this socket settles a gate - and it has to
+ * live here rather than be re-resolved per frame, for the same reason the level
+ * does: `onMessage` must not read a membership row to answer one approval.
+ *
+ * `userId` is NULLABLE for the same reason `AuthorizedCaller.userId` is: a BYO
+ * `shared` credential has no subject at all, and inventing one would put a name
+ * that means nothing into run history.
+ */
+interface MonitorConnectionState {
+  level: CapabilityLevel;
+  userId: string | null;
+}
 
 /** A pending approval: the engine's resolver plus what it is waiting for. */
 interface PendingApprovalEntry {
@@ -518,6 +589,12 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    * workflow, where the inventory is read before `POST /workflow` has stamped
    * `ownerId` - without it, a hosted tenant's very first deploy would look at
    * the wrong vault and report every secret missing.
+   *
+   * That fallback is the RESOLVED owner, never the caller's `userId`
+   * (multi-organisation-phorma, Requirement 4.1). A member's first push of an
+   * organisation's workflow would otherwise read their PERSONAL vault and report
+   * every shared credential missing, which is a refused push with a message
+   * naming secrets a colleague had already stored.
    */
   private connectionHost(workflowId: string, ownerFallback?: string | null): WorkerConnectionStore {
     return new WorkerConnectionStore(
@@ -535,7 +612,9 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    * caller already turns absence into a named, actionable error, and a
    * half-decrypted credential must never reach an outbound request.
    */
-  private vaultSecretSource(ownerFallback?: string | null): WorkerConnectionSecretSource | undefined {
+  private vaultSecretSource(
+    ownerFallback?: string | null,
+  ): WorkerConnectionSecretSource | undefined {
     const encryptionKey = this.env.KEY_ENC_SECRET;
     if (!this.env.SecretVault || !encryptionKey) return undefined;
     const ownerId = this.hosted ? (this.state.ownerId ?? ownerFallback ?? null) : null;
@@ -599,6 +678,17 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private readonly waits = new Map<string, PendingWaitEntry>();
   /** Events that arrived before their waiter registered (key → payload). */
   private readonly earlyEvents = new Map<string, string>();
+  /**
+   * Who settled a gate, keyed by {@link gateActorKey} and consumed by the emit
+   * tee when the engine reports the outcome (Requirement 10.5).
+   *
+   * A map rather than a field on the pending entry, because a settle DELETES the
+   * entry and the engine emits `approval-resolved` afterwards - so the acting id
+   * has to outlive the resolver it belonged to by exactly one event. It reaches
+   * run history through the recorder, which is why there is no table here: the
+   * outcome and the actor are one row in the log the studio already reads.
+   */
+  private readonly gateActors = new Map<string, string>();
   /** Ring buffer of this run's events, replayed to late-joining monitors. */
   private eventLog: RunEvent[] = [];
   /** Run-history recorder for the in-flight run (EPIC 1). */
@@ -635,38 +725,43 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, '');
 
+    // 3: WHAT MAY YOU DO. Resolved exactly ONCE per request, so a route that
+    // checks twice still costs one membership read, and so the `role_unknown`
+    // refusal is answered in one place rather than per branch.
+    //
+    // The method is named so the impersonation refusal is write-scoped: this is
+    // where an act-as write is refused `impersonation_read_only` with the gateway
+    // out of the path (Requirement 14.7), and where an act-as READ is admitted.
+    const caller = await this.resolveCaller(auth, request.method);
+    if (caller instanceof Response) return caller;
+
+    // Fail CLOSED for a mutating method the ONE write-route table does not
+    // answer (Requirement 6.9). This is NOT the enforcement - each write branch
+    // below names its own level as a literal, so no required level is ever
+    // derived from the path here. It only refuses what the table does not
+    // mention, which is what makes a new write branch added without a
+    // `WRITE_ROUTES` entry broken rather than open. A mutating request for a path
+    // that matches no branch at all therefore reads 403 instead of the 404 it
+    // used to: an unknown write path is not something to enumerate.
+    if (isMutatingMethod(request.method) && requiredLevelFor(request.method, path) === undefined) {
+      return this.refuseLevel(request, ROLE_GATE_FALLBACK_LEVEL);
+    }
+
     if (request.method === 'POST' && path.endsWith('/workflow')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       const spec = (await request.json()) as WorkflowSpec;
-      if (!spec || spec.version !== 1 || !Array.isArray(spec.graph?.nodes)) {
-        return json({ error: 'Body must be a version-1 WorkflowSpec.' }, 400);
+      // ONE push path, reached from here and from the `acceptSpecPush` RPC a
+      // proposal publish uses (multi-organisation-phorma, Requirement 12.7), so
+      // "publishing a proposal is indistinguishable from pushing the same spec"
+      // is true by construction rather than by two implementations agreeing.
+      const outcome = await this.applySpecPush(spec, resolveOwner(auth));
+      if (!outcome.ok) {
+        return json(
+          { error: outcome.error, ...(outcome.findings ? { findings: outcome.findings } : {}) },
+          outcome.status,
+        );
       }
-      // Deploy-time capability gate (Requirements 17.12, 17.15): the SAME
-      // validator and the SAME connection inventory the studio checks at push
-      // time (Requirement 17.11, `CloudService.pushWorkflow`), run again here so
-      // a direct/older/misbehaving client can never deploy a spec this worker
-      // cannot run. An error finding aborts before `setState`/`rescheduleCron`
-      // run, so a previously deployed workflow is left completely unchanged.
-      // Warning-only findings never block the deployment.
-      const connections = await this.connectionHost(spec.id, auth.userId).list();
-      const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, connections);
-      if (findings.some(finding => finding.severity === 'error')) {
-        return json({ error: 'Workflow is not deployable to this worker.', findings }, 400);
-      }
-      // Re-arm the schedule-trigger cron (if any) for the new spec.
-      await this.rescheduleCron(spec);
-      // Hosted mode: first push stamps ownership; later pushes keep it.
-      const ownerId = this.state.ownerId ?? auth.userId;
-      this.setState({
-        ...this.state,
-        spec,
-        savedAt: new Date().toISOString(),
-        ownerId,
-      });
-      // AFTER the capability gate and the state write, so a rejected push leaves
-      // the registry untouched (Requirement 2.5) and a listed deployment is
-      // always one that is really deployed.
-      await this.syncDeployment(spec, ownerId);
-      return json({ ok: true, name: spec.name });
+      return json({ ok: true, name: outcome.name });
     }
 
     // Reads the deployed spec back out (Requirement 4). This is what makes a
@@ -694,6 +789,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // itself, its run history, usage ledger and connection metadata are
     // untouched, so pushing again needs no other setup.
     if (request.method === 'DELETE' && path.endsWith('/workflow')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       if (this.handle) {
         return json({ error: 'Stop the running run before removing this workflow.' }, 409);
       }
@@ -717,6 +813,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // cancels cron, unpublishes the portal and purges every tracked portal
     // session DO via {@link WorkflowAgent.purgeSelf} (RPC).
     if (request.method === 'DELETE' && path.endsWith('/workflow/purge')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       if (this.handle) {
         return json({ error: 'Stop the running run before removing this workflow.' }, 409);
       }
@@ -728,6 +825,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // NAMES only: `connectionMetadataFromPush` drops anything value-shaped, and
     // the secrets themselves arrive separately as `CONN_*` worker secrets.
     if (request.method === 'POST' && path.endsWith('/connections')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       const body = (await request.json().catch(() => ({}))) as unknown;
       const connections = [...connectionMetadataFromPush(body).values()];
       this.setState({ ...this.state, connections });
@@ -741,11 +839,15 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // inventory `WorkerConnectionStore` will resolve against at run time.
     if (request.method === 'GET' && path.endsWith('/connections')) {
       const workflowId = this.state.spec?.id ?? '';
-      const connections = await this.connectionHost(workflowId, auth.userId).list();
+      // The RESOLVED owner as the vault fallback, for the same reason the push
+      // path uses it: the studio reads this inventory BEFORE the first push has
+      // stamped an owner (Requirement 4.1).
+      const connections = await this.connectionHost(workflowId, resolveOwner(auth)).list();
       return json({ connections });
     }
 
     if (request.method === 'POST' && path.endsWith('/trigger')) {
+      if (!atLeast(caller.level, 'operator')) return this.refuseLevel(request, 'operator');
       const body = (await request.json().catch(() => ({}))) as {
         input?: string;
         source?: string;
@@ -761,6 +863,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
 
     if (request.method === 'POST' && path.endsWith('/events')) {
+      if (!atLeast(caller.level, 'operator')) return this.refuseLevel(request, 'operator');
       const body = (await request.json().catch(() => ({}))) as {
         correlationKey?: string;
         payload?: unknown;
@@ -769,11 +872,16 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       if (!key) return json({ error: 'correlationKey is required.' }, 400);
       const payload =
         typeof body.payload === 'string' ? body.payload : JSON.stringify(body.payload ?? '');
+      // Recorded BEFORE the delivery, because `deliverEvent` can resolve the
+      // waiter synchronously and the engine then emits `wait-resolved` inside this
+      // call - after which there is nothing left to attribute.
+      this.rememberGateActor('event', key, caller.userId);
       const delivered = this.deliverEvent(key, payload);
       return json({ ok: true, delivered });
     }
 
     if (request.method === 'POST' && path.endsWith('/approvals')) {
+      if (!atLeast(caller.level, 'operator')) return this.refuseLevel(request, 'operator');
       const body = (await request.json().catch(() => ({}))) as {
         requestId?: string;
         approved?: boolean;
@@ -782,11 +890,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       const pending = this.approvals.get(body.requestId);
       if (!pending) return json({ ok: true, delivered: false });
       this.approvals.delete(body.requestId);
+      this.rememberGateActor('approval', body.requestId, caller.userId);
       pending.resolve(body.approved === true);
       return json({ ok: true, delivered: true });
     }
 
     if (request.method === 'POST' && path.endsWith('/questions')) {
+      if (!atLeast(caller.level, 'operator')) return this.refuseLevel(request, 'operator');
       const body = (await request.json().catch(() => ({}))) as {
         requestId?: string;
         response?: string;
@@ -795,6 +905,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       const pending = this.questions.get(body.requestId);
       if (!pending) return json({ ok: true, delivered: false });
       this.questions.delete(body.requestId);
+      this.rememberGateActor('question', body.requestId, caller.userId);
       pending.resolve(typeof body.response === 'string' ? body.response : '');
       return json({ ok: true, delivered: true });
     }
@@ -850,6 +961,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // PUBLIC surface lives in portal.ts and never reaches this method.
 
     if (request.method === 'POST' && path.endsWith('/publish')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       // Drain the body even though it is unused: leaving a request stream
       // unread inside a Durable Object throws "Can't read from request stream
       // after response has been sent" and wedges the connection for the
@@ -859,6 +971,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
 
     if (request.method === 'POST' && path.endsWith('/unpublish')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       await request.text().catch(() => '');
       const result = await portalIndex(this.env).unpublish(this.workflowKey());
       return json({ ok: true, removed: result.removed });
@@ -879,6 +992,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
 
     if (request.method === 'POST' && path.endsWith('/portal-tokens')) {
+      if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
       const body = (await request.json().catch(() => ({}))) as { label?: string };
       return this.mintPortalKey(body.label ?? '');
     }
@@ -887,6 +1001,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       const match =
         request.method === 'DELETE' ? /\/portal-tokens\/([^/]+)$/.exec(path) : null;
       if (match) {
+        if (!atLeast(caller.level, 'builder')) return this.refuseLevel(request, 'builder');
         await request.text().catch(() => '');
         return this.revokePortalKey(decodeURIComponent(match[1]));
       }
@@ -907,11 +1022,42 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get('token');
-    const auth = await this.verifyToken(token);
+    const verified = await this.verifyToken(token);
+    // The act-as header is applied here too, for the case the gateway cannot cover:
+    // an upgrade dispatched straight at the instance. `resolveCaller` below is
+    // called with NO method, so it fails closed and refuses an impersonated socket
+    // outright - which is the correct answer rather than an over-refusal, because
+    // every `ControlFrame` this socket accepts writes state (Requirement 14.5).
+    const auth = verified
+      ? applyImpersonation(verified, await resolveImpersonation(ctx.request, this.env))
+      : null;
     if (!auth || this.enforceOwnership(auth)) {
-      connection.close(4001, 'Unauthorized.');
+      this.closeMonitor(connection);
       return;
     }
+    // The monitor socket accepts `approval`, `question`, `event`, `trigger` and
+    // `stop` control frames, so it is a WRITE channel and the Role_Gate applies
+    // to it (design section 6.3, Requirement 6.2). Every one of those frames
+    // needs `operator`, which is the FLOOR, so ONE resolution at connect answers
+    // for all of them - and the admitted level is recorded ON THE CONNECTION so
+    // `onMessage` can refuse a frame without re-reading a membership row per
+    // frame and without ever holding the caller's token.
+    //
+    // `connection.setState` writes the socket's own hibernation attachment
+    // (partyserver keeps it under `__user`, beside its own `__pk` metadata), so
+    // the decision survives a Durable Object eviction exactly as long as the
+    // socket does. A socket opened by an older worker build carries no state and
+    // is therefore refused on its next frame, which is the correct direction: it
+    // reconnects.
+    const caller = await this.resolveCaller(auth);
+    if (caller instanceof Response) {
+      this.closeMonitor(connection);
+      return;
+    }
+    (connection as Connection<MonitorConnectionState>).setState({
+      level: caller.level,
+      userId: caller.userId,
+    });
     // Replay the current run's events so a late-joining monitor catches up.
     for (const event of this.eventLog) {
       connection.send(JSON.stringify(event));
@@ -926,7 +1072,37 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     );
   }
 
+  /**
+   * Refuses the socket. `close(4001)` is BEST EFFORT and deliberately not the
+   * enforcement: measured against the real deploy bundle, a close issued from
+   * inside `onConnect` is not delivered to the client at all - the socket stays
+   * open with `readyState === 1`, which is why the pre-existing `!auth` refusal
+   * above needed the frame-level guard in {@link onMessage} rather than just this
+   * line. The state is cleared FIRST so the guard refuses even if the close is
+   * dropped.
+   */
+  private closeMonitor(connection: Connection): void {
+    try {
+      (connection as Connection<MonitorConnectionState>).setState(null);
+    } catch {
+      // A socket with no attachment to clear is already in the refused state.
+    }
+    connection.close(4001, 'Unauthorized.');
+  }
+
   override async onMessage(connection: Connection, message: string | ArrayBuffer): Promise<void> {
+    // The Role_Gate on the socket. Every control frame below WRITES state - an
+    // approval, an answered question, a correlated event, a trigger, a stop - so
+    // none of them may act on a socket that was never admitted by `onConnect`
+    // (Requirement 6.2). Reading the recorded level rather than re-resolving it
+    // keeps this off the membership-read path, and an ABSENT level refuses:
+    // that is the whole reason `onConnect` records one.
+    const admitted = (connection as Connection<MonitorConnectionState>).state;
+    if (!admitted || !isCapabilityLevel(admitted.level) || !atLeast(admitted.level, 'operator')) {
+      this.closeMonitor(connection);
+      return;
+    }
+
     if (typeof message !== 'string') return;
     let frame: ControlFrame;
     try {
@@ -940,6 +1116,11 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         const pending = this.approvals.get(frame.requestId);
         if (pending) {
           this.approvals.delete(frame.requestId);
+          // The socket's own recorded identity (Requirement 10.5). Not the
+          // instance owner and not a re-resolved caller: this frame is an action by
+          // the person who opened THIS socket, which is the only thing the
+          // attachment can honestly say.
+          this.rememberGateActor('approval', frame.requestId, admitted.userId);
           pending.resolve(frame.approved);
         }
         break;
@@ -948,13 +1129,16 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         const pending = this.questions.get(frame.requestId);
         if (pending) {
           this.questions.delete(frame.requestId);
+          this.rememberGateActor('question', frame.requestId, admitted.userId);
           pending.resolve(frame.response ?? '');
         }
         break;
       }
       case 'event':
         if (frame.correlationKey?.trim()) {
-          this.deliverEvent(frame.correlationKey.trim(), frame.payload ?? '');
+          const key = frame.correlationKey.trim();
+          this.rememberGateActor('event', key, admitted.userId);
+          this.deliverEvent(key, frame.payload ?? '');
         }
         break;
       case 'trigger':
@@ -1031,6 +1215,110 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   // Every write is non-fatal (Requirement 2.8): a deployment that works but is
   // not listed is recoverable on the next wake, while refusing a deployment
   // because a bookkeeping write failed is not.
+
+  /**
+   * THE push path: validate, arm the cron, stamp the owner, write the state,
+   * write the registry record. Reached from two entrances and implemented once.
+   *
+   * The entrances are `POST /workflow` (a builder's push from the studio) and the
+   * {@link acceptSpecPush} RPC (a proposal publish, multi-organisation-phorma
+   * Requirement 12.7). ONE body, because "publishing a proposal produces the same
+   * validation findings, the same deployed state and the same registry record as
+   * pushing the spec directly" (Property 29) has to be a structural fact - two
+   * implementations agreeing today is not the same claim.
+   *
+   * `fallbackOwnerId` is used only when nothing is stamped yet. On a FIRST push
+   * that is the RESOLVED owner (Requirement 2.3), so a member's first deploy
+   * stamps the ORGANISATION rather than the member - otherwise the workflow they
+   * just deployed would be unreachable by every colleague and would need a claim
+   * to fix on day one.
+   */
+  private async applySpecPush(
+    spec: WorkflowSpec,
+    fallbackOwnerId: string | null,
+  ): Promise<SpecPushOutcome> {
+    if (!spec || spec.version !== 1 || !Array.isArray(spec.graph?.nodes)) {
+      return { ok: false, status: 400, error: 'Body must be a version-1 WorkflowSpec.' };
+    }
+    // Deploy-time capability gate (Requirements 17.12, 17.15): the SAME
+    // validator and the SAME connection inventory the studio checks at push
+    // time (Requirement 17.11, `CloudService.pushWorkflow`), run again here so
+    // a direct/older/misbehaving client can never deploy a spec this worker
+    // cannot run. An error finding aborts before `setState`/`rescheduleCron`
+    // run, so a previously deployed workflow is left completely unchanged.
+    // Warning-only findings never block the deployment.
+    //
+    // The vault fallback is the RESOLVED owner (Requirement 4.1): on a FIRST push
+    // no stamp exists yet, and reading the member's personal vault here would
+    // report every credential a colleague already stored as missing and refuse
+    // the deploy.
+    const connections = await this.connectionHost(spec.id, fallbackOwnerId).list();
+    const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, connections);
+    if (findings.some(finding => finding.severity === 'error')) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Workflow is not deployable to this worker.',
+        findings,
+      };
+    }
+    // Re-arm the schedule-trigger cron (if any) for the new spec.
+    await this.rescheduleCron(spec);
+    // Hosted mode: first push stamps ownership; later pushes keep it.
+    const ownerId = this.state.ownerId ?? fallbackOwnerId;
+    this.setState({
+      ...this.state,
+      spec,
+      savedAt: new Date().toISOString(),
+      ownerId,
+    });
+    // AFTER the capability gate and the state write, so a rejected push leaves
+    // the registry untouched (Requirement 2.5) and a listed deployment is
+    // always one that is really deployed.
+    await this.syncDeployment(spec, ownerId);
+    return { ok: true, name: spec.name };
+  }
+
+  /**
+   * The push path's SECOND entrance: a proposal publish, arriving from the worker
+   * rather than from a studio (Requirement 12.7).
+   *
+   * RPC and not `stub.fetch()`, for the documented reason `notificationsSince`,
+   * `purgeSelf` and `startPortalTurn` are all RPC: a worker-to-DO fetch carries no
+   * bearer for `authorized()` to check, so it would be refused. The caller has
+   * ALREADY verified the identity, resolved the owner and checked the `builder`
+   * capability at the proposal route; what is left for this method is the owner
+   * re-check, which it performs exactly as `notificationsSince` does.
+   *
+   * A public method IS the RPC surface on an `Agent` subclass, which is why the
+   * shared body above is a separate, private method rather than this one - the
+   * names differ only because TypeScript cannot hold two members with one name.
+   *
+   * It returns an OUTCOME rather than throwing on a refused push, because "the
+   * push was refused" is the case the caller must be able to act on: it leaves the
+   * proposal `pending` (Requirement 12.8) instead of recording a deploy that did
+   * not happen.
+   */
+  async acceptSpecPush(ownerId: string, spec: WorkflowSpec): Promise<SpecPushOutcome> {
+    // Mirrors `notificationsSince`: once an instance is owned, only its owner may
+    // move it. Defence in depth - the caller resolved this instance's name out of
+    // an owner-scoped registry prefix, so reaching here with a foreign owner means
+    // the caller has a bug. A THROW rather than a soft refusal, for the same
+    // reason it throws there: a refusal has to stay distinguishable from "nothing
+    // happened". BYO never denies (single-tenant).
+    if (this.hosted) {
+      const owner = this.state.ownerId;
+      if (owner && owner !== ownerId) {
+        throw new Error('Forbidden: this workflow belongs to another account.');
+      }
+    }
+    // A portal session instance is one visitor's conversation and is not a
+    // deployment, so nothing may be deployed into it.
+    if (this.state.portalSession) {
+      throw new Error('This instance is a portal session and holds no deployment.');
+    }
+    return this.applySpecPush(spec, ownerId);
+  }
 
   /**
    * Writes this instance's deployment record after an accepted spec push.
@@ -1133,6 +1421,93 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       // settings issue the owner sees 200 times.
       console.warn('backfillDeployment: failed', error);
     }
+  }
+
+  /**
+   * Moves this instance's stamped owner to `newOwnerId`, and its deployment
+   * registry record with it (Requirements 3.1, 3.5, 3.6).
+   *
+   * RPC, like `purgeSelf` and `notificationsSince`, because the worker has already
+   * verified the caller and resolved their level - and a worker-to-DO
+   * `stub.fetch()` would carry no bearer for `authorized()` to check. The
+   * capability gate is `requireCapability` at `builder` in `ownership-claim.ts`;
+   * this method owns only the decisions that need the instance's own state.
+   *
+   * THE INSTANCE DECIDES, in this order, and the order is load-bearing:
+   *
+   *  1. No stamp at all -> `claim_unowned`, so a claim never adopts an instance
+   *     that the ordinary first-push stamp would have owned (Requirement 3.4).
+   *     A never-deployed instance answers here, which is also what makes the route
+   *     safe to address by name: naming a workflow id nobody deployed creates a
+   *     blank instance and refuses.
+   *  2. Already stamped with the new owner -> idempotent success. BEFORE the
+   *     not-owner check on purpose (Requirement 3.8): after an accepted claim the
+   *     stamp is the ORGANISATION, which is not the acting user, so a repeat would
+   *     otherwise read as `claim_not_owner` and a retried request would look like a
+   *     failure over work that had already landed.
+   *  3. A stamp that is not the acting USER -> `claim_not_owner`
+   *     (Requirement 3.3). Against the acting user and NOT the resolved owner,
+   *     because moving a personally-owned deployment into an organisation is the
+   *     whole point - comparing the resolved owner would make the precondition
+   *     "the organisation already owns it", which is the state we are trying to
+   *     reach.
+   */
+  async claimOwnership(actingUserId: string, newOwnerId: string): Promise<ClaimOwnershipResult> {
+    // A portal session instance is one visitor's conversation, never a deployment,
+    // and it holds no claimable stamp (Requirement 2.8). It is unreachable through
+    // the route (the `#s` separator is refused there), so this is the structural
+    // guarantee for an RPC that is reachable by name.
+    if (this.state.portalSession) return { ok: false, code: 'claim_unowned' };
+
+    const previousOwnerId = this.state.ownerId;
+    if (!previousOwnerId) return { ok: false, code: 'claim_unowned' };
+    if (previousOwnerId === newOwnerId) {
+      return { ok: true, alreadyOwned: true, previousOwnerId };
+    }
+    if (previousOwnerId !== actingUserId) return { ok: false, code: 'claim_not_owner' };
+
+    // ONE write replaces the stamp. Durable Object state is a single
+    // `cf_agents_state` row and `setState` rewrites it, so there is no observable
+    // moment with two stamped owners or none (Requirement 3.5). Everything below
+    // therefore reads `this.state.ownerId` FRESH rather than from a variable
+    // captured before this line - a read that straddled it would be exactly the
+    // interleaving this single write exists to rule out.
+    this.setState({ ...this.state, ownerId: newOwnerId });
+
+    // WRITE FIRST, THEN REMOVE, and not the reverse (Requirement 3.6). A failure
+    // between the two leaves a DUPLICATE record, which the owner can see and which
+    // a later push or `backfillDeployment` corrects. The reverse order leaves NO
+    // record, which is invisible: a Durable Object namespace cannot be enumerated,
+    // so an absent record means an unnameable deployment, which is the exact defect
+    // this registry exists to close. Both calls are idempotent, so a retry of the
+    // whole claim converges.
+    try {
+      const index = portalIndex(this.env);
+      const workflowId = this.workflowKey();
+      const existing = await index.getDeployment(deploymentOwner(previousOwnerId), workflowId);
+      if (existing) {
+        await index.registerDeployment({ ...existing, ownerId: deploymentOwner(this.state.ownerId) });
+      } else {
+        // A deployment that predates the registry has no record to move. The
+        // backfill writes one from held state, under the owner this instance now
+        // holds, so a claimed pre-registry deployment becomes listable rather than
+        // staying invisible.
+        await this.backfillDeployment();
+      }
+      await index.deregisterDeployment(deploymentOwner(previousOwnerId), workflowId);
+    } catch (error) {
+      // Non-fatal, exactly like every other registry write here: the ownership
+      // move has landed, and a list that has not caught up is recoverable on the
+      // next push or wake. Refusing now would report a failure for a claim that
+      // succeeded.
+      this.reportSettingsIssue(
+        `${WORKER_HOST_LABEL}: this deployment moved owner, but the deployment list ` +
+          `could not be updated (${messageOf(error)}). The list catches up on the next ` +
+          `push or wake.`,
+      );
+    }
+
+    return { ok: true, alreadyOwned: false, previousOwnerId };
   }
 
   /**
@@ -1364,7 +1739,13 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     if (this.hosted) {
       const ownerId = this.state.ownerId;
       if (!ownerId) return { ok: false, error: 'Workflow has no owner. Push it again.', status: 409 };
-      const gate = await resolveHostedInference(store, ownerId);
+      // The deployed workflow's own id, which this instance already holds
+      // (multi-organisation-phorma Requirement 15.3). The gate reads it in no
+      // release yet; passing it now is what keeps per-workflow pricing a policy
+      // change inside the gate rather than a signature change reaching in here.
+      const gate = await resolveHostedInference(store, ownerId, {
+        workflowId: spec.id ?? undefined,
+      });
       if ('status' in gate) {
         return { ok: false, error: gate.error, status: gate.status, code: gate.code };
       }
@@ -1533,10 +1914,16 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
         // UI use that provider to render credits instead of dollars (plan
         // subscribers must never see raw USD). BYO deployments keep their
         // real provider names (their cost IS dollars).
-        const event =
+        const relabelled =
           this.hosted && rawEvent.type === 'node-usage'
             ? { ...rawEvent, provider: 'phorma-cloud' }
             : rawEvent;
+        // Requirement 10.5: a gate settled by a member carries that member's id
+        // alongside its outcome. Stamped HERE, above the one tee every consumer
+        // hangs off, so the recorder (run history), the monitors and the
+        // notification projection all see the same event - RunEvents stay the only
+        // contract and no second channel carries the identity.
+        const event = attributeGateActor(relabelled, this.gateActors);
         if (event.type === 'node-usage') {
           runUsage.inputTokens += event.usage.inputTokens ?? 0;
           runUsage.outputTokens += event.usage.outputTokens ?? 0;
@@ -2112,6 +2499,21 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   }
 
   /**
+   * Remembers who settled a gate, for the one event that reports its outcome.
+   *
+   * A null or absent id is NOT recorded, and the two cases that produce one are
+   * both real: a BYO `shared` credential has no subject, and a socket opened by a
+   * worker build that predates this field carries no `userId` in its attachment.
+   * Recording a placeholder would put a name that means nothing into run history,
+   * where it is indistinguishable from a real one - an absent `actor` says "nobody
+   * is recorded", which is the truth in both cases.
+   */
+  private rememberGateActor(kind: GateKind, id: string, userId: string | null | undefined): void {
+    if (!userId) return;
+    this.gateActors.set(gateActorKey(kind, id), userId);
+  }
+
+  /**
    * Settles and forgets every suspended gate, so no engine promise dangles.
    *
    * Called from the two places a run stops being resumable: the `stop` control
@@ -2131,6 +2533,10 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     this.questions.clear();
     for (const pending of this.waits.values()) pending.resolve('');
     this.waits.clear();
+    // Nobody settled these, so nobody is attributed. Clearing here rather than
+    // letting the entries expire also keeps an id recorded a moment before a stop
+    // from being spent on a gate of the NEXT run with the same request id.
+    this.gateActors.clear();
   }
 
   private deliverEvent(correlationKey: string, payload: string): boolean {
@@ -2429,6 +2835,15 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // its owner may read it. Defence in depth - the caller resolved this name
     // from an owner-scoped prefix, so reaching here with a foreign owner means
     // the aggregator has a bug. BYO never denies (single-tenant).
+    //
+    // A THROW and not an empty payload, deliberately, against the letter of
+    // multi-organisation-phorma Requirement 4.5. Nothing is disclosed either way -
+    // the aggregator catches it and records the workflow in `unreachable` - but an
+    // empty payload makes a refusal indistinguishable from "nothing has happened",
+    // and this refusal is the ONLY observable answer to "who owns this instance"
+    // that exists: it is how `organisation-isolation.test.mjs` proves the instance
+    // refuses ALONE with the gateway out of the path (Requirement 2.5), and how
+    // `ownership-claim.test.mjs` reads the stamp before and after a claim.
     if (this.hosted) {
       const owner = this.state.ownerId;
       if (owner && owner !== ownerId) {
@@ -2699,9 +3114,26 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     return isHosted(this.env);
   }
 
-  /** Verifies an Authorization header (shared logic in ./auth). */
-  private authorized(request: Request): Promise<AuthContext | null> {
-    return verifyRequest(this.env, request);
+  /**
+   * Verifies an Authorization header (shared logic in ./auth), then applies the
+   * operator act-as header if one was honoured.
+   *
+   * The impersonation resolution is REPEATED here rather than trusted from the
+   * gateway, and that is the whole of Requirement 14.7's "inside the
+   * Workflow_Agent" half: an instance is reachable by name with the gateway
+   * entirely out of the path, exactly as `enforceOwnership` exists for. So the
+   * owner substitution and the read-only refusal are both resolved from the
+   * request the INSTANCE received, off the allowlist the instance binds.
+   *
+   * Substituting the owner is what lets `enforceOwnership` admit an operator's
+   * READ of a customer's instance; the refusal then happens one step later, in
+   * {@link resolveCaller}, for a write. Refusing here instead would make a read
+   * and a write indistinguishable and would lose the whole read half.
+   */
+  private async authorized(request: Request): Promise<AuthContext | null> {
+    const auth = await verifyRequest(this.env, request);
+    if (!auth) return null;
+    return applyImpersonation(auth, await resolveImpersonation(request, this.env));
   }
 
   /** Validates a bearer token (shared logic in ./auth). */
@@ -2717,10 +3149,74 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private enforceOwnership(auth: AuthContext): Response | null {
     if (!this.hosted) return null;
     const owner = this.state.ownerId;
-    if (owner && owner !== auth.userId) {
+    // The RESOLVED owner, not the caller: a stamp is an organisation once a claim
+    // or a first push put one there, and every member of that organisation
+    // resolves it (Requirement 2.4). Comparing `auth.userId` here would refuse
+    // every member but the one who happened to deploy.
+    //
+    // The FIELD rather than `resolveOwner(auth)`, which is what `resolveOwner`'s own
+    // doc comment asks of a caller holding a context it did not verify itself. The
+    // two are identical for every verified credential - `verifyBearer` fills the
+    // field by calling the function - and they differ for exactly one context:
+    // an impersonated one, where `applyImpersonation` substitutes the field and
+    // leaves the verified claims alone. Recomputing here would compare the
+    // OPERATOR's own account against the stamp and refuse every impersonated read.
+    //
+    // This is the SECOND isolation layer and it must be able to refuse ALONE
+    // (Requirement 2.5). The gateway in `index.ts` is one `if` over a string
+    // prefix and simply does not run for an RPC entry point - `notificationsSince`,
+    // `purgeSelf` and `startPortalTurn` are all reached that way, because a
+    // worker-to-DO `stub.fetch()` carries no bearer for `authorized()` to check.
+    if (owner && owner !== auth.ownerId) {
       return json({ error: 'Forbidden: this workflow belongs to another account.' }, 403);
     }
     return null;
+  }
+
+  /**
+   * The THIRD step of every request, after `authorized` (who are you) and
+   * `enforceOwnership` (whose instance is this): what may you do.
+   *
+   * It resolves the level ONCE per request and returns the `role_unknown`
+   * refusal itself, so no dispatch branch has to answer that case and a route
+   * with two checks still costs one membership read. What it deliberately does
+   * NOT do is decide which level a route requires - that would put a second
+   * route table beside the dispatch below, and two path matchers for one
+   * dispatch is how one of them starts admitting what the other refuses.
+   *
+   * `requireCapability` is asked for `operator`, the FLOOR: every resolvable
+   * level holds it, so the only things this call can refuse are an unresolvable
+   * role and an impersonated WRITE. Each branch then compares against its own
+   * literal.
+   *
+   * `method` is passed because this one gate serves reads and writes alike, and
+   * the impersonation refusal is write-scoped: an operator acting as a customer
+   * may read this instance and may write nothing on it (Requirement 14.5).
+   * OMITTING the method fails closed, so the socket path below - where every
+   * control frame writes - correctly passes none.
+   *
+   * Free on an install with no organisation: `resolveRole` short-circuits to
+   * `admin` on an absent organisation claim without reading `DB` or `TENANTS`.
+   */
+  private async resolveCaller(
+    auth: AuthContext,
+    method?: string,
+  ): Promise<AuthorizedCaller | Response> {
+    return requireCapability(this.env, auth, 'operator', json, { method });
+  }
+
+  /**
+   * The `role_forbidden` refusal, with the request body DRAINED first.
+   *
+   * The drain is not hygiene. Leaving a request stream unread inside a Durable
+   * Object throws "Can't read from request stream after response has been sent"
+   * and wedges the connection for the caller's NEXT request on the same socket -
+   * the same reason `/publish` drains a body it never uses. A refusal on
+   * `POST /trigger` carries a JSON body, so every level refusal has to do it.
+   */
+  private async refuseLevel(request: Request, required: CapabilityLevel): Promise<Response> {
+    await request.text().catch(() => '');
+    return roleForbidden(required, json);
   }
 
   /** Month-to-date usage, resetting when the calendar month rolls over. */
@@ -2746,7 +3242,12 @@ function json(body: unknown, status = 200): Response {
       // The studio calls from a Tauri webview / localhost dev server.
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      // The SECOND copy of the gateway's header list (`corsHeaders` in
+      // `index.ts`). The two can drift, so anything added there is added here.
+      // `X-Phorma-Act-As` is on both because the preflight is answered by the
+      // GATEWAY while these responses are the instance's, and a header allowed in
+      // one place and not the other is a browser dropping it silently.
+      'Access-Control-Allow-Headers': `Authorization, Content-Type, ${ACT_AS_HEADER}`,
     },
   });
 }

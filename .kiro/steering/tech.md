@@ -50,21 +50,22 @@ or start them as a background process.
 
 ```powershell
 cd frontend; npm run build                       # production build: the ONLY thing that checks Angular budgets
-cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1411 specs, ~25s
+cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1529 specs, ~25s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
-cd engine;   npm run test:e2e                    # all 11 test/*.e2e.mts scenario scripts
-cd cloud;    npm run test:unit                   # 29 worker suites (`test` is the same; the portal e2e is manual)
+cd engine;   npm run test:e2e                    # all 12 test/*.e2e.mts scenario scripts
+cd cloud;    npm run test:unit                   # 39 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
 cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)
 cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
 cd backend/src-tauri; cargo test                 # 30 unit tests (sql, llm, data, deploy_assets)
-cd admin; npm run build                          # dashboard production build: 791 kB initial, 1.5MB warning / 2MB error
-cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 43 specs, ~15s
+cd admin; npm run build                          # dashboard production build: 831 kB initial, 1.5MB warning / 2MB error
+cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 55 specs, ~17s
 node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
 node scripts/check-telemetry-catalog.mjs         # the two Counter_Catalog twins and the D1 migration still agree
 node scripts/check-telemetry-isolation.mjs       # TelemetryService import list is still a DI leaf
+node scripts/check-capability-isolation.mjs      # CapabilityService is still a DI leaf, and no level token is compared outside it
 node scripts/check-telemetry-secrets.mjs         # after the admin build: no admin secret, no sk_ key in the bundle
 node scripts/check-admin-conventions.mjs         # dashboard templates: Tabler icons, no p-dialog, explicit sizes
 ```
@@ -84,7 +85,7 @@ manually started `wrangler dev` and a local model.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
   warning / 26kB error. `initial` currently sits at 2.87MB, so the warning is expected and only the
   3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
-  791kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
+  831kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
   (chart.js) behind `@defer (on immediate)`.
 - `engine/` has no local TypeScript install. For a type-only check there use
   `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json`. Running `npx tsc` inside

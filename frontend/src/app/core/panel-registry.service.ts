@@ -1,4 +1,6 @@
 import { effect, inject, Injectable, signal, computed } from '@angular/core';
+import type { CapabilityLevel } from './capabilities';
+import { CapabilityService } from './capability.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import { counterName } from './telemetry-catalog';
 import { TelemetryService } from './telemetry.service';
@@ -13,6 +15,19 @@ export interface PanelTab {
   order: number;
   /** Whether the tab is shown in its sidebar. Hidden tabs can be reopened via the Window menu. */
   visible: boolean;
+  /**
+   * The minimum Capability_Level this tab requires, if it requires one.
+   *
+   * DATA, not a decision (Requirement 7.5): the comparison happens once, in the
+   * `leftTabs` / `rightTabs` computeds, through `CapabilityService.allows`. An
+   * absent value means the tab needs no particular level, and that default lives
+   * inside the capability module rather than here - see `allows`.
+   *
+   * Not persisted in any meaningful sense: `loadTabs` takes `side`, `order` and
+   * `visible` off the saved layout and everything else off `DEFAULT_TABS`, so a
+   * minimum changed in a later release is adopted rather than restored stale.
+   */
+  minLevel?: CapabilityLevel;
 }
 
 /** Default width for each side panel (px) when no saved width exists. */
@@ -30,19 +45,24 @@ export const LAYOUT_VERSION = 2;
  * Default tab layout — used for fresh installs and when resetting panels.
  * First-run keeps the workspace focused: Agents/Workflows/Runs on the left,
  * Prompt/Properties on the right. Everything else opens via the Window menu.
+ *
+ * `minLevel` is declared where a tab is a BUILDER surface: Skills, Connections,
+ * Evals and Portal each configure how workflows are built and shipped rather than
+ * showing what a run did. Everything else is absent, which reads as "no particular
+ * level" inside `CapabilityService.allows`.
  */
 const DEFAULT_TABS: PanelTab[] = [
   { id: 'agents',     label: 'Agents',     icon: 'ti ti-robot',      side: 'left',  order: 0, visible: true },
   { id: 'workflows',  label: 'Workflows',  icon: 'ti ti-topology-star-3', side: 'left', order: 1, visible: true },
   { id: 'runs',       label: 'Runs',       icon: 'ti ti-history',    side: 'left',  order: 2, visible: true },
-  { id: 'skills',     label: 'Skills',     icon: 'ti ti-books',      side: 'left',  order: 3, visible: false },
-  { id: 'connections', label: 'Connections', icon: 'ti ti-plug-connected', side: 'left', order: 4, visible: false },
+  { id: 'skills',     label: 'Skills',     icon: 'ti ti-books',      side: 'left',  order: 3, visible: false, minLevel: 'builder' },
+  { id: 'connections', label: 'Connections', icon: 'ti ti-plug-connected', side: 'left', order: 4, visible: false, minLevel: 'builder' },
   { id: 'prompt',     label: 'Prompt',     icon: 'ti ti-message-2',  side: 'right', order: 0, visible: true },
   { id: 'properties', label: 'Properties', icon: 'ti ti-adjustments', side: 'right', order: 1, visible: true },
   { id: 'usage',      label: 'Usage',      icon: 'ti ti-chart-bar',  side: 'right', order: 2, visible: false },
-  { id: 'evals',      label: 'Evals',      icon: 'ti ti-flask',      side: 'right', order: 3, visible: false },
+  { id: 'evals',      label: 'Evals',      icon: 'ti ti-flask',      side: 'right', order: 3, visible: false, minLevel: 'builder' },
   { id: 'assistant',  label: 'Assistant',  icon: 'ti ti-sparkles',   side: 'right', order: 4, visible: false },
-  { id: 'portal',     label: 'Portal',     icon: 'ti ti-world-share', side: 'right', order: 5, visible: false },
+  { id: 'portal',     label: 'Portal',     icon: 'ti ti-world-share', side: 'right', order: 5, visible: false, minLevel: 'builder' },
 ];
 
 /**
@@ -56,6 +76,10 @@ export class PanelRegistryService {
   // `TauriService`, so this edge cannot pull a service back into the layout
   // shell that reads this registry at startup.
   private readonly telemetry = inject(TelemetryService);
+  // Same justification, and `scripts/check-capability-isolation.mjs` keeps it
+  // true: `CapabilityService` injects NOTHING at all, so it cannot pull a member
+  // of the NG0200 run/model/cloud cycle into this registry's injector.
+  private readonly capability = inject(CapabilityService);
 
   private readonly _tabs = signal<PanelTab[]>(this.loadTabs());
 
@@ -70,28 +94,72 @@ export class PanelRegistryService {
   readonly collapsedLeft  = signal(loadLayout('collapsedLeft', false));
   readonly collapsedRight = signal(loadLayout('collapsedRight', false));
 
-  /** All registered tabs */
+  /**
+   * All registered tabs, capability filter and visibility included.
+   *
+   * Read by callers that only need "which side hosts X": the registry is the
+   * record of the user's arrangement, and that record is unchanged by the level.
+   * A surface that OFFERS a tab to the user wants {@link allowedTabs} instead.
+   */
   readonly tabs = this._tabs.asReadonly();
 
-  /** Active tab id on the left side */
-  readonly activeLeft  = this._activeLeft.asReadonly();
-
-  /** Active tab id on the right side */
-  readonly activeRight = this._activeRight.asReadonly();
+  /**
+   * Every tab this session's Capability_Level permits, visible or hidden.
+   *
+   * The list a menu offers. `leftTabs` / `rightTabs` subtract hidden tabs too, so
+   * they cannot answer "what could this user reopen" - and a Window-menu entry
+   * that shows a tab the sidebar then filters out is a control that does nothing.
+   */
+  readonly allowedTabs = computed(() =>
+    this._tabs().filter(t => this.capability.allows(t.minLevel))
+  );
 
   /** Current measured panel widths, used by floating chrome such as the console. */
   readonly leftWidth = this._leftWidth.asReadonly();
   readonly rightWidth = this._rightWidth.asReadonly();
 
-  /** Visible tabs belonging to the left side, sorted by order */
+  /**
+   * Visible tabs belonging to the left side, sorted by order.
+   *
+   * The capability filter is SUBTRACTIVE and lives HERE rather than in `_tabs`
+   * (Requirement 7.3). That distinction is load-bearing: `loadTabs()` merges the
+   * saved side, order and visibility onto `DEFAULT_TABS` and a constructor
+   * `effect` persists `_tabs`, so dropping an entry from `_tabs` would delete it
+   * from the user's saved layout - and a member later promoted to builder would
+   * find their arrangement gone. Filtering in the computed makes a promotion a
+   * single signal write that puts every tab back where the user left it.
+   *
+   * `allows(t.minLevel)` and never `atLeastLevel(t.minLevel ?? 'operator')`: the
+   * absent-means-no-minimum default belongs inside the capability module, or this
+   * line carries a level literal Requirement 7.4 forbids.
+   */
   readonly leftTabs = computed(() =>
-    this._tabs().filter(t => t.side === 'left' && t.visible).sort((a, b) => a.order - b.order)
+    this._tabs()
+      .filter(t => t.side === 'left' && t.visible && this.capability.allows(t.minLevel))
+      .sort((a, b) => a.order - b.order)
   );
 
   /** Visible tabs belonging to the right side, sorted by order */
   readonly rightTabs = computed(() =>
-    this._tabs().filter(t => t.side === 'right' && t.visible).sort((a, b) => a.order - b.order)
+    this._tabs()
+      .filter(t => t.side === 'right' && t.visible && this.capability.allows(t.minLevel))
+      .sort((a, b) => a.order - b.order)
   );
+
+  /**
+   * Active tab id on the left side.
+   *
+   * Derived rather than raw, for the same reason the tab lists are: the stored
+   * choice is the USER's and survives a level change untouched, while what the
+   * sidebar renders has to be a tab that side is actually showing. Without the
+   * fallback, an account demoted below `builder` whose last active right-hand tab
+   * was Portal would open onto a tab strip that does not contain it and a pane
+   * that renders nothing.
+   */
+  readonly activeLeft = computed(() => this.resolveActive(this._activeLeft(), this.leftTabs()));
+
+  /** Active tab id on the right side */
+  readonly activeRight = computed(() => this.resolveActive(this._activeRight(), this.rightTabs()));
 
   constructor() {
     // Persist collapse + width state so the layout survives app restarts.
@@ -105,6 +173,17 @@ export class PanelRegistryService {
     effect(() => saveLayout('panelTabs', this._tabs()));
     effect(() => saveLayout('activeLeft', this._activeLeft()));
     effect(() => saveLayout('activeRight', this._activeRight()));
+  }
+
+  /**
+   * The id a side should render: the stored choice when that side is showing it,
+   * otherwise the first tab it is showing. Falls back to the stored choice when a
+   * side is showing nothing at all, because the sidebar collapses to zero width in
+   * that case and no pane is rendered either way.
+   */
+  private resolveActive(stored: string, shown: readonly PanelTab[]): string {
+    if (shown.length === 0) return stored;
+    return shown.some(t => t.id === stored) ? stored : shown[0].id;
   }
 
   setActive(side: 'left' | 'right', tabId: string): void {
