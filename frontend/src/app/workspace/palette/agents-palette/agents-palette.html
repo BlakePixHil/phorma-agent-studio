@@ -36,6 +36,13 @@
     }
   </div>
 
+  <!-- System One assists: deferred, and only when a decision backend exists. -->
+  @if (decisionsAvailable()) {
+    @defer (on idle) {
+      <app-palette-assist [query]="query()" [noResults]="!hasResults()" />
+    }
+  }
+
   <div class="phorma-palette__scroll">
     @for (section of sections(); track section.key) {
       <section class="phorma-palette__section" [style.--section-color]="section.color">

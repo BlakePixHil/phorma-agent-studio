@@ -345,6 +345,13 @@
   </section>
 }
 
+<!-- System One (TypeSafe Jev): deferred so it stays out of the initial bundle -->
+@if (has('system-one')) {
+  @defer (on immediate) {
+    <app-agent-decisions [agent]="agent()" [scope]="scope()" />
+  }
+}
+
 <!-- Capabilities summary -->
 @if (has('capabilities')) {
   <section class="phorma-prompt__section">

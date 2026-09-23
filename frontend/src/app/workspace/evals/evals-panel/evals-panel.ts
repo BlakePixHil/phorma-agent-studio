@@ -15,6 +15,7 @@ import { TextareaModule } from 'primeng/textarea';
 
 import {
   evalPassCounts,
+  isJudgeMatcher,
   type EvalCase,
   type EvalCaseResult,
   type EvalMatcher,
@@ -47,6 +48,7 @@ const MATCHER_OPTIONS: { id: EvalMatcher; label: string }[] = [
   { id: 'exact', label: 'Exact match' },
   { id: 'contains', label: 'Contains' },
   { id: 'llm-judge', label: 'LLM judge' },
+  { id: 'decision-judge', label: 'System One judge' },
 ];
 
 /**
@@ -266,6 +268,10 @@ export class EvalsPanel {
   }
 
   /** True when any case uses the llm-judge matcher. */
+  protected isReferenceMatcher(matcher: EvalMatcher): boolean {
+    return isJudgeMatcher(matcher);
+  }
+
   protected readonly usesJudge = computed(() =>
     (this.selectedSuite()?.cases ?? []).some(item => item.matcher === 'llm-judge'),
   );

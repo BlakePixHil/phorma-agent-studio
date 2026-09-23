@@ -12,6 +12,10 @@
  * - `contains` — case-insensitive substring.
  * - `llm-judge` — a one-off model call grades the output against the
  *   expectation (plus optional free-form criteria) and returns strict JSON.
+ * - `decision-judge` - System One answers a calibrated battery (answers the
+ *   input, matches expected, contradicts expected, meets criteria) and the
+ *   weighted composite is the score. Deterministic at a fixed model version,
+ *   and roughly a thousand times cheaper than an LLM judge.
  *
  * Pure TypeScript, zero framework dependencies — same rules as the rest of
  * the engine package.
@@ -20,9 +24,16 @@
 import type { ModelClient, ModelRequest } from './model.js';
 import type { ModelProviderId } from './types.js';
 import type { RunEnvironment } from './run-record.js';
+import { DEFAULT_DECISION_MODEL, decisionCostUsd, type DecisionClient } from './decisions.js';
+import { judgeQuestions, judgeScore } from './decision-batteries.js';
 
 /** How a case's expected value is compared against the run output. */
-export type EvalMatcher = 'exact' | 'contains' | 'llm-judge';
+export type EvalMatcher = 'exact' | 'contains' | 'llm-judge' | 'decision-judge';
+
+/** True for matchers that grade against a reference answer (and take criteria). */
+export function isJudgeMatcher(matcher: EvalMatcher): boolean {
+  return matcher === 'llm-judge' || matcher === 'decision-judge';
+}
 
 /** One test case in a suite. */
 export interface EvalCase {
@@ -52,6 +63,8 @@ export interface EvalSuite {
   cases: EvalCase[];
   /** Model used for llm-judge scoring; host default model when absent. */
   judge?: EvalModelRef;
+  /** decision-judge tuning: pass threshold (default 0.7) and pinned model. */
+  decisionJudge?: { passAt?: number; model?: string };
   /**
    * Comparison matrix: when present, the suite runs once per model with
    * `RunOptions.defaultModel` overridden (agents pinning an explicit model
@@ -137,16 +150,32 @@ export interface EvalJudgeOptions {
   >;
 }
 
+/** Options for {@link scoreOutput} when the case uses the decision-judge matcher. */
+export interface EvalDecisionJudgeOptions {
+  client: DecisionClient;
+  /** Pinned model; `jev-latest` when absent. */
+  model?: string;
+  /** Composite score at or above this passes (default 0.7). */
+  passAt?: number;
+}
+
+/** A decision-judge verdict carries its own cost so hosts can add it to the case. */
+export interface EvalDecisionScore extends EvalScore {
+  costUsd: number;
+}
+
 /**
  * Scores a run output against a case. Deterministic matchers are pure;
- * `llm-judge` requires {@link EvalJudgeOptions} and makes one model call.
- * Judge failures (unusable response, thrown error) reject — the caller
- * records the case as `error`, never silently passed/failed.
+ * `llm-judge` requires {@link EvalJudgeOptions} and makes one model call;
+ * `decision-judge` requires {@link EvalDecisionJudgeOptions} and makes one
+ * System One call. Judge failures (unusable response, thrown error) reject -
+ * the caller records the case as `error`, never silently passed/failed.
  */
 export async function scoreOutput(
   evalCase: EvalCase,
   output: string,
   judge?: EvalJudgeOptions,
+  decisionJudge?: EvalDecisionJudgeOptions,
 ): Promise<EvalScore> {
   switch (evalCase.matcher) {
     case 'exact': {
@@ -169,7 +198,35 @@ export async function scoreOutput(
       if (!judge) throw new Error('llm-judge matcher requires a judge model.');
       return judgeOutput(evalCase, output, judge);
     }
+    case 'decision-judge': {
+      if (!decisionJudge) {
+        throw new Error(
+          'decision-judge matcher requires System One. Add a TypeSafe key in Settings or sign in to Phorma Cloud.',
+        );
+      }
+      return decisionJudgeOutput(evalCase, output, decisionJudge);
+    }
   }
+}
+
+/** One System One call grading `output` against the case. */
+export async function decisionJudgeOutput(
+  evalCase: EvalCase,
+  output: string,
+  options: EvalDecisionJudgeOptions,
+): Promise<EvalDecisionScore> {
+  const clipField = (text: string): string => clip(text || '(empty)', 20_000);
+  const result = await options.client.evaluate({
+    model: options.model?.trim() || DEFAULT_DECISION_MODEL,
+    state: {
+      input: clipField(evalCase.input),
+      output: clipField(output),
+      expected: clipField(evalCase.expected),
+    },
+    questions: judgeQuestions(evalCase.judgeCriteria),
+  });
+  const verdict = judgeScore(result.answers, options.passAt ?? 0.7);
+  return { ...verdict, costUsd: decisionCostUsd(result.usage) };
 }
 
 async function judgeOutput(

@@ -157,7 +157,8 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
   {
     id: 'agent-classifier',
     label: 'Classifier',
-    description: 'Sorts incoming work into exactly one category.',
+    description:
+      'Sorts incoming work into exactly one category. For routing, a Router in System One mode is cheaper and calibrated.',
     icon: 'ti ti-category',
     category: 'agent',
     kind: 'agent',

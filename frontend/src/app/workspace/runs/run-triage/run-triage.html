@@ -1,0 +1,37 @@
+<div class="phorma-triage" aria-live="polite">
+  @switch (state()) {
+    @case ('idle') {
+      <button type="button" class="phorma-triage__ask" (click)="triage()">
+        <i class="ti ti-stethoscope" aria-hidden="true"></i>
+        Why did this fail?
+      </button>
+    }
+    @case ('loading') {
+      <p class="phorma-triage__note"><i class="ti ti-loader-2 phorma-triage__spin" aria-hidden="true"></i>Diagnosing</p>
+    }
+    @case ('failed') {
+      <p class="phorma-triage__note">System One could not diagnose this failure.</p>
+    }
+    @case ('done') {
+      @if (verdict(); as v) {
+        <div class="phorma-triage__card">
+          <p class="phorma-triage__title">
+            <i class="ti ti-stethoscope" aria-hidden="true"></i>
+            <span>{{ v.category }}</span>
+            <span class="phorma-triage__pct" title="System One confidence">{{ percent(v.confidence) }}</span>
+          </p>
+          <p class="phorma-triage__remedy">{{ v.remedy }}</p>
+          <p class="phorma-triage__retry">
+            @if (v.retryLikely >= 0.6) {
+              A plain retry would likely succeed ({{ percent(v.retryLikely) }}).
+            } @else if (v.retryLikely <= 0.3) {
+              A plain retry would likely fail again.
+            } @else {
+              A plain retry may or may not help.
+            }
+          </p>
+        </div>
+      }
+    }
+  }
+</div>

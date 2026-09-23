@@ -118,6 +118,12 @@ export interface DataHosts {
   state?: WorkflowStateStore;
   fixtures?: import('@phorma/engine').FixtureStore;
   redact?: (value: string) => string;
+  /**
+   * System One (TypeSafe Jev). Built from the `typesafe` provider key when one
+   * is in Secret_Store; absent otherwise, and the engine then falls back
+   * (Router) or fails naming the capability (every other System One step).
+   */
+  decisions?: import('@phorma/engine').DecisionClient;
 }
 
 /**
@@ -221,6 +227,12 @@ export interface TriggerInput {
 // Run outcome
 // ---------------------------------------------------------------------------
 
+/** The engine's root-level terminal event, as the runner records it. */
+type TerminalEvent =
+  | { type: 'run-completed' }
+  | { type: 'run-failed'; error: string }
+  | { type: 'run-stopped' };
+
 export type RunOutcome =
   | { status: 'completed' }
   | { status: 'failed'; error: string }
@@ -296,6 +308,13 @@ export async function executeRun(
   let leaseLost = false;
   let stopped = false;
   let runHandle: RunHandle | undefined;
+  /**
+   * The engine's terminal event. `RunHandle.done` resolves for a failed or
+   * stopped run too (the engine reports those as events, not rejections), so
+   * the outcome must come from here or every failure would settle `completed`.
+   */
+  let terminal: TerminalEvent | null = null;
+  const settledTerminal = (): TerminalEvent | null => terminal;
 
   // Pending suspensions for frame routing
   const pendingApprovals = new Set<string>();
@@ -328,6 +347,13 @@ export async function executeRun(
   // ─── Event emission handler ────────────────────────────────────────────
   const emit = async (event: RunEvent): Promise<void> => {
     if (leaseLost) return; // Req 2.6: no further write after lease loss
+
+    // Root-level terminal events only; a sub-workflow frame never settles the run.
+    if (!event.scope?.length) {
+      if (event.type === 'run-completed') terminal = { type: 'run-completed' };
+      else if (event.type === 'run-failed') terminal = { type: 'run-failed', error: event.error };
+      else if (event.type === 'run-stopped') terminal = { type: 'run-stopped' };
+    }
 
     eventSequence += 1;
 
@@ -399,6 +425,7 @@ export async function executeRun(
     state: dataHosts.state,
     fixtures: dataHosts.fixtures,
     redact: dataHosts.redact,
+    decisions: dataHosts.decisions,
 
     // Suspension handlers
     requestApproval: (nodeId, message, payload, requestId) => {
@@ -481,7 +508,11 @@ export async function executeRun(
   let outcome: RunOutcome;
   try {
     await runHandle.done;
-    outcome = { status: 'completed' };
+    const settled = settledTerminal();
+    if (leaseLost) outcome = { status: 'failed', error: 'lease loss' };
+    else if (settled?.type === 'run-failed') outcome = { status: 'failed', error: settled.error };
+    else if (settled?.type === 'run-stopped' || stopped) outcome = { status: 'stopped' };
+    else outcome = { status: 'completed' };
   } catch (err: unknown) {
     if (leaseLost) {
       outcome = { status: 'failed', error: 'lease loss' };

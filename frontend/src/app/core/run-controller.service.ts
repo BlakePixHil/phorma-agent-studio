@@ -5,6 +5,7 @@ import {
   BROWSER_CAPABILITIES,
   createRedactor,
   decisionEdgeLabels,
+  describeDecisionOutcome,
   type DecisionEdgeLabel,
   DEFAULT_MAX_RESPONSE_BYTES,
   startRun,
@@ -988,7 +989,7 @@ export class RunControllerService {
         this.console(
           'run',
           'warning',
-          `${event.nodeName}: primary model ${event.fromModel} failed — switching to fallback ${event.toModel}.`,
+          `${event.nodeName}: switching from ${event.fromModel} to fallback ${event.toModel}. ${event.error}`,
         );
         break;
 
@@ -1013,15 +1014,7 @@ export class RunControllerService {
         this.console(
           'run',
           event.fallback ? 'warning' : 'info',
-          `${event.nodeName}: System One ${
-            event.fallback === 'no-transport'
-              ? 'unavailable - keyword routing used'
-              : event.fallback === 'low-confidence'
-                ? 'unsure - took the unsure route'
-                : event.purpose === 'gate'
-                  ? 'assessed the approval'
-                  : 'decided'
-          }.`,
+          `${event.nodeName}: System One ${describeDecisionOutcome(event)}.`,
         );
         break;
       }

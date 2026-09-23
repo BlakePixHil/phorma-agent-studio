@@ -1,4 +1,9 @@
-import { CLOUDFLARE_CAPABILITIES, portBaseId, validateAgainstCapabilities } from '@phorma/engine';
+import {
+  CLOUDFLARE_CAPABILITIES,
+  portBaseId,
+  usesDecisions,
+  validateAgainstCapabilities,
+} from '@phorma/engine';
 import { WORKFLOW_TEMPLATES, findWorkflowTemplate } from './workflow-templates';
 import type { WorkflowGraph } from './workflow.model';
 
@@ -121,5 +126,25 @@ describe('Jira Time-Log Safety Net template', () => {
     const data = email.data as { authMode?: string; authKey?: string };
     expect(data.authMode).not.toBe('oauth');
     expect(data.authKey).toBeTruthy();
+  });
+});
+
+describe('System One templates', () => {
+  for (const id of ['tpl-support-triage', 'tpl-verified-extraction']) {
+    it(`${id} is deployable to Cloudflare and uses System One`, () => {
+      const spec = findWorkflowTemplate(id)!.build();
+      expect(validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, [])).toEqual([]);
+      expect(usesDecisions(spec.graph)).toBeTrue();
+    });
+  }
+
+  it('points every support-triage route criterion and the unsure port at real ports', () => {
+    const router = findWorkflowTemplate('tpl-support-triage')!
+      .build()
+      .graph.nodes.find(node => node.kind === 'router')!;
+    const ids = new Set(router.ports.map(port => port.id));
+    const data = router.data as { routeCriteria: Record<string, string>; unsurePortId: string };
+    for (const portId of Object.keys(data.routeCriteria)) expect(ids.has(portId)).withContext(portId).toBeTrue();
+    expect(ids.has(data.unsurePortId)).toBeTrue();
   });
 });

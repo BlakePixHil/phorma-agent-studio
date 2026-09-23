@@ -97,6 +97,11 @@ manually started `wrangler dev` and a local model.
 ## Model providers
 
 Anthropic, OpenAI, Google Gemini, OpenRouter, Ollama (local, zero key), LM Studio, and
-`phorma-cloud` (billed to plan credits through the `/api/infer` proxy). Ollama and LM Studio
+`phorma-cloud` (billed to plan credits through the `/api/infer` proxy).
+
+System One (TypeSafe Jev, `docs/system-one.md`) is NOT a model provider: it is a separate
+`RunOptions.decisions` transport (`DecisionClient`), keyed `typesafe` in the keychain,
+`TYPESAFE_API_KEY` on a BYO worker, `TYPESAFE_PLATFORM_KEY` hosted (proxied by `POST /api/decide`),
+and a `typesafe` provider key on AWS. Priced at $0.042/Mtok input, output free. Ollama and LM Studio
 model lists are fetched live from the local server - do not rely on static suggestion lists, and
 do not assume `llama3.2` is installed. Query `http://localhost:11434/api/tags` first.

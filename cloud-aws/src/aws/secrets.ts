@@ -15,15 +15,21 @@
  *
  * The module also implements:
  * - Provider key resolution and {{API_KEY}} substitution (Req 8.12)
+ * - The System One decision client, keyed by the `typesafe` provider key
  * - Secret_Store write path for the Trigger_API route (Req 8.15)
  *
  * Feature: aws-deployment-target
  * Requirements: 8.1, 8.9, 8.10, 8.11, 8.12, 8.14, 8.15
  */
 
-import type { ConnectionStore, Redactor } from '@phorma/engine';
+import type { ConnectionStore, DecisionClient, Redactor } from '@phorma/engine';
 import type { Connection, ResolvedConnection } from '@phorma/engine';
-import { assertConnectionId, awsSecretName } from '@phorma/engine';
+import {
+  DECISION_PROVIDER,
+  FetchDecisionClient,
+  assertConnectionId,
+  awsSecretName,
+} from '@phorma/engine';
 
 import { RETRY_BUDGETS, shouldRetry } from '../core/retry.js';
 import { utf8ByteLength } from '../core/events.js';
@@ -204,6 +210,17 @@ export class SecretsAdapter implements ConnectionStore {
     }
     const key = await this.resolveProviderKey(providerId);
     return template.replaceAll(API_KEY_PLACEHOLDER, key);
+  }
+
+  /**
+   * The System One client for a run, or undefined when no `typesafe` provider
+   * key is configured. The key is resolved lazily on the first decision call
+   * (and seeds the Redactor then), so a workflow that never asks System One
+   * never reads the secret. The endpoint is fixed in the engine.
+   */
+  decisionClient(): DecisionClient | undefined {
+    if (!this.config.providerKeys?.has(DECISION_PROVIDER)) return undefined;
+    return new FetchDecisionClient(async () => this.resolveProviderKey(DECISION_PROVIDER));
   }
 
   // ─────────────────────────────────────────────────────────────────────────

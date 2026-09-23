@@ -11,6 +11,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { UIChart } from 'primeng/chart';
+import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
@@ -21,6 +22,7 @@ import {
   caseAggregates,
   caseFlakiness,
   evalPassCounts,
+  isJudgeMatcher,
   modelAggregates,
   resultModelLabel,
   suiteCostUsd,
@@ -35,6 +37,7 @@ import {
 } from '@phorma/engine';
 
 import { CloudService } from '../../../core/cloud.service';
+import { DecisionTransportService } from '../../../core/decision-transport.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { EvalRunnerService } from '../../../core/eval-runner.service';
 import { EvalService } from '../../../core/eval.service';
@@ -61,6 +64,7 @@ const MATCHER_OPTIONS: { id: EvalMatcher; label: string }[] = [
   { id: 'exact', label: 'Exact match' },
   { id: 'contains', label: 'Contains' },
   { id: 'llm-judge', label: 'LLM judge' },
+  { id: 'decision-judge', label: 'System One judge' },
 ];
 
 /** `1 suite` / `3 suites` — subtitles read as broken without this. */
@@ -102,6 +106,7 @@ export interface MatrixRow {
     ExpandedPanelDialog,
     FormsModule,
     ButtonModule,
+    InputNumberModule,
     InputTextModule,
     SelectButtonModule,
     SelectModule,
@@ -122,6 +127,7 @@ export class EvalsDialog {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly toast = inject(ToastService);
+  protected readonly decisionTransport = inject(DecisionTransportService);
 
   protected readonly visible = computed(() => this.expand.isOpen('evals'));
   protected readonly matcherOptions = MATCHER_OPTIONS;
@@ -216,6 +222,27 @@ export class EvalsDialog {
   protected readonly usesJudge = computed(() =>
     (this.selectedSuite()?.cases ?? []).some(item => item.matcher === 'llm-judge'),
   );
+
+  /** True when any case uses the System One judge. */
+  protected readonly usesDecisionJudge = computed(() =>
+    (this.selectedSuite()?.cases ?? []).some(item => item.matcher === 'decision-judge'),
+  );
+
+  /** Pass threshold as a whole percentage for the editor. */
+  protected readonly decisionPassPercent = computed(() =>
+    Math.round((this.selectedSuite()?.decisionJudge?.passAt ?? 0.7) * 100),
+  );
+
+  protected setDecisionPassPercent(value: number | null): void {
+    const suite = this.selectedSuite();
+    if (!suite) return;
+    const pct = typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(1, value)) : 70;
+    this.patchSuite({ decisionJudge: { ...suite.decisionJudge, passAt: pct / 100 } });
+  }
+
+  protected isReferenceMatcher(matcher: EvalMatcher): boolean {
+    return isJudgeMatcher(matcher);
+  }
 
   // ── Suite CRUD ──────────────────────────────────────────────────────────
 

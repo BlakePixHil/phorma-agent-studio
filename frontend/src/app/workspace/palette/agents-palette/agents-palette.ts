@@ -16,6 +16,8 @@ import {
   type McpPreset,
 } from '../../../core/node-catalog';
 import { ConnectorsService } from '../../../core/connectors.service';
+import { DecisionTransportService } from '../../../core/decision-transport.service';
+import { PaletteAssist } from '../palette-assist/palette-assist';
 import type { ConnectorStepEntry } from '../../../core/connectors.model';
 import { NodeDragService } from '../../../core/node-drag.service';
 import { PhormaCloudIcon } from '../../../shared/icons/phorma-cloud-icon';
@@ -73,15 +75,19 @@ interface McpPresetGroup {
 @Component({
   selector: 'app-agents-palette',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PhormaCloudIcon],
+  imports: [PhormaCloudIcon, PaletteAssist],
   templateUrl: './agents-palette.html',
   styleUrl: './agents-palette.scss',
 })
 export class AgentsPalette {
   private readonly nodeDrag = inject(NodeDragService);
   private readonly connectors = inject(ConnectorsService);
+  private readonly decisions = inject(DecisionTransportService);
 
   protected readonly query = signal('');
+
+  /** System One assists render only when a decision backend is configured. */
+  protected readonly decisionsAvailable = this.decisions.available;
 
   /** Currently selected category filters (inclusive OR). */
   protected readonly activeCategories = signal<Set<NodeCategory>>(new Set());

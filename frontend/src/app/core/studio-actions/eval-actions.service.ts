@@ -14,7 +14,7 @@ import {
   type StudioAction,
 } from './studio-action.model';
 
-const MATCHERS: readonly EvalMatcher[] = ['exact', 'contains', 'llm-judge'];
+const MATCHERS: readonly EvalMatcher[] = ['exact', 'contains', 'llm-judge', 'decision-judge'];
 
 /**
  * Surface `evals` Studio_Actions (Requirement 2.1). This is the surface the
@@ -79,7 +79,7 @@ export class EvalActionsService {
         id: 'eval_add_case',
         label: 'Add an eval case',
         description:
-          'Adds a test case to an eval suite. `matcher` is exact, contains or llm-judge; llm-judge compares against `expected` as a reference answer and may take extra judgeCriteria.',
+          'Adds a test case to an eval suite. `matcher` is exact, contains, llm-judge or decision-judge; the two judges compare against `expected` as a reference answer and may take extra judgeCriteria. decision-judge uses System One (calibrated, deterministic, very cheap) and needs a TypeSafe key or a Phorma Cloud sign-in.',
         surface: 'evals',
         access: 'write',
         risk: 'silent',
@@ -94,7 +94,7 @@ export class EvalActionsService {
           },
           expected: {
             type: 'string',
-            description: 'Expected output, or the reference answer for llm-judge.',
+            description: 'Expected output, or the reference answer for the judge matchers.',
             required: true,
           },
           matcher: {
@@ -104,7 +104,7 @@ export class EvalActionsService {
           },
           judgeCriteria: {
             type: 'string',
-            description: 'Extra grading instructions (llm-judge only).',
+            description: 'Extra grading instructions (judge matchers only).',
           },
         },
         activity: args => `Adding eval case "${argStr(args, 'name') ?? ''}"`,

@@ -1,0 +1,44 @@
+@use '../prompt-shared' as prompt;
+
+:host {
+  display: block;
+  min-width: 0;
+}
+
+@include prompt.prompt-sections;
+@include prompt.prompt-reliability;
+
+.phorma-prompt__checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.3rem 0.75rem;
+  padding-left: 1.6rem;
+}
+
+// A second top-level toggle after an expanded group: separate the groups.
+.phorma-prompt__check.phorma-prompt__check--group {
+  margin-top: 0.5rem;
+}
+
+// A nested option under a parent toggle: lighter, and no stacking margin.
+.phorma-prompt__check.phorma-prompt__check--sub {
+  margin-top: 0;
+  font-weight: 400;
+}
+
+.phorma-prompt__textarea {
+  width: 100%;
+  resize: vertical;
+  font-size: 0.928rem;
+}
+
+.phorma-prompt__hint--warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  color: var(--phorma-accent-amber);
+
+  > .ti {
+    margin-top: 0.15rem;
+  }
+}

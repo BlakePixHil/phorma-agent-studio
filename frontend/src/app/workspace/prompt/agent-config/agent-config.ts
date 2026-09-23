@@ -6,6 +6,8 @@ import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 
+import { AgentDecisions } from '../agent-decisions/agent-decisions';
+
 import { BillingRefreshService } from '../../../core/billing-refresh.service';
 import { BillingService, subscriptionLookupKey } from '../../../core/billing.service';
 import { ModelTransportService } from '../../../core/model-transport.service';
@@ -67,6 +69,7 @@ const LIVE_FETCH_PROVIDERS: ReadonlySet<ModelProviderId> = new Set([
     InputNumberModule,
     InputTextModule,
     SelectModule,
+    AgentDecisions,
     CheckoutFallback,
     PastDueNotice,
   ],
@@ -106,8 +109,10 @@ export class AgentConfig {
     'skills',
     'model',
     'reliability',
+    'system-one',
     'capabilities',
   ]);
+
 
   protected has(section: AgentConfigSection): boolean {
     return this.sections().includes(section);
@@ -484,4 +489,4 @@ export class AgentConfig {
 }
 
 /** The configuration groups {@link AgentConfig} can render. */
-export type AgentConfigSection = 'skills' | 'model' | 'reliability' | 'capabilities';
+export type AgentConfigSection = 'skills' | 'model' | 'reliability' | 'system-one' | 'capabilities';

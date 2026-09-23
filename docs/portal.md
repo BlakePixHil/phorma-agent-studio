@@ -252,6 +252,27 @@ know something the validator does not.
 Visitors spend your model budget. Portal runs appear in Runs and Usage with a
 `ti ti-world-share` badge.
 
+### Guardrails (System One)
+
+Portal trigger > Guardrails screens visitor messages, answers, or both with
+System One (see `docs/system-one.md`). Each side checks jailbreaks, harm or
+illegal activity, medical advice and self-harm, plus a 0-3 severity score:
+
+- A hazard at or above 70% takes its action: jailbreak and harm **block**,
+  medical goes to **review**, and self-harm shows the **support** message. At
+  35% or more a hazard goes to review. A severity of 2 or more hardens a review
+  into a block. Precedence is support > block > review > pass. On a public page
+  a review passes, unless "Also block borderline cases" is on.
+- A blocked visitor message never reaches the workflow, a model or the
+  transcript. Ask User answers are screened the same way.
+- Screening answers turns off token streaming: the reply is held until it has
+  been checked, then delivered, or replaced by the refusal or support message.
+- **Fail closed.** With no key (`TYPESAFE_PLATFORM_KEY` hosted,
+  `TYPESAFE_API_KEY` BYO) or on any System One error, the turn is refused with
+  the generic error, never let through. The worker logs why.
+- Hosted screening cost is ledgered to the owner as a `decide:<model>` row that
+  does not count as a run.
+
 ---
 
 ## Local development

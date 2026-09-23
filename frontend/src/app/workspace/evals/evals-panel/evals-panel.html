@@ -195,11 +195,11 @@
               class="phorma-evals__textarea"
               rows="2"
               pSize="small"
-              [placeholder]="case_.matcher === 'llm-judge' ? 'Reference answer the judge grades against' : 'Expected output'"
+              [placeholder]="isReferenceMatcher(case_.matcher) ? 'Reference answer the judge grades against' : 'Expected output'"
               [ngModel]="case_.expected"
               (ngModelChange)="patchCase(i, { expected: $event })"
             ></textarea>
-            @if (case_.matcher === 'llm-judge') {
+            @if (isReferenceMatcher(case_.matcher)) {
               <textarea
                 pTextarea
                 class="phorma-evals__textarea"

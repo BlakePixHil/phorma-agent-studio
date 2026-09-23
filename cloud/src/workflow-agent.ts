@@ -56,6 +56,7 @@ import {
   type TenantRecord,
 } from './tenants';
 import {
+  PORTAL_GENERIC_ERROR,
   isTerminalPortalEvent,
   toPortalEvent,
   toSseFrame,
@@ -137,7 +138,12 @@ import {
 import {
   CLOUDFLARE_CAPABILITIES,
   DEFAULT_MAX_RESPONSE_BYTES,
+  DEFAULT_REFUSAL_MESSAGE,
+  DEFAULT_SUPPORT_MESSAGE,
   FetchDecisionClient,
+  screenGuardrail,
+  type GuardrailScreening,
+  type PortalGuardrails,
   FetchModelClient,
   HttpMcpClient,
   applyConnectionAuth,
@@ -722,6 +728,16 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private readonly portalStreams = new Set<PortalStreamWriter>();
   /** Public events of the current portal run, replayed to a late subscriber. */
   private portalReplay: PortalEvent[] = [];
+  /** Increments per visitor turn so a late output screening never lands on the next turn. */
+  private portalTurnSeq = 0;
+  /** In-flight output screening of the current turn's answer (System One guardrails). */
+  private portalScreening: Promise<void> | null = null;
+  /**
+   * Set when an input guardrail ends a running turn (an Ask User answer was
+   * blocked): the run is stopped and its `stopped` event is delivered to the
+   * visitor as this answer instead.
+   */
+  private portalOverride: string | null = null;
 
   /**
    * Host default for how many finished runs each workflow keeps; oldest are
@@ -2811,11 +2827,34 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   }): Promise<{ ok: boolean; runId?: string; error?: string; status?: number }> {
     const session = this.state.portalSession;
     if (!session) return { ok: false, error: 'This conversation has expired.', status: 409 };
-    if (this.handle) {
+    if (this.handle || this.portalScreening) {
       return { ok: false, error: 'Still working on your last message.', status: 409 };
     }
 
     const message = input.message?.trim() ?? '';
+
+    // System One input guardrails: screen BEFORE anything runs or is recorded,
+    // so a blocked message never reaches a model or the transcript.
+    const guard = this.portalGuardrails();
+    if (guard?.input?.enabled) {
+      const screened = await this.screenPortalText(
+        'input',
+        message || renderFieldSummary(input.fields),
+      );
+      if (screened === 'unavailable') {
+        return { ok: false, error: 'This assistant is temporarily unavailable.', status: 503 };
+      }
+      if (screened.action === 'block' || screened.action === 'support') {
+        return this.answerPortalTurnDirectly(
+          screened.action === 'support'
+            ? guard.supportMessage?.trim() || DEFAULT_SUPPORT_MESSAGE
+            : guard.refusalMessage?.trim() || DEFAULT_REFUSAL_MESSAGE,
+        );
+      }
+    }
+
+    this.portalTurnSeq += 1;
+    this.portalOverride = null;
     const turnNumber = session.transcript.filter(turn => turn.role === 'user').length + 1;
     const envelope = buildPortalInput({
       message,
@@ -2978,9 +3017,143 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   async answerPortalQuestion(requestId: string, response: string): Promise<{ delivered: boolean }> {
     const pending = this.questions.get(requestId);
     if (!pending) return { delivered: false };
+
+    // The visitor's answer is visitor input too: same input guardrails.
+    const guard = this.portalGuardrails();
+    if (guard?.input?.enabled) {
+      const screened = await this.screenPortalText('input', response);
+      const refusal =
+        screened === 'unavailable'
+          ? PORTAL_GENERIC_ERROR
+          : screened.action === 'support'
+            ? guard.supportMessage?.trim() || DEFAULT_SUPPORT_MESSAGE
+            : screened.action === 'block'
+              ? guard.refusalMessage?.trim() || DEFAULT_REFUSAL_MESSAGE
+              : null;
+      if (refusal !== null) {
+        // End the turn: the run stops and its `stopped` event reaches the
+        // visitor as the refusal (see fanOutToPortal).
+        this.portalOverride = refusal;
+        this.handle?.stop();
+        return { delivered: true };
+      }
+    }
+
     this.questions.delete(requestId);
     pending.resolve(response);
     return { delivered: true };
+  }
+
+  // ── Portal guardrails (System One) ─────────────────────────────────────────
+
+  /** The portal trigger's guardrail config, when the session's spec has one. */
+  private portalGuardrails(): PortalGuardrails | undefined {
+    const graph = this.state.spec?.graph;
+    if (!graph) return undefined;
+    return findPortalTrigger(graph)?.data.guardrails;
+  }
+
+  /**
+   * Screens one visitor message or answer. Fails CLOSED: with no decision key
+   * or on any System One failure the result is `unavailable`, and the caller
+   * refuses rather than letting unscreened text through. Hosted cost is
+   * ledgered to the owner (never counted as a run).
+   */
+  private async screenPortalText(
+    side: 'input' | 'output',
+    text: string,
+  ): Promise<GuardrailScreening | 'unavailable'> {
+    const guard = this.portalGuardrails();
+    const config = guard?.[side];
+    if (!guard || !config?.enabled) return 'unavailable';
+    const client = this.decisionClient();
+    if (!client) {
+      this.reportSettingsIssue(
+        `Portal ${side} guardrails are on but System One has no key (${
+          this.hosted ? 'TYPESAFE_PLATFORM_KEY' : 'TYPESAFE_API_KEY'
+        }); visitor turns are refused.`,
+      );
+      return 'unavailable';
+    }
+    let screened: GuardrailScreening;
+    try {
+      screened = await screenGuardrail(client, side, config, text, guard.decisionModel);
+    } catch (error) {
+      console.error(
+        `[phorma] portal ${side} guardrail failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return 'unavailable';
+    }
+    if (screened.action !== 'pass') {
+      console.log(
+        `[phorma] portal ${side} guardrail: ${screened.action}` +
+          (screened.top ? ` (${screened.top.hazard} ${Math.round(screened.top.probability * 100)}%)` : ''),
+      );
+    }
+    const ownerId = this.state.ownerId;
+    if (this.hosted && ownerId) {
+      void (async () => {
+        const store = new TenantStore(this.env);
+        const tenant = await store.getTenant(ownerId);
+        if (!tenant) return;
+        await store.recordRun({
+          tenantId: tenant.id,
+          tier: tenant.tier,
+          runId: `guard-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          workflowId: `decide:${screened.model || 'guardrails'}`,
+          costUsd: screened.costUsd,
+          tokensIn: screened.inputTokens,
+          tokensOut: screened.outputTokens,
+          countsAsRun: false,
+        });
+      })().catch(() => undefined);
+    }
+    return screened;
+  }
+
+  /**
+   * Ends a visitor turn without running the workflow: the answer is replayed
+   * to the stream the page opens next, and recorded in the transcript. The
+   * blocked message itself is never recorded.
+   */
+  private answerPortalTurnDirectly(answer: string): { ok: boolean; runId: string } {
+    this.portalTurnSeq += 1;
+    const runId = `portal-guard-${Date.now().toString(36)}`;
+    this.portalReplay = [
+      { type: 'started', runId },
+      { type: 'done', output: answer },
+    ];
+    this.appendPortalTurn({ role: 'assistant', text: answer, at: Date.now() });
+    return { ok: true, runId };
+  }
+
+  /** Screens a finished answer, then delivers it (or its replacement) to the visitor. */
+  private screenPortalAnswer(output: string): void {
+    const turn = this.portalTurnSeq;
+    const guard = this.portalGuardrails();
+    this.portalScreening = (async () => {
+      const screened = await this.screenPortalText('output', output);
+      if (turn !== this.portalTurnSeq) return;
+      let delivered: PortalEvent;
+      if (screened === 'unavailable') {
+        delivered = { type: 'error', message: PORTAL_GENERIC_ERROR };
+      } else if (screened.action === 'block') {
+        delivered = { type: 'done', output: guard?.refusalMessage?.trim() || DEFAULT_REFUSAL_MESSAGE };
+      } else if (screened.action === 'support') {
+        delivered = { type: 'done', output: guard?.supportMessage?.trim() || DEFAULT_SUPPORT_MESSAGE };
+      } else {
+        delivered = { type: 'done', output };
+      }
+      this.publishPortalEvent(delivered);
+    })()
+      .catch(() => {
+        if (turn === this.portalTurnSeq) {
+          this.publishPortalEvent({ type: 'error', message: PORTAL_GENERIC_ERROR });
+        }
+      })
+      .finally(() => {
+        this.portalScreening = null;
+      });
   }
 
   /**
@@ -3000,7 +3173,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     let writer: PortalStreamWriter | null = null;
     const streams = this.portalStreams;
     const replay = [...this.portalReplay];
-    const running = this.handle !== null;
+    // A finished run whose answer is still being screened is still "running".
+    const running = this.handle !== null || this.portalScreening !== null;
 
     const body = new ReadableStream<Uint8Array>({
       start: controller => {
@@ -3092,9 +3266,29 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
   private fanOutToPortal(event: RunEvent): void {
     const session = this.state.portalSession;
     if (!session) return;
-    const projected = toPortalEvent(event, { responderNodeId: session.responderNodeId });
+    let projected = toPortalEvent(event, { responderNodeId: session.responderNodeId });
     if (!projected) return;
 
+    // An input guardrail stopped this turn: the visitor gets the refusal.
+    if (projected.type === 'stopped' && this.portalOverride !== null) {
+      projected = { type: 'done', output: this.portalOverride };
+      this.portalOverride = null;
+    }
+
+    // Output guardrails: nothing streams (a token cannot be unsent), and the
+    // final answer is delivered only once System One has screened it.
+    if (this.portalGuardrails()?.output?.enabled) {
+      if (projected.type === 'token') return;
+      if (projected.type === 'done' && event.type === 'run-completed') {
+        this.screenPortalAnswer(projected.output);
+        return;
+      }
+    }
+    this.publishPortalEvent(projected);
+  }
+
+  /** Buffers, records and broadcasts one public event. */
+  private publishPortalEvent(projected: PortalEvent): void {
     // Buffer for a visitor whose EventSource has not attached yet: the page
     // POSTs the message and opens the stream as two round trips, so the first
     // tokens can legitimately land before anyone is listening.

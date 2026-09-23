@@ -1,0 +1,147 @@
+<section class="phorma-prompt__section">
+  <label class="phorma-prompt__label">System One</label>
+
+  <label class="phorma-prompt__check">
+    <p-checkbox
+      [binary]="true"
+      size="small"
+      [inputId]="id('verify-enabled')"
+      [ngModel]="verify()?.enabled ?? false"
+      (ngModelChange)="toggleVerify($event)"
+    />
+    Verify the output
+  </label>
+  @if (verify()?.enabled) {
+    <div class="phorma-prompt__checks">
+      @for (check of verifyChecks; track check.id) {
+        <label class="phorma-prompt__check phorma-prompt__check--sub">
+          <p-checkbox
+            [binary]="true"
+            size="small"
+            [inputId]="id('verify-' + check.id)"
+            [ngModel]="verifyHasCheck(check.id)"
+            (ngModelChange)="toggleVerifyCheck(check.id, $event)"
+          />
+          {{ check.label }}
+        </label>
+      }
+    </div>
+    <textarea
+      pTextarea
+      class="phorma-prompt__textarea"
+      rows="2"
+      pSize="small"
+      placeholder="Extra checks, one per line"
+      title="Each line is a yes/no question where yes means something is wrong"
+      aria-label="Custom verification checks"
+      [ngModel]="verifyCustomText()"
+      (ngModelChange)="onVerifyCustomChange($event)"
+    ></textarea>
+    <div class="phorma-prompt__inline">
+      <label class="phorma-prompt__inline-label" [for]="id('verify-fire')">Flag at</label>
+      <p-inputnumber
+        [inputId]="id('verify-fire')"
+        class="phorma-prompt__number"
+        size="small"
+        [min]="1"
+        [max]="100"
+        suffix="%"
+        [showButtons]="false"
+        [useGrouping]="false"
+        [ngModel]="verifyFirePercent()"
+        (ngModelChange)="onVerifyFireChange($event)"
+      />
+    </div>
+    <p-select
+      [options]="onFailOptions"
+      optionLabel="label"
+      optionValue="id"
+      [ngModel]="verify()?.onFail ?? 'fallback'"
+      (ngModelChange)="onVerifyOnFailChange($event)"
+      size="small"
+      appendTo="body"
+      ariaLabel="When a check fires"
+    />
+    <p class="phorma-prompt__hint">
+      Asks calibrated yes/no checks about the answer; any one at or above the threshold flags it.
+      @if (verifyNeedsFallback()) {
+        Turn on a <strong>Fallback model</strong> under Reliability, or a flagged answer fails the
+        step.
+      }
+    </p>
+  }
+
+  <label class="phorma-prompt__check phorma-prompt__check--group">
+    <p-checkbox
+      [binary]="true"
+      size="small"
+      [inputId]="id('preselect-enabled')"
+      [ngModel]="preselect()?.enabled ?? false"
+      (ngModelChange)="togglePreselect($event)"
+    />
+    Preselect tools and skills
+  </label>
+  @if (preselect()?.enabled) {
+    <div class="phorma-prompt__checks">
+      <label class="phorma-prompt__check phorma-prompt__check--sub">
+        <p-checkbox
+          [binary]="true"
+          size="small"
+          [inputId]="id('preselect-tools')"
+          [ngModel]="preselect()?.tools !== false"
+          (ngModelChange)="togglePreselectTools($event)"
+        />
+        Tools
+      </label>
+      <label class="phorma-prompt__check phorma-prompt__check--sub">
+        <p-checkbox
+          [binary]="true"
+          size="small"
+          [inputId]="id('preselect-skills')"
+          [ngModel]="preselect()?.skills !== false"
+          (ngModelChange)="togglePreselectSkills($event)"
+        />
+        Skills
+      </label>
+    </div>
+    <div class="phorma-prompt__inline">
+      <label class="phorma-prompt__inline-label" [for]="id('preselect-topk')">Keep up to</label>
+      <p-inputnumber
+        [inputId]="id('preselect-topk')"
+        class="phorma-prompt__number"
+        size="small"
+        [min]="1"
+        [max]="20"
+        [showButtons]="false"
+        [useGrouping]="false"
+        [ngModel]="preselect()?.topK ?? 3"
+        (ngModelChange)="onPreselectTopKChange($event)"
+      />
+    </div>
+    <div class="phorma-prompt__inline">
+      <label class="phorma-prompt__inline-label" [for]="id('preselect-fit')">Minimum fit</label>
+      <p-inputnumber
+        [inputId]="id('preselect-fit')"
+        class="phorma-prompt__number"
+        size="small"
+        [min]="0"
+        [max]="100"
+        suffix="%"
+        [showButtons]="false"
+        [useGrouping]="false"
+        [ngModel]="preselectFitPercent()"
+        (ngModelChange)="onPreselectFitChange($event)"
+      />
+    </div>
+    <p class="phorma-prompt__hint">
+      Offers the model only what fits each turn. Tools never drop to zero; skills can.
+    </p>
+  }
+
+  @if ((verify()?.enabled || preselect()?.enabled) && !decisionsAvailable()) {
+    <p class="phorma-prompt__hint phorma-prompt__hint--warn">
+      <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+      Add a TypeSafe key in Settings or sign in to Phorma Cloud, or this step fails when it runs.
+    </p>
+  }
+</section>

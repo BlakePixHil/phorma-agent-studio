@@ -17,6 +17,8 @@ import { marked } from 'marked';
 import type { RunRecord, RunRecordSummary, RunRecordUsage } from '@phorma/engine';
 
 import { CloudService } from '../../../core/cloud.service';
+import { DecisionTransportService } from '../../../core/decision-transport.service';
+import { RunTriage } from '../run-triage/run-triage';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { RunControllerService, TraceEntry } from '../../../core/run-controller.service';
 import { RunHistoryService } from '../../../core/run-history.service';
@@ -101,7 +103,7 @@ interface HistoryRow {
 @Component({
   selector: 'app-runs-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet, ButtonModule, Textarea],
+  imports: [CurrencyPipe, DatePipe, DecimalPipe, NgTemplateOutlet, ButtonModule, Textarea, RunTriage],
   templateUrl: './runs-panel.html',
   styleUrl: './runs-panel.scss',
 })
@@ -113,6 +115,10 @@ export class RunsPanel {
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
   private readonly workflow = inject(WorkflowService);
+  private readonly decisions = inject(DecisionTransportService);
+
+  /** System One triage shows only when a decision backend is configured. */
+  protected readonly decisionsAvailable = this.decisions.available;
 
   constructor() {
     // Reload history whenever the active workflow changes (and initially).

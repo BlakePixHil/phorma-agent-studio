@@ -162,6 +162,16 @@
     }
   </section>
 
+  <!-- System One triage for a failed run: its own section so the clipped,
+       growing Trace section never cuts the card off. -->
+  @if (terminal.phase() === 'failed' && decisionsAvailable() && !selectedRun()) {
+  <section class="phorma-runs__section">
+    @defer (on immediate) {
+    <app-run-triage />
+    }
+  </section>
+  }
+
   <!-- Run history -->
   <section class="phorma-runs__section phorma-runs__history-section"
     [class.phorma-runs__history-section--collapsed]="historyCollapsed()">

@@ -604,6 +604,43 @@ export function describeDecisionAnswers(answers: Readonly<Record<string, Decisio
   });
 }
 
+/**
+ * The short verb phrase a trace or console line uses for a `decision` event,
+ * after "System One": purpose- and fallback-aware, so a flagged verification
+ * never reads like a routing miss. Shared by every surface that renders one.
+ */
+export function describeDecisionOutcome(event: {
+  purpose: DecisionPurpose;
+  fallback?: 'no-transport' | 'low-confidence' | 'error';
+}): string {
+  if (event.fallback === 'no-transport') {
+    return event.purpose === 'route' ? 'unavailable, used keyword routing' : 'unavailable';
+  }
+  if (event.fallback === 'error') {
+    return event.purpose === 'tool-select' || event.purpose === 'skill-select'
+      ? 'could not answer, offered everything'
+      : 'could not answer';
+  }
+  switch (event.purpose) {
+    case 'route':
+      return event.fallback === 'low-confidence' ? 'unsure, took the unsure route' : 'routed';
+    case 'gate':
+      return 'assessed the approval';
+    case 'verify':
+      return event.fallback === 'low-confidence' ? 'flagged the output' : 'verified the output';
+    case 'tool-select':
+      return 'picked the tools';
+    case 'skill-select':
+      return 'picked the skills';
+    case 'guard':
+      return event.fallback === 'low-confidence' ? 'blocked the message' : 'screened the message';
+    case 'judge':
+      return 'graded the output';
+    default:
+      return 'decided';
+  }
+}
+
 /** A probability pill drawn on one outgoing edge of a routing decision. */
 export interface DecisionEdgeLabel {
   /** e.g. `92%`, or `unsure` on the low-confidence path. */

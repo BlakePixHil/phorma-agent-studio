@@ -1258,7 +1258,7 @@ export class PropertiesForm {
   /** Kinds whose System One configuration renders in `DecisionConfig`. */
   protected readonly usesDecisionConfig = computed(() => {
     const kind = this.node()?.kind;
-    return kind === 'router' || kind === 'approval-gate' || kind === 'decide';
+    return kind === 'router' || kind === 'approval-gate' || kind === 'decide' || kind === 'portal-trigger';
   });
 
   /** Router/parallel/aggregator branch ports are editable lists. */

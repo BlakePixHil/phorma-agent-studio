@@ -18,7 +18,15 @@ prevent, so host-specific behaviour belongs in the injected transports, never in
   kinds, node data interfaces, `WorkflowSettings`, and `ModelProviderId` change in both or neither.
 - Everything the host provides arrives through `RunOptions`: `ModelClient`, `ToolHost`,
   `connections`, `dataFetch`, `sql`, `state`, `fixtures`, `redact`, `capabilities`, `journal`,
-  `requestApproval`, `waitForEvent`, `defaultModel`, `maxToolRounds`, `maxExecutions`.
+  `requestApproval`, `waitForEvent`, `defaultModel`, `maxToolRounds`, `maxExecutions`,
+  `decisions` (System One `DecisionClient`), `decisionModel`.
+- System One: every call goes through `Engine.evaluateDecision` (validation, purpose-scoped
+  fixtures, the shared retry loop, one `node-usage` with provider `typesafe`). Emit exactly one
+  `decision` event per logical decision via `emitDecision`. Question builders and answer readers
+  are pure and live in `decisions.ts` (graph consumers) and `decision-batteries.ts` (verify,
+  preselect, judge, guardrails). Only the Router degrades without a client (keyword fallback,
+  `fallback: 'no-transport'`); every other consumer throws `missingCapability`. Preselection
+  degrades to the full tool list on a System One error, never on a missing client.
 
 ## Execution contracts
 
@@ -61,6 +69,7 @@ Pure, framework-free, individually unit and property tested. Reuse them rather t
 | `redact.ts` | `createRedactor`: literals first (min secret length 8), then depth-32 structural path/key rules, then pattern rules on non-JSON text. Patterns capped at 256 chars with a 100ms match budget. |
 | `state.ts` | `scopedStateKey`, `canonicalJson`, `fnv1a`, `compareWatermark`, `deltaFilter`, `claimIdempotent`. Store contract: TTL expiry, 1000-entry `list` clamp, 32KB value cap, atomic `compareAndSet`. |
 | `pricing.ts` | `ModelPriceTable` keyed by OpenRouter slugs, `toPricingSlug` normalisation, `estimateCostUsd`, `withEstimatedCost` (reported cost always wins), `priceTableFromOpenRouter`. |
+| `decisions.ts`, `decision-batteries.ts` | System One request validation and parsing, `FetchDecisionClient`, answer projection (`compactDecisionAnswers`), edge labels, `describeDecisionOutcome`, and the verify / preselect / judge / guardrail batteries with their verdict readers. |
 | `data-http.ts`, `data-nodes.ts`, `sql-statement.ts`, `connections.ts`, `data-host.ts`, `fixtures.ts`, `capabilities.ts` | HTTP/pagination, transform/aggregate/batch, SQL statement safety, connection identity and secret naming, host capability contracts, fixture record/replay. |
 
 Design intent and requirement numbering for all of the above live in

@@ -14,6 +14,10 @@ import type {
   ApprovalGateData,
   DecideNodeData,
   DecisionQuestionSpec,
+  PortalGuardrailHazard,
+  PortalGuardrailSide,
+  PortalGuardrails,
+  PortalTriggerData,
   RouterNodeData,
   WorkflowNode,
 } from '../../../core/workflow.model';
@@ -30,6 +34,21 @@ const QUESTION_TYPES: { id: QuestionType; label: string }[] = [
 const ROUTER_MODES: { id: 'keyword' | 'decide'; label: string }[] = [
   { id: 'keyword', label: 'Keyword match' },
   { id: 'decide', label: 'System One decides' },
+];
+
+type GuardSide = 'input' | 'output';
+
+/** Both screening sides, with their toggle labels. */
+const GUARD_SIDES: { id: GuardSide; label: string }[] = [
+  { id: 'input', label: 'Screen visitor messages' },
+  { id: 'output', label: 'Screen answers before they are sent' },
+];
+
+const HAZARDS: { id: PortalGuardrailHazard; label: string }[] = [
+  { id: 'jailbreak', label: 'Jailbreaks' },
+  { id: 'harmful', label: 'Harm or illegal' },
+  { id: 'medical', label: 'Medical advice' },
+  { id: 'self-harm', label: 'Self-harm' },
 ];
 
 /** Question ids: a letter, then letters, digits or `_` (mirrors the engine). */
@@ -55,7 +74,7 @@ export class DecisionConfig {
   private readonly decisions = inject(DecisionTransportService);
   private readonly settingsDialog = inject(SettingsDialogService);
 
-  /** The selected node (router, approval-gate or decide). */
+  /** The selected node (router, approval-gate, decide or portal-trigger). */
   readonly node = input.required<WorkflowNode>();
   /** Id prefix from the host form, so panel and dialog ids never collide. */
   readonly scope = input<string>('panel');
@@ -227,6 +246,44 @@ export class DecisionConfig {
       : question.type === 'choice'
         ? `$.${key}.${question.id}.choice`
         : `$.${key}.${question.id}.score`;
+  }
+
+  // ── Portal guardrails ─────────────────────────────────────────────────────
+
+  protected readonly hazards = HAZARDS;
+  protected readonly guardSides = GUARD_SIDES;
+
+  protected readonly guard = computed<PortalGuardrails | null>(() => {
+    const node = this.node();
+    if (node.kind !== 'portal-trigger') return null;
+    return (node.data as PortalTriggerData).guardrails ?? {};
+  });
+
+  protected readonly guardEnabled = computed(() => {
+    const guard = this.guard();
+    return !!guard && (guard.input?.enabled === true || guard.output?.enabled === true);
+  });
+
+  protected patchGuard(patch: Partial<PortalGuardrails>): void {
+    this.patch({ guardrails: { ...(this.guard() ?? {}), ...patch } });
+  }
+
+  protected patchSide(side: GuardSide, patch: Partial<PortalGuardrailSide>): void {
+    const current = this.guard()?.[side] ?? { enabled: false };
+    this.patchGuard({ [side]: { ...current, ...patch } });
+  }
+
+  protected hasHazard(side: GuardSide, hazard: PortalGuardrailHazard): boolean {
+    const list = this.guard()?.[side]?.hazards;
+    return !list || list.length === 0 || list.includes(hazard);
+  }
+
+  protected toggleHazard(side: GuardSide, hazard: PortalGuardrailHazard, on: boolean): void {
+    const current = HAZARDS.map(entry => entry.id).filter(id => this.hasHazard(side, id));
+    const next = on ? [...new Set([...current, hazard])] : current.filter(id => id !== hazard);
+    const ordered = HAZARDS.map(entry => entry.id).filter(id => next.includes(id));
+    // An empty list means "every hazard"; keep at least one explicit hazard.
+    this.patchSide(side, { hazards: ordered.length > 0 ? ordered : [hazard] });
   }
 
   // ── Shared ────────────────────────────────────────────────────────────────

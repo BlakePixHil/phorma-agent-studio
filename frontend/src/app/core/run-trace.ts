@@ -1,4 +1,10 @@
-import { DECISION_ACTOR, describeDecisionAnswers, formatProbability, type RunLogEvent } from '@phorma/engine';
+import {
+  DECISION_ACTOR,
+  describeDecisionAnswers,
+  describeDecisionOutcome,
+  formatProbability,
+  type RunLogEvent,
+} from '@phorma/engine';
 
 import type { TraceEntry } from './run-controller.service';
 
@@ -87,7 +93,7 @@ export function describeRunEvent(
       return {
         icon: 'ti ti-arrows-exchange',
         label: `${event.nodeName} switched to fallback model ${event.toModel}`,
-        detail: `Primary ${event.fromModel} failed: ${event.error}`,
+        detail: `From ${event.fromModel}: ${event.error}`,
         tone: 'warning',
         kind: 'event',
       };
@@ -137,14 +143,9 @@ export function describeRunEvent(
     case 'decision': {
       const lines = describeDecisionAnswers(event.answers);
       const suffix = event.replayed ? ' (fixture)' : event.durationMs > 0 ? ` in ${event.durationMs}ms` : '';
-      const label =
-        event.fallback === 'no-transport'
-          ? `${event.nodeName} - no System One on this host, used keyword routing`
-          : event.fallback === 'low-confidence'
-            ? `${event.nodeName} - System One unsure, took the unsure route${suffix}`
-            : event.purpose === 'gate'
-              ? `${event.nodeName} - System One assessed the approval${suffix}`
-              : `${event.nodeName} - System One decided${suffix}`;
+      const label = `${event.nodeName} - System One ${describeDecisionOutcome(event)}${
+        event.fallback === 'no-transport' ? '' : suffix
+      }`;
       return {
         icon: 'ti ti-scale',
         label,

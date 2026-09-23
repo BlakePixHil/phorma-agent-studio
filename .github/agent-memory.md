@@ -1426,3 +1426,22 @@ Global repo memory for AI agents working on this codebase. **Read this at the st
   orphan and publishes the metric. Whether `CreateSchedule` accepts the Lambda target and whether the
   shim's signed call lands is still NOT provable without a real account, so it stays checklist rows
   12 and 13 in `docs/deploy-aws.md` section 7.1.
+
+## System One (TypeSafe Jev), shipped 2026-09-23
+
+- 2026-09-23 - `cloud-aws` `executeRun` used to settle EVERY run `completed`. `RunHandle.done`
+  resolves for failed and stopped runs too (the engine reports them as events, not rejections), so
+  the `try { await done; completed } catch { failed }` shape never saw a failure. The outcome now
+  comes from the root-level terminal event captured in `emit`. Any host that awaits `done` must do
+  the same. Found by `runner-decisions.spec.ts`; no earlier AWS spec asserted a failed outcome.
+- 2026-09-23 - `ng serve` keeps serving the LAST GOOD bundle after a compile error, so a browser
+  E2E can "pass" against stale code. Read the dev-server terminal for `bundle generation failed`
+  before trusting a UI result after an edit.
+- 2026-09-23 - The initial bundle sits near the 3MB error limit, so System One UI is deferred. The
+  engine's `decisions.ts`/`decision-batteries.ts` still land in the initial chunks because the
+  engine barrel is imported eagerly (~2.94MB total). New System One UI goes in the existing
+  `@defer` components, never inline in `properties-form` or `agent-config`.
+- 2026-09-23 - A `decision` event's wording must be purpose-aware (`describeDecisionOutcome`): the
+  first cut reused the router's "unsure, took the unsure route" for a flagged agent verification.
+- 2026-09-23 - A card appended inside the Runs panel's `--grow` Trace section is clipped (the
+  section is `overflow: hidden` and the list takes `flex: 1`). Give it its own non-growing section.

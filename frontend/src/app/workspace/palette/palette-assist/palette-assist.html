@@ -1,0 +1,71 @@
+@if (showSearch()) {
+  <section class="phorma-assist" aria-live="polite">
+    @switch (searchState()) {
+      @case ('idle') {
+        <button type="button" class="phorma-assist__ask" (click)="askSearch()">
+          <i class="ti ti-sparkles" aria-hidden="true"></i>
+          Find by meaning with System One
+        </button>
+      }
+      @case ('loading') {
+        <p class="phorma-assist__note"><i class="ti ti-loader-2 phorma-assist__spin" aria-hidden="true"></i>Thinking</p>
+      }
+      @case ('failed') {
+        <p class="phorma-assist__note">System One could not answer right now.</p>
+      }
+      @case ('done') {
+        @if (searchResults().length > 0) {
+          <span class="phorma-assist__heading">Closest matches</span>
+          <ul class="phorma-assist__list">
+            @for (item of searchResults(); track item.id) {
+              <li>
+                <button type="button" class="phorma-assist__item" (click)="addFromSearch(item)" [title]="'Add ' + item.label">
+                  <span class="phorma-assist__label">{{ item.label }}</span>
+                  <span class="phorma-assist__pct">{{ percent(item.probability) }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="phorma-assist__note">Nothing in the palette fits that.</p>
+        }
+      }
+    }
+  </section>
+}
+
+@if (anchor(); as node) {
+  <section class="phorma-assist phorma-assist--next" aria-live="polite">
+    @switch (nextState()) {
+      @case ('idle') {
+        <button type="button" class="phorma-assist__ask" (click)="askNext()">
+          <i class="ti ti-sparkles" aria-hidden="true"></i>
+          <span class="phorma-assist__ask-text">Suggest what comes after {{ node.name }}</span>
+        </button>
+      }
+      @case ('loading') {
+        <p class="phorma-assist__note"><i class="ti ti-loader-2 phorma-assist__spin" aria-hidden="true"></i>Thinking</p>
+      }
+      @case ('failed') {
+        <p class="phorma-assist__note">System One could not answer right now.</p>
+      }
+      @case ('done') {
+        @if (nextResults().length > 0) {
+          <span class="phorma-assist__heading">After {{ node.name }}</span>
+          <ul class="phorma-assist__list">
+            @for (item of nextResults(); track item.id) {
+              <li>
+                <button type="button" class="phorma-assist__item" (click)="addNext(item)" [title]="'Add ' + item.label + ' and connect it'">
+                  <span class="phorma-assist__label">{{ item.label }}</span>
+                  <span class="phorma-assist__pct">{{ percent(item.probability) }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="phorma-assist__note">No confident suggestion.</p>
+        }
+      }
+    }
+  </section>
+}

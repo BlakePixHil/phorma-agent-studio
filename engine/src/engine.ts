@@ -13,7 +13,10 @@
  *    Attached tools are DESCRIBED to the agent; native tool invocation lands
  *    with the MCP milestone.
  *  - Routers match a route label inside the payload (case-insensitive); no
- *    match → first route. Pair one with a Classifier agent for LLM routing.
+ *    match → first route. In `decide` mode System One (TypeSafe Jev) picks the
+ *    route with a calibrated Choice instead (see `decisions.ts`).
+ *  - Agents may verify their output and preselect tools/skills with System One
+ *    (`verify`, `preselect`); Decide nodes ask typed questions in one call.
  *  - Parallel fans the payload out to every branch concurrently.
  *  - Aggregators wait for every CONNECTED input, then merge as markdown.
  *  - Approval gates suspend until the studio resolves them.
@@ -87,6 +90,17 @@ import {
   type NoulAnswer,
 } from './decisions.js';
 import {
+  preselectFitQuestions,
+  preselectFitting,
+  preselectRankQuestions,
+  preselectShortlist,
+  verifyQuestions,
+  verifyState,
+  verifyVerdict,
+  type PreselectCandidate,
+  type VerifyVerdict,
+} from './decision-batteries.js';
+import {
   isWriteStatement,
   reconcileSqlParameters,
   resolveSqlLimits,
@@ -120,6 +134,8 @@ import {
   nodeForConnector,
   portBaseId,
   type AgentNodeData,
+  type AgentSkill,
+  type AgentVerifyConfig,
   type ApprovalGateNodeData,
   type AskUserNodeData,
   type AssertNodeData,
@@ -1035,7 +1051,11 @@ class WorkflowRun {
     }
 
     if (isAgentNode(node)) {
-      const output = await this.runAgent(node, payload);
+      const output = await this.runAgent(
+        node,
+        payload,
+        executionKey ?? this.nextExecutionKey(node, payload),
+      );
       // Success never flows through the "On error" branch: restrict routing
       // to the regular out-ports when an error port is declared.
       const errorPortId = (node.data as AgentNodeData).errorPortId;
@@ -2535,7 +2555,7 @@ class WorkflowRun {
 
   // ── Node behaviours ────────────────────────────────────────────────────────
 
-  private async runAgent(node: WorkflowNode, payload: string): Promise<string> {
+  private async runAgent(node: WorkflowNode, payload: string, executionKey: string): Promise<string> {
     const data = node.data as AgentNodeData & { region?: string };
 
     // Resolve the model: explicit node config wins; otherwise inherit the
@@ -2553,13 +2573,22 @@ class WorkflowRun {
 
     // Resolve callable tools from the agent's tool-link edges.
     const toolNodes = this.attachedTools(node);
-    const resolved: ResolvedTool[] =
+    const allResolved: ResolvedTool[] =
       this.options.tools && toolNodes.length > 0
         ? await resolveAgentTools(toolNodes, this.options.tools)
         : [];
+
+    // System One preselection: offer the model only the tools and skills that
+    // fit this turn. Tools never narrow to zero; skills may.
+    const { tools: resolved, skills: selectedSkills } = await this.preselectForAgent(
+      node,
+      payload,
+      executionKey,
+      allResolved,
+    );
     const byWireName = new Map(resolved.map(tool => [tool.definition.name, tool]));
 
-    const system = this.renderPrompt(data.prompt, payload, node, resolved.length > 0);
+    const system = this.renderPrompt(data.prompt, payload, node, allResolved.length > 0, selectedSkills);
     let messages: ChatMessage[] = [{ role: 'user', content: payload || 'Begin.' }];
     let output = '';
 
@@ -2705,39 +2734,220 @@ class WorkflowRun {
       typeof agentMaxRounds === 'number' && agentMaxRounds > 0
         ? agentMaxRounds
         : this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
-    for (let round = 0; round < maxToolRounds; round++) {
-      // Compress the conversation when the next request would land near the
-      // model's context limit. Best-effort: failures never break the node.
-      if (!data.compressionDisabled && round > 0) {
-        messages = await this.maybeCompressContext(
-          node,
-          active.provider,
-          active.model,
-          system,
-          messages,
-          lastReportedInputTokens,
-        );
-      }
+    const initialMessages = messages;
+    const runLoop = async (): Promise<string> => {
+      messages = initialMessages;
+      output = '';
+      for (let round = 0; round < maxToolRounds; round++) {
+        // Compress the conversation when the next request would land near the
+        // model's context limit. Best-effort: failures never break the node.
+        if (!data.compressionDisabled && round > 0) {
+          messages = await this.maybeCompressContext(
+            node,
+            active.provider,
+            active.model,
+            system,
+            messages,
+            lastReportedInputTokens,
+          );
+        }
 
-      const { roundText, calls } = await streamRoundRobustly();
+        const { roundText, calls } = await streamRoundRobustly();
 
-      output += (output && roundText ? '\n' : '') + roundText;
-      if (calls.length === 0) break;
+        output += (output && roundText ? '\n' : '') + roundText;
+        if (calls.length === 0) break;
 
-      // Execute the requested tools, then hand the results back to the model.
-      messages.push({ role: 'assistant-tool-calls', text: roundText || undefined, calls });
-      const results: { id: string; name: string; content: string }[] = [];
-      for (const call of calls) {
-        if (this.gate.stopped) throw new RunStoppedError();
+        // Execute the requested tools, then hand the results back to the model.
+        messages.push({ role: 'assistant-tool-calls', text: roundText || undefined, calls });
+        const results: { id: string; name: string; content: string }[] = [];
+        for (const call of calls) {
+          if (this.gate.stopped) throw new RunStoppedError();
+          checkDeadline();
+          const content = await this.executeToolCall(node, call, byWireName);
+          results.push({ id: call.id, name: call.name, content });
+        }
+        messages.push({ role: 'tool-results', results });
         checkDeadline();
-        const content = await this.executeToolCall(node, call, byWireName);
-        results.push({ id: call.id, name: call.name, content });
       }
-      messages.push({ role: 'tool-results', results });
-      checkDeadline();
-    }
+      return output.trim();
+    };
 
-    return output.trim();
+    const first = await runLoop();
+    const verify = data.verify;
+    if (!verify?.enabled) return first;
+
+    // System One verification: calibrated "is this wrong?" checks, max-gated.
+    const verdict = await this.verifyAgentOutput(node, payload, executionKey, data.prompt, first, verify, 0);
+    if (!verdict.failed) return first;
+    const onFail = verify.onFail ?? 'fallback';
+    const reason = `System One flagged the output of "${node.name}" (${verdict.fired.join(', ')}).`;
+    if (onFail === 'warn') return first;
+    if (onFail === 'fallback' && fallback && !usedFallback) {
+      usedFallback = true;
+      this.emit({
+        type: 'node-fallback',
+        runId: this.options.runId,
+        nodeId: node.id,
+        nodeName: node.name,
+        fromProvider: active.provider,
+        fromModel: active.model,
+        toProvider: fallback.provider,
+        toModel: fallback.model,
+        error: reason,
+        at: Date.now(),
+      });
+      active = { provider: fallback.provider, model: fallback.model };
+      const second = await runLoop();
+      const recheck = await this.verifyAgentOutput(node, payload, executionKey, data.prompt, second, verify, 1);
+      if (!recheck.failed) return second;
+      throw new Error(
+        `System One flagged the output of "${node.name}" again after the fallback model (${recheck.fired.join(', ')}).`,
+      );
+    }
+    throw new Error(
+      onFail === 'fallback' ? `${reason} No fallback model is configured.` : reason,
+    );
+  }
+
+  /**
+   * Runs the verify battery against an agent's output. `attempt` scopes the
+   * fixture so the primary and fallback checks replay independently.
+   */
+  private async verifyAgentOutput(
+    node: WorkflowNode,
+    payload: string,
+    executionKey: string,
+    instructions: string,
+    output: string,
+    config: AgentVerifyConfig,
+    attempt: number,
+  ): Promise<VerifyVerdict> {
+    const task = payloadToState(payload, config.statePath);
+    const outcome = await this.evaluateDecision(node, 'verify', {
+      payload,
+      executionKey,
+      tuning: config,
+      questions: verifyQuestions(config),
+      state: verifyState(typeof task === 'string' ? task : JSON.stringify(task), instructions, output),
+      fixtures: (node.data as { fixtures?: FixtureMode }).fixtures,
+      ...(attempt > 0 ? { fixtureScope: 'fallback' } : {}),
+    });
+    const verdict = verifyVerdict(config, outcome.result.answers);
+    this.emitDecision(node, 'verify', outcome, verdict.failed ? { fallback: 'low-confidence' } : {});
+    return verdict;
+  }
+
+  /**
+   * Tool/skill preselection. Two passes: one Choice ranks every candidate
+   * (its probabilities are the ranking) with a "does this turn need one"
+   * gate, then absolute fit Nouls on the shortlist. Any failure degrades to
+   * the full list - preselection is an optimisation, never a blocker. A
+   * missing decision client is the exception: it fails like every other
+   * System One feature except the Router.
+   */
+  private async preselectForAgent(
+    node: WorkflowNode,
+    payload: string,
+    executionKey: string,
+    tools: ResolvedTool[],
+  ): Promise<{ tools: ResolvedTool[]; skills?: AgentSkill[] }> {
+    const data = node.data as AgentNodeData;
+    const config = data.preselect;
+    const skills = Array.isArray(data.skills) ? data.skills : [];
+    if (!config?.enabled) return { tools };
+    // Only the Router degrades without a client; every other feature says so.
+    if (!this.options.decisions) throw this.missingCapability(node, 'decisions', 'preselect tools with System One');
+
+    const topK = typeof config.topK === 'number' && config.topK > 0 ? config.topK : 3;
+    const minFit = readThreshold(config.minFit, 0.3);
+    // The turn as the model will see it, capped to keep the state narrow.
+    const request = (payload || 'Begin.').slice(0, 24_000);
+
+    const narrow = async <T>(
+      kind: 'tool' | 'skill',
+      purpose: DecisionPurpose,
+      items: T[],
+      toCandidate: (item: T) => PreselectCandidate,
+      allowEmpty: boolean,
+    ): Promise<T[]> => {
+      // Nothing to gain below topK+1 candidates when narrowing may not empty.
+      if (items.length === 0 || (!allowEmpty && items.length <= topK)) return items;
+      const candidates = items.map(toCandidate);
+      try {
+        const { questions, labels } = preselectRankQuestions(kind, candidates);
+        const ranked = await this.evaluateDecision(node, purpose, {
+          payload,
+          executionKey,
+          tuning: config,
+          questions,
+          state: { request },
+          fixtures: (data as { fixtures?: FixtureMode }).fixtures,
+          fixtureScope: 'rank',
+        });
+        const { shortlist, gate } = preselectShortlist(candidates, labels, ranked.result.answers, topK);
+        // Candidates past the 255-option limit were never ranked: keep them.
+        const overflow = candidates.slice(labels.length);
+        let kept: PreselectCandidate[];
+        let fitOutcome: typeof ranked | undefined;
+        if (allowEmpty && gate < minFit) {
+          kept = [];
+        } else {
+          fitOutcome = await this.evaluateDecision(node, purpose, {
+            payload,
+            executionKey,
+            tuning: config,
+            questions: preselectFitQuestions(kind, shortlist),
+            state: { request },
+            fixtures: (data as { fixtures?: FixtureMode }).fixtures,
+            fixtureScope: 'fit',
+          });
+          kept = preselectFitting(shortlist, fitOutcome.result.answers, minFit);
+          if (!allowEmpty && kept.length === 0) kept = shortlist.slice(0, 1);
+        }
+        const merged = { ...ranked.result.answers, ...(fitOutcome?.result.answers ?? {}) };
+        this.emitDecision(node, purpose, {
+          result: { ...ranked.result, answers: merged },
+          durationMs: ranked.durationMs + (fitOutcome?.durationMs ?? 0),
+          replayed: ranked.replayed && (fitOutcome?.replayed ?? true),
+        });
+        const keep = new Set([...kept, ...overflow].map(candidate => candidate.key));
+        return items.filter((item, index) => keep.has(candidates[index]!.key));
+      } catch (error) {
+        if (error instanceof RunStoppedError) throw error;
+        this.emitDecision(node, purpose, { durationMs: 0 }, { fallback: 'error' });
+        return items;
+      }
+    };
+
+    const narrowedTools =
+      config.tools === false
+        ? tools
+        : await narrow(
+            'tool',
+            'tool-select',
+            tools,
+            tool => ({
+              key: tool.definition.name,
+              name: tool.definition.name,
+              description: tool.definition.description,
+            }),
+            false,
+          );
+    const narrowedSkills =
+      config.skills === false || skills.length === 0
+        ? undefined
+        : await narrow(
+            'skill',
+            'skill-select',
+            skills,
+            skill => ({
+              key: skill.id || skill.name,
+              name: skill.name || 'Skill',
+              description: skill.description || skill.content.slice(0, 400),
+            }),
+            true,
+          );
+    return { tools: narrowedTools, skills: narrowedSkills };
   }
 
   /**
@@ -2892,6 +3102,7 @@ class WorkflowRun {
     payload: string,
     node: WorkflowNode,
     toolsCallable: boolean,
+    selectedSkills?: readonly AgentSkill[],
   ): string {
     // `{{input}}` interpolates the whole payload; `{{a.b.c}}` digs into it
     // when the payload parses as JSON (structured handoffs).
@@ -2899,8 +3110,8 @@ class WorkflowRun {
 
     // Attached skills render verbatim (no interpolation - skills are static
     // guidance, not task templates), in attachment order, before the
-    // capabilities/hand-off sections.
-    const skills = (node.data as AgentNodeData).skills;
+    // capabilities/hand-off sections. Preselection may pass a subset.
+    const skills = selectedSkills ?? (node.data as AgentNodeData).skills;
     if (Array.isArray(skills)) {
       for (const skill of skills) {
         if (!skill || typeof skill.content !== 'string' || !skill.content.trim()) continue;
@@ -2948,6 +3159,10 @@ class WorkflowRun {
       questions: Record<string, DecisionQuestion>;
       fixtures?: FixtureMode;
       retry?: NodeRetryPolicy;
+      /** Explicit state; absent = the payload narrowed by `tuning.statePath`. */
+      state?: string | Record<string, unknown> | unknown[];
+      /** Suffix keeping several calls of one purpose apart in the fixture store. */
+      fixtureScope?: string;
     },
   ): Promise<{ result: DecisionResult; durationMs: number; replayed: boolean }> {
     const client = this.options.decisions;
@@ -2955,7 +3170,7 @@ class WorkflowRun {
 
     const request = {
       model: resolveDecisionModel(input.tuning.decisionModel, this.options.decisionModel),
-      state: payloadToState(input.payload, input.tuning.statePath),
+      state: input.state ?? payloadToState(input.payload, input.tuning.statePath),
       questions: input.questions,
     };
     const invalid = validateDecisionRequest(request);
@@ -2965,7 +3180,7 @@ class WorkflowRun {
       mode: input.fixtures,
       workflowId: this.options.workflowId ?? '',
       // Purpose-scoped so an agent's verify and preselect calls never collide.
-      nodeId: `${node.id}#${purpose}`,
+      nodeId: `${node.id}#${purpose}${input.fixtureScope ? `#${input.fixtureScope}` : ''}`,
       nodeName: node.name,
       payload: input.payload,
       occurrence: this.occurrenceOf(input.executionKey),

@@ -1,0 +1,107 @@
+:host {
+  display: block;
+}
+
+.phorma-triage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.phorma-triage__ask {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px dashed color-mix(in srgb, var(--phorma-accent-red) 45%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-red) 6%, transparent);
+  color: var(--p-text-color);
+  font-size: 0.857rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  > .ti {
+    color: var(--phorma-accent-red);
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--phorma-accent-red) 12%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--p-primary-color);
+    outline-offset: 1px;
+  }
+}
+
+.phorma-triage__note {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-triage__spin {
+  animation: phorma-triage-spin 0.9s linear infinite;
+}
+
+@keyframes phorma-triage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phorma-triage__spin {
+    animation: none;
+  }
+}
+
+.phorma-triage__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--phorma-accent-red) 35%, transparent);
+  background: color-mix(in srgb, var(--phorma-accent-red) 6%, transparent);
+
+  p {
+    margin: 0;
+  }
+}
+
+.phorma-triage__title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.928rem;
+  font-weight: 700;
+  color: var(--p-text-color);
+
+  > .ti {
+    color: var(--phorma-accent-red);
+  }
+}
+
+.phorma-triage__pct {
+  margin-left: auto;
+  font-size: 0.857rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-triage__remedy {
+  font-size: 0.928rem;
+  color: var(--p-text-color);
+}
+
+.phorma-triage__retry {
+  font-size: 0.857rem;
+  color: var(--p-text-muted-color);
+}

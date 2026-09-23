@@ -12,6 +12,15 @@ user's own Cloudflare account and keys).
 
 ## Rules
 
+- System One (`docs/system-one.md`): the DO's `decisionClient()` uses `TYPESAFE_PLATFORM_KEY` hosted
+  and `TYPESAFE_API_KEY` BYO; absent key = no client. `POST /api/decide` is the metered proxy for
+  local runs (operator capability, 501 without the platform key, validated with the engine's own
+  `validateDecisionRequest` before any upstream spend, status and `Retry-After` passed through,
+  ledgered as `decide:<model>` with `countsAsRun: false`). Portal guardrails live in the DO
+  (`startPortalTurn`, `answerPortalQuestion`, `fanOutToPortal`) and FAIL CLOSED: no key or any
+  System One error refuses the turn. With output screening on, `node-token` is withheld and the
+  `done` frame is delivered only after `screenPortalAnswer`; `portalScreening` keeps the turn busy
+  and the SSE stream open until then.
 - `cloud/` must depend on the `ai` package - the `agents` SDK imports it dynamically and wrangler
   bundling fails with "Could not resolve ai" otherwise.
 - Verify with `npm run check` (`tsc --noEmit` plus `wrangler deploy --dry-run`) AND `npm test`.

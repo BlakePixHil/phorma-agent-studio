@@ -276,12 +276,12 @@
                           pTextarea
                           class="phorma-evalsd__cell-area"
                           rows="2"
-                          [placeholder]="item.matcher === 'llm-judge' ? 'Reference answer' : 'Expected output'"
+                          [placeholder]="isReferenceMatcher(item.matcher) ? 'Reference answer' : 'Expected output'"
                           aria-label="Expected output"
                           [ngModel]="item.expected"
                           (ngModelChange)="patchCase(i, { expected: $event })"
                         ></textarea>
-                        @if (item.matcher === 'llm-judge') {
+                        @if (isReferenceMatcher(item.matcher)) {
                           <textarea
                             pTextarea
                             class="phorma-evalsd__cell-area phorma-evalsd__cell-area--criteria"
@@ -384,6 +384,33 @@
                   <p class="phorma-evalsd__hint">
                     Grades <code>llm-judge</code> cases at temperature 0, on models that accept one.
                     Leave on Studio default to reuse the application model.
+                  </p>
+                </div>
+              }
+
+              @if (usesDecisionJudge()) {
+                <div class="phorma-evalsd__config-block">
+                  <span class="phorma-evalsd__section-label">System One judge</span>
+                  <div class="phorma-evalsd__row">
+                    <label class="phorma-evalsd__hint" for="evalsd-decision-pass">Pass at</label>
+                    <p-inputnumber
+                      inputId="evalsd-decision-pass"
+                      [ngModel]="decisionPassPercent()"
+                      (ngModelChange)="setDecisionPassPercent($event)"
+                      [min]="1"
+                      [max]="100"
+                      suffix="%"
+                      size="small"
+                      [inputStyle]="{ width: '5rem' }"
+                    />
+                  </div>
+                  <p class="phorma-evalsd__hint">
+                    Grades <code>decision-judge</code> cases with calibrated System One questions:
+                    answers the input, matches the reference, contradicts it, meets the criteria.
+                    Deterministic and costs a fraction of a cent per case.
+                    @if (!decisionTransport.available()) {
+                      <strong>Add a TypeSafe key in Settings or sign in to Phorma Cloud to use it.</strong>
+                    }
                   </p>
                 </div>
               }

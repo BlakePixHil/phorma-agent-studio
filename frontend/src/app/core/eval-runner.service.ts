@@ -391,6 +391,7 @@ export class EvalRunnerService {
         testCase,
         output,
         testCase.matcher === 'llm-judge' ? this.judgeOptions(suite) : undefined,
+        testCase.matcher === 'decision-judge' ? this.decisionJudgeOptions(suite) : undefined,
       );
     } catch (error) {
       return {
@@ -400,12 +401,28 @@ export class EvalRunnerService {
         error: `Judge failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    // A decision-judge verdict carries its own (tiny) cost; add it to the case.
+    const judgeCost = (score as { costUsd?: number }).costUsd;
+    const costUsd =
+      typeof judgeCost === 'number' && judgeCost > 0 ? (base.costUsd ?? 0) + judgeCost : base.costUsd;
     return {
       ...base,
+      ...(costUsd !== undefined ? { costUsd } : {}),
       status: score.pass ? 'passed' : 'failed',
       output: clip(output),
       score: score.score,
       judgeReasoning: score.reasoning,
+    };
+  }
+
+  /** System One judge: undefined when no decision backend is configured. */
+  private decisionJudgeOptions(suite: EvalSuite) {
+    const client = this.decisionTransport.create();
+    if (!client) return undefined;
+    return {
+      client,
+      model: suite.decisionJudge?.model?.trim() || this.decisionTransport.defaultModel(),
+      passAt: suite.decisionJudge?.passAt,
     };
   }
 

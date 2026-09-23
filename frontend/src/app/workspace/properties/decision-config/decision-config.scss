@@ -67,6 +67,25 @@
   &--first {
     margin-top: 0;
   }
+
+  // A nested option under a parent toggle.
+  &--sub {
+    margin-top: 0;
+    color: var(--p-text-muted-color);
+  }
+}
+
+// Hazard toggles under a guardrail side: two columns, indented under the parent.
+.phorma-dc__hazards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.3rem 0.6rem;
+  margin-top: 0.3rem;
+  padding-left: 1.55rem;
+}
+
+.phorma-dc__hazards-wide {
+  grid-column: 1 / -1;
 }
 
 .phorma-dc__route {

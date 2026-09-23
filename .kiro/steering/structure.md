@@ -176,6 +176,14 @@ Node kinds are data plus strategy - the canvas is registry-driven and normally n
 Adding an MCP preset is a single entry in `MCP_PRESETS` (`core/node-catalog.ts`); palette,
 properties panel, settings Integrations, and the Rust stdio spawn path all pick it up.
 
+System One UI is deferred so it stays out of the initial bundle (the budget is tight): node
+config in `workspace/properties/decision-config/` (router, approval gate, decide, portal
+guardrails), agent config in `workspace/prompt/agent-decisions/`, palette assists in
+`workspace/palette/palette-assist/`, run triage in `workspace/runs/run-triage/`. Each is mounted
+with `@defer` and gated on `DecisionTransportService.available()`. Studio-side question builders
+live in `core/studio-assist.ts` and are loaded with a dynamic `import()`. A new System One node
+setting goes in `decision-config`, not in the properties form.
+
 ## Connector packaging (P1-14)
 
 A connector is one `*.connector.json` declaring a connection template, pre-configured data steps,

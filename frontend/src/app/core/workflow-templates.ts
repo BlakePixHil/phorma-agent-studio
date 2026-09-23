@@ -777,6 +777,237 @@ function buildJiraSafetyNetWorkflow(): WorkflowSpec {
   };
 }
 
+// ── Template: Support triage (System One) ────────────────────────────────────────────
+
+const TRIGGER_PORTS: TemplateNodeInit['ports'] = [{ key: 'start', name: 'Start', role: 'message-out' }];
+
+/**
+ * A support inbox router that needs no classifier agent: System One reads each
+ * ticket, picks the team with a calibrated confidence (visible on the canvas
+ * edges), and sends anything it is unsure about to a person. Each team drafts
+ * a reply, and a gate auto-approves the confidently safe ones.
+ */
+function buildSupportTriageWorkflow(): WorkflowSpec {
+  connectionCounter = 0;
+  const draft = (team: string): string =>
+    [
+      `# Role`,
+      ``,
+      `You are on the ${team} support team. Draft a short, friendly reply to the ticket below.`,
+      `State only what you know from the ticket, and say what happens next.`,
+      ``,
+      `# Ticket`,
+      ``,
+      `{{input}}`,
+    ].join('\n');
+
+  const nodes: WorkflowNode[] = [
+    node({
+      id: 'tpl-st-trigger',
+      name: 'New ticket',
+      kind: 'manual-trigger',
+      category: 'trigger',
+      icon: 'ti ti-player-play',
+      x: 80,
+      y: 260,
+      ports: TRIGGER_PORTS,
+      data: {},
+      description: 'Paste a support ticket and press Run. Swap for a Webhook trigger in production.',
+    }),
+    node({
+      id: 'tpl-st-router',
+      name: 'Which team?',
+      kind: 'router',
+      category: 'flow',
+      icon: 'ti ti-arrows-split-2',
+      x: 360,
+      y: 260,
+      ports: [
+        { key: 'input', name: 'In', role: 'message-in' },
+        { key: 'billing', name: 'Billing', role: 'message-out' },
+        { key: 'technical', name: 'Technical', role: 'message-out' },
+        { key: 'account', name: 'Account', role: 'message-out' },
+        { key: 'unsure', name: 'Not sure', role: 'message-out' },
+      ],
+      data: {
+        mode: 'decide',
+        instructions: 'Which team should handle this support ticket?',
+        routeCriteria: {
+          'tpl-st-router-billing': 'Invoices, charges, refunds, payment methods, plans and pricing.',
+          'tpl-st-router-technical': 'Errors, bugs, outages, integrations, the API and anything not working.',
+          'tpl-st-router-account': 'Sign-in, passwords, profile details, team members and account closure.',
+        },
+        minConfidence: 0.6,
+        unsurePortId: 'tpl-st-router-unsure',
+      },
+      description: 'System One picks the team. Below 60% confidence the ticket goes to a person.',
+    }),
+    agent('tpl-st-billing', 'Billing reply', 680, 60, draft('billing')),
+    agent('tpl-st-technical', 'Technical reply', 680, 260, draft('technical')),
+    agent('tpl-st-account', 'Account reply', 680, 460, draft('account')),
+    node({
+      id: 'tpl-st-human',
+      name: 'Needs a person',
+      kind: 'approval-gate',
+      category: 'flow',
+      icon: 'ti ti-user-check',
+      x: 680,
+      y: 660,
+      ports: [
+        { key: 'input', name: 'In', role: 'message-in' },
+        { key: 'approved', name: 'Approved', role: 'message-out' },
+        { key: 'rejected', name: 'Rejected', role: 'message-out' },
+      ],
+      data: { message: 'System One could not place this ticket confidently. Route it by hand.' },
+    }),
+    node({
+      id: 'tpl-st-gate',
+      name: 'Safe to send?',
+      kind: 'approval-gate',
+      category: 'flow',
+      icon: 'ti ti-user-check',
+      x: 1000,
+      y: 260,
+      ports: [
+        { key: 'input', name: 'In', role: 'message-in' },
+        { key: 'approved', name: 'Approved', role: 'message-out' },
+        { key: 'rejected', name: 'Rejected', role: 'message-out' },
+      ],
+      data: {
+        message: 'Review the drafted reply before it is sent.',
+        autoResolve: {
+          enabled: true,
+          question:
+            'Is this reply polite, on topic, free of promises about refunds or dates, and free of personal data?',
+          approveAt: 0.9,
+          rejectAt: 0.1,
+        },
+      },
+      description: 'Confidently safe replies go straight through; the rest wait for a person.',
+    }),
+  ];
+
+  const connections: WorkflowConnection[] = [
+    connect('tpl-st-trigger', 'start', 'tpl-st-router', 'input'),
+    connect('tpl-st-router', 'billing', 'tpl-st-billing', 'task'),
+    connect('tpl-st-router', 'technical', 'tpl-st-technical', 'task'),
+    connect('tpl-st-router', 'account', 'tpl-st-account', 'task'),
+    connect('tpl-st-router', 'unsure', 'tpl-st-human', 'input'),
+    connect('tpl-st-billing', 'result', 'tpl-st-gate', 'input'),
+    connect('tpl-st-technical', 'result', 'tpl-st-gate', 'input'),
+    connect('tpl-st-account', 'result', 'tpl-st-gate', 'input'),
+  ];
+
+  return {
+    version: 1,
+    id: 'tpl-support-triage',
+    name: 'Support triage (System One)',
+    description:
+      'Routes each support ticket to Billing, Technical or Account by meaning, with a calibrated ' +
+      'confidence on every edge, and sends unsure tickets to a person. Drafted replies that System ' +
+      'One judges safe are approved automatically. Needs a TypeSafe key (Settings > API keys) or a ' +
+      'Phorma Cloud sign-in.',
+    graph: { nodes, connections },
+    savedAt: new Date().toISOString(),
+  };
+}
+
+// ── Template: Verified extraction (System One) ───────────────────────────────────────
+
+/**
+ * Pull structured facts out of free text, then let System One check the
+ * result is grounded in the source and complete. A flagged extraction reruns
+ * once on a stronger fallback model; a Decide node then scores it so a
+ * downstream step can branch on the numbers.
+ */
+function buildVerifiedExtractionWorkflow(): WorkflowSpec {
+  connectionCounter = 0;
+  const nodes: WorkflowNode[] = [
+    node({
+      id: 'tpl-ve-trigger',
+      name: 'Document',
+      kind: 'manual-trigger',
+      category: 'trigger',
+      icon: 'ti ti-player-play',
+      x: 80,
+      y: 200,
+      ports: TRIGGER_PORTS,
+      data: {},
+      description: 'Paste an email, contract clause or invoice and press Run.',
+    }),
+    agent(
+      'tpl-ve-extract',
+      'Extract',
+      360,
+      200,
+      [
+        '# Role',
+        '',
+        'Extract the parties, amounts, dates and obligations from the document below as JSON:',
+        '`{"parties": [], "amounts": [], "dates": [], "obligations": []}`.',
+        'Use only what the document says. Leave a list empty rather than guess.',
+        '',
+        '# Document',
+        '',
+        '{{input}}',
+      ].join('\n'),
+      'Checked by System One for invented or missing facts; a flagged answer reruns on the fallback model.',
+      {
+        verify: {
+          enabled: true,
+          checks: ['unsupported', 'incomplete', 'format'],
+          fireAt: 0.7,
+          onFail: 'fallback',
+        },
+      },
+    ),
+    node({
+      id: 'tpl-ve-assess',
+      name: 'Assess',
+      kind: 'decide',
+      category: 'flow',
+      icon: 'ti ti-scale',
+      x: 660,
+      y: 200,
+      ports: [
+        { key: 'input', name: 'In', role: 'message-in' },
+        { key: 'decided', name: 'Decided', role: 'message-out' },
+      ],
+      data: {
+        resultKey: 'assessment',
+        questions: [
+          { id: 'has_deadline', type: 'noul', instructions: 'Does the extraction include at least one deadline or due date?' },
+          {
+            id: 'risk',
+            type: 'score',
+            instructions: 'How much financial or legal risk do these obligations carry?',
+            levels: ['None', 'Low', 'Moderate', 'High'],
+          },
+        ],
+      },
+      description: 'Answers merge into the payload: $.assessment.has_deadline and $.assessment.risk.score.',
+    }),
+  ];
+
+  const connections: WorkflowConnection[] = [
+    connect('tpl-ve-trigger', 'start', 'tpl-ve-extract', 'task'),
+    connect('tpl-ve-extract', 'result', 'tpl-ve-assess', 'input'),
+  ];
+
+  return {
+    version: 1,
+    id: 'tpl-verified-extraction',
+    name: 'Verified extraction (System One)',
+    description:
+      'Extracts parties, amounts, dates and obligations as JSON, has System One check the result is ' +
+      'grounded and complete (rerunning on the fallback model if not), then scores the risk. Set a ' +
+      'Fallback model on the Extract agent to enable escalation. Needs a TypeSafe key or a Phorma ' +
+      'Cloud sign-in.',
+    graph: { nodes, connections },
+    savedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Registry of workflow templates shown in the Workflows panel.
  * Adding a template = one entry here.
@@ -799,6 +1030,24 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       'day against one random eligible ticket and emails a report.',
     icon: 'ti ti-brand-jira',
     build: buildJiraSafetyNetWorkflow,
+  },
+  {
+    id: 'tpl-support-triage',
+    label: 'Support triage (System One)',
+    description:
+      'Routes tickets to the right team by meaning, with calibrated confidence on every edge, and ' +
+      'auto-approves replies System One judges safe.',
+    icon: 'ti ti-arrows-split-2',
+    build: buildSupportTriageWorkflow,
+  },
+  {
+    id: 'tpl-verified-extraction',
+    label: 'Verified extraction (System One)',
+    description:
+      'Extracts facts as JSON, verifies they are grounded and complete, escalates to a fallback ' +
+      'model when not, then scores the risk.',
+    icon: 'ti ti-file-check',
+    build: buildVerifiedExtractionWorkflow,
   },
 ];
 

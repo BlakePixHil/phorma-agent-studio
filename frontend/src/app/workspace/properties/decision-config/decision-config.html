@@ -1,10 +1,16 @@
 <!-- System One availability: one line, never blocking. -->
-@if (!available() && (router()?.mode === 'decide' || gate()?.enabled || decide())) {
+@if (!available() && (router()?.mode === 'decide' || gate()?.enabled || decide() || guardEnabled())) {
   <p class="phorma-dc__notice" role="status">
     <i class="ti ti-plug-connected-x" aria-hidden="true"></i>
     <span>
       System One is not configured.
-      @if (router()) { This router falls back to keyword matching. } @else { This step will fail when it runs. }
+      @if (router()) {
+        This router falls back to keyword matching.
+      } @else if (guard()) {
+        The deployed worker needs its own TypeSafe key, or visitor messages are refused.
+      } @else {
+        This step will fail when it runs.
+      }
       <button type="button" class="phorma-dc__link" (click)="openSettings()">Add a TypeSafe key</button>
     </span>
   </p>
@@ -169,6 +175,84 @@
       <p class="phorma-dc__hint">
         At or above the approve line the gate opens on its own; at or below the reject line it
         closes. Anything in between waits for a person, who sees System One's estimate.
+      </p>
+    }
+  </section>
+}
+
+<!-- ── Portal guardrails ───────────────────────────────────────────────── -->
+@if (guard(); as g) {
+  <section class="phorma-dc__section" data-section="portal-guardrails">
+    <span class="phorma-dc__label">Guardrails</span>
+    @for (side of guardSides; track side.id) {
+      <label class="phorma-dc__check" [class.phorma-dc__check--first]="$first">
+        <p-checkbox
+          [binary]="true"
+          size="small"
+          [inputId]="id('guard-' + side.id)"
+          [ngModel]="g[side.id]?.enabled ?? false"
+          (ngModelChange)="patchSide(side.id, { enabled: $event })"
+        />
+        {{ side.label }}
+      </label>
+      @if (g[side.id]?.enabled) {
+        <div class="phorma-dc__hazards">
+          @for (hazard of hazards; track hazard.id) {
+            <label class="phorma-dc__check phorma-dc__check--sub">
+              <p-checkbox
+                [binary]="true"
+                size="small"
+                [inputId]="id('guard-' + side.id + '-' + hazard.id)"
+                [ngModel]="hasHazard(side.id, hazard.id)"
+                (ngModelChange)="toggleHazard(side.id, hazard.id, $event)"
+              />
+              {{ hazard.label }}
+            </label>
+          }
+          <label class="phorma-dc__check phorma-dc__check--sub phorma-dc__hazards-wide">
+            <p-checkbox
+              [binary]="true"
+              size="small"
+              [inputId]="id('guard-' + side.id + '-strict')"
+              [ngModel]="g[side.id]?.reviewAction === 'block'"
+              (ngModelChange)="patchSide(side.id, { reviewAction: $event ? 'block' : undefined })"
+            />
+            Also block borderline cases
+          </label>
+        </div>
+      }
+    }
+
+    @if (guardEnabled()) {
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('guard-refusal')">Refusal message</label>
+      <textarea
+        pTextarea
+        pSize="small"
+        [id]="id('guard-refusal')"
+        class="phorma-dc__textarea"
+        rows="2"
+        [value]="g.refusalMessage ?? ''"
+        (input)="patchGuard({ refusalMessage: value($event) || undefined })"
+        placeholder="Sorry, I can't help with that request."
+      ></textarea>
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('guard-support')">Support message</label>
+      <textarea
+        pTextarea
+        pSize="small"
+        [id]="id('guard-support')"
+        class="phorma-dc__textarea"
+        rows="2"
+        [value]="g.supportMessage ?? ''"
+        (input)="patchGuard({ supportMessage: value($event) || undefined })"
+        placeholder="Shown when someone may be at risk"
+      ></textarea>
+      <p class="phorma-dc__hint">
+        Include a local helpline in the support message.
+      </p>
+      <p class="phorma-dc__hint">
+        Runs on the published portal. A blocked message never reaches your model or the
+        transcript. Screening answers turns off token streaming, so visitors see each reply once
+        it is checked. If System One is unreachable the turn is refused, never let through.
       </p>
     }
   </section>
