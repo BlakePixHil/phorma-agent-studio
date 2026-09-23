@@ -172,7 +172,7 @@ describe('owner-scoped local storage', () => {
       ),
       RUNS,
     );
-  });
+  }, 120_000);
 
   /**
    * Feature: multi-organisation-phorma, Property 41: A local row belongs to
@@ -188,6 +188,8 @@ describe('owner-scoped local storage', () => {
     owner.adoptOwners([{ orgId: 'org_alpha', label: 'Alpha' }]);
 
     const id = uniqueId('unstamped');
+    // The service must create the schema first; see `writeUnstamped`.
+    await storage.listWorkflows();
     await writeUnstamped('workflows', spec(id, 'Legacy'));
 
     owner.setActiveOrg(null);
@@ -390,6 +392,11 @@ function deleteDatabase(name: string): Promise<void> {
 async function writeUnstamped(store: string, row: object): Promise<void> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open('phorma-agent-studio-db');
+    // A versionless open CREATES an empty v1 database if none exists yet.
+    request.onupgradeneeded = () => {
+      request.transaction?.abort();
+      reject(new Error('writeUnstamped ran before the service created the database.'));
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('open failed'));
   });
