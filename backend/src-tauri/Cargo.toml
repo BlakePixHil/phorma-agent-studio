@@ -1,6 +1,6 @@
 [package]
 name = "phorma-agent-studio"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 description = "Phorma Agent Studio — a visual canvas for designing, debugging, and deploying multi-agent AI workflows."
 authors = ["Phorma"]
 edition = "2021"
