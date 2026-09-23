@@ -219,6 +219,15 @@ Recovery:
   exist. Or republish from a dev machine:
   `gh release download vX.Y.Z --dir release-assets-fix` then
   `node scripts/publish-r2.mjs vX.Y.Z release-assets-fix` (needs `cloud/node_modules/.bin` on PATH).
+- **`publish-r2` fails with "no assets to download" despite all 4 platform builds succeeding.**
+  Seen at beta.5: GitHub's tag-based release lookup (`releases/tags/{tag}`, which `gh release
+  view`/`gh release download` both use) served stale data (0 assets) for over 10 minutes after
+  upload, while `gh api repos/OWNER/REPO/releases/{id}` (get the id from any prior `gh api
+  repos/.../releases` call) showed all 13 assets correctly the whole time. Re-running the job hits
+  the same stale cache and fails identically. Do not trust "no assets to download" at face value -
+  check the by-ID endpoint first. If it shows assets, download each one manually:
+  `gh api repos/OWNER/REPO/releases/assets/{assetId} -H "Accept: application/octet-stream" > file`
+  for every entry in `.assets[]`, then run `publish-r2.mjs` against that directory as above.
 - **A build failed.** `gh release delete vX.Y.Z --yes --cleanup-tag`, then `git tag -d vX.Y.Z`
   locally, fix, and cut the **next** version. Never re-point a tag.
 - Do not remove `projectPath: backend` from the workflow. Without it `tauri-action` auto-detection
