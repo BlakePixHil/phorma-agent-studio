@@ -68,10 +68,11 @@ const BANNED_ELEMENTS = {
     'confirm-dialog pattern, so a PrimeNG dialog would bring a second overlay stack',
 };
 
-/** PrimeNG elements with no size to set, and why. Keeps the p-* check total. */
-const NO_SIZE_ELEMENTS = {
-  'p-chart': 'a canvas wrapper - it takes width and height, and has no size token',
-};
+/**
+ * PrimeNG elements with no size to set, and why. Keeps the p-* check total.
+ * Empty since the dashboard's charts became its own SVG kit (views/charts/).
+ */
+const NO_SIZE_ELEMENTS = {};
 
 /** The only accepted static size value. */
 const EXPECTED_SIZE = 'small';

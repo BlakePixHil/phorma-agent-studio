@@ -17,8 +17,7 @@ type ViewLoader = NonNullable<Route['loadComponent']>;
  * here.
  *
  * Each view is lazily loaded, so a visitor pays for the view they open and the
- * trend view's chart.js chunk (deferred again inside that view) never loads for
- * anyone reading the overview.
+ * geography map's generated path data never loads for anyone reading another view.
  *
  * The outlet these render into lives inside the shell's signed-in branch (see
  * `app.html`), so no view component is constructed - and no `resource()` fires -

@@ -29,8 +29,8 @@ export const INSTALLS_COLUMN: readonly GroupColumn[] = [{ key: 'installs', label
   selector: 'admin-group-table',
   imports: [DecimalPipe],
   template: `
-    <article class="admin-card">
-      <h3 class="admin-card__title">
+    <article [class.admin-card]="framed()" [class.admin-table-block]="!framed()">
+      <h3 class="admin-card__title" [class.admin-sr]="!framed()">
         <i class="ti {{ icon() }}" aria-hidden="true"></i>
         <span>{{ title() }}</span>
       </h3>
@@ -81,6 +81,9 @@ export class GroupTable {
 
   /** The numeric columns, in render order. */
   readonly columns = input<readonly GroupColumn[]>(INSTALLS_COLUMN);
+
+  /** False inside a "View data" disclosure: no card chrome, and the title is screen-reader only. */
+  readonly framed = input(true);
 
   /** The label the Worker folds sub-threshold groups under. */
   readonly otherLabel = OTHER_GROUP_LABEL;

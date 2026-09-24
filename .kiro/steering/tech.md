@@ -18,7 +18,7 @@ Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud
 | Engine | `@phorma/engine` - pure TypeScript, no framework deps, consumed through a tsconfig path alias (no build step) |
 | Desktop | Tauri v2, Rust 1.77+, plugins: dialog, opener, process, updater |
 | Cloud | Cloudflare Worker + `agents` SDK (`WorkflowAgent` Durable Object, embedded SQLite), wrangler 4, `@clerk/backend` |
-| Admin | `admin/` - separate Angular 20 telemetry dashboard (PrimeNG 20 Aura, Tailwind v4, `ngx-clerk`), deployed as a Worker serving static assets, isolated from every other package |
+| Admin | `admin/` - separate Angular 20 telemetry dashboard (PrimeNG 20 Aura, Tailwind v4, `ngx-clerk`, its own SVG chart kit - no chart.js), deployed as a Worker serving static assets, isolated from every other package |
 | Tests | engine: vitest 4 + fast-check 4 (`*.spec.ts`) and `tsx` scenario scripts (`test/*.e2e.mts`); frontend and admin: karma + jasmine (+ fast-check 4); cloud: `tsx`/`node` test scripts + miniflare |
 
 Dev port is **7322**, and `admin` serves on **7323**. Phorma Code owns 7321 - never collide.
@@ -40,6 +40,7 @@ cd ../admin;   npm install --legacy-peer-deps # telemetry dashboard, same PrimeN
 cd backend;  npm run dev     # desktop shell + Angular dev server together
 cd frontend; npm start       # browser only, http://localhost:7322
 cd admin;    npm start       # telemetry dashboard only, http://localhost:7323
+cd admin;    npm run preview # same port, fixture data + fake session: no Clerk, no Worker (?preview=empty|fail|degraded)
 cd cloud;    npx wrangler dev # local Durable Object, no Cloudflare account needed
 ```
 
@@ -60,8 +61,8 @@ cd cloud-aws; npm test                           # vitest --run (unit + property
 cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
 cd backend/src-tauri; cargo test                 # 30 unit tests (sql, llm, data, deploy_assets)
-cd admin; npm run build                          # dashboard production build: 831 kB initial, 1.5MB warning / 2MB error
-cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 55 specs, ~17s
+cd admin; npm run build                          # dashboard production build: 875 kB initial, 1.5MB warning / 2MB error
+cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 77 specs, ~26s
 node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
 node scripts/check-telemetry-catalog.mjs         # the two Counter_Catalog twins and the D1 migration still agree
 node scripts/check-telemetry-isolation.mjs       # TelemetryService import list is still a DI leaf
@@ -85,8 +86,10 @@ manually started `wrangler dev` and a local model.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
   warning / 26kB error. `initial` currently sits at 2.87MB, so the warning is expected and only the
   3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
-  831kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
-  (chart.js) behind `@defer (on immediate)`.
+  875kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
+  (chart.js in `frontend`) behind `@defer (on immediate)`.
+- `cloud/test/*.test.mjs` suites that use `node:module` `registerHooks` need Node 22+. On a Node 20
+  machine run one with `npx -y node@22 --import tsx test/<suite>.test.mjs`.
 - `engine/` has no local TypeScript install. For a type-only check there use
   `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json`. Running `npx tsc` inside
   `engine/` tries to fetch the bogus `tsc` package and prompts interactively.

@@ -32,19 +32,19 @@ import { VIEW_FAILURE_FALLBACK, type ViewState } from '../core/view-state';
   template: `
     @switch (state().kind) {
       @case ('loading') {
-        <div class="admin-view-state" data-view-state="loading" role="status">
+        <div class="admin-view-state" [class.admin-view-state--inline]="inline()" data-view-state="loading" role="status">
           <i class="ti ti-loader-2 admin-view-state__spinner" aria-hidden="true"></i>
-          <p class="admin-view-state__message">Loading telemetry.</p>
+          <p class="admin-view-state__message">Loading.</p>
         </div>
       }
       @case ('empty') {
-        <div class="admin-view-state" data-view-state="empty">
+        <div class="admin-view-state" [class.admin-view-state--inline]="inline()" data-view-state="empty">
           <i class="ti ti-database-off admin-view-state__icon" aria-hidden="true"></i>
           <p class="admin-view-state__message">{{ emptyMessage() }}</p>
         </div>
       }
       @case ('failed') {
-        <div class="admin-view-state" data-view-state="failed" role="alert">
+        <div class="admin-view-state" [class.admin-view-state--inline]="inline()" data-view-state="failed" role="alert">
           <i class="ti ti-alert-triangle admin-view-state__icon" aria-hidden="true"></i>
           <p class="admin-view-state__message">{{ failureReason() }}</p>
           <button
@@ -76,6 +76,9 @@ export class ViewStateRail {
    * the reporting threshold (10.13).
    */
   readonly emptyMessage = input('No telemetry for this range.');
+
+  /** Drops the card chrome when the rail sits inside a card of its own. */
+  readonly inline = input(false);
 
   /** Re-run the view's own request. The failed state's only action (10.12). */
   readonly retry = output<void>();

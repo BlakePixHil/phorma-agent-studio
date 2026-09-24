@@ -641,6 +641,30 @@ realConsole.log('\nGET costs - burn, runway and the committed ceiling');
     `${body.burn.runwayDays} from balance ${body.vendor.balanceUsd}`,
   );
 
+  // The daily series: ascending, contiguous, zero-filled, and summing to the total.
+  const daily = body.burn.daily ?? [];
+  const dayMs = (day) => Date.parse(`${day}T00:00:00Z`);
+  const utcDay = (daysAgo) => new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+  check(
+    'the daily burn spans the window, one contiguous UTC day at a time, ending today',
+    (daily.length === BURN_DAYS || daily.length === BURN_DAYS + 1) &&
+      daily.every((entry, i) => i === 0 || dayMs(entry.day) - dayMs(daily[i - 1].day) === 86_400_000) &&
+      daily[daily.length - 1]?.day === utcDay(0),
+    `${daily.length} days, ${daily[0]?.day}..${daily[daily.length - 1]?.day}`,
+  );
+  check(
+    'the daily burn sums to the metered total',
+    Math.abs(daily.reduce((sum, entry) => sum + entry.usd, 0) - expectedBurn) < 1e-6,
+    JSON.stringify(daily.filter((entry) => entry.usd > 0)),
+  );
+  check(
+    'each metered row lands on its own UTC day, and the rest are zero',
+    daily.find((entry) => entry.day === utcDay(1))?.usd === 3 &&
+      daily.find((entry) => entry.day === utcDay(10))?.usd === 12 &&
+      daily.filter((entry) => entry.usd > 0).length === 2,
+    JSON.stringify(daily.filter((entry) => entry.usd > 0)),
+  );
+
   const expectedAllowance = TIER_ALLOWANCE.starter * 2 + TIER_ALLOWANCE.team; // t_a, t_nokey, t_b
   check(
     'the committed allowance counts ACTIVE tenants only, at their own tier rate',

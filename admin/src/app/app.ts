@@ -27,6 +27,12 @@ export interface ViewNavItem {
   icon: string;
 }
 
+/** A labelled cluster of nav entries in the header. */
+export interface ViewNavGroup {
+  label: string;
+  items: readonly ViewNavItem[];
+}
+
 /**
  * Labels and icons for the five telemetry views. The SET of entries is derived
  * from `TELEMETRY_ROUTES` rather than written out, so a sixth aggregate route
@@ -56,11 +62,25 @@ const NAV_LABELS: Record<TelemetryRoute, { label: string; icon: string }> = {
  * the one an operator should reach for least often - it is a support action that
  * names a person in a permanent record every time it is used.
  */
-export const VIEW_NAV: readonly ViewNavItem[] = [
-  ...TELEMETRY_ROUTES.map((route) => ({ route, ...NAV_LABELS[route] })),
+const TELEMETRY_NAV: readonly ViewNavItem[] = TELEMETRY_ROUTES.map((route) => ({
+  route,
+  ...NAV_LABELS[route],
+}));
+const BUSINESS_NAV: readonly ViewNavItem[] = [
   { route: BILLING_VIEW_ID, label: 'Spend', icon: 'ti-cash' },
+];
+const ADMIN_NAV: readonly ViewNavItem[] = [
   { route: ORG_VIEW_ID, label: 'Organisations', icon: 'ti-building-community' },
   { route: IMPERSONATION_VIEW_ID, label: 'Impersonation', icon: 'ti-eye' },
+];
+
+export const VIEW_NAV: readonly ViewNavItem[] = [...TELEMETRY_NAV, ...BUSINESS_NAV, ...ADMIN_NAV];
+
+/** {@link VIEW_NAV} in the groups the header draws, same order. */
+export const VIEW_NAV_GROUPS: readonly ViewNavGroup[] = [
+  { label: 'Telemetry', items: TELEMETRY_NAV },
+  { label: 'Business', items: BUSINESS_NAV },
+  { label: 'Admin', items: ADMIN_NAV },
 ];
 
 /**
@@ -109,6 +129,7 @@ export class App {
 
   /** The nav entries and the presets, for the template. */
   readonly nav = VIEW_NAV;
+  readonly navGroups = VIEW_NAV_GROUPS;
   readonly presets = RANGE_PRESET_DAYS;
   readonly rangeRejectedMessage = RANGE_REJECTED_MESSAGE;
 

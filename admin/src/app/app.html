@@ -21,9 +21,28 @@
   <div class="admin-shell">
     <header class="admin-shell__header">
       <div class="admin-shell__brand">
-        <i class="ti ti-chart-histogram" aria-hidden="true"></i>
-        <span class="admin-shell__brand-name">Phorma Telemetry</span>
+        <span class="admin-shell__mark" aria-hidden="true">
+          <i class="ti ti-chart-histogram"></i>
+        </span>
+        <span class="admin-shell__brand-name">Phorma <span>Telemetry</span></span>
       </div>
+
+      <nav class="admin-nav" aria-label="Telemetry views">
+        @for (group of navGroups; track group.label) {
+          <div class="admin-nav__group" role="group" [attr.aria-label]="group.label">
+            @for (item of group.items; track item.route) {
+              <a
+                class="admin-nav__link"
+                routerLinkActive="admin-nav__link--active"
+                [routerLink]="['/', item.route]"
+              >
+                <i class="ti {{ item.icon }}" aria-hidden="true"></i>
+                <span>{{ item.label }}</span>
+              </a>
+            }
+          </div>
+        }
+      </nav>
 
       <div class="admin-range" role="group" aria-label="Date range">
         <div class="admin-range__presets">
@@ -80,7 +99,9 @@
         <p class="admin-range__summary">{{ days() }} days</p>
       </div>
 
-      <clerk-user-button />
+      <div class="admin-shell__user">
+        <clerk-user-button />
+      </div>
     </header>
 
     @if (rangeRejected()) {
@@ -89,19 +110,6 @@
         <span>{{ rangeRejectedMessage }}</span>
       </p>
     }
-
-    <nav class="admin-nav" aria-label="Telemetry views">
-      @for (item of nav; track item.route) {
-        <a
-          class="admin-nav__link"
-          routerLinkActive="admin-nav__link--active"
-          [routerLink]="['/', item.route]"
-        >
-          <i class="ti {{ item.icon }}" aria-hidden="true"></i>
-          <span>{{ item.label }}</span>
-        </a>
-      }
-    </nav>
 
     <main class="admin-shell__body">
       <router-outlet />

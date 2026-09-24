@@ -66,6 +66,12 @@ export function trailingRange(days: number, today: string): DateRange {
   return { from: shiftMetricDay(today, -(days - 1)), to: today };
 }
 
+/** The equal-length window immediately before `range`. Always valid when `range` is. */
+export function previousRangeOf(range: DateRange): DateRange {
+  const to = shiftMetricDay(range.from, -1);
+  return { from: shiftMetricDay(to, -(inclusiveDays(range) - 1)), to };
+}
+
 /** True when the range is one the Admin_API will accept. */
 export function isValidRange(range: DateRange): boolean {
   if (!isMetricDay(range.from) || !isMetricDay(range.to)) return false;
@@ -87,6 +93,9 @@ export class DateRangeService {
 
   /** Inclusive length of the selected range, for the header summary. */
   readonly days = computed(() => inclusiveDays(this.current()));
+
+  /** The equal-length window ending the day before the selected one starts, for deltas. */
+  readonly previousRange = computed<DateRange>(() => previousRangeOf(this.current()));
 
   /**
    * The preset the selected range corresponds to, or `null` for a hand-picked

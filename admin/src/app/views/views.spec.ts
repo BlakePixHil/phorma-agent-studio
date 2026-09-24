@@ -31,14 +31,13 @@
 //     the attribute is a direct test of the exclusivity the two arms of the view's
 //     `@if` are supposed to guarantee - no reading of component state involved.
 //
-//   - The trend chart is NOT asserted through the DOM. `UIChart` paints into a
-//     canvas, so no label of it is readable from the DOM at all, and it sits
-//     behind `@defer (on immediate)` so chart.js resolves asynchronously. The
-//     assertions are made on `chartData()`, which is exactly the data handed to
-//     `p-chart`, plus the day table and the footnote, which ARE in the DOM. The
-//     trend mounts run with `DeferBlockBehavior.Manual` so a 100-iteration
-//     property does not load and tear down chart.js 100 times; the rendering
-//     example lets the defer play through and asserts the chart element appears.
+//   - The trend plot is asserted on `chartData()`, the reported days handed to
+//     the SVG chart, plus the day table and the fold chip, which are in the DOM.
+//     The rendering example asserts the SVG chart actually painted.
+//
+//   - Views also issue ENRICHMENT requests (the previous period, a sparkline
+//     series). `pending` matches the view's own request by route AND range, and
+//     `finish` fails whatever enrichments are left - they never fail the view.
 //
 // Property assertions throw rather than using jasmine `expect`, so fast-check can
 // shrink to a minimal counterexample.
@@ -47,6 +46,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import type { Type } from '@angular/core';
 import { DeferBlockBehavior, TestBed, type ComponentFixture } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import fc from 'fast-check';
 import Aura from '@primeuix/themes/aura';
 import { providePrimeNG } from 'primeng/config';
@@ -72,7 +72,8 @@ import { Features } from './features/features';
 import { Geography } from './geography/geography';
 import { paintShapes, unmappedInstalls } from './geography/world-map';
 import type { WorldShape } from './geography/world-map.data';
-import { Overview } from './overview/overview';
+import { formatRange } from './format';
+import { Overview, OVERVIEW_PRIVACY_HINT } from './overview/overview';
 import { Trend } from './trend/trend';
 
 /** Minimum iterations mandated for every property test in this feature. */
@@ -130,6 +131,7 @@ function mount<T>(type: Type<T>, options: { deferBlocks?: DeferBlockBehavior } =
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
+      provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
       providePrimeNG({ theme: { preset: Aura } }),
@@ -144,16 +146,36 @@ function mount<T>(type: Type<T>, options: { deferBlocks?: DeferBlockBehavior } =
   return { fixture, view: fixture.componentInstance, host: fixture.nativeElement, http, range };
 }
 
-/** The single in-flight request, asserted to carry the view's own range. */
-async function pending<T>(mounted: Mounted<T>, route: TelemetryRoute) {
+/** The single in-flight request for `route` over `range` (the view's own range by default). */
+async function pending<T>(mounted: Mounted<T>, route: TelemetryRoute, range: DateRange = mounted.range) {
   await settle();
-  const request = mounted.http.expectOne((candidate) => candidate.url.endsWith(`/${route}`));
-  assert(
-    request.request.params.get('from') === mounted.range.from &&
-      request.request.params.get('to') === mounted.range.to,
-    `${route}: requested ${request.request.params.get('from')}..${request.request.params.get('to')}, expected ${mounted.range.from}..${mounted.range.to}`,
+  return mounted.http.expectOne(
+    (candidate) =>
+      candidate.url.endsWith(`/${route}`) &&
+      candidate.params.get('from') === range.from &&
+      candidate.params.get('to') === range.to,
+    `${route} for ${range.from}..${range.to}`,
   );
-  return request;
+}
+
+/** Answers an enrichment request and settles, like {@link answer}. */
+async function answerFor<T>(
+  mounted: Mounted<T>,
+  route: TelemetryRoute,
+  range: DateRange,
+  body: object,
+): Promise<void> {
+  (await pending(mounted, route, range)).flush(body);
+  for (let round = 0; round < 2; round += 1) {
+    mounted.fixture.detectChanges();
+    await settle();
+  }
+  mounted.fixture.detectChanges();
+}
+
+/** The previous-period range the view compares against. */
+function previousRange(): DateRange {
+  return TestBed.inject(DateRangeService).previousRange();
 }
 
 /**
@@ -185,8 +207,11 @@ async function reject<T>(mounted: Mounted<T>, route: TelemetryRoute): Promise<vo
   mounted.fixture.detectChanges();
 }
 
-/** Nothing may be left in flight when a case ends. */
+/** Fails any enrichment still in flight, then asserts nothing else is. */
 function finish<T>(mounted: Mounted<T>): void {
+  for (const request of mounted.http.match(() => true)) {
+    request.flush({ error: 'not under test' }, { status: 500, statusText: 'Server Error' });
+  }
   mounted.http.verify();
 }
 
@@ -651,21 +676,56 @@ describe('Overview view (10.5)', () => {
     await answer(mounted, 'summary', SUMMARY);
 
     expect(renderedState(mounted.host)).toBe('loaded');
-    // Label, formatted value and caption for all eight numbers 10.5 names.
+    // The range totals lead as KPIs, then the three trailing active windows.
     expect(renderedStats(mounted.host)).toEqual([
+      { label: 'Installs', value: '4,444', note: '' },
+      { label: 'Sessions', value: '55.6K', note: '' },
+      { label: 'Runs', value: '666', note: '77 completed' },
+      { label: 'Success rate', value: '12%', note: '' },
+      { label: 'Error events', value: '8', note: '' },
       { label: 'Last 24 hours', value: '11', note: 'Trailing 1 day' },
       { label: 'Last 7 days', value: '222', note: 'Trailing 7 days' },
       { label: 'Last 30 days', value: '3,333', note: 'Trailing 30 days' },
-      { label: 'Installs', value: '4,444', note: 'Distinct installs in range' },
-      { label: 'Sessions', value: '55,555', note: 'Sessions started' },
-      { label: 'Runs', value: '666', note: 'Runs started' },
-      { label: 'Runs completed', value: '77', note: 'Runs that settled' },
-      { label: 'Error events', value: '8', note: 'Run errors reported' },
     ]);
     // The selected range is stated, so the totals cannot be misread.
-    expect(text(mounted.host.querySelector('.admin-view__range'))).toBe(
-      `${mounted.range.from} to ${mounted.range.to}`,
+    expect(text(mounted.host.querySelector('.admin-view__range'))).toBe(formatRange(mounted.range));
+    // The anonymity explainer is a tooltip now, still readable to assistive tech.
+    expect(text(mounted.host.querySelector('admin-hint .admin-sr'))).toBe(OVERVIEW_PRIVACY_HINT);
+    finish(mounted);
+  });
+
+  it('shows deltas against the previous period once that enrichment lands', async () => {
+    const mounted = mount(Overview);
+    await answer(mounted, 'summary', SUMMARY);
+    expect(mounted.host.querySelector('[data-delta]')).toBeNull();
+
+    await answerFor(mounted, 'summary', previousRange(), {
+      ...SUMMARY,
+      totals: { ...SUMMARY.totals, installs: 2222, runErrors: 16 },
+    } satisfies SummaryResponse);
+
+    const deltas = Array.from(mounted.host.querySelectorAll('[data-delta]')).map((el) => ({
+      tone: el.getAttribute('data-delta'),
+      text: text(el),
+    }));
+    // Installs doubled (good); errors halved, which is ALSO good because a fall is.
+    expect(deltas[0]).toEqual({ tone: 'good', text: '+100%' });
+    expect(deltas[deltas.length - 1]).toEqual({ tone: 'good', text: '-50%' });
+    finish(mounted);
+  });
+
+  it('stays loaded when an enrichment request fails', async () => {
+    const mounted = mount(Overview);
+    await answer(mounted, 'summary', SUMMARY);
+    (await pending(mounted, 'summary', previousRange())).flush(
+      { error: FAILURE_REASON },
+      { status: 500, statusText: 'Server Error' },
     );
+    (await pending(mounted, 'trend')).flush({ error: FAILURE_REASON }, { status: 500, statusText: 'Server Error' });
+    await settle();
+    mounted.fixture.detectChanges();
+    expect(renderedState(mounted.host)).toBe('loaded');
+    expect(mounted.host.querySelector('[data-delta]')).toBeNull();
     finish(mounted);
   });
 
@@ -773,9 +833,11 @@ describe('Geography view (10.6)', () => {
     expect(footnote).toContain('7');
 
     // The bar list beside the map names the busiest real countries, `other` excluded.
-    const bars = Array.from(mounted.host.querySelectorAll('.admin-map-bar')).map((bar) => ({
-      name: text(bar.querySelector('.admin-map-bar__name')),
-      count: text(bar.querySelector('.admin-map-bar__count')),
+    const bars = Array.from(
+      mounted.host.querySelectorAll('.admin-map-row__list .admin-bars__item'),
+    ).map((bar) => ({
+      name: text(bar.querySelector('.admin-bars__label')),
+      count: text(bar.querySelector('.admin-bars__value')),
     }));
     expect(bars).toEqual([
       { name: 'United States of America', count: '41' },
@@ -974,8 +1036,7 @@ describe('Trend view (10.9)', () => {
       OTHER_GROUP_LABEL,
     ]);
 
-    // The plot excludes the fold. Asserted on the data handed to `p-chart`,
-    // because the chart itself is a canvas with no readable labels.
+    // The plot excludes the fold.
     const chart = mounted.view.chartData();
     expect(chart.labels).toEqual(['2026-01-01', '2026-01-02', '2026-01-03']);
     expect(chart.datasets.map((set) => set.label)).toEqual(['Installs', 'Sessions', 'Runs']);
@@ -985,14 +1046,21 @@ describe('Trend view (10.9)', () => {
       [20, 24, 31],
     ]);
 
-    // foldedDays renders as a footnote naming the count.
-    const footnote = text(mounted.host.querySelector('[data-trend-folded]'));
-    expect(footnote).toContain('4 day(s)');
-    expect(footnote).toContain(OTHER_GROUP_LABEL);
+    // foldedDays renders as a chip naming the count.
+    const chip = text(mounted.host.querySelector('[data-trend-folded]'));
+    expect(chip).toContain('4 day(s)');
+    expect(chip).toContain(OTHER_GROUP_LABEL);
+
+    // Per-series KPIs total the plotted days only: the fold is not a day.
+    expect(renderedStats(mounted.host).map((stat) => [stat.label, stat.value])).toEqual([
+      ['Installs', '24'],
+      ['Sessions', '56'],
+      ['Runs', '75'],
+    ]);
     finish(mounted);
   });
 
-  it('omits the folded-days footnote when nothing was folded', async () => {
+  it('omits the folded-days chip when nothing was folded', async () => {
     const mounted = mount(Trend, { deferBlocks: DeferBlockBehavior.Manual });
     await answer(mounted, 'trend', {
       range: RANGE,
@@ -1005,18 +1073,24 @@ describe('Trend view (10.9)', () => {
     finish(mounted);
   });
 
-  it('mounts the deferred chart once the range has data', async () => {
-    // The one case that lets `@defer (on immediate)` play through: chart.js
-    // loads asynchronously, so what is asserted is that the deferred `p-chart`
-    // reaches the DOM inside the chart container, not anything it paints.
+  it('paints one line per series once the range has data', async () => {
     const mounted = mount(Trend);
     await answer(mounted, 'trend', TREND);
+    // `whenStable` waits on every in-flight resource, so settle the enrichment first.
+    await answerFor(mounted, 'trend', previousRange(), { range: previousRange(), days: [], foldedDays: 0 });
     await mounted.fixture.whenStable();
     mounted.fixture.detectChanges();
 
-    const container = mounted.host.querySelector('.admin-chart');
-    expect(container).not.toBeNull();
-    expect(container?.querySelector('p-chart')).not.toBeNull();
+    const lines = mounted.host.querySelectorAll('.admin-chart admin-area-chart path.admin-area__line');
+    expect(lines.length).toBe(3);
+    for (const line of Array.from(lines)) {
+      expect(line.getAttribute('d')).toMatch(/^M[\d.]+,[\d.]+C/);
+    }
+    // Legend chips carry each series total.
+    const legend = Array.from(mounted.host.querySelectorAll('.admin-legend__chip')).map(
+      (chip) => `${text(chip.querySelector('.admin-legend__label'))} ${text(chip.querySelector('.admin-legend__total'))}`,
+    );
+    expect(legend).toEqual(['Installs 24', 'Sessions 56', 'Runs 75']);
     finish(mounted);
   });
 

@@ -102,14 +102,25 @@ anybody did.
 - Auth surfaces in `auth/`: `signed-out` (no Clerk session), `session-rejected` (a token we sent was
   refused - 401), `not-authorized` (403). Three screens because the remedies differ, and the shell
   orders them in that sequence.
-- Every shared class already exists in `admin/src/styles.scss` (`.admin-view`, `.admin-grid`,
-  `.admin-card`, `.admin-stat`, `.admin-table`, `.admin-footnote`, `.admin-columns`). A new view should
-  add no SCSS; the budget is 1.5MB warning against ~842kB. Three exceptions exist and all three are
-  component-scoped `styles:` blocks with a stated reason: Spend's muted look for a figure that could not
-  be READ, and the form rows plus id line in BOTH Organisations and Impersonation, because the
-  dashboard was read-only until Organisations and no shared form class exists yet. Those form rules are
-  now duplicated in exactly two views, which is the agreed ceiling: a THIRD view needing a form
-  promotes them into `styles.scss` rather than copying them again.
+- The "Obsidian glow" visual language lives entirely in `admin/src/styles.scss`: glass `.admin-card`,
+  `.admin-kpis`, `.admin-split`/`.admin-pair`, `.admin-chip`, `.admin-figure`, the shared form classes
+  (`.admin-form`, `.admin-field`, `.admin-label`, `.admin-id`, `.admin-sr`), tables, and every chart
+  class. Component `styles:` blocks carry page LAYOUT only. Budget: 1.5MB warning against ~875kB.
+- Views are built from `views/kit/` (`AdminKpi` - keeps the `.admin-stat*` classes specs read,
+  `AdminDelta`, `AdminHint`, `AdminData`) and `views/charts/` (SVG, no chart.js). Rules they encode:
+  - NO explainer text on the page. Standing copy goes in an `AdminHint` tooltip, which also renders it
+    `.admin-sr` so assistive tech and `textContent` specs still read it. Only FUNCTIONAL status (a
+    degraded read, a caveat, the impersonation "nothing deployed" warning) stays visible, as a chip.
+  - Raw tables live behind `AdminData` ("View data", a native `<details>`) as `GroupTable
+    [framed]="false"`, so the "every label reaches the DOM" property still holds.
+  - A request that only ENRICHES a view (previous-period deltas via `DateRangeService.previousRange`,
+    a sparkline series) goes through `enrichment()` in `views/secondary.ts`: it never throws, so it
+    cannot move the view out of `loaded`. Specs match requests by route AND range (`pending(m, route,
+    range)`), and `finish` fails leftover enrichments.
+  - Per-day charts are laid onto every calendar day (`alignDays` in `views/series.ts`), so a folded
+    day is a gap, never a zero and never silently bridged.
+- `npm run preview` swaps `app/preview/preview.ts` for `preview.fixtures.ts` (fixture HttpBackend,
+  fake Clerk session). The prod bundle carries none of it - check with a grep for `FixtureBackend`.
   Watch out for one trap in an inline `styles:` or `template:` block: a BACKTICK inside a comment
   terminates the template literal, and Angular reports it as
   `Failed to resolve @Component.styles to a string` with no line number.

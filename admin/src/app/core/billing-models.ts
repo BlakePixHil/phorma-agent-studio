@@ -42,6 +42,12 @@ export interface VendorBalance {
   balanceUsd: number | null;
 }
 
+/** One UTC day of metered spend inside the burn window. */
+export interface BurnDay {
+  day: string;
+  usd: number;
+}
+
 /** Burn rate over a trailing window, and the runway it implies. */
 export interface BurnRate {
   /** The trailing window, in days. Always 30 today; stated so a view need not assume. */
@@ -51,6 +57,11 @@ export interface BurnRate {
   perDayUsd: number;
   /** Null when the balance is unknown or nothing was spent - never "infinite". */
   runwayDays: number | null;
+  /**
+   * The window per UTC day, ascending and zero-filled. Optional here only because
+   * this dashboard can deploy ahead of a Worker that does not send it yet.
+   */
+  daily?: BurnDay[];
 }
 
 /** One tier's contribution to the committed ceiling. */
@@ -181,3 +192,6 @@ export const BILLING_VIEW_ID = 'spend';
 
 /** Marker the Worker uses for the OpenRouter half of `degraded`. Twin constant. */
 export const DEGRADED_VENDOR_BALANCE = 'openrouter-balance';
+
+/** Marker for the usage-ledger half of `degraded`. Twin constant. */
+export const DEGRADED_METERED_COST = 'metered-cost';

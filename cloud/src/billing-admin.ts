@@ -159,6 +159,13 @@ export interface VendorBalance {
   balanceUsd: number | null;
 }
 
+/** One UTC day of metered spend inside the burn window. */
+export interface BurnDay {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+  usd: number;
+}
+
 /** Burn rate and the runway it implies. */
 export interface BurnRate {
   /** Always {@link BURN_WINDOW_DAYS}. Stated so a reader need not assume it. */
@@ -172,6 +179,12 @@ export interface BurnRate {
    * been spent in the window. Null is "cannot be computed", never "infinite".
    */
   runwayDays: number | null;
+  /**
+   * The same window per UTC day, ascending and zero-filled, so its sum is
+   * `meteredUsd`. The first day is partial (the window starts at an instant).
+   * Empty when the ledger could not be read or there is no D1 binding.
+   */
+  daily: BurnDay[];
 }
 
 /** One tier's contribution to the committed ceiling. */
@@ -372,14 +385,15 @@ export async function buildCosts(env: BillingAdminEnv): Promise<BillingCostsResp
     readTenantAttention(db, degraded),
   ]);
 
-  const perDayUsd = round4(metered / BURN_WINDOW_DAYS);
+  const perDayUsd = round4(metered.total / BURN_WINDOW_DAYS);
   return {
     vendor,
     burn: {
       windowDays: BURN_WINDOW_DAYS,
-      meteredUsd: round4(metered),
+      meteredUsd: round4(metered.total),
       perDayUsd,
       runwayDays: runwayDays(vendor.balanceUsd, perDayUsd),
+      daily: metered.daily,
     },
     committed: {
       ...committed,
@@ -513,21 +527,51 @@ async function readVendorBalance(
  * string is a chronological compare. There is no index on `created_at` - the
  * table is small and this is an operator read on a page nobody loads in a loop,
  * so it is a scan by design rather than by oversight.
+ *
+ * One grouped query serves both the total and the daily series, so the two can
+ * never disagree: the total IS the sum of the days.
  */
-async function readMeteredBurn(db: D1Database | undefined, degraded: string[]): Promise<number> {
-  if (!db) return 0;
-  const since = new Date(Date.now() - BURN_WINDOW_DAYS * 86_400_000).toISOString();
+async function readMeteredBurn(
+  db: D1Database | undefined,
+  degraded: string[],
+): Promise<{ total: number; daily: BurnDay[] }> {
+  if (!db) return { total: 0, daily: [] };
+  const now = Date.now();
+  const since = new Date(now - BURN_WINDOW_DAYS * 86_400_000).toISOString();
   try {
-    const row = await db
-      .prepare('SELECT COALESCE(SUM(cost_usd), 0) AS spent FROM usage WHERE created_at >= ?')
+    const { results } = await db
+      .prepare(
+        'SELECT substr(created_at, 1, 10) AS day, COALESCE(SUM(cost_usd), 0) AS spent ' +
+          'FROM usage WHERE created_at >= ? GROUP BY day ORDER BY day',
+      )
       .bind(since)
-      .first<{ spent: number }>();
-    return Math.max(0, finiteNumber(row?.spent) ?? 0);
+      .all<{ day: string; spent: number }>();
+    const byDay = new Map<string, number>();
+    for (const row of results ?? []) {
+      byDay.set(row.day, Math.max(0, finiteNumber(row.spent) ?? 0));
+    }
+    const daily = burnDays(since.slice(0, 10), new Date(now).toISOString().slice(0, 10), byDay);
+    const total = [...byDay.values()].reduce((sum, usd) => sum + usd, 0);
+    return { total, daily };
   } catch (error) {
     console.error(`billing admin: the metered burn could not be read: ${describeError(error)}`);
     degraded.push(DEGRADED_METERED_COST);
-    return 0;
+    return { total: 0, daily: [] };
   }
+}
+
+/** Every UTC day from `first` to `last` inclusive, zero where nothing was metered. */
+export function burnDays(first: string, last: string, byDay: ReadonlyMap<string, number>): BurnDay[] {
+  const days: BurnDay[] = [];
+  let cursor = Date.parse(`${first}T00:00:00Z`);
+  const end = Date.parse(`${last}T00:00:00Z`);
+  // Bounded: a window of N days spans at most N + 1 calendar days.
+  while (cursor <= end && days.length <= BURN_WINDOW_DAYS + 1) {
+    const day = new Date(cursor).toISOString().slice(0, 10);
+    days.push({ day, usd: round4(byDay.get(day) ?? 0) });
+    cursor += 86_400_000;
+  }
+  return days;
 }
 
 /**

@@ -1,38 +1,53 @@
-import { DecimalPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, resource } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { DateRangeService } from '../../core/date-range.service';
 import type { SummaryResponse } from '../../core/models';
 import { TelemetryApiService } from '../../core/telemetry-api.service';
 import { loadedValue, viewStateOf } from '../../core/view-state';
+import { AdminAreaChart, type AreaSeries } from '../charts/area-chart';
+import { deltaOf, shareOf, type DeltaReading } from '../charts/chart-math';
+import { AdminRing } from '../charts/ring';
+import type { Tone } from '../charts/tones';
+import { compact, completionRate, formatRange, percent, ratio, whole } from '../format';
+import { AdminHint } from '../kit/hint';
+import { AdminKpi } from '../kit/kpi';
+import { enriched, enrichment } from '../secondary';
+import { alignDays, type TrendMetric } from '../series';
 import { unwrapAdminResult } from '../view-data';
 import { ViewStateRail } from '../view-state-rail';
 
-/** One number on the overview, with the icon and caption that explain it. */
+/** One headline number on the overview. */
 export interface StatCard {
   label: string;
-  value: number;
+  value: string;
   icon: string;
-  note: string;
+  tone: Tone;
+  note: string | null;
+  hint: string | null;
+  delta: DeltaReading | null;
+  invert: boolean;
+  spark: readonly (number | null)[] | null;
 }
 
+/** The overview hint that replaced the anonymity footnote. */
+export const OVERVIEW_PRIVACY_HINT =
+  'Counts are anonymous per-install rollups. No install identifier leaves the API.';
+
+const PULSE_HINT =
+  'Distinct installs active in the trailing 1, 7 and 30 days, measured back from today. The date picker does not move these.';
+
 /**
- * The overview view: active installs for the trailing 1, 7 and 30 days, plus the
- * range totals (Requirement 10.5).
+ * Overview: the range at a glance (Requirement 10.5).
  *
- * The data is a `resource()` keyed on the shared range signal, so a range change
- * refetches it with no wiring beyond that key (10.10). Its four render states go
- * through `viewStateOf`, so precedence is the same here as in every other view
- * (10.11, 10.12, 10.13).
- *
- * The trailing windows are NOT clipped to the selected range: they are what the
- * Admin_API reports for the last 1, 7 and 30 days, which is the reading the
- * requirement asks for. The captions say so, so a narrow range cannot be
- * misread as having produced them.
+ * The summary for the selected range is the view's one required request, so it
+ * alone decides loading, empty and failed. The previous-period summary and the
+ * per-day trend are enrichments: they add deltas and sparklines and never fail
+ * the view.
  */
 @Component({
   selector: 'admin-overview',
-  imports: [DecimalPipe, ViewStateRail],
+  imports: [AdminAreaChart, AdminHint, AdminKpi, AdminRing, RouterLink, ViewStateRail],
   template: `
     <section class="admin-view" aria-labelledby="admin-overview-title">
       <header class="admin-view__header">
@@ -40,48 +55,114 @@ export interface StatCard {
           <i class="ti ti-gauge" aria-hidden="true"></i>
           <span>Overview</span>
         </h1>
-        <p class="admin-view__range">{{ range().from }} to {{ range().to }}</p>
+        <p class="admin-view__range">{{ rangeLabel() }}</p>
+        <admin-hint [text]="privacyHint" icon="ti-shield-lock" />
       </header>
 
       @if (summary(); as data) {
         <div class="admin-view__body" data-view-state="loaded">
-          <section class="admin-view__section" aria-labelledby="admin-overview-active">
-            <h2 class="admin-view__section-title" id="admin-overview-active">Active installs</h2>
-            <div class="admin-grid">
-              @for (card of activeCards(); track card.label) {
-                <article class="admin-card admin-stat">
-                  <p class="admin-stat__label">
-                    <i class="ti {{ card.icon }}" aria-hidden="true"></i>
-                    <span>{{ card.label }}</span>
-                  </p>
-                  <p class="admin-stat__value">{{ card.value | number }}</p>
-                  <p class="admin-stat__note">{{ card.note }}</p>
-                </article>
-              }
-            </div>
-          </section>
+          <div class="admin-kpis">
+            @for (card of totalCards(); track card.label) {
+              <admin-kpi
+                [label]="card.label"
+                [value]="card.value"
+                [icon]="card.icon"
+                [tone]="card.tone"
+                [note]="card.note"
+                [hint]="card.hint"
+                [delta]="card.delta"
+                [deltaHint]="deltaHint()"
+                [invert]="card.invert"
+                [spark]="card.spark"
+              />
+            }
+          </div>
 
-          <section class="admin-view__section" aria-labelledby="admin-overview-totals">
-            <h2 class="admin-view__section-title" id="admin-overview-totals">
-              Totals for this range
-            </h2>
-            <div class="admin-grid">
-              @for (card of totalCards(); track card.label) {
-                <article class="admin-card admin-stat">
-                  <p class="admin-stat__label">
-                    <i class="ti {{ card.icon }}" aria-hidden="true"></i>
-                    <span>{{ card.label }}</span>
-                  </p>
-                  <p class="admin-stat__value">{{ card.value | number }}</p>
-                  <p class="admin-stat__note">{{ card.note }}</p>
-                </article>
+          <div class="admin-split admin-split--stretch">
+            <article class="admin-card admin-card--hero">
+              <div class="admin-card__head">
+                <h2 class="admin-card__title">
+                  <i class="ti ti-activity" aria-hidden="true"></i>
+                  <span>Activity</span>
+                </h2>
+                <div class="admin-card__aside">
+                  <a class="admin-link-button" routerLink="/trend">
+                    <span>Open trend</span>
+                    <i class="ti ti-arrow-right" aria-hidden="true"></i>
+                  </a>
+                </div>
+              </div>
+              @if (activity(); as chart) {
+                <admin-area-chart [labels]="chart.labels" [series]="chart.series" [height]="240" />
+              } @else {
+                <p class="admin-empty-inline">
+                  <i class="ti ti-chart-area-line" aria-hidden="true"></i>
+                  <span>Per-day activity is not available for this range.</span>
+                </p>
               }
-            </div>
-          </section>
+            </article>
 
-          <p class="admin-footnote">
-            Counts are anonymous per-install rollups. No install identifier leaves the API.
-          </p>
+            <div class="admin-stack-col">
+              <article class="admin-card">
+                <div class="admin-card__head">
+                  <h2 class="admin-card__title">
+                    <i class="ti ti-heartbeat" aria-hidden="true"></i>
+                    <span>Pulse</span>
+                  </h2>
+                  <admin-hint [text]="pulseHint" />
+                </div>
+                <div class="admin-figures">
+                  @for (card of activeCards(); track card.label) {
+                    <div class="admin-figure admin-stat">
+                      <span class="admin-figure__label admin-stat__label"><span>{{ card.label }}</span></span>
+                      <span class="admin-figure__value admin-stat__value">{{ card.value }}</span>
+                      <span class="admin-stat__note admin-sr">{{ card.note }}</span>
+                    </div>
+                  }
+                </div>
+                <hr class="admin-divider" />
+                <div class="admin-ring-row">
+                  <div class="admin-ring-pair">
+                    <admin-ring [value]="stickiness().daily" tone="emerald" caption="DAU / MAU" [small]="true" />
+                    <div class="admin-ring-pair__text">
+                      <span class="admin-ring-pair__title">Daily stickiness</span>
+                      <span class="admin-ring-pair__note">of monthly installs came back today</span>
+                    </div>
+                  </div>
+                  <div class="admin-ring-pair">
+                    <admin-ring [value]="stickiness().weekly" tone="azure" caption="WAU / MAU" [small]="true" />
+                    <div class="admin-ring-pair__text">
+                      <span class="admin-ring-pair__title">Weekly stickiness</span>
+                      <span class="admin-ring-pair__note">of monthly installs were active this week</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="admin-card">
+                <div class="admin-card__head">
+                  <h2 class="admin-card__title">
+                    <i class="ti ti-bolt" aria-hidden="true"></i>
+                    <span>Engagement</span>
+                  </h2>
+                </div>
+                <div class="admin-figures">
+                  <div class="admin-figure">
+                    <span class="admin-figure__label">Sessions / install</span>
+                    <span class="admin-figure__value">{{ engagement().sessionsPerInstall }}</span>
+                  </div>
+                  <div class="admin-figure">
+                    <span class="admin-figure__label">Runs / session</span>
+                    <span class="admin-figure__value">{{ engagement().runsPerSession }}</span>
+                  </div>
+                  <div class="admin-figure">
+                    <span class="admin-figure__label">Runs / install</span>
+                    <span class="admin-figure__value">{{ engagement().runsPerInstall }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
         </div>
       } @else {
         <admin-view-state [state]="state()" (retry)="reload()" />
@@ -92,94 +173,163 @@ export interface StatCard {
 })
 export class Overview {
   private readonly api = inject(TelemetryApiService);
+  private readonly dates = inject(DateRangeService);
 
-  /** The one shared range. Both the resource key and the header caption. */
-  readonly range = inject(DateRangeService).range;
+  readonly range = this.dates.range;
+  readonly privacyHint = OVERVIEW_PRIVACY_HINT;
+  readonly pulseHint = PULSE_HINT;
+  readonly rangeLabel = computed(() => formatRange(this.range()));
 
   private readonly data = resource({
     params: () => this.range(),
     loader: ({ params }) => this.api.fetchSummary(params).then(unwrapAdminResult),
   });
 
-  /**
-   * Exactly one of loading, loaded, empty or failed.
-   *
-   * `value` is read through `hasValue()`, never bare: `resource().value()` THROWS
-   * while the resource is in its error state, and the literal below evaluates
-   * every property eagerly, so a bare read makes this computed throw on any
-   * failed request instead of resolving to `failed` (10.12). Same guard in all
-   * five views.
-   */
+  private readonly previousData = enrichment(
+    () => this.dates.previousRange(),
+    (range) => this.api.fetchSummary(range),
+  );
+
+  private readonly trendData = enrichment(
+    () => this.range(),
+    (range) => this.api.fetchTrend(range),
+  );
+
   readonly state = computed(() =>
     viewStateOf<SummaryResponse>({
       loading: this.data.isLoading(),
       error: this.data.error(),
+      // Guarded read: `value()` throws in the error state (10.12).
       value: this.data.hasValue() ? this.data.value() : undefined,
       isEmpty: isSummaryEmpty,
     }),
   );
 
-  /** The loaded response, or `null` in the other three states. */
   readonly summary = computed(() => loadedValue(this.state()));
+  readonly previous = computed(() => enriched(this.previousData));
 
-  readonly activeCards = computed<StatCard[]>(() => {
+  readonly deltaHint = computed(() => `Against ${formatRange(this.dates.previousRange())}`);
+
+  /** Per-day series aligned to the range, or null when trend is unavailable. */
+  private readonly series = computed(() => {
+    const trend = enriched(this.trendData);
+    if (!trend || trend.days.length === 0) return null;
+    return alignDays(trend.range, trend.days);
+  });
+
+  readonly activity = computed<{ labels: string[]; series: AreaSeries[] } | null>(() => {
+    const series = this.series();
+    if (!series || series.labels.length < 2) return null;
+    const line = (key: TrendMetric, label: string, tone: Tone): AreaSeries => ({
+      key,
+      label,
+      tone,
+      values: series.byMetric[key],
+    });
+    return {
+      labels: series.labels,
+      series: [line('installs', 'Installs', 'iris'), line('sessions', 'Sessions', 'azure'), line('runs', 'Runs', 'amber')],
+    };
+  });
+
+  readonly activeCards = computed(() => {
     const active = this.summary()?.activeInstalls;
     if (!active) return [];
     return [
-      { label: 'Last 24 hours', value: active.d1, icon: 'ti-clock', note: 'Trailing 1 day' },
-      { label: 'Last 7 days', value: active.d7, icon: 'ti-calendar-week', note: 'Trailing 7 days' },
-      {
-        label: 'Last 30 days',
-        value: active.d30,
-        icon: 'ti-calendar-month',
-        note: 'Trailing 30 days',
-      },
+      { label: 'Last 24 hours', value: whole(active.d1), note: 'Trailing 1 day' },
+      { label: 'Last 7 days', value: whole(active.d7), note: 'Trailing 7 days' },
+      { label: 'Last 30 days', value: whole(active.d30), note: 'Trailing 30 days' },
     ];
+  });
+
+  readonly stickiness = computed(() => {
+    const active = this.summary()?.activeInstalls;
+    if (!active || active.d30 === 0) return { daily: null, weekly: null };
+    return { daily: shareOf(active.d1, active.d30), weekly: shareOf(active.d7, active.d30) };
+  });
+
+  readonly engagement = computed(() => {
+    const totals = this.summary()?.totals;
+    if (!totals) return { sessionsPerInstall: '-', runsPerSession: '-', runsPerInstall: '-' };
+    return {
+      sessionsPerInstall: ratio(totals.sessions, totals.installs),
+      runsPerSession: ratio(totals.runs, totals.sessions),
+      runsPerInstall: ratio(totals.runs, totals.installs),
+    };
   });
 
   readonly totalCards = computed<StatCard[]>(() => {
     const totals = this.summary()?.totals;
     if (!totals) return [];
+    const prev = this.previous()?.totals;
+    const series = this.series();
+    const success = completionRate(totals.runsCompleted, totals.runs);
+    const prevSuccess = prev ? completionRate(prev.runsCompleted, prev.runs) : null;
     return [
       {
         label: 'Installs',
-        value: totals.installs,
+        value: whole(totals.installs),
         icon: 'ti-device-desktop',
-        note: 'Distinct installs in range',
+        tone: 'iris',
+        note: null,
+        hint: 'Distinct installs that reported in this range.',
+        delta: deltaOf(totals.installs, prev?.installs),
+        invert: false,
+        spark: series?.byMetric.installs ?? null,
       },
       {
         label: 'Sessions',
-        value: totals.sessions,
+        value: compact(totals.sessions),
         icon: 'ti-player-play',
-        note: 'Sessions started',
+        tone: 'azure',
+        note: null,
+        hint: 'Sessions started in this range.',
+        delta: deltaOf(totals.sessions, prev?.sessions),
+        invert: false,
+        spark: series?.byMetric.sessions ?? null,
       },
-      { label: 'Runs', value: totals.runs, icon: 'ti-rocket', note: 'Runs started' },
       {
-        label: 'Runs completed',
-        value: totals.runsCompleted,
+        label: 'Runs',
+        value: compact(totals.runs),
+        icon: 'ti-rocket',
+        tone: 'amber',
+        note: `${whole(totals.runsCompleted)} completed`,
+        hint: 'Workflow runs started in this range.',
+        delta: deltaOf(totals.runs, prev?.runs),
+        invert: false,
+        spark: series?.byMetric.runs ?? null,
+      },
+      {
+        label: 'Success rate',
+        value: percent(success),
         icon: 'ti-circle-check',
-        note: 'Runs that settled',
+        tone: 'emerald',
+        note: null,
+        hint: 'Runs that completed, as a share of runs started.',
+        delta: deltaOf(success, prevSuccess, 'points'),
+        invert: false,
+        spark: null,
       },
       {
         label: 'Error events',
-        value: totals.runErrors,
+        value: whole(totals.runErrors),
         icon: 'ti-alert-triangle',
-        note: 'Run errors reported',
+        tone: 'rose',
+        note: null,
+        hint: 'Run errors reported in this range. A fall is good.',
+        delta: deltaOf(totals.runErrors, prev?.runErrors),
+        invert: true,
+        spark: null,
       },
     ];
   });
 
-  /** Re-runs this view's own request. The failed state's retry control (10.12). */
   reload(): void {
     this.data.reload();
   }
 }
 
-/**
- * The summary carries no group rows, so "no rows for this range" means every
- * number it reports is zero. Anything above zero is real data and renders as
- * loaded, however small (10.13).
- */
+/** Empty only when every number the summary reports is zero (10.13). */
 export function isSummaryEmpty(value: SummaryResponse): boolean {
   const { activeInstalls: active, totals } = value;
   return (

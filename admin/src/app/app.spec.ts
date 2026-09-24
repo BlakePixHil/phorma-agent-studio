@@ -554,6 +554,7 @@ describe('App range control', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
+        provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
         providePrimeNG({ theme: { preset: Aura } }),
@@ -570,21 +571,33 @@ describe('App range control', () => {
       totals: { installs: 3, sessions: 4, runs: 5, runsCompleted: 5, runErrors: 0 },
     });
 
+    // The overview's own summary, plus two enrichments: the previous-period summary
+    // and the per-day trend. Every one of them must follow the range.
+    const listed = (requests: TestRequest[]) =>
+      requests
+        .map((r) => `${routeOf(r)} ${r.request.params.get('from')}..${r.request.params.get('to')}`)
+        .sort();
+    const expected = (range: DateRange) => {
+      const previous = TestBed.inject(DateRangeService).previousRange();
+      return [
+        `summary ${previous.from}..${previous.to}`,
+        `summary ${range.from}..${range.to}`,
+        `trend ${range.from}..${range.to}`,
+      ].sort();
+    };
+
     fixture.detectChanges();
     await settle();
     const first = http.match(() => true);
-    expect(first.length).toBe(1);
-    expect(first[0].request.params.get('from')).toBe(dateRange.range().from);
-    first[0].flush(summary(dateRange.range()));
+    expect(listed(first)).toEqual(expected(dateRange.range()));
+    for (const request of first) request.flush(routeOf(request) === 'summary' ? summary(dateRange.range()) : { range: dateRange.range(), days: [], foldedDays: 0 });
 
     dateRange.applyPreset(7);
     fixture.detectChanges();
     await settle();
     const second = http.match(() => true);
-    expect(second.length).toBe(1);
-    expect(second[0].request.params.get('from')).toBe(trailing(7).from);
-    expect(second[0].request.params.get('to')).toBe(trailing(7).to);
-    second[0].flush(summary(trailing(7)));
+    expect(listed(second)).toEqual(expected(trailing(7)));
+    for (const request of second) request.flush(routeOf(request) === 'summary' ? summary(trailing(7)) : { range: trailing(7), days: [], foldedDays: 0 });
 
     fixture.detectChanges();
     await settle();

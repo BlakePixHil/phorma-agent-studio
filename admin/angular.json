@@ -64,6 +64,17 @@
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
+            },
+            "preview": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "src/app/preview/preview.ts",
+                  "with": "src/app/preview/preview.fixtures.ts"
+                }
+              ]
             }
           },
           "defaultConfiguration": "production"
@@ -79,6 +90,9 @@
             },
             "development": {
               "buildTarget": "phorma-admin:build:development"
+            },
+            "preview": {
+              "buildTarget": "phorma-admin:build:preview"
             }
           },
           "defaultConfiguration": "development"

@@ -369,7 +369,9 @@ user's own Cloudflare account and keys).
   name identified paying tenants on purpose - "which account is cancelled but still holding a live
   key" is not actionable without the id. Two routes: `costs` (OpenRouter balance via
   `GET /api/v1/credits`, trailing-30-day burn from `usage`, runway, the committed ceiling summed over
-  ACTIVE tenants, and the attention lists) and `revenue` (Stripe `/v1/invoices` for gross/tax/net plus
+  ACTIVE tenants, and the attention lists; `burn.daily` is the same window per UTC day, ascending and
+  zero-filled, from ONE grouped query whose day sums ARE `meteredUsd`, and `[]` when the ledger is
+  degraded or unbound) and `revenue` (Stripe `/v1/invoices` for gross/tax/net plus
   `/v1/balance_transactions` for the processing fee, KV-cached 300s). Split rather than merged so a
   Stripe outage degrades one card instead of blanking the balance and runway, which are what an
   operator opens the page for during exactly that outage.

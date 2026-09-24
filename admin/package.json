@@ -6,6 +6,7 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "preview": "ng serve --configuration preview",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
@@ -35,7 +36,6 @@
     "@angular/router": "^20.3.0",
     "@primeuix/themes": "^2.0.3",
     "@tabler/icons-webfont": "^3.44.0",
-    "chart.js": "^4.5.1",
     "ngx-clerk": "^0.2.0",
     "primeng": "^20.4.0",
     "rxjs": "~7.8.0",

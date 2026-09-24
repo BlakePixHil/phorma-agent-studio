@@ -14,6 +14,7 @@ import Aura from '@primeuix/themes/aura';
 import { ClerkService } from 'ngx-clerk';
 
 import { routes } from './app.routes';
+import { PREVIEW_PROVIDERS } from './preview/preview';
 import { environment } from '../environments/environment';
 
 /**
@@ -65,6 +66,8 @@ export const appConfig: ApplicationConfig = {
     // build configuration (Requirement 10.15) - the Clerk secret key never
     // appears in this package.
     provideAppInitializer(() => {
+      // The fixture preview fakes the session; there is no Clerk to start.
+      if (PREVIEW_PROVIDERS.length > 0) return;
       const key = environment.clerkPublishableKey;
       if (!hasClerkKey(key)) {
         console.warn(
@@ -90,5 +93,6 @@ export const appConfig: ApplicationConfig = {
         },
       },
     }),
+    ...PREVIEW_PROVIDERS,
   ],
 };

@@ -105,6 +105,11 @@ nulls it).
   the primary line.
 - Never label a time series date-only when points can share a day. Add the clock time when
   `new Set(days).size < days.length`.
+- The `admin/` dashboard does NOT use chart.js: it has its own SVG kit in `admin/src/app/views/charts/`
+  (area, column, donut, ring, bar list, stack bar, meter, waterfall, calendar, sparkline) with the
+  maths pure and property-tested in `chart-math.ts`. Colours are `--admin-tone-*` RGB triples, so
+  SVG `fill`/`stroke` use `rgb(var(--tone))` via `style` bindings - a presentation ATTRIBUTE does
+  not resolve `var()`.
 - chart.js is ~240KB: both the `<p-chart>` and its pane template stay inside
   `@defer (on immediate)`.
 
