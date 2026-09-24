@@ -183,42 +183,10 @@
 /* ── Action / tool-call rows ────────────────────────────────────────────
    One row per thing the turn did, the Copilot-style transcript. Rows are
    siblings of the answer rather than a container card: a dashed box around
-   them read as a separate widget, and it disappeared when the turn finished. */
-.phorma-chat__steps {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-.phorma-chat__step {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.4rem;
-  padding: 0.22rem 0.1rem;
-  font-size: 0.857rem;
-  line-height: 1.45;
-  color: var(--p-text-muted-color);
-
-  /* Hairline between rows only, so a single action carries no chrome at all. */
-  & + & {
-    border-top: 1px solid color-mix(in srgb, var(--p-text-color) 5%, transparent);
-  }
-}
-
-.phorma-chat__step-icon {
-  flex-shrink: 0;
-  margin-top: 0.15rem;
-  font-size: 0.72rem;
-  color: color-mix(in srgb, var(--phorma-accent-green, #22c55e) 80%, var(--p-text-muted-color));
-}
-
-.phorma-chat__step-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
+   them read as a separate widget, and it disappeared when the turn finished.
+   The rows, the thinking bubble and the thought disclosure are their own
+   components (`chat-steps`, `thinking-bubble`, `chat-thought`), which also keeps
+   this sheet under the anyComponentStyle budget. */
 
 /* ── Re-run button (user turns) ──────────────────────────────────── */
 .phorma-chat__rerun {
@@ -887,4 +855,139 @@
 .phorma-chat__context-hint {
   font-size: 0.786rem;
   opacity: 0.7;
+}
+
+/* ── Web references ──────────────────────────────────────────────────────
+   Same pill vocabulary as the workflow context chips, so "what the assistant
+   can see" reads as one strip whatever the source. */
+.phorma-chat__ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.15rem 0 0.15rem 0.4rem;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--p-content-background) 60%, transparent);
+  font: inherit;
+  color: var(--p-text-color);
+
+  > .ti {
+    flex-shrink: 0;
+    font-size: 0.857rem;
+    opacity: 0.7;
+  }
+
+  &--failed {
+    border-color: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 40%, var(--phorma-card-border));
+    color: var(--phorma-accent-red, #ef4444);
+  }
+
+  /* A sent reference is a link back to the page. */
+  &--sent {
+    padding-right: 0.4rem;
+    font-size: 0.786rem;
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+
+    &:hover { color: var(--p-primary-color); }
+  }
+}
+
+.phorma-chat__ref-name {
+  min-width: 0;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phorma-chat__turn-refs {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  max-width: 92%;
+  margin: 0;
+  padding: 0;
+}
+
+.phorma-chat__ref-form {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.phorma-chat__ref-form-icon {
+  flex-shrink: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-chat__ref-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.phorma-chat__ref-error {
+  margin: -0.15rem 0 0;
+  font-size: 0.786rem;
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-chat__ref-offer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: -0.1rem 0 0;
+  font-size: 0.786rem;
+  color: var(--p-text-muted-color);
+
+  > .ti { font-size: 0.857rem; }
+}
+
+.phorma-chat__ref-offer-dismiss {
+  color: var(--p-text-muted-color);
+}
+
+/* ── Composer tool toggles (reference a page, show reasoning) ───────────── */
+.phorma-chat__tools {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.14rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--phorma-card-border);
+}
+
+.phorma-chat__tool {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 0.38rem;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font-size: 0.928rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) { color: var(--p-text-color); }
+
+  &--active {
+    background: color-mix(in srgb, var(--p-primary-color) 18%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--p-primary-color) 60%, transparent);
+    outline-offset: 1px;
+  }
 }

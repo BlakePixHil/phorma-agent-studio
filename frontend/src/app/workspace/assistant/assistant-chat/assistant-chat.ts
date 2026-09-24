@@ -12,12 +12,18 @@ import {
 } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
+import { normalizeWebUrl } from '@phorma/engine';
 import { ButtonModule } from 'primeng/button';
+import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 
 import { renderMarkdown } from '../../../shared/markdown/render-markdown';
-import { AssistantChatService } from '../../../core/assistant-chat.service';
-import type { AssistantMode, ChatTurn } from '../../../core/assistant-chat.model';
+import { AssistantChatService, type PendingReference } from '../../../core/assistant-chat.service';
+import type { AssistantMode, ChatReference, ChatTurn } from '../../../core/assistant-chat.model';
+import { McpOAuthService } from '../../../core/mcp-oauth.service';
+import { ChatSteps } from './chat-steps';
+import { ChatThought } from './chat-thought';
+import { ThinkingBubble } from './thinking-bubble';
 import { BillingRefreshService } from '../../../core/billing-refresh.service';
 import { BillingService, subscriptionLookupKey } from '../../../core/billing.service';
 import { ENTRY_PLAN_TIER } from '../../../core/plan-catalog';
@@ -58,7 +64,17 @@ const MODES: { id: AssistantMode; label: string; icon: string; title: string }[]
 @Component({
   selector: 'app-assistant-chat',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, ButtonModule, SelectModule, CheckoutFallback, PastDueNotice],
+  imports: [
+    FormsModule,
+    ButtonModule,
+    InputTextModule,
+    SelectModule,
+    CheckoutFallback,
+    PastDueNotice,
+    ChatSteps,
+    ChatThought,
+    ThinkingBubble,
+  ],
   templateUrl: './assistant-chat.html',
   styleUrl: './assistant-chat.scss',
 })
@@ -79,6 +95,9 @@ export class AssistantChat {
   private readonly actions = inject(StudioActionRegistryService);
   protected readonly context = inject(AssistantContextService);
   private readonly workflow = inject(WorkflowService);
+  // The app's one external-link helper (system browser on desktop, a
+  // `noopener` tab in the browser).
+  private readonly links = inject(McpOAuthService);
 
   /** Wide layout (expanded dialog) vs compact (sidebar panel). */
   readonly wide = input(false);
@@ -94,6 +113,38 @@ export class AssistantChat {
 
   private readonly scrollRef = viewChild<ElementRef<HTMLElement>>('scroll');
   private readonly inputRef = viewChild<ElementRef<HTMLTextAreaElement>>('chatInput');
+  private readonly refInputRef = viewChild<ElementRef<HTMLInputElement>>('refInput');
+
+  /** The inline "reference a page" field is open. */
+  protected readonly referenceOpen = signal(false);
+  protected readonly referenceDraft = signal('');
+  protected readonly referenceError = signal<string | null>(null);
+  /** A bare URL the user just pasted, offered as a reference. */
+  protected readonly pastedUrl = signal<string | null>(null);
+
+  /** True once the live turn has streamed any reasoning (not per delta). */
+  private readonly isThinking = computed(() => this.chat.thinkingText() !== '');
+
+  /** True while any live step is still running (its row shows the spinner). */
+  protected readonly liveStepRunning = computed(() =>
+    this.chat.steps().some(step => step.status === 'running'),
+  );
+
+  /** Duration of the live turn's finished thinking phase. */
+  protected readonly liveThinkingMs = computed(() => {
+    const started = this.chat.thinkingStartedAt();
+    const ended = this.chat.thinkingEndedAt();
+    return started !== null && ended !== null ? ended - started : 0;
+  });
+
+  protected readonly reasoningTitle = computed(() => {
+    if (!this.chat.reasoningSupported()) {
+      return "This model can't be asked to show its reasoning (it will still appear if the model shares it)";
+    }
+    return this.chat.reasoningEnabled()
+      ? 'Showing the model\u2019s reasoning - click to turn off'
+      : 'Show the model\u2019s reasoning (uses a few more tokens)';
+  });
 
   /** Provider options for the model picker: Automatic + selectable providers. */
   protected readonly providerOptions = computed(() => {
@@ -161,9 +212,83 @@ export class AssistantChat {
     effect(() => {
       this.chat.activeThread();
       this.chat.streamingText();
-      this.chat.activity();
+      this.chat.steps();
+      // Only the START and END of thinking move the layout (the bubble is a
+      // fixed height and scrolls itself), so the deltas do not re-pin.
+      this.isThinking();
+      this.chat.thinkingEndedAt();
       untracked(() => this.scrollToBottom());
     });
+  }
+
+  // ── Web references ────────────────────────────────────────────────────────
+
+  protected toggleReference(): void {
+    if (this.referenceOpen()) {
+      this.closeReference();
+      return;
+    }
+    this.referenceOpen.set(true);
+    this.referenceError.set(null);
+    setTimeout(() => this.refInputRef()?.nativeElement.focus(), 0);
+  }
+
+  protected closeReference(): void {
+    this.referenceOpen.set(false);
+    this.referenceDraft.set('');
+    this.referenceError.set(null);
+    setTimeout(() => this.inputRef()?.nativeElement.focus(), 0);
+  }
+
+  protected addReference(): void {
+    const error = this.chat.addReference(this.referenceDraft());
+    if (error) {
+      this.referenceError.set(error);
+      return;
+    }
+    this.closeReference();
+  }
+
+  /** Offers a lone pasted URL as a reference; the paste itself is untouched. */
+  protected onInputPaste(event: ClipboardEvent): void {
+    const text = event.clipboardData?.getData('text/plain')?.trim() ?? '';
+    const url = /^https?:\/\/\S+$/i.test(text) ? normalizeWebUrl(text) : null;
+    const attached = url !== null && this.chat.references().some(ref => ref.url === url);
+    this.pastedUrl.set(url && !attached && this.chat.webAvailable() ? url : null);
+  }
+
+  protected acceptPastedUrl(url: string): void {
+    this.pastedUrl.set(null);
+    const error = this.chat.addReference(url);
+    if (error) {
+      this.referenceOpen.set(true);
+      this.referenceDraft.set(url);
+      this.referenceError.set(error);
+    }
+  }
+
+  protected openReference(url: string): void {
+    void this.links.openExternal(url);
+  }
+
+  protected hostOf(url: string): string {
+    try {
+      return new URL(url).host.replace(/^www\./, '');
+    } catch {
+      return url;
+    }
+  }
+
+  protected pendingReferenceTitle(ref: PendingReference): string {
+    if (ref.status === 'reading') return `Reading ${ref.url}…`;
+    if (ref.status === 'failed') return `${ref.url}\nCould not be read: ${ref.error ?? 'unknown error'}`;
+    return `${ref.title ? `${ref.title}\n` : ''}${ref.url}`;
+  }
+
+  protected referenceTitle(ref: ChatReference): string {
+    if (ref.status === 'failed') return `${ref.url}\nCould not be read: ${ref.error ?? 'unknown error'}`;
+    const size = ref.chars ? `\n${ref.chars.toLocaleString()} characters${ref.truncated ? ' (truncated)' : ''}` : '';
+    return `${ref.title ? `${ref.title}\n` : ''}${ref.url}${size}\nClick to open`;
   }
 
   protected setMode(mode: AssistantMode): void {
@@ -201,6 +326,8 @@ export class AssistantChat {
     const request = this.draft().trim();
     if (!request || this.chat.busy()) return;
     this.draft.set('');
+    this.pastedUrl.set(null);
+    if (this.referenceOpen()) this.closeReference();
     // Pasted n8n/Flowise/Dify exports route to the migration converter.
     const foreign = this.importer.detect(request);
     if (foreign) {

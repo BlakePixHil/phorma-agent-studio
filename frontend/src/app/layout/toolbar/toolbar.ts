@@ -948,22 +948,18 @@ export class Toolbar {
   }
 
   /**
-   * True when the user has an active text selection inside a `.selectable`
-   * region (e.g. the prompt preview). In that case Ctrl+C should perform the
-   * browser's native copy of the highlighted text rather than copying canvas
-   * nodes — the user explicitly selected text to copy it.
+   * True when the user has an active, non-empty text selection anywhere
+   * (normally a `.selectable` region such as a chat reply or prompt preview).
+   * In that case Ctrl+C / Ctrl+X / Ctrl+A belong to the browser's native text
+   * handling rather than canvas node clipboard - the user explicitly selected
+   * text to copy it.
    */
   private hasSelectableTextSelection(): boolean {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
       return false;
     }
-    const anchor = selection.anchorNode;
-    if (!anchor) return false;
-    const element = anchor.nodeType === Node.ELEMENT_NODE
-      ? (anchor as Element)
-      : anchor.parentElement;
-    return !!element?.closest('.selectable');
+    return selection.toString().trim() !== '';
   }
 
   private savedWorkflowItems(): MenuItem[] {

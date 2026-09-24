@@ -1,0 +1,92 @@
+@if (steps().length > 0) {
+  <div class="phorma-steps" [class.phorma-steps--live]="live()">
+    @if (!live()) {
+      <!-- No aria-controls: panel and dialog both render this, so an id would
+           duplicate. aria-expanded carries the state. -->
+      <button
+        type="button"
+        class="phorma-steps__summary"
+        [attr.aria-expanded]="expanded()"
+        (click)="toggle()"
+      >
+        <i
+          class="ti phorma-steps__chevron"
+          [class.ti-chevron-down]="expanded()"
+          [class.ti-chevron-right]="!expanded()"
+          aria-hidden="true"
+        ></i>
+        <i class="ti ti-list-check phorma-steps__summary-icon" aria-hidden="true"></i>
+        <span class="phorma-steps__summary-text">{{ summary() }}</span>
+        @if (failedCount() > 0) {
+          <span class="phorma-steps__badge">{{ failedCount() }} failed</span>
+        }
+        @if (totalDuration()) {
+          <span class="phorma-steps__time">{{ totalDuration() }}</span>
+        }
+      </button>
+    }
+
+    @if (live() || expanded()) {
+      <ol class="phorma-steps__list">
+        @for (step of steps(); track step.id) {
+          <li
+            class="phorma-steps__row"
+            [class.phorma-steps__row--running]="step.status === 'running'"
+            [class.phorma-steps__row--failed]="step.status === 'failed'"
+          >
+            @if (hasDetail(step)) {
+              <button
+                type="button"
+                class="phorma-steps__head"
+                [attr.aria-expanded]="isOpen(step)"
+                (click)="toggleRow(step)"
+              >
+                <ng-container *ngTemplateOutlet="head; context: { $implicit: step }" />
+              </button>
+              @if (isOpen(step)) {
+                <div class="phorma-steps__detail selectable">
+                  @if (step.error) {
+                    <p class="phorma-steps__error">{{ step.error }}</p>
+                  }
+                  @if (step.args) {
+                    <p class="phorma-steps__detail-label">Input</p>
+                    <pre class="phorma-steps__code">{{ step.args }}</pre>
+                  }
+                  @if (step.result) {
+                    <p class="phorma-steps__detail-label">Result</p>
+                    <pre class="phorma-steps__code">{{ step.result }}</pre>
+                  }
+                </div>
+              }
+            } @else {
+              <span class="phorma-steps__head phorma-steps__head--plain">
+                <ng-container *ngTemplateOutlet="head; context: { $implicit: step }" />
+              </span>
+            }
+          </li>
+        }
+      </ol>
+    }
+  </div>
+}
+
+<ng-template #head let-step>
+  @switch (step.status) {
+    @case ('running') {
+      <i class="ti ti-loader-2 phorma-steps__icon phorma-steps__spin" aria-hidden="true"></i>
+    }
+    @case ('failed') {
+      <i class="ti ti-alert-circle phorma-steps__icon" aria-hidden="true"></i>
+    }
+    @default {
+      <i class="ti ti-check phorma-steps__icon" aria-hidden="true"></i>
+    }
+  }
+  <span class="phorma-steps__label" [class.phorma-steps__shimmer]="step.status === 'running'">
+    {{ step.label }}
+  </span>
+  <span class="sr-only">{{ statusLabel(step) }}</span>
+  @if (duration(step); as time) {
+    <span class="phorma-steps__time">{{ time }}</span>
+  }
+</ng-template>

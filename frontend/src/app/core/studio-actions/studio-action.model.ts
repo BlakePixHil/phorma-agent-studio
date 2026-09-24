@@ -32,7 +32,8 @@ export type ActionSurface =
   | 'portal'
   | 'usage'
   | 'settings'
-  | 'navigation';
+  | 'navigation'
+  | 'web';
 
 /**
  * Guardrail tier. `silent` executes immediately; `confirm` routes through

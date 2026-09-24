@@ -840,6 +840,9 @@ try {
       required: 'operator',
       body: { model: 'jev-latest', state: 'x', questions: { q: { type: 'noul', instructions: 'q?' } } },
     },
+    // The page reader. A loopback URL makes an admitted caller stop at the SSRF
+    // guard's 400, so the drive never opens a socket.
+    { method: 'POST', path: '/api/fetch', required: 'operator', body: { url: 'http://127.0.0.1/' } },
     // The ownership claim route (task 2). Nothing is deployed under this workflow
     // id, so an admitted caller reaches `claim_unowned` rather than a capability
     // refusal - which is exactly what this drive needs to tell apart. The claim path

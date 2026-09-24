@@ -94,9 +94,13 @@ pub async fn http_request(
         .text()
         .await
         .map_err(|error| format!("Could not read the response body: {error}"))?;
-    // Cap the payload so a huge response can't flood the IPC bridge.
+    // Cap the payload so a huge response can't flood the IPC bridge. The cut
+    // lands on a character boundary: slicing a `str` mid-character panics.
     let body = if text.len() > 64_000 {
-        format!("{}…(truncated)", &text[..64_000])
+        format!(
+            "{}…(truncated)",
+            crate::web_fetch::truncate_at_char_boundary(&text, 64_000)
+        )
     } else {
         text
     };

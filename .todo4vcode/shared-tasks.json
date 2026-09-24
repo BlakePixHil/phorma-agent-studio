@@ -23,27 +23,6 @@
       "order": 2000
     },
     {
-      "id": "scan-1lenuej",
-      "text": "what this exercises about the handler's ordering choice. The event row is",
-      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1072",
-      "tags": [
-        "note",
-        "cloud/test/stripe-webhook.test.mjs",
-        "cloud/test/stripe-webhook.test.mjs:1072"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1789345817295,
-      "order": 4000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/test/stripe-webhook.test.mjs",
-        "line": 1072,
-        "marker": "NOTE"
-      }
-    },
-    {
       "id": "scan-17abnuo",
       "text": "on \"prefix of the submitted value\": the implementation trims before it",
       "description": "[NOTE] cloud/test/telemetry.test.mjs:605",
@@ -61,27 +40,6 @@
         "type": "comment-scan",
         "file": "cloud/test/telemetry.test.mjs",
         "line": 605,
-        "marker": "NOTE"
-      }
-    },
-    {
-      "id": "scan-1seikit",
-      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
-      "description": "[NOTE] cloud/wrangler.jsonc:108",
-      "tags": [
-        "note",
-        "cloud/wrangler.jsonc",
-        "cloud/wrangler.jsonc:108"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1790040245971,
-      "order": 6000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/wrangler.jsonc",
-        "line": 108,
         "marker": "NOTE"
       }
     },
@@ -128,27 +86,6 @@
       }
     },
     {
-      "id": "scan-ovjl02",
-      "text": "what this exercises about the handler's ordering choice. The event row is",
-      "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1208",
-      "tags": [
-        "note",
-        "cloud/test/stripe-webhook.test.mjs",
-        "cloud/test/stripe-webhook.test.mjs:1208"
-      ],
-      "priority": "Could",
-      "status": "Todo",
-      "completed": false,
-      "createdAt": 1790069835803,
-      "order": 9000,
-      "source": {
-        "type": "comment-scan",
-        "file": "cloud/test/stripe-webhook.test.mjs",
-        "line": 1208,
-        "marker": "NOTE"
-      }
-    },
-    {
       "id": "scan-ih31m2",
       "text": "what this exercises about the handler's ordering choice. The event row is",
       "description": "[NOTE] cloud/test/stripe-webhook.test.mjs:1213",
@@ -166,6 +103,27 @@
         "type": "comment-scan",
         "file": "cloud/test/stripe-webhook.test.mjs",
         "line": 1213,
+        "marker": "NOTE"
+      }
+    },
+    {
+      "id": "scan-impi6v",
+      "text": "no `r2_buckets` here on purpose. The `RELEASES` bucket serves",
+      "description": "[NOTE] cloud/wrangler.jsonc:111",
+      "tags": [
+        "note",
+        "cloud/wrangler.jsonc",
+        "cloud/wrangler.jsonc:111"
+      ],
+      "priority": "Could",
+      "status": "Todo",
+      "completed": false,
+      "createdAt": 1790203881194,
+      "order": 11000,
+      "source": {
+        "type": "comment-scan",
+        "file": "cloud/wrangler.jsonc",
+        "line": 111,
         "marker": "NOTE"
       }
     }

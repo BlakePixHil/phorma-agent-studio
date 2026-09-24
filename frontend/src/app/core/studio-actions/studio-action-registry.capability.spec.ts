@@ -61,6 +61,8 @@ import { SettingsActionsService } from './settings-actions.service';
 import { SkillActionsService } from './skill-actions.service';
 import { StudioActionRegistryService } from './studio-action-registry.service';
 import { UsageActionsService } from './usage-actions.service';
+import { WebFetchService } from '../web-fetch.service';
+import { WebActionsService } from './web-actions.service';
 import { WorkflowActionsService } from './workflow-actions.service';
 import { actionOk, type ActionAccess, type StudioAction } from './studio-action.model';
 
@@ -149,6 +151,7 @@ function fixtureHarness(approve = true): FixtureHarness {
       { provide: ConnectionActionsService, useValue: empty },
       { provide: PortalActionsService, useValue: empty },
       { provide: UsageActionsService, useValue: empty },
+      { provide: WebActionsService, useValue: empty },
       { provide: SettingsActionsService, useValue: { actions: () => [], reveal: () => true } },
       { provide: ConfirmDialogService, useValue: { confirm } },
       { provide: TauriService, useValue: { isDesktop: false } },
@@ -370,6 +373,7 @@ function realRegistry(): { registry: StudioActionRegistryService; capability: Ca
       { provide: ConnectorsService, useValue: { byId: () => new Map() } },
       { provide: PortalService, useValue: {} },
       { provide: UsageAnalyticsService, useValue: {} },
+      { provide: WebFetchService, useValue: {} },
       { provide: SettingsRegistryService, useValue: { pages: [] } },
       { provide: PanelRegistryService, useValue: { allowedTabs: () => [], tabs: () => [] } },
     ],

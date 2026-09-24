@@ -15,6 +15,7 @@ mod oauth;
 mod ollama;
 mod process;
 mod sql;
+mod web_fetch;
 
 /// Builds and runs the Phorma Agent Studio desktop application.
 ///
@@ -56,6 +57,7 @@ pub fn run() {
             process::run_streamed_command,
             deploy_assets::prepare_deploy_workspace,
             mcp::http_request,
+            web_fetch::web_fetch,
             mcp::mcp_connect,
             mcp::mcp_call,
             mcp::mcp_disconnect,

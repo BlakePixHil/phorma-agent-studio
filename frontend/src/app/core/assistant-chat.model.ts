@@ -98,6 +98,56 @@ export interface ChatTurnUsage {
   estimated: boolean;
 }
 
+/** Lifecycle of one step the assistant took. */
+export type ChatStepStatus = 'running' | 'done' | 'failed';
+
+/**
+ * One studio action or tool call the assistant made during a turn.
+ *
+ * Replaced the plain `activity: string[]`, which encoded status in the TEXT
+ * ("X - done", "X - failed: ...") and appended a second row when a call ended,
+ * so every call showed twice and a failure still wore a green check. One step
+ * is now one row whose status changes in place.
+ */
+export interface ChatStep {
+  /** The tool-call id, stable across the running -> done/failed transition. */
+  id: string;
+  /** Studio_Action id (`web_fetch`, `graph_add_node`, ...). */
+  action: string;
+  /** Human-readable activity line. */
+  label: string;
+  status: ChatStepStatus;
+  /** Arguments as the model sent them, pretty-printed and capped. */
+  args?: string;
+  /** Result payload excerpt (successful steps), pretty-printed and capped. */
+  result?: string;
+  /** One-sentence failure reason (failed steps). */
+  error?: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
+/** The model's visible reasoning for one turn. */
+export interface ChatThinking {
+  /** Readable reasoning text (a provider summary for Claude models). */
+  text: string;
+  /** Wall time spent thinking, for the "Thought for Ns" header. */
+  durationMs: number;
+}
+
+/** A web page the user attached to a message as a reference. */
+export interface ChatReference {
+  url: string;
+  /** Page title once read; the host until then. */
+  title?: string;
+  /** `failed` keeps the chip visible with its reason instead of dropping it silently. */
+  status: 'ready' | 'failed';
+  /** Characters of page text handed to the model. */
+  chars?: number;
+  truncated?: boolean;
+  error?: string;
+}
+
 /** One message in a thread. */
 export interface ChatTurn {
   id: string;
@@ -112,12 +162,22 @@ export interface ChatTurn {
   attachment?: ChatAttachment;
   /**
    * What the assistant DID this turn, one entry per studio action or tool call,
-   * in order. Captured from the live activity feed when the turn completes so
-   * the step rows survive in the transcript instead of vanishing with the
-   * spinner - scrolling back through a conversation is how a user audits what
-   * an Agent-mode turn changed. Absent on turns that took no actions.
+   * in order. Captured from the live step feed when the turn completes so the
+   * rows survive in the transcript instead of vanishing with the spinner -
+   * scrolling back through a conversation is how a user audits what an
+   * Agent-mode turn changed. Absent on turns that took no actions.
+   */
+  steps?: ChatStep[];
+  /**
+   * LEGACY: the pre-{@link ChatStep} activity lines. Read only by
+   * {@link normalizeChatTurn}, which converts them to `steps` on load; never
+   * written any more.
    */
   activity?: string[];
+  /** The model's visible reasoning this turn (assistant turns, when streamed). */
+  thinking?: ChatThinking;
+  /** Web pages the user attached to this message (user turns). */
+  references?: ChatReference[];
   /** Cost of this turn's model calls (assistant turns, when known). */
   usage?: ChatTurnUsage;
   /** Terminal state for assistant turns. */
@@ -145,6 +205,51 @@ let chatCounter = 0;
 export function chatId(prefix: string): string {
   chatCounter += 1;
   return `${prefix}-${Date.now().toString(36)}-${chatCounter}`;
+}
+
+/**
+ * Upgrades a turn persisted before {@link ChatStep} existed: each legacy
+ * activity pair ("X" then "X - done" / "X - failed: why") collapses to ONE
+ * step carrying its status. Idempotent, and a no-op for current turns, so it
+ * is safe on every read path - no IndexedDB version bump is needed because
+ * the store holds whole objects without a schema.
+ */
+export function normalizeChatTurn(turn: ChatTurn): ChatTurn {
+  if (!turn.activity || turn.steps) {
+    if (!turn.activity) return turn;
+    const { activity: _legacy, ...rest } = turn;
+    return rest;
+  }
+  const steps: ChatStep[] = [];
+  for (const [index, line] of turn.activity.entries()) {
+    const done = /^(.*) - done$/.exec(line);
+    const failed = /^(.*) - failed: (.*)$/.exec(line);
+    const label = done?.[1] ?? failed?.[1];
+    const previous = steps[steps.length - 1];
+    if (label !== undefined && previous && previous.label === label && previous.status === 'running') {
+      previous.status = failed ? 'failed' : 'done';
+      if (failed) previous.error = failed[2];
+      continue;
+    }
+    steps.push({
+      id: `${turn.id}-legacy-${index}`,
+      action: '',
+      label: label ?? line,
+      status: failed ? 'failed' : done ? 'done' : 'running',
+      ...(failed ? { error: failed[2] } : {}),
+      startedAt: turn.at,
+    });
+  }
+  // A legacy row left "running" is a completed turn's step whose end line was
+  // never written (older builds wrote one line per call); it did finish.
+  for (const step of steps) if (step.status === 'running') step.status = 'done';
+  const { activity: _legacy, ...rest } = turn;
+  return { ...rest, steps };
+}
+
+/** {@link normalizeChatTurn} over a whole thread. */
+export function normalizeChatThread(thread: ChatThread): ChatThread {
+  return { ...thread, turns: thread.turns.map(normalizeChatTurn) };
 }
 
 /** Derives a thread title from the first user message. */

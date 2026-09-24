@@ -307,6 +307,12 @@ export const WRITE_ROUTES: readonly WriteRoute[] = [
   },
   {
     method: 'POST',
+    match: /^\/api\/fetch$/,
+    required: 'operator',
+    note: "Reading a public page is egress on the owner's behalf; the lowest level suffices.",
+  },
+  {
+    method: 'POST',
     match: /^\/api\/deployments\/[^/]+\/claim$/,
     required: 'builder',
     note: 'Claiming a deployment into an organisation is a deployment write (Requirement 3.2).',

@@ -15,6 +15,7 @@ import { RunActionsService } from './run-actions.service';
 import { SettingsActionsService } from './settings-actions.service';
 import { SkillActionsService } from './skill-actions.service';
 import { UsageActionsService } from './usage-actions.service';
+import { WebActionsService } from './web-actions.service';
 import { WorkflowActionsService } from './workflow-actions.service';
 import {
   actionFail,
@@ -72,6 +73,7 @@ export class StudioActionRegistryService {
   private readonly portalActions = inject(PortalActionsService);
   private readonly usageActions = inject(UsageActionsService);
   private readonly settingsActions = inject(SettingsActionsService);
+  private readonly webActions = inject(WebActionsService);
   private readonly confirmDialog = inject(ConfirmDialogService);
   private readonly tauri = inject(TauriService);
   // `CapabilityService` injects NOTHING at all, and
@@ -94,6 +96,7 @@ export class StudioActionRegistryService {
       ...this.portalActions.actions(),
       ...this.usageActions.actions(),
       ...this.settingsActions.actions(),
+      ...this.webActions.actions(),
     ]) {
       entries.set(action.id, action);
     }
@@ -202,7 +205,11 @@ export class StudioActionRegistryService {
   nonRevertableEffects(): string[] {
     const seen = new Set<string>();
     for (const effect of this.effects) {
-      if (!effect.revertable) seen.add(effect.label);
+      // A read changed nothing, so there is nothing for Revert to miss. Without
+      // this, "Reading the usage summary" was listed under "Not covered by
+      // Revert" as if it were a permanent effect.
+      if (effect.revertable || this.byId(effect.actionId)?.access === 'read') continue;
+      seen.add(effect.label);
     }
     return [...seen];
   }

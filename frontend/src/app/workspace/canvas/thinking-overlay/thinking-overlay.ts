@@ -34,7 +34,7 @@ import { marked } from 'marked';
     @if (hasText()) {
       @if (streaming()) {
         <span class="phorma-thinking-label" aria-live="polite">
-          <i class="ti ti-bubble-loading" aria-hidden="true"></i>
+          <i class="ti ti-brain" aria-hidden="true"></i>
           <span class="phorma-thinking-word">Thinking…</span>
         </span>
       } @else {

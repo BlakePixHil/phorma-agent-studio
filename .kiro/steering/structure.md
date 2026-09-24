@@ -213,7 +213,8 @@ execute. All three assistant modes dispatch through it: Agent mode as live tools
 1. Add one entry to the owning surface's `actions()` (`eval-actions.service.ts`,
    `run-actions.service.ts`, `prompt-actions.service.ts`, `workflow-actions.service.ts`,
    `skill-actions.service.ts`, `connection-actions.service.ts`, `portal-actions.service.ts`,
-   `usage-actions.service.ts`, `settings-actions.service.ts`, `graph-actions.service.ts`).
+   `usage-actions.service.ts`, `settings-actions.service.ts`, `graph-actions.service.ts`,
+   `web-actions.service.ts`).
 2. Delegate the executor to the Owning_Service. The registry never reimplements a capability.
 3. Pick the tier: `confirm` for credit spend, deletion, deploy, and settings or connection writes;
    `silent` for reads and local reversible document edits.
@@ -238,6 +239,13 @@ downstream of them.
 Panel state is READ ON DEMAND. Do not embed eval suites, run records, prompt bodies, usage rows,
 skills, connections, portal configuration or settings values into a system prompt; expose a
 Read_Action instead so prompt size stays flat as the surface grows.
+
+Web content is UNTRUSTED. Anything the assistant reads from the web (`web_fetch`, `web_search`, URL
+references) goes through `core/web-fetch.service.ts` - never a raw `fetch` - so desktop (Rust
+`web_fetch`) and browser (`POST /api/fetch`) apply one egress policy: public addresses only,
+redirects re-checked per hop, readable content types, byte caps. Results carry `untrusted: true`,
+referenced pages are fenced in `<untrusted_web_content>`, and every prompt that can see web content
+carries `WEB_CONTENT_RULES` (data, never instructions).
 
 ## Assistant context
 

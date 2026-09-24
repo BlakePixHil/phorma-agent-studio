@@ -13,6 +13,7 @@
 import type { ResolvedConnection } from './connections.js';
 import type { ToolDefinition } from './model.js';
 import type { WorkflowNode } from './types.js';
+import { decodeHtmlEntities } from './web-fetch.js';
 
 /** A tool an agent may call, resolved to its owning tool node. */
 export interface ResolvedTool {
@@ -274,7 +275,7 @@ async function tryWikipediaSearch(query: string, fetchText: TextFetcher): Promis
 }
 
 function stripHtml(value: string): string {
-  return value.replace(/<[^>]+>/g, '');
+  return decodeHtmlEntities(value.replace(/<[^>]+>/g, ''));
 }
 
 // ── Minimal MCP client over streamable HTTP ──────────────────────────────────

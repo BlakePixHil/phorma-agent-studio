@@ -2,11 +2,17 @@ import { Injectable, computed, effect, inject, signal, untracked } from '@angula
 
 import type { ChatMessage } from '@phorma/engine';
 
+import { normalizeWebUrl } from '@phorma/engine';
+
 import {
   chatId,
+  normalizeChatThread,
   titleFromRequest,
   type AssistantMode,
   type ChatModelRef,
+  type ChatReference,
+  type ChatStep,
+  type ChatThinking,
   type ChatThread,
   type ChatTurn,
   type EditPlan,
@@ -17,11 +23,33 @@ import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { loadLayout, saveLayout } from './layout-storage';
 import { counterName } from './telemetry-catalog';
 import { TelemetryService } from './telemetry.service';
+import { WebFetchService, type WebPage } from './web-fetch.service';
 import { WorkflowBuilderService } from './workflow-builder.service';
+import {
+  summarizeReferencedPages,
+  type FailedReference,
+  type ReferencedPage,
+} from './workflow-builder-prompt';
 import { WorkflowService } from './workflow.service';
 
 /** How many prior turns ride along as conversation history per request. */
 const HISTORY_TURNS = 12;
+
+/** References one message may carry. */
+export const MAX_REFERENCES = 5;
+
+/** Page text budget per reference, and for all references of one message. */
+const REFERENCE_CHARS = 12_000;
+const REFERENCE_TOTAL_CHARS = 36_000;
+
+/** A URL reference in the composer, before the message is sent. */
+export interface PendingReference {
+  url: string;
+  /** `reading` while the page is fetched for its title; the send re-uses the result. */
+  status: 'reading' | 'ready' | 'failed';
+  title?: string;
+  error?: string;
+}
 
 /**
  * Orchestrates the AI Assistant chat (EPIC 5): persistent per-workflow
@@ -40,6 +68,7 @@ export class AssistantChatService {
   // Safe DI direction: `TelemetryService` is a leaf that injects only
   // `TauriService`, so it cannot pull anything back into this service.
   private readonly telemetry = inject(TelemetryService);
+  private readonly web = inject(WebFetchService);
 
   /** Threads for the active workflow, newest first. */
   readonly threads = signal<ChatThread[]>([]);
@@ -49,8 +78,26 @@ export class AssistantChatService {
   readonly busy = signal(false);
   /** Cumulative streamed text of the in-flight assistant turn. */
   readonly streamingText = signal('');
-  /** Live activity lines while an Agent-mode turn edits the canvas. */
-  readonly activity = signal<string[]>([]);
+  /** Live steps (studio actions / tool calls) of the in-flight turn, in order. */
+  readonly steps = signal<ChatStep[]>([]);
+  /** Streamed reasoning of the in-flight turn. */
+  readonly thinkingText = signal('');
+  /** When the in-flight turn started thinking / stopped thinking (epoch ms). */
+  readonly thinkingStartedAt = signal<number | null>(null);
+  readonly thinkingEndedAt = signal<number | null>(null);
+  /** URL references attached in the composer for the next message. */
+  readonly references = signal<PendingReference[]>([]);
+  /** Whether turns ask the model to reason visibly (persisted). */
+  readonly reasoningEnabled = signal<boolean>(loadLayout<boolean>('assistantReasoning', true));
+  /** Whether the next turn's model can be asked to reason at all. */
+  readonly reasoningSupported = computed(() =>
+    this.builder.canRequestReasoning(this.resolvedModel()),
+  );
+  /** Whether the studio can read web pages from this session. */
+  readonly webAvailable = computed(() => this.web.available());
+
+  /** Page reads started for pending references, keyed by URL, reused on send. */
+  private readonly referenceReads = new Map<string, Promise<WebPage>>();
   /** Explicit model override from the picker (null = automatic). */
   readonly modelOverride = signal<ChatModelRef | null>(null);
   /**
@@ -150,7 +197,8 @@ export class AssistantChatService {
   /** Reloads the thread list for the current workflow scope. */
   async refresh(): Promise<void> {
     try {
-      this.threads.set(await this.storage.listChatThreads(this.scopeWorkflowId));
+      const threads = await this.storage.listChatThreads(this.scopeWorkflowId);
+      this.threads.set(threads.map(normalizeChatThread));
     } catch {
       // Chat history must never break the studio.
       this.threads.set([]);
@@ -160,7 +208,7 @@ export class AssistantChatService {
   /** Opens an existing thread. */
   openThread(thread: ChatThread): void {
     if (this.busy()) return;
-    this.activeThread.set(structuredClone(thread));
+    this.activeThread.set(normalizeChatThread(structuredClone(thread)));
   }
 
   /** Returns to the thread-list view. */
@@ -200,6 +248,143 @@ export class AssistantChatService {
     saveLayout('assistantMode', mode);
   }
 
+  setReasoning(enabled: boolean): void {
+    this.reasoningEnabled.set(enabled);
+    saveLayout('assistantReasoning', enabled);
+  }
+
+  // ── URL references ──────────────────────────────────────────────────────────
+
+  /**
+   * Attaches a web page to the next message. Starts reading it straight away
+   * so the chip can show the page title, and so the send does not wait.
+   * Returns an error sentence when the URL is refused, or null when added.
+   */
+  addReference(raw: string): string | null {
+    const url = normalizeWebUrl(raw);
+    if (!url) return 'That is not a valid web address.';
+    const current = this.references();
+    if (current.some(ref => ref.url === url)) return 'That page is already attached.';
+    if (current.length >= MAX_REFERENCES) {
+      return `A message can reference at most ${MAX_REFERENCES} pages.`;
+    }
+    if (!this.web.available()) {
+      return 'Reading web pages needs the desktop app, or a Phorma Cloud sign-in in the browser.';
+    }
+    this.references.set([...current, { url, status: 'reading' }]);
+    const read = this.web.read(url, { maxChars: REFERENCE_CHARS });
+    this.referenceReads.set(url, read);
+    read.then(
+      page => this.patchReference(url, { status: 'ready', title: page.title || undefined }),
+      error => this.patchReference(url, { status: 'failed', error: oneLine(error) }),
+    );
+    return null;
+  }
+
+  removeReference(url: string): void {
+    this.references.update(list => list.filter(ref => ref.url !== url));
+    this.referenceReads.delete(url);
+  }
+
+  private patchReference(url: string, patch: Partial<PendingReference>): void {
+    this.references.update(list =>
+      list.map(ref => (ref.url === url ? { ...ref, ...patch } : ref)),
+    );
+  }
+
+  /**
+   * Resolves the composer's references for a send: waits for reads still in
+   * flight, builds the prompt block, and returns the record kept on the turn.
+   * Clears the composer.
+   */
+  private async takeReferences(): Promise<{ block: string; records: ChatReference[] }> {
+    const pending = this.references();
+    if (pending.length === 0) return { block: '', records: [] };
+    this.references.set([]);
+    const reads = pending.map(ref => {
+      const read = this.referenceReads.get(ref.url) ?? this.web.read(ref.url, { maxChars: REFERENCE_CHARS });
+      return read.then(
+        page => ({ ref, page }),
+        (error: unknown) => ({ ref, error: oneLine(error) }),
+      );
+    });
+    const settled = await Promise.all(reads);
+    this.referenceReads.clear();
+
+    const pages: ReferencedPage[] = [];
+    const failed: FailedReference[] = [];
+    const records: ChatReference[] = [];
+    let budget = REFERENCE_TOTAL_CHARS;
+    for (const item of settled) {
+      if ('page' in item) {
+        const text = item.page.text.slice(0, Math.max(0, budget));
+        const truncated = item.page.truncated || text.length < item.page.text.length;
+        budget -= text.length;
+        pages.push({ url: item.page.url, title: item.page.title, text, truncated });
+        records.push({
+          url: item.ref.url,
+          title: item.page.title || undefined,
+          status: 'ready',
+          chars: text.length,
+          ...(truncated ? { truncated: true } : {}),
+        });
+      } else {
+        failed.push({ url: item.ref.url, error: item.error });
+        records.push({ url: item.ref.url, status: 'failed', error: item.error });
+      }
+    }
+    return { block: summarizeReferencedPages(pages, failed), records };
+  }
+
+  // ── Live turn state ──────────────────────────────────────────────────────────
+
+  private resetLiveTurn(): void {
+    this.streamingText.set('');
+    this.steps.set([]);
+    this.thinkingText.set('');
+    this.thinkingStartedAt.set(null);
+    this.thinkingEndedAt.set(null);
+  }
+
+  /** Inserts a step, or replaces the one with the same id in place. */
+  private upsertStep(step: ChatStep): void {
+    this.steps.update(list => {
+      const index = list.findIndex(existing => existing.id === step.id);
+      if (index === -1) return [...list, step];
+      const next = [...list];
+      next[index] = step;
+      return next;
+    });
+  }
+
+  private appendThinking(delta: string): void {
+    if (this.thinkingStartedAt() === null) this.thinkingStartedAt.set(Date.now());
+    // Interleaved thinking (between tool rounds) resumes the clock.
+    this.thinkingEndedAt.set(null);
+    this.thinkingText.update(text => text + delta);
+  }
+
+  private endThinking(): void {
+    if (this.thinkingStartedAt() !== null && this.thinkingEndedAt() === null) {
+      this.thinkingEndedAt.set(Date.now());
+    }
+  }
+
+  /** The callbacks every chat turn shares. */
+  private liveTurnHooks(): {
+    onStep: (step: ChatStep) => void;
+    onThinking: (delta: string) => void;
+    onThinkingEnd: () => void;
+    reasoning: boolean;
+  } {
+    return {
+      onStep: step => this.upsertStep(step),
+      onThinking: delta => this.appendThinking(delta),
+      onThinkingEnd: () => this.endThinking(),
+      reasoning: this.reasoningEnabled(),
+    };
+  }
+
   /**
    * Sends a user message in the given mode. Creates the active thread when
    * none is open. Resolves once the assistant turn settles (ok or error).
@@ -217,12 +402,13 @@ export class AssistantChatService {
     const model = this.resolvedModel();
 
     this.busy.set(true);
-    this.streamingText.set('');
-    this.activity.set([]);
+    this.resetLiveTurn();
     this.billingRemedy.set('none');
 
+    const userTurnId = chatId('turn');
+    const hasReferences = this.references().length > 0;
     this.appendTurn({
-      id: chatId('turn'),
+      id: userTurnId,
       role: 'user',
       text: trimmed,
       mode,
@@ -232,19 +418,30 @@ export class AssistantChatService {
 
     const history = this.historyMessages();
     try {
+      // Referenced pages are read (or awaited) before the model call, and the
+      // outcome is recorded on the user turn so the transcript shows which
+      // pages the answer was grounded in.
+      const { block: extraContext, records } = hasReferences
+        ? await this.takeReferences()
+        : { block: '', records: [] };
+      if (records.length > 0) {
+        this.patchTurn(userTurnId, turn => ({ ...turn, references: records }));
+      }
+      const hooks = { ...this.liveTurnHooks(), extraContext };
       if (mode === 'ask') {
         const answer = await this.builder.runAskTurn({
           request: trimmed,
           history,
           model,
           onText: text => this.streamingText.set(text),
+          ...hooks,
         });
         this.appendTurn({
           ...this.assistantTurn(mode, model, this.withTurnNotes(answer || 'No answer produced.')),
           status: this.builder.wasCancelled ? 'cancelled' : 'ok',
         });
       } else if (mode === 'plan') {
-        const plan = await this.builder.runPlanTurn({ request: trimmed, history, model });
+        const plan = await this.builder.runPlanTurn({ request: trimmed, history, model, ...hooks });
         if (this.builder.wasCancelled) {
           this.appendTurn({
             ...this.assistantTurn(mode, model, 'Stopped.'),
@@ -264,7 +461,7 @@ export class AssistantChatService {
           request: trimmed,
           history,
           model,
-          onActivity: line => this.activity.update(lines => [...lines, line]),
+          ...hooks,
         });
         this.appendTurn({
           ...this.assistantTurn(
@@ -284,8 +481,7 @@ export class AssistantChatService {
         error: message,
       });
     } finally {
-      this.streamingText.set('');
-      this.activity.set([]);
+      this.resetLiveTurn();
       await this.settleTurn();
     }
   }
@@ -309,7 +505,7 @@ export class AssistantChatService {
     const model = this.resolvedModel();
 
     this.busy.set(true);
-    this.streamingText.set('');
+    this.resetLiveTurn();
     this.billingRemedy.set('none');
 
     this.appendTurn({
@@ -321,6 +517,7 @@ export class AssistantChatService {
     });
     this.retitleIfFirst(options.label);
 
+    const hooks = this.liveTurnHooks();
     try {
       if (options.mode === 'ask') {
         const answer = await this.builder.runAskTurn({
@@ -329,6 +526,7 @@ export class AssistantChatService {
           model,
           system: options.system,
           onText: text => this.streamingText.set(text),
+          ...hooks,
         });
         this.appendTurn(this.assistantTurn('ask', model, answer || 'No output produced.'));
       } else {
@@ -337,6 +535,7 @@ export class AssistantChatService {
           history: [],
           model,
           system: options.system,
+          ...hooks,
         });
         this.appendTurn({
           ...this.assistantTurn('plan', model, plan.summary ?? 'Here is the plan.'),
@@ -355,7 +554,7 @@ export class AssistantChatService {
         error: message,
       });
     } finally {
-      this.streamingText.set('');
+      this.resetLiveTurn();
       await this.settleTurn();
     }
   }
@@ -452,7 +651,7 @@ export class AssistantChatService {
   /** Opens a thread by id (used by the palette's "Continue in chat"). */
   async openThreadById(id: string): Promise<void> {
     const thread = await this.storage.getChatThread(id).catch(() => undefined);
-    if (thread) this.activeThread.set(thread);
+    if (thread) this.activeThread.set(normalizeChatThread(thread));
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
@@ -480,10 +679,16 @@ export class AssistantChatService {
 
   private assistantTurn(mode: AssistantMode, model: ChatModelRef, text: string): ChatTurn {
     const usage = this.builder.lastTurnUsage;
-    // Snapshot the live activity feed onto the turn. Safe because every caller
-    // builds the turn BEFORE the `finally` that clears `activity`; copy the
-    // array rather than aliasing it, or the clear would empty the transcript.
-    const steps = this.activity();
+    // Snapshot the live step feed and reasoning onto the turn. Safe because
+    // every caller builds the turn BEFORE the `finally` that clears them; copy
+    // rather than alias, or the clear would empty the transcript. A step still
+    // `running` here was interrupted (Stop), so it is recorded as failed.
+    const now = Date.now();
+    const steps = this.steps().map(step =>
+      step.status === 'running'
+        ? { ...step, status: 'failed' as const, error: 'Stopped.', endedAt: now }
+        : { ...step },
+    );
     return {
       id: chatId('turn'),
       role: 'assistant',
@@ -491,10 +696,19 @@ export class AssistantChatService {
       mode,
       modelRef: model,
       usage: usage && usage.costUsd > 0 ? { ...usage } : undefined,
-      activity: steps.length > 0 ? [...steps] : undefined,
+      steps: steps.length > 0 ? steps : undefined,
+      thinking: this.thinkingSnapshot(now),
       status: 'ok',
-      at: Date.now(),
+      at: now,
     };
+  }
+
+  /** The in-flight turn's reasoning as a transcript record, or undefined. */
+  private thinkingSnapshot(now: number): ChatThinking | undefined {
+    const text = this.thinkingText().trim();
+    const started = this.thinkingStartedAt();
+    if (!text || started === null) return undefined;
+    return { text, durationMs: Math.max(0, (this.thinkingEndedAt() ?? now) - started) };
   }
 
   private appendTurn(turn: ChatTurn): void {
@@ -545,4 +759,9 @@ export class AssistantChatService {
       // Persistence failures must never break the conversation.
     }
   }
+}
+
+function oneLine(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split('\n')[0] ?? message;
 }

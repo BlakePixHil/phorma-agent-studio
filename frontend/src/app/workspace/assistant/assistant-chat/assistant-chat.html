@@ -14,6 +14,30 @@
       @for (turn of thread.turns; track turn.id) {
         @if (turn.role === 'user') {
           <div class="phorma-chat__turn phorma-chat__turn--user">
+            @if (turn.references?.length) {
+              <!-- The pages this message was grounded in. -->
+              <ul class="phorma-chat__turn-refs" aria-label="Referenced pages">
+                @for (ref of turn.references; track ref.url) {
+                  <li>
+                    <button
+                      type="button"
+                      class="phorma-chat__ref phorma-chat__ref--sent"
+                      [class.phorma-chat__ref--failed]="ref.status === 'failed'"
+                      [title]="referenceTitle(ref)"
+                      (click)="openReference(ref.url)"
+                    >
+                      <i
+                        class="ti"
+                        [class.ti-world]="ref.status !== 'failed'"
+                        [class.ti-world-off]="ref.status === 'failed'"
+                        aria-hidden="true"
+                      ></i>
+                      <span class="phorma-chat__ref-name">{{ ref.title || hostOf(ref.url) }}</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
             <div class="phorma-chat__bubble phorma-chat__bubble--user selectable">
               {{ turn.text }}
               <button
@@ -61,17 +85,21 @@
                 </button>
               </div>
             } @else {
-              <!-- What the turn DID, one row per action - the transcript of an
-                   Agent-mode turn, kept after it finishes. -->
-              @if (turn.activity?.length) {
-                <ol class="phorma-chat__steps">
-                  @for (line of turn.activity; track $index) {
-                    <li class="phorma-chat__step">
-                      <i class="ti ti-check phorma-chat__step-icon" aria-hidden="true"></i>
-                      <span class="phorma-chat__step-text">{{ line }}</span>
-                    </li>
-                  }
-                </ol>
+              <!-- How the turn got there, collapsed: what the model thought,
+                   then what it did. Both open on demand; the answer is the
+                   content. -->
+              <!-- Deferred: these three components are a lazy chunk, which
+                   keeps the eagerly loaded chat inside the initial-bundle
+                   budget. `on immediate` loads it right after first render. -->
+              @if (turn.thinking; as thought) {
+                @defer (on immediate) {
+                  <app-chat-thought [text]="thought.text" [durationMs]="thought.durationMs" />
+                }
+              }
+              @if (turn.steps?.length) {
+                @defer (on immediate) {
+                  <app-chat-steps [steps]="turn.steps!" />
+                }
               }
               <!-- No bubble: the answer is the page, like a document. -->
               @if (turn.text) {
@@ -249,30 +277,38 @@
            then bubble-less markdown) so nothing shifts when the turn lands. -->
       @if (chat.busy()) {
         <div class="phorma-chat__turn phorma-chat__turn--assistant">
-          @if (chat.activity().length > 0) {
-            <ol class="phorma-chat__steps">
-              @for (line of chat.activity(); track $index; let last = $last) {
-                <li class="phorma-chat__step">
-                  @if (last && !chat.streamingText()) {
-                    <i class="ti ti-loader-2 phorma-chat__step-icon phorma-chat__spin" aria-hidden="true"></i>
-                    <span class="phorma-chat__step-text phorma-chat__shimmer">{{ line }}</span>
-                  } @else {
-                    <i class="ti ti-check phorma-chat__step-icon" aria-hidden="true"></i>
-                    <span class="phorma-chat__step-text">{{ line }}</span>
-                  }
-                </li>
+          @if (chat.thinkingText()) {
+            <!-- Live while the model reasons; once it moves on to acting or
+                 answering, it collapses to the same disclosure a finished
+                 turn shows, so nothing jumps when the turn lands. -->
+            @if (chat.thinkingEndedAt() === null) {
+              @defer (on immediate) {
+                <app-thinking-bubble
+                  [text]="chat.thinkingText()"
+                  [startedAt]="chat.thinkingStartedAt()"
+                  [endedAt]="chat.thinkingEndedAt()"
+                />
               }
-            </ol>
+            } @else {
+              @defer (on immediate) {
+                <app-chat-thought [text]="chat.thinkingText()" [durationMs]="liveThinkingMs()" />
+              }
+            }
+          }
+          @if (chat.steps().length > 0) {
+            @defer (on immediate) {
+              <app-chat-steps [steps]="chat.steps()" [live]="true" />
+            }
           }
           @if (chat.streamingText()) {
             <div
               class="phorma-chat__md selectable"
               [innerHTML]="renderMarkdown(chat.streamingText())"
             ></div>
-          } @else if (chat.activity().length === 0) {
+          } @else if (!chat.thinkingText() && !liveStepRunning()) {
             <div class="phorma-chat__thinking">
               <i class="ti ti-loader-2 phorma-chat__spin" aria-hidden="true"></i>
-              <span class="phorma-chat__shimmer">Thinking…</span>
+              <span class="phorma-chat__shimmer">{{ chat.steps().length > 0 ? 'Working…' : 'Thinking…' }}</span>
             </div>
           }
         </div>
@@ -320,10 +356,77 @@
           }
         </span>
       }
-      @if (context.extras().length === 0) {
+      @for (ref of chat.references(); track ref.url) {
+        <span
+          class="phorma-chat__ref"
+          [class.phorma-chat__ref--failed]="ref.status === 'failed'"
+          [title]="pendingReferenceTitle(ref)"
+        >
+          <i
+            class="ti"
+            [class.ti-loader-2]="ref.status === 'reading'"
+            [class.phorma-chat__spin]="ref.status === 'reading'"
+            [class.ti-world]="ref.status === 'ready'"
+            [class.ti-world-off]="ref.status === 'failed'"
+            aria-hidden="true"
+          ></i>
+          <span class="phorma-chat__ref-name">{{ ref.title || hostOf(ref.url) }}</span>
+          <button
+            type="button"
+            class="phorma-chat__context-remove"
+            [attr.aria-label]="'Remove reference ' + (ref.title || ref.url)"
+            title="Remove reference"
+            [disabled]="chat.busy()"
+            (click)="chat.removeReference(ref.url)"
+          >
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </span>
+      }
+      @if (context.extras().length === 0 && chat.references().length === 0) {
         <span class="phorma-chat__context-hint">right-click a tab to add another</span>
       }
     </div>
+
+    @if (referenceOpen()) {
+      <!-- Inline, not a popover: it sits where the chip will appear, and
+           Escape / blur-to-empty closes it without stealing focus from the
+           conversation. -->
+      <form class="phorma-chat__ref-form" (submit)="$event.preventDefault(); addReference()">
+        <i class="ti ti-link phorma-chat__ref-form-icon" aria-hidden="true"></i>
+        <input
+          #refInput
+          pInputText
+          pSize="small"
+          type="url"
+          class="phorma-chat__ref-input"
+          placeholder="https://example.com/docs"
+          aria-label="Web page to reference"
+          spellcheck="false"
+          autocomplete="off"
+          [value]="referenceDraft()"
+          (input)="referenceDraft.set(refInput.value); referenceError.set(null)"
+          (keydown.escape)="closeReference()"
+        />
+        <button type="submit" pButton size="small" severity="secondary" [outlined]="true" [disabled]="!referenceDraft().trim()">
+          Add
+        </button>
+        <button
+          type="button"
+          pButton
+          size="small"
+          severity="secondary"
+          [text]="true"
+          aria-label="Cancel"
+          (click)="closeReference()"
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </form>
+      @if (referenceError(); as error) {
+        <p class="phorma-chat__ref-error" role="alert">{{ error }}</p>
+      }
+    }
 
     <div class="phorma-chat__input-wrap" [class.phorma-chat__input-wrap--busy]="chat.busy()">
       <textarea
@@ -335,8 +438,22 @@
         [disabled]="chat.busy()"
         (input)="draft.set(chatInput.value)"
         (keydown)="onInputKeydown($event)"
+        (paste)="onInputPaste($event)"
       ></textarea>
     </div>
+    @if (pastedUrl(); as url) {
+      <!-- A bare pasted link is offered as a reference, never converted silently. -->
+      <p class="phorma-chat__ref-offer">
+        <i class="ti ti-link" aria-hidden="true"></i>
+        <span>Let the assistant read {{ hostOf(url) }}?</span>
+        <button type="button" class="phorma-chat__proposal-link" (click)="acceptPastedUrl(url)">
+          Attach as reference
+        </button>
+        <button type="button" class="phorma-chat__proposal-link phorma-chat__ref-offer-dismiss" (click)="pastedUrl.set(null)">
+          Dismiss
+        </button>
+      </p>
+    }
 
     <div class="phorma-chat__controls">
       <!-- Mode switch -->
@@ -360,6 +477,36 @@
             }
           </button>
         }
+      </div>
+
+      <!-- Reference a page / visible reasoning -->
+      <div class="phorma-chat__tools">
+        <button
+          type="button"
+          class="phorma-chat__tool"
+          [class.phorma-chat__tool--active]="referenceOpen()"
+          [disabled]="chat.busy() || !chat.webAvailable()"
+          [title]="chat.webAvailable()
+            ? 'Reference a web page'
+            : 'Referencing web pages needs the desktop app or a Phorma Cloud sign-in'"
+          aria-label="Reference a web page"
+          [attr.aria-pressed]="referenceOpen()"
+          (click)="toggleReference()"
+        >
+          <i class="ti ti-link-plus" aria-hidden="true"></i>
+        </button>
+        <button
+          type="button"
+          class="phorma-chat__tool"
+          [class.phorma-chat__tool--active]="chat.reasoningEnabled() && chat.reasoningSupported()"
+          [disabled]="chat.busy() || !chat.reasoningSupported()"
+          [title]="reasoningTitle()"
+          aria-label="Show the model's reasoning"
+          [attr.aria-pressed]="chat.reasoningEnabled() && chat.reasoningSupported()"
+          (click)="chat.setReasoning(!chat.reasoningEnabled())"
+        >
+          <i class="ti ti-brain" aria-hidden="true"></i>
+        </button>
       </div>
 
       <!-- Model picker -->

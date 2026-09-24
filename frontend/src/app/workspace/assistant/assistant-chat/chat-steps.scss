@@ -1,0 +1,249 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+/* A finished turn's steps sit behind a quiet one-line summary; while the turn
+   runs the rows are shown directly. Same 12px body / 11px metadata scale as
+   the rest of the transcript. */
+.phorma-steps {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* ── Collapsed summary (finished turns) ─────────────────────────────── */
+.phorma-steps__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.22rem 0.25rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: none;
+  font: inherit;
+  font-size: 0.857rem;
+  line-height: 1.45;
+  color: var(--p-text-muted-color);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 6%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--p-primary-color) 60%, transparent);
+    outline-offset: 1px;
+  }
+}
+
+.phorma-steps__chevron {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+}
+
+.phorma-steps__summary-icon {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.phorma-steps__summary-text {
+  min-width: 0;
+  font-weight: 600;
+}
+
+.phorma-steps__badge {
+  flex-shrink: 0;
+  padding: 0 0.35rem;
+  border-radius: 0.3rem;
+  font-size: 0.786rem;
+  font-weight: 600;
+  color: var(--phorma-accent-red, #ef4444);
+  background: color-mix(in srgb, var(--phorma-accent-red, #ef4444) 12%, transparent);
+}
+
+/* ── Rows ───────────────────────────────────────────────────────────── */
+.phorma-steps__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+}
+
+/* Indented under the summary when expanded, flush while live. */
+.phorma-steps:not(.phorma-steps--live) .phorma-steps__list {
+  margin-left: 0.55rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid color-mix(in srgb, var(--p-text-color) 9%, transparent);
+}
+
+.phorma-steps__row + .phorma-steps__row {
+  border-top: 1px solid color-mix(in srgb, var(--p-text-color) 5%, transparent);
+}
+
+.phorma-steps__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.22rem 0.1rem;
+  border: 0;
+  border-radius: 0.3rem;
+  background: none;
+  font: inherit;
+  font-size: 0.857rem;
+  line-height: 1.45;
+  color: var(--p-text-muted-color);
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--p-text-color) 5%, transparent);
+    color: var(--p-text-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--p-primary-color) 60%, transparent);
+    outline-offset: 1px;
+  }
+
+  &--plain {
+    cursor: default;
+
+    &:hover {
+      background: none;
+      color: var(--p-text-muted-color);
+    }
+  }
+}
+
+.phorma-steps__icon {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--phorma-accent-green, #22c55e) 80%, var(--p-text-muted-color));
+}
+
+.phorma-steps__row--running .phorma-steps__icon {
+  color: var(--p-primary-color);
+}
+
+.phorma-steps__row--failed {
+  .phorma-steps__icon,
+  .phorma-steps__label {
+    color: var(--phorma-accent-red, #ef4444);
+  }
+}
+
+.phorma-steps__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Right-aligned, tabular: durations line up down the list. */
+.phorma-steps__time {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 0.4rem;
+  font-size: 0.786rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--p-text-muted-color);
+  opacity: 0.85;
+}
+
+/* ── Row detail ─────────────────────────────────────────────────────── */
+.phorma-steps__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.1rem 0.1rem 0.45rem 1.15rem;
+}
+
+.phorma-steps__detail-label {
+  margin: 0.15rem 0 0;
+  font-size: 0.786rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-steps__error {
+  margin: 0;
+  font-size: 0.786rem;
+  line-height: 1.5;
+  color: var(--phorma-accent-red, #ef4444);
+  overflow-wrap: anywhere;
+}
+
+.phorma-steps__code {
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-text-color) 4%, transparent);
+  font-size: 0.786rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--p-text-color);
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────── */
+.phorma-steps__shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--p-text-muted-color) 0%,
+    var(--p-text-color) 50%,
+    var(--p-text-muted-color) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: phorma-steps-shimmer 1.4s linear infinite;
+}
+
+@keyframes phorma-steps-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.phorma-steps__spin {
+  animation: phorma-steps-spin 0.9s linear infinite;
+}
+
+@keyframes phorma-steps-spin {
+  to { transform: rotate(360deg); }
+}
+
+.phorma-steps__row {
+  animation: phorma-steps-in 0.2s ease-out both;
+}
+
+@keyframes phorma-steps-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phorma-steps__row,
+  .phorma-steps__spin,
+  .phorma-steps__shimmer {
+    animation: none;
+  }
+
+  .phorma-steps__shimmer {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
+}

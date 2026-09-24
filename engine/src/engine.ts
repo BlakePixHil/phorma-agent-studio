@@ -122,6 +122,7 @@ import {
   isTransientModelError,
   type ChatMessage,
   type ModelClient,
+  type ReasoningReplay,
   type ToolCall,
 } from './model.js';
 import { batchItems, runAggregate, runTransform } from './data-nodes.js';
@@ -2627,9 +2628,14 @@ class WorkflowRun {
      * a retried round may therefore show a partial then a fresh stream. The
      * trace's node-retrying entry explains the restart.
      */
-    const streamRound = async (): Promise<{ roundText: string; calls: ToolCall[] }> => {
+    const streamRound = async (): Promise<{
+      roundText: string;
+      calls: ToolCall[];
+      reasoning?: ReasoningReplay;
+    }> => {
       let roundText = '';
       const calls: ToolCall[] = [];
+      let reasoning: ReasoningReplay | undefined;
       for await (const chunk of this.options.model.stream({
         provider: active.provider,
         model: active.model,
@@ -2669,13 +2675,19 @@ class WorkflowRun {
           });
         } else if (chunk.type === 'tool-call') {
           calls.push(chunk.call);
+        } else if (chunk.type === 'reasoning-replay') {
+          reasoning = chunk.replay;
         }
       }
-      return { roundText, calls };
+      return { roundText, calls, reasoning };
     };
 
     /** One round with retries, then (once) the fallback model with retries. */
-    const streamRoundRobustly = async (): Promise<{ roundText: string; calls: ToolCall[] }> => {
+    const streamRoundRobustly = async (): Promise<{
+      roundText: string;
+      calls: ToolCall[];
+      reasoning?: ReasoningReplay;
+    }> => {
       for (;;) {
         let lastError: unknown;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -2752,13 +2764,20 @@ class WorkflowRun {
           );
         }
 
-        const { roundText, calls } = await streamRoundRobustly();
+        const { roundText, calls, reasoning } = await streamRoundRobustly();
 
         output += (output && roundText ? '\n' : '') + roundText;
         if (calls.length === 0) break;
 
         // Execute the requested tools, then hand the results back to the model.
-        messages.push({ role: 'assistant-tool-calls', text: roundText || undefined, calls });
+        // Reasoning state (thinking signatures) is echoed back verbatim - a
+        // Claude tool continuation without it loses or rejects its thinking.
+        messages.push({
+          role: 'assistant-tool-calls',
+          text: roundText || undefined,
+          calls,
+          ...(reasoning ? { reasoning } : {}),
+        });
         const results: { id: string; name: string; content: string }[] = [];
         for (const call of calls) {
           if (this.gate.stopped) throw new RunStoppedError();

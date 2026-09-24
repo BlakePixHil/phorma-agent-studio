@@ -105,11 +105,47 @@ export interface ToolCall {
   arguments: string;
 }
 
+/**
+ * Opaque reasoning state a provider requires back, unmodified, when the
+ * conversation continues after a tool call.
+ *
+ * - `anthropic`: the Messages API `thinking` / `redacted_thinking` content
+ *   blocks with their `signature` (Claude rejects or silently disables
+ *   thinking on a tool-use turn whose earlier thinking blocks are missing).
+ * - `openrouter`: OpenRouter's `reasoning_details` array, which it maps back to
+ *   the upstream provider's native form (signatures, encrypted reasoning).
+ *
+ * Never shown to the user and never interpreted - it is echoed verbatim on the
+ * matching `assistant-tool-calls` message and ignored by every other adapter.
+ */
+export interface ReasoningReplay {
+  format: 'anthropic' | 'openrouter';
+  blocks: unknown[];
+}
+
 /** Provider-agnostic conversation message. Adapters map to wire formats. */
 export type ChatMessage =
   | { role: 'user' | 'assistant'; content: string }
-  | { role: 'assistant-tool-calls'; text?: string; calls: ToolCall[] }
+  | {
+      role: 'assistant-tool-calls';
+      text?: string;
+      calls: ToolCall[];
+      /** Reasoning state from the round that produced these calls. */
+      reasoning?: ReasoningReplay;
+    }
   | { role: 'tool-results'; results: { id: string; name: string; content: string }[] };
+
+/** How hard a reasoning-capable model should think. */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
+/**
+ * Asks the model to reason visibly before answering. Adapters that cannot
+ * request reasoning (or whose models never stream it) ignore the field; a
+ * model that reasons by default still streams `thinking` chunks without it.
+ */
+export interface ReasoningRequest {
+  effort: ReasoningEffort;
+}
 
 /** JSON-Schema-ish parameters object accepted by all providers. */
 export interface ToolDefinition {
@@ -126,7 +162,10 @@ export interface ModelRequest {
   messages: ChatMessage[];
   tools?: ToolDefinition[];
   temperature?: number;
+  /** Visible-output budget. Reasoning, when requested, is budgeted on top. */
   maxTokens?: number;
+  /** Request visible reasoning (see {@link supportsReasoningRequest}). */
+  reasoning?: ReasoningRequest;
   /** Ollama server override; defaults to http://localhost:11434. */
   ollamaBaseUrl?: string;
   /** LM Studio server override; defaults to http://localhost:1234. */
@@ -157,6 +196,11 @@ export type ModelChunk =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool-call'; call: ToolCall }
+  /**
+   * Emitted once at end-of-stream when the response carried reasoning state
+   * that must be echoed back on the next tool round (see ReasoningReplay).
+   */
+  | { type: 'reasoning-replay'; replay: ReasoningReplay }
   | { type: 'usage'; usage: ModelUsage }
   | { type: 'done' };
 
@@ -230,6 +274,85 @@ export function acceptsSamplingParams(model: string): boolean {
  */
 function wireTemperature(request: ModelRequest): number | undefined {
   return acceptsSamplingParams(request.model) ? request.temperature : undefined;
+}
+
+// ── Reasoning (thinking) requests ────────────────────────────────────────────────────────
+
+/**
+ * Claude models that take ADAPTIVE thinking (`thinking: {type: 'adaptive'}`):
+ * the 4.6 generation onward. From 4.7 the manual `type: 'enabled'` form is a
+ * hard 400, and from 4.7 `display` defaults to `omitted`, so the request must
+ * opt into `display: 'summarized'` or the stream carries no thinking text.
+ */
+const ADAPTIVE_THINKING = /claude-(?:sonnet|opus|fable|mythos)-(?:5|4[-.][6-9])\b/i;
+
+/**
+ * Claude models that only take MANUAL extended thinking (`budget_tokens`):
+ * Claude 3.7 Sonnet and the Claude 4 models up to 4.5. Checked after
+ * {@link ADAPTIVE_THINKING}, which claims the newer ids first.
+ */
+const MANUAL_THINKING = /claude-(?:3-7-sonnet|(?:sonnet|opus)-4|haiku-4[-.]5)/i;
+
+/** Thinking-token budget per effort level (manual budget / visible-output headroom). */
+const REASONING_BUDGET: Record<ReasoningEffort, number> = {
+  low: 2048,
+  medium: 4096,
+  high: 8192,
+};
+
+/**
+ * OpenRouter's `reasoning.effort` share of `max_tokens` (its documented
+ * ratios). The request's `max_tokens` is inflated by this share so the
+ * caller's `maxTokens` stays the budget for the VISIBLE answer.
+ */
+const OPENROUTER_EFFORT_SHARE: Record<ReasoningEffort, number> = {
+  low: 0.2,
+  medium: 0.5,
+  high: 0.8,
+};
+
+/** Hard ceiling for an inflated `max_tokens` (well under every model's limit). */
+const MAX_REASONING_MAX_TOKENS = 32_000;
+
+/**
+ * Whether the engine can ASK this provider/model for visible reasoning. False
+ * does not mean the model never reasons - DeepSeek-R1 on Ollama streams
+ * `reasoning_content` unasked - only that a {@link ReasoningRequest} is a
+ * no-op, so a UI toggle for it should read as disabled.
+ */
+export function supportsReasoningRequest(provider: ModelProviderId, model: string): boolean {
+  if (provider === 'openrouter' || provider === 'phorma-cloud') return true;
+  if (provider === 'anthropic') return ADAPTIVE_THINKING.test(model) || MANUAL_THINKING.test(model);
+  return false;
+}
+
+/** The Anthropic `thinking` config (and adjusted limits) for a request, or null. */
+function anthropicThinking(
+  request: ModelRequest,
+): { thinking: object; maxTokens: number; omitTemperature: boolean } | null {
+  if (!request.reasoning) return null;
+  const base = request.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const budget = REASONING_BUDGET[request.reasoning.effort];
+  // Thinking tokens count toward max_tokens in both modes, so the budget is
+  // added on top rather than carved out of the visible answer.
+  const maxTokens = Math.min(base + budget, MAX_REASONING_MAX_TOKENS);
+  if (ADAPTIVE_THINKING.test(request.model)) {
+    return {
+      thinking: { type: 'adaptive', display: 'summarized' },
+      maxTokens,
+      omitTemperature: true,
+    };
+  }
+  if (MANUAL_THINKING.test(request.model)) {
+    return {
+      // budget_tokens must be >= 1024 and strictly below max_tokens.
+      thinking: { type: 'enabled', budget_tokens: Math.min(budget, maxTokens - 1024) },
+      maxTokens,
+      // `temperature` is incompatible with thinking on these models.
+      omitTemperature: true,
+    };
+  }
+  return null;
 }
 
 // ── Amazon Bedrock (Converse API) ────────────────────────────────────────────
@@ -384,6 +507,11 @@ function openAiMessages(request: ModelRequest): object[] {
           type: 'function',
           function: { name: call.name, arguments: call.arguments },
         })),
+        // OpenRouter maps these back to the upstream's native reasoning
+        // blocks (Claude signatures, encrypted OpenAI reasoning). Only ever
+        // present when the previous round came from OpenRouter's wire.
+        reasoning_details:
+          message.reasoning?.format === 'openrouter' ? message.reasoning.blocks : undefined,
       });
     } else if (message.role === 'tool-results') {
       for (const result of message.results) {
@@ -410,12 +538,24 @@ function openAiBody(request: ModelRequest): string {
     request.provider === 'gemini' ||
     request.provider === 'ollama';
   const wantsCost = request.provider === 'openrouter' || request.provider === 'phorma-cloud';
+  // OpenRouter's unified `reasoning` parameter (Phorma Cloud forwards to
+  // OpenRouter). Effort is a SHARE of max_tokens there, so max_tokens is
+  // inflated to keep the caller's budget for the visible answer.
+  const reasoning = wantsCost && request.reasoning ? request.reasoning : undefined;
+  const baseMaxTokens = request.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const maxTokens = reasoning
+    ? Math.min(
+        Math.round(baseMaxTokens / (1 - OPENROUTER_EFFORT_SHARE[reasoning.effort])),
+        MAX_REASONING_MAX_TOKENS,
+      )
+    : baseMaxTokens;
   return JSON.stringify({
     model: request.model,
     stream: true,
     temperature: wireTemperature(request),
-    max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+    max_tokens: maxTokens,
     messages: openAiMessages(request),
+    reasoning: reasoning ? { effort: reasoning.effort } : undefined,
     stream_options: wantsUsage ? { include_usage: true } : undefined,
     usage: wantsCost ? { include: true } : undefined,
     tools: request.tools?.length
@@ -427,10 +567,53 @@ function openAiBody(request: ModelRequest): string {
   });
 }
 
+/**
+ * Rebuilds OpenRouter's `reasoning_details` from streamed fragments. Each
+ * fragment carries an `index`; fragments sharing one are pieces of the same
+ * detail, so their text-like fields concatenate and scalar fields (signature,
+ * id, format, type) take the latest non-empty value. The result is echoed back
+ * verbatim, so nothing here interprets the content.
+ */
+class ReasoningDetailsAccumulator {
+  private readonly byIndex = new Map<number, Record<string, unknown>>();
+  private nextIndex = 0;
+
+  push(fragments: readonly unknown[]): void {
+    for (const fragment of fragments) {
+      if (!fragment || typeof fragment !== 'object') continue;
+      const record = fragment as Record<string, unknown>;
+      const index = typeof record['index'] === 'number' ? record['index'] : this.nextIndex++;
+      const existing = this.byIndex.get(index);
+      if (!existing) {
+        this.byIndex.set(index, { ...record });
+        continue;
+      }
+      for (const [key, value] of Object.entries(record)) {
+        if (value === null || value === undefined || value === '') continue;
+        if ((key === 'text' || key === 'summary' || key === 'data') && typeof value === 'string') {
+          const prior = existing[key];
+          existing[key] = typeof prior === 'string' ? prior + value : value;
+        } else {
+          existing[key] = value;
+        }
+      }
+    }
+  }
+
+  drain(): unknown[] {
+    const blocks = [...this.byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, block]) => block);
+    this.byIndex.clear();
+    this.nextIndex = 0;
+    return blocks;
+  }
+}
+
 /** Assembles OpenAI streaming deltas (text + fragmented tool calls). */
 class OpenAiStreamParser implements StreamParser {
   private readonly pending = new Map<number, { id: string; name: string; args: string }>();
   private toolCounter = 0;
+  /** OpenRouter `reasoning_details`, merged across stream fragments. */
+  private readonly details = new ReasoningDetailsAccumulator();
 
   push(line: string): ModelChunk[] {
     if (!line.startsWith('data:')) return [];
@@ -443,6 +626,7 @@ class OpenAiStreamParser implements StreamParser {
           content?: string | null;
           reasoning?: string | null;
           reasoning_content?: string | null;
+          reasoning_details?: unknown[] | null;
           tool_calls?: {
             index?: number;
             id?: string;
@@ -495,6 +679,11 @@ class OpenAiStreamParser implements StreamParser {
     if (choice.delta?.reasoning_content) {
       chunks.push({ type: 'thinking', text: choice.delta.reasoning_content });
     }
+    // Structured reasoning state for replay. Not re-emitted as `thinking`:
+    // OpenRouter mirrors the readable text into `delta.reasoning` above.
+    if (Array.isArray(choice.delta?.reasoning_details)) {
+      this.details.push(choice.delta.reasoning_details);
+    }
     for (const fragment of choice.delta?.tool_calls ?? []) {
       const index = fragment.index ?? 0;
       let call = this.pending.get(index);
@@ -515,7 +704,13 @@ class OpenAiStreamParser implements StreamParser {
   }
 
   end(): ModelChunk[] {
-    return [...this.flushCalls(), { type: 'done' }];
+    const chunks: ModelChunk[] = this.flushCalls();
+    const blocks = this.details.drain();
+    if (blocks.length > 0) {
+      chunks.push({ type: 'reasoning-replay', replay: { format: 'openrouter', blocks } });
+    }
+    chunks.push({ type: 'done' });
+    return chunks;
   }
 
   private flushCalls(): ModelChunk[] {
@@ -560,6 +755,11 @@ function anthropicMessages(request: ModelRequest): object[] {
   for (const message of request.messages) {
     if (message.role === 'assistant-tool-calls') {
       const content: object[] = [];
+      // Thinking blocks go back first and verbatim - Claude rejects a tool-use
+      // continuation whose thinking was edited, reordered or dropped.
+      if (message.reasoning?.format === 'anthropic') {
+        content.push(...(message.reasoning.blocks as object[]));
+      }
       if (message.text?.trim()) content.push({ type: 'text', text: message.text });
       for (const call of message.calls) {
         content.push({
@@ -589,6 +789,11 @@ function anthropicMessages(request: ModelRequest): object[] {
 /** Assembles Anthropic streaming events (text deltas + tool_use blocks). */
 class AnthropicStreamParser implements StreamParser {
   private readonly blocks = new Map<number, { id: string; name: string; json: string }>();
+  /** Thinking / redacted_thinking blocks by content index, for replay. */
+  private readonly thinkingBlocks = new Map<
+    number,
+    { type: 'thinking'; thinking: string; signature: string } | { type: 'redacted_thinking'; data: string }
+  >();
   private inputTokens: number | undefined;
   private outputTokens: number | undefined;
 
@@ -598,8 +803,14 @@ class AnthropicStreamParser implements StreamParser {
       type?: string;
       index?: number;
       message?: { usage?: { input_tokens?: number } };
-      content_block?: { type?: string; id?: string; name?: string };
-      delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+      content_block?: { type?: string; id?: string; name?: string; data?: string };
+      delta?: {
+        type?: string;
+        text?: string;
+        thinking?: string;
+        signature?: string;
+        partial_json?: string;
+      };
       usage?: { output_tokens?: number };
     };
     try {
@@ -626,14 +837,28 @@ class AnthropicStreamParser implements StreamParser {
             name: parsed.content_block.name ?? '',
             json: '',
           });
+        } else if (parsed.content_block?.type === 'thinking') {
+          this.thinkingBlocks.set(parsed.index ?? 0, { type: 'thinking', thinking: '', signature: '' });
+        } else if (parsed.content_block?.type === 'redacted_thinking') {
+          this.thinkingBlocks.set(parsed.index ?? 0, {
+            type: 'redacted_thinking',
+            data: parsed.content_block.data ?? '',
+          });
         }
         return [];
       case 'content_block_delta':
         if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
           return [{ type: 'text', text: parsed.delta.text }];
         }
-        if (parsed.delta?.type === 'thinking_delta' && parsed.delta.thinking) {
-          return [{ type: 'thinking', text: parsed.delta.thinking }];
+        if (parsed.delta?.type === 'thinking_delta') {
+          const block = this.thinkingBlocks.get(parsed.index ?? 0);
+          if (block?.type === 'thinking') block.thinking += parsed.delta.thinking ?? '';
+          return parsed.delta.thinking ? [{ type: 'thinking', text: parsed.delta.thinking }] : [];
+        }
+        if (parsed.delta?.type === 'signature_delta') {
+          const block = this.thinkingBlocks.get(parsed.index ?? 0);
+          if (block?.type === 'thinking') block.signature += parsed.delta.signature ?? '';
+          return [];
         }
         if (parsed.delta?.type === 'input_json_delta') {
           const block = this.blocks.get(parsed.index ?? 0);
@@ -663,6 +888,13 @@ class AnthropicStreamParser implements StreamParser {
   end(): ModelChunk[] {
     this.blocks.clear();
     const chunks: ModelChunk[] = [];
+    if (this.thinkingBlocks.size > 0) {
+      const blocks = [...this.thinkingBlocks.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, block]) => block);
+      this.thinkingBlocks.clear();
+      chunks.push({ type: 'reasoning-replay', replay: { format: 'anthropic', blocks } });
+    }
     if (this.inputTokens !== undefined || this.outputTokens !== undefined) {
       chunks.push({
         type: 'usage',
@@ -678,11 +910,13 @@ class AnthropicStreamParser implements StreamParser {
 
 /** Builds the Anthropic Messages API request body (shared by Anthropic + Bedrock). */
 function anthropicBody(request: ModelRequest): string {
+  const thinking = anthropicThinking(request);
   return JSON.stringify({
     model: request.model,
     stream: true,
-    temperature: wireTemperature(request),
-    max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+    temperature: thinking?.omitTemperature ? undefined : wireTemperature(request),
+    max_tokens: thinking?.maxTokens ?? request.maxTokens ?? DEFAULT_MAX_TOKENS,
+    thinking: thinking?.thinking,
     system: request.system,
     messages: anthropicMessages(request),
     tools: request.tools?.length

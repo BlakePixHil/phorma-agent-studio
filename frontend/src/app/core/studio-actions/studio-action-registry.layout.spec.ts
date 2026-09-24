@@ -31,6 +31,7 @@ import { SettingsActionsService } from './settings-actions.service';
 import { SkillActionsService } from './skill-actions.service';
 import { StudioActionRegistryService } from './studio-action-registry.service';
 import { UsageActionsService } from './usage-actions.service';
+import { WebActionsService } from './web-actions.service';
 import { WorkflowActionsService } from './workflow-actions.service';
 import { actionOk, type ActionSurface, type StudioAction } from './studio-action.model';
 
@@ -90,6 +91,7 @@ describe('StudioActionRegistryService leaves the layout alone', () => {
         { provide: ConnectionActionsService, useValue: empty },
         { provide: PortalActionsService, useValue: empty },
         { provide: UsageActionsService, useValue: empty },
+        { provide: WebActionsService, useValue: empty },
         { provide: SettingsActionsService, useValue: { actions: () => [], reveal } },
         { provide: PanelRegistryService, useValue: panels },
         { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },

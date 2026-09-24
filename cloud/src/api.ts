@@ -82,6 +82,8 @@ import {
   type BillingAdminEnv,
 } from './billing-admin';
 import { BRAND_PAGE_CSP, brandPageDocument } from './brand-page';
+import { fetchPublicPage, WebFetchRateLimiter } from './web-fetch';
+import { clampMaxTokens, sanitizeReasoning } from './infer-body';
 import {
   applyImpersonation,
   guardImpersonation,
@@ -1169,6 +1171,35 @@ async function routeApiRequest(
     });
   }
 
+  // ── POST /api/fetch - public page reader for the browser studio ──────────
+  // The AI assistant's `web_fetch` tool and chat URL references, when the
+  // studio runs in a plain browser (CORS blocks a direct fetch there). The
+  // desktop app reads pages in Rust instead. See `web-fetch.ts` for the guard.
+  if (request.method === 'POST' && url.pathname === '/api/fetch') {
+    const auth = await verifyRequest(env, request);
+    if (!auth?.userId) return respond({ error: 'Unauthorized.' }, 401);
+    // `operator`, the lowest level: reading a public page spends nothing and
+    // changes nothing, but it is still egress on the owner's behalf.
+    const role = await requireCapability(env, auth, 'operator', respond);
+    if (role instanceof Response) return role;
+    const ownerId = auth.ownerId ?? auth.userId;
+    if (!webFetchLimiter.allow(ownerId)) {
+      return respond({ error: 'Too many page reads. Wait a minute and try again.' }, 429);
+    }
+    const body = (await request.json().catch(() => null)) as {
+      url?: unknown;
+      maxBytes?: unknown;
+    } | null;
+    if (typeof body?.url !== 'string' || body.url.length === 0 || body.url.length > 4096) {
+      return respond({ error: 'Body must include a url.' }, 400);
+    }
+    const result = await fetchPublicPage(body.url, {
+      maxBytes: typeof body.maxBytes === 'number' ? body.maxBytes : undefined,
+    });
+    if ('error' in result) return respond({ error: result.error }, result.status);
+    return respond(result);
+  }
+
   // ── POST /api/infer — per-request LLM proxy for local runs ───────────────
   // Lets a local run spend the tenant's Phorma Cloud credits: the studio
   // POSTs an OpenRouter-shaped chat/completions request (model already a
@@ -1201,11 +1232,20 @@ async function routeApiRequest(
       messages?: unknown[];
       system?: string;
       temperature?: number;
+      /**
+       * The engine's OpenRouter-shaped body sends `max_tokens`; `maxTokens` is the
+       * older spelling this route was written against. Reading only `maxTokens`
+       * silently capped every studio call at the 4096 default, which a reasoning
+       * request (budgeted ON TOP of the answer) would exhaust while thinking.
+       */
+      max_tokens?: number;
       maxTokens?: number;
       stream?: boolean;
       streamOptions?: unknown;
       usage?: unknown;
       tools?: unknown[];
+      /** OpenRouter's unified reasoning request, e.g. `{ effort: 'medium' }`. */
+      reasoning?: unknown;
       /**
        * Which workflow this call is spending on, when the caller knows
        * (multi-organisation-phorma Requirement 15.2). ADDITIVE and OPTIONAL in both
@@ -1251,8 +1291,9 @@ async function routeApiRequest(
       model: body.model,
       stream: true,
       temperature: body.temperature,
-      max_tokens: body.maxTokens ?? 4096,
+      max_tokens: clampMaxTokens(body.max_tokens ?? body.maxTokens),
       messages: body.messages,
+      reasoning: sanitizeReasoning(body.reasoning),
       stream_options: { include_usage: true },
       usage: { include: true },
       tools: body.tools,
@@ -1672,6 +1713,9 @@ async function routeApiRequest(
 
   return respond({ error: 'Not found.' }, 404);
 }
+
+/** One limiter per isolate for `POST /api/fetch` (see `web-fetch.ts`). */
+const webFetchLimiter = new WebFetchRateLimiter();
 
 /**
  * Parses an OpenRouter SSE stream's usage block and records a ledger row +

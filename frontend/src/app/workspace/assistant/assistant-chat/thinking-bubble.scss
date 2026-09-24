@@ -1,0 +1,110 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+.phorma-thought {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Same row rhythm as a step row, so thinking and actions read as one feed. */
+.phorma-thought__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.1rem 0;
+  font-size: 0.857rem;
+  line-height: 1.45;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-thought__icon {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--p-primary-color);
+  animation: phorma-thought-pulse 1.6s ease-in-out infinite;
+}
+
+.phorma-thought__label {
+  background: linear-gradient(
+    90deg,
+    var(--p-text-muted-color) 0%,
+    var(--p-text-color) 50%,
+    var(--p-text-muted-color) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: phorma-thought-shimmer 1.4s linear infinite;
+}
+
+/* Tabular so the clock does not jitter the row as digits change. */
+.phorma-thought__time {
+  margin-left: auto;
+  font-size: 0.786rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* The bubble: fixed height (about four lines of 11px text), newest text at the
+   bottom, older text dissolving under the top mask. A glimpse, not a transcript -
+   so it never scrolls the conversation by growing. */
+.phorma-thought__window {
+  height: 5.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--phorma-card-border);
+  background: color-mix(in srgb, var(--p-primary-color) 4%, color-mix(in srgb, var(--p-text-color) 3%, transparent));
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.6rem, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.6rem, #000 100%);
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar { display: none; }
+}
+
+.phorma-thought__text {
+  margin: 0;
+  font-size: 0.786rem;
+  line-height: 1.55;
+  font-style: italic;
+  color: var(--p-text-muted-color);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.phorma-thought__seg {
+  animation: phorma-thought-fade 0.32s ease-out both;
+}
+
+@keyframes phorma-thought-fade {
+  from { opacity: 0; filter: blur(2px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+@keyframes phorma-thought-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes phorma-thought-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phorma-thought__seg,
+  .phorma-thought__icon,
+  .phorma-thought__label {
+    animation: none;
+  }
+
+  .phorma-thought__label {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
+}

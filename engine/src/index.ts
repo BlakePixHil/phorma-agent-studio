@@ -22,6 +22,7 @@ export * from './retry.js';
 export * from './expr.js';
 export * from './model.js';
 export * from './tools.js';
+export * from './web-fetch.js';
 export * from './mcp-oauth.js';
 export * from './engine.js';
 export * from './evals.js';

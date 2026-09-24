@@ -24,6 +24,7 @@ import type { ChatThread } from './assistant-chat.model';
 import { AssistantChatService } from './assistant-chat.service';
 import { IndexedDbStorageService } from './indexed-db-storage.service';
 import { TelemetryService } from './telemetry.service';
+import { WebFetchService } from './web-fetch.service';
 import { WorkflowBuilderService } from './workflow-builder.service';
 import { WorkflowService } from './workflow.service';
 
@@ -46,6 +47,7 @@ describe('AssistantChatService thread scope during a turn', () => {
       resolveModel: () => ({ provider: 'ollama', model: 'llama3.2' }),
       modeAvailable: () => true,
       canAutoApply: () => true,
+      canRequestReasoning: () => false,
       wasCancelled: false,
       lastTurnUsage: null,
       lastTurnNonRevertableEffects: [] as string[],
@@ -75,6 +77,7 @@ describe('AssistantChatService thread scope during a turn', () => {
         { provide: WorkflowBuilderService, useValue: builder },
         { provide: IndexedDbStorageService, useValue: storage },
         { provide: TelemetryService, useValue: { count: () => undefined } },
+        { provide: WebFetchService, useValue: { available: () => false } },
       ],
     });
     const chat = TestBed.inject(AssistantChatService);

@@ -18,10 +18,29 @@
       rel="stylesheet"
     />
     <script>
-      // Native desktop behaviour: disable the default browser context menu.
-      // (Tauri also disables it in release, but this guarantees it everywhere,
-      //  including `ng serve` previews and dev builds.)
-      window.addEventListener('contextmenu', (e) => e.preventDefault());
+      // Native desktop behaviour: suppress the browser's page context menu
+      // (Back / Reload / Inspect) over app chrome, but KEEP it where the user
+      // is working with text - editable fields (Cut / Copy / Paste and the
+      // spelling suggestions) and selected text in a `.selectable` region
+      // (Copy). Tauri does not disable the WebView2 menu itself; this script
+      // is the only gate. Components with their own PrimeNG context menu
+      // (canvas, tab strips) preventDefault on their targets independently.
+      window.addEventListener('contextmenu', (e) => {
+        const target = e.target instanceof Element ? e.target : null;
+        if (target?.closest('input, textarea, [contenteditable="true"], [contenteditable=""]')) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (
+          target?.closest('.selectable') &&
+          selection &&
+          !selection.isCollapsed &&
+          selection.toString().trim() !== ''
+        ) {
+          return;
+        }
+        e.preventDefault();
+      });
 
       // Disable ctrl+wheel page zoom so the canvas owns zooming.
       window.addEventListener(

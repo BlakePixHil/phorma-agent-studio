@@ -1,6 +1,14 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 
-import type { ChatMessage, ModelRequest, ModelUsage, ToolCall } from '@phorma/engine';
+import {
+  supportsReasoningRequest,
+  type ChatMessage,
+  type ModelChunk,
+  type ModelRequest,
+  type ModelUsage,
+  type ReasoningReplay,
+  type ToolCall,
+} from '@phorma/engine';
 
 import { AgentStreamService } from './agent-stream.service';
 import { AiEditSessionService } from './ai-edit-session.service';
@@ -9,6 +17,7 @@ import { AssistantContextService } from './assistant-context.service';
 import type {
   AssistantMode,
   ChatModelRef,
+  ChatStep,
   ChatTurnUsage,
   EditPlan,
   PlanOp,
@@ -48,6 +57,9 @@ const MAX_AGENT_ROUNDS = 12;
 /** Delay between applied ops in Plan mode - the "watch it build" cadence. */
 const PLAN_APPLY_DELAY_MS = 220;
 
+/** Characters of a step's arguments / result kept for the expandable row. */
+const STEP_DETAIL_CHARS = 1_600;
+
 export type BuilderStatus = 'idle' | 'thinking' | 'applying' | 'done' | 'error';
 
 /** Options shared by the chat-turn methods. */
@@ -60,8 +72,26 @@ export interface ChatTurnOptions {
   system?: string;
   /** Cumulative streamed text callback (Ask mode). */
   onText?: (text: string) => void;
-  /** Human-readable activity lines as the agent works (Agent mode). */
-  onActivity?: (line: string) => void;
+  /**
+   * One call per step transition: once when a studio action starts
+   * (`running`) and once when it ends (`done` / `failed`), with the SAME id,
+   * so a view can update the row in place (Ask and Agent modes).
+   */
+  onStep?: (step: ChatStep) => void;
+  /** Streamed reasoning deltas (every mode, when the model reasons visibly). */
+  onThinking?: (delta: string) => void;
+  /**
+   * Called when the model starts producing its answer or its first tool call
+   * after reasoning, so a view can stop the thinking clock.
+   */
+  onThinkingEnd?: () => void;
+  /** Ask the model to reason visibly (ignored when it cannot be asked). */
+  reasoning?: boolean;
+  /**
+   * Extra context appended to the system prompt for this turn only - the
+   * "Referenced pages" block for URLs the user attached.
+   */
+  extraContext?: string;
 }
 
 /**
@@ -285,7 +315,8 @@ export class WorkflowBuilderService {
     const graph = this.workflow.graph();
     this.actions.beginTurn(graph);
     const system =
-      options.system ?? buildAskSystemPrompt(graph, this.actions, this.contextBlock());
+      options.system ??
+      buildAskSystemPrompt(graph, this.actions, this.contextBlock(options.extraContext));
     const tools = options.system ? undefined : this.actions.toolDefinitions('read');
     const messages: ChatMessage[] = [
       ...options.history,
@@ -305,22 +336,13 @@ export class WorkflowBuilderService {
           ...(tools && tools.length > 0 ? { tools } : {}),
           temperature: 0.4,
           maxTokens: 4096,
+          ...this.reasoningFor(options),
           ...this.settings.providerEndpoints(),
         };
 
-        let text = '';
-        const calls: ToolCall[] = [];
-        for await (const chunk of client.stream(modelRequest)) {
-          if (this.cancelled) break;
-          if (chunk.type === 'text') {
-            text += chunk.text;
-            options.onText?.(answer + text);
-          } else if (chunk.type === 'tool-call') {
-            calls.push(chunk.call);
-          } else if (chunk.type === 'usage') {
-            this.recordUsage(options.model, chunk.usage);
-          }
-        }
+        const { text, calls, reasoning } = await this.streamRound(client, modelRequest, options, {
+          onText: roundText => options.onText?.(answer + roundText),
+        });
         if (this.cancelled) break;
 
         if (calls.length === 0) {
@@ -330,7 +352,7 @@ export class WorkflowBuilderService {
         // Keep any prose the model emitted alongside its lookups, then run
         // them and let it answer with the results in hand.
         if (text.trim()) answer += `${text}\n\n`;
-        messages.push({ role: 'assistant-tool-calls', text: text || undefined, calls });
+        messages.push(toolCallsMessage(text, calls, reasoning));
         messages.push({
           role: 'tool-results',
           results: await this.runToolCalls(calls, options, { readOnly: true }),
@@ -355,19 +377,18 @@ export class WorkflowBuilderService {
     const modelRequest: ModelRequest = {
       provider: options.model.provider,
       model: options.model.model,
-      system: options.system ?? buildPlanSystemPrompt(graph, this.actions, this.contextBlock()),
+      system:
+        options.system ??
+        buildPlanSystemPrompt(graph, this.actions, this.contextBlock(options.extraContext)),
       messages: [...options.history, { role: 'user', content: options.request }],
       temperature: 0.2,
       maxTokens: 8192,
+      ...this.reasoningFor(options),
       ...this.settings.providerEndpoints(),
     };
     let text = '';
     try {
-      for await (const chunk of this.transport.create().stream(modelRequest)) {
-        if (this.cancelled) break;
-        if (chunk.type === 'text') text += chunk.text;
-        else if (chunk.type === 'usage') this.recordUsage(options.model, chunk.usage);
-      }
+      ({ text } = await this.streamRound(this.transport.create(), modelRequest, options));
     } finally {
       this.status.set('idle');
     }
@@ -606,14 +627,80 @@ export class WorkflowBuilderService {
    * the document tab menu, or an empty string when there are none. The active
    * canvas is not included here - it already has its own section.
    */
-  private contextBlock(): string {
-    return summarizeContextWorkflows(
+  private contextBlock(extra?: string): string {
+    const workflows = summarizeContextWorkflows(
       this.context.extraDocuments().map(doc => ({
         workflowId: doc.workflowId,
         name: doc.name,
         graph: doc.graph,
       })),
     );
+    return [workflows, extra ?? ''].filter(block => block.trim().length > 0).join('\n\n');
+  }
+
+  /**
+   * Whether a turn's model can be ASKED to reason visibly, for the composer
+   * toggle. A model that reasons unasked still streams its thoughts.
+   */
+  canRequestReasoning(model: ChatModelRef): boolean {
+    return supportsReasoningRequest(model.provider, model.model);
+  }
+
+  /** The `reasoning` field for a turn's requests, or nothing. */
+  private reasoningFor(options: ChatTurnOptions): Pick<ModelRequest, 'reasoning'> {
+    if (!options.reasoning || !this.canRequestReasoning(options.model)) return {};
+    return { reasoning: { effort: 'medium' } };
+  }
+
+  /**
+   * Streams one model round, routing each chunk: answer text, tool calls,
+   * reasoning deltas (to the thinking bubble - never into the answer), the
+   * reasoning replay state and usage. Shared by every chat mode so thinking
+   * behaves the same in Ask, Plan and Agent.
+   */
+  private async streamRound(
+    client: { stream(request: ModelRequest): AsyncIterable<ModelChunk> },
+    request: ModelRequest,
+    options: ChatTurnOptions,
+    hooks: { onText?: (roundText: string) => void } = {},
+  ): Promise<{ text: string; calls: ToolCall[]; reasoning?: ReasoningReplay }> {
+    let text = '';
+    const calls: ToolCall[] = [];
+    let reasoning: ReasoningReplay | undefined;
+    let thinking = false;
+    const endThinking = (): void => {
+      if (!thinking) return;
+      thinking = false;
+      options.onThinkingEnd?.();
+    };
+    for await (const chunk of client.stream(request)) {
+      if (this.cancelled) break;
+      switch (chunk.type) {
+        case 'thinking':
+          thinking = true;
+          options.onThinking?.(chunk.text);
+          break;
+        case 'text':
+          endThinking();
+          text += chunk.text;
+          hooks.onText?.(text);
+          break;
+        case 'tool-call':
+          endThinking();
+          calls.push(chunk.call);
+          break;
+        case 'reasoning-replay':
+          reasoning = chunk.replay;
+          break;
+        case 'usage':
+          this.recordUsage(options.model, chunk.usage);
+          break;
+        default:
+          break;
+      }
+    }
+    endThinking();
+    return { text, calls, reasoning };
   }
 
   /** Fits the whole graph in the viewport (same as View -> Fit to screen). */
@@ -655,7 +742,7 @@ export class WorkflowBuilderService {
     // Requirement 3.1: one tool definition per available Studio_Action, name,
     // description and schema all derived from the registry entry.
     const tools = this.actions.toolDefinitions('all');
-    const context = this.contextBlock();
+    const context = this.contextBlock(options.extraContext);
     let summary = '';
 
     for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
@@ -669,17 +756,11 @@ export class WorkflowBuilderService {
         tools,
         temperature: 0.2,
         maxTokens: 8192,
+        ...this.reasoningFor(options),
         ...this.settings.providerEndpoints(),
       };
 
-      let text = '';
-      const calls: ToolCall[] = [];
-      for await (const chunk of client.stream(modelRequest)) {
-        if (this.cancelled) break;
-        if (chunk.type === 'text') text += chunk.text;
-        else if (chunk.type === 'tool-call') calls.push(chunk.call);
-        else if (chunk.type === 'usage') this.recordUsage(options.model, chunk.usage);
-      }
+      const { text, calls, reasoning } = await this.streamRound(client, modelRequest, options);
       if (this.cancelled) break;
 
       if (calls.length === 0) {
@@ -689,7 +770,7 @@ export class WorkflowBuilderService {
       }
 
       this.status.set('applying');
-      messages.push({ role: 'assistant-tool-calls', text: text || undefined, calls });
+      messages.push(toolCallsMessage(text, calls, reasoning));
       messages.push({ role: 'tool-results', results: await this.runToolCalls(calls, options) });
       this.status.set('thinking');
     }
@@ -711,10 +792,10 @@ export class WorkflowBuilderService {
 
   /**
    * Runs a round of tool calls through the Action_Registry and returns the
-   * results as JSON for the model (Requirement 3.2). One plain-language
-   * activity line is emitted per executed action (Requirement 3.5), and an
-   * unknown id or invalid arguments come back as `ok: false` without breaking
-   * the loop (Requirements 3.3, 3.4).
+   * results as JSON for the model (Requirement 3.2). One step is reported per
+   * executed action (Requirement 3.5) - first `running`, then `done` or
+   * `failed` under the same id - and an unknown id or invalid arguments come
+   * back as `ok: false` without breaking the loop (Requirements 3.3, 3.4).
    */
   private async runToolCalls(
     calls: readonly ToolCall[],
@@ -724,21 +805,49 @@ export class WorkflowBuilderService {
     const results: { id: string; name: string; content: string }[] = [];
     for (const call of calls) {
       if (this.cancelled) break;
+      const startedAt = Date.now();
       const args = parseToolArguments(call.arguments);
       if (args === null) {
+        const message = 'Malformed tool arguments (invalid JSON).';
+        options.onStep?.({
+          id: call.id,
+          action: call.name,
+          label: this.actions.describe(call.name, {}),
+          status: 'failed',
+          args: capDetail(call.arguments ?? ''),
+          error: message,
+          startedAt,
+          endedAt: startedAt,
+        });
         results.push({
           id: call.id,
           name: call.name,
-          content: JSON.stringify({ ok: false, message: 'Malformed tool arguments (invalid JSON).' }),
+          content: JSON.stringify({ ok: false, message }),
         });
         continue;
       }
-      const line = this.actions.describe(call.name, args);
-      options.onActivity?.(line);
+      const running: ChatStep = {
+        id: call.id,
+        action: call.name,
+        label: this.actions.describe(call.name, args),
+        status: 'running',
+        ...(Object.keys(args).length > 0 ? { args: capDetail(prettyJson(args)) } : {}),
+        startedAt,
+      };
+      options.onStep?.(running);
       const result = await this.actions.execute(call.name, args, dispatch);
-      options.onActivity?.(
-        result.ok ? `${line} - done` : `${line} - failed: ${result.message ?? 'unknown error'}`,
-      );
+      options.onStep?.({
+        ...running,
+        status: result.ok ? 'done' : 'failed',
+        ...(result.ok
+          ? result.data !== undefined
+            ? { result: capDetail(prettyJson(result.data)) }
+            : result.message
+              ? { result: result.message }
+              : {}
+          : { error: result.message ?? 'Unknown error.' }),
+        endedAt: Date.now(),
+      });
       results.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
       await this.delay(120);
     }
@@ -768,6 +877,40 @@ export class WorkflowBuilderService {
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+}
+
+/**
+ * The `assistant-tool-calls` message for a round, carrying the provider's
+ * reasoning state so a thinking model's tool continuation is accepted (Claude
+ * rejects or silently disables thinking when its signed blocks are missing).
+ */
+function toolCallsMessage(
+  text: string,
+  calls: ToolCall[],
+  reasoning: ReasoningReplay | undefined,
+): ChatMessage {
+  return {
+    role: 'assistant-tool-calls',
+    text: text || undefined,
+    calls,
+    ...(reasoning ? { reasoning } : {}),
+  };
+}
+
+function prettyJson(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? '';
+  } catch {
+    return String(value);
+  }
+}
+
+/** Caps a step detail so a fetched page cannot bloat the persisted thread. */
+function capDetail(value: string): string {
+  return value.length > STEP_DETAIL_CHARS
+    ? `${value.slice(0, STEP_DETAIL_CHARS)}\n... (${value.length - STEP_DETAIL_CHARS} more characters)`
+    : value;
 }
 
 /** Parses tool-call arguments, returning null for malformed JSON. */
