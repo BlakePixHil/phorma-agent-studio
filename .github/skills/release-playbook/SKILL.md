@@ -47,6 +47,7 @@ Paste this into your working notes and tick as you go. The phases below explain 
 [ ] 5  git push origin main vX.Y.Z   (BOTH refs, one command)
 [ ] 6  CI green AND Release workflow green; GitHub Release has all 4 platforms
 [ ] 7  Worker deployed if cloud/ changed; /status.json build == X.Y.Z
+       Admin deployed if admin/ changed; live main-*.js == local build
 [ ] 8  R2 manifests serve X.Y.Z; updater answers 200 for an older version
 [ ] 9  Post-release: memory + steering updated, operator steps recorded
 ```
@@ -253,6 +254,19 @@ Then the gate that catches the drift this repo has actually shipped twice:
 ```powershell
 (Invoke-WebRequest https://cloud.phorma-labs.com/status.json).Content | ConvertFrom-Json | Select-Object build
 # expect: X.Y.Z  — exactly the tag you just pushed
+```
+
+**Then deploy the telemetry admin if anything under `admin/` changed** since its last deploy. It is
+a separate static-asset worker (`phorma-admin`, `telemetry-admin.phorma-labs.com`) that no workflow
+deploys, and it goes AFTER the cloud worker so any admin routes it calls already exist. It was
+silently missed for beta.4 through beta.6.
+
+```powershell
+cd admin; npx wrangler deployments list        # compare the date with `git log -- admin/`
+npm run build; npx wrangler deploy
+# expect: the live index.html references the same main-*.js as dist/admin/browser
+[regex]::Match((Invoke-WebRequest https://telemetry-admin.phorma-labs.com/).Content,'main-[A-Z0-9]+\.js').Value
+(Get-ChildItem dist/admin/browser/main-*.js).Name
 ```
 
 A `wrangler secret put` publishes **no** config change of its own; only `deploy` applies a `vars`
