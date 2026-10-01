@@ -6,7 +6,7 @@ inclusion: always
 
 Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud`, `cloud-aws`,
 `engine` and `admin`, plus `backend/src-tauri/Cargo.toml`. All six packages share ONE version number
-(currently `1.0.0-beta.6`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
+(currently `1.0.0-beta.7`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
 `release.md` steering.
 
 ## Stack
