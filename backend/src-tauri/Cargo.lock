@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "phorma-agent-studio"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "chrono",
  "futures-util",
