@@ -181,13 +181,26 @@ describe('telemetry call site: PanelRegistryService.setActive', () => {
   let panels: PanelRegistryService;
   let names: () => string[];
 
+  // `PanelRegistryService` reads `phorma.layout.activeLeft` at construction, and
+  // karma shares one localStorage across a randomised suite: any earlier spec that
+  // revealed Runs leaves `activeLeft = "runs"`, which turns the first setActive
+  // below into a no-op. Start (and leave) the layout namespace empty.
+  const clearLayout = (): void => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('phorma.layout.')) localStorage.removeItem(key);
+    }
+  };
+
   beforeEach(() => {
+    clearLayout();
     TestBed.configureTestingModule({
       providers: [{ provide: TauriService, useValue: { isDesktop: false } }],
     });
     panels = TestBed.inject(PanelRegistryService);
     names = watchCounters();
   });
+
+  afterEach(clearLayout);
 
   it('counts panel.opened once when a tab becomes active on a side', () => {
     panels.setActive('left', 'runs');
