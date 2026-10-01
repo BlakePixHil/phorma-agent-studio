@@ -1,0 +1,21 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "7458d4e9-0000-47bd-98cb-000000000001",
+      "title": "Platform Engineer",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "FullTime",
+      "location": "Remote - Worldwide",
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "isListed": true,
+      "publishedAt": "__POSTED_2D__",
+      "jobUrl": "https://jobs.ashbyhq.com/example-ashby/7458d4e9-0000-47bd-98cb-000000000001",
+      "applyUrl": "https://jobs.ashbyhq.com/example-ashby/7458d4e9-0000-47bd-98cb-000000000001/application",
+      "descriptionPlain": "Run our Kubernetes and AWS platform. Apply through the form on our careers site.",
+      "descriptionHtml": "<p>Run our Kubernetes and AWS platform. Apply through the form on our careers site.</p>"
+    }
+  ]
+}

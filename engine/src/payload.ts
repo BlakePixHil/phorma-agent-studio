@@ -29,20 +29,43 @@ export function resolveJsonPath(value: unknown, path: string): unknown {
 }
 
 /**
+ * Values a template may address besides the payload. `vars` is the run frame's
+ * workflow-variable scope (see `variables.ts`).
+ */
+export interface TemplateScope {
+  readonly vars?: Readonly<Record<string, unknown>>;
+}
+
+/** Prefix that always addresses the workflow-variable scope, never the payload. */
+const VARS_PREFIX = 'vars.';
+
+/**
  * Interpolates `{{token}}` placeholders in a template against a payload.
  *
  * - `{{input}}` — the whole payload (or `(no input provided)` when empty).
+ * - `{{vars.name}}` — a workflow variable from `scope.vars`. This prefix NEVER
+ *   reads the payload, so a payload field named `vars` cannot shadow a
+ *   configured value; it stays reachable through `{{input}}`.
  * - `{{a.b.c}}` — a dotted path into the payload parsed as JSON. Non-string
  *   values are re-serialized as JSON.
  * - Unresolvable tokens are left untouched so prompt text like
  *   `{{example}}` survives verbatim.
  */
-export function interpolatePayload(template: string, payload: string): string {
+export function interpolatePayload(
+  template: string,
+  payload: string,
+  scope?: TemplateScope,
+): string {
   const whole = payload || '(no input provided)';
   let parsed: unknown;
   let didParse = false;
   return template.replace(/\{\{\s*([\w$][\w$.-]*)\s*\}\}/g, (match, path: string) => {
     if (path === 'input') return whole;
+    if (path.startsWith(VARS_PREFIX)) {
+      const value = resolveJsonPath(scope?.vars ?? {}, path.slice(VARS_PREFIX.length));
+      if (value === undefined) return match;
+      return typeof value === 'string' ? value : JSON.stringify(value);
+    }
     if (!didParse) {
       didParse = true;
       try {

@@ -1697,7 +1697,11 @@
           appendTo="body" size="small">
           <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
         </p-select>
-        @if ((data.bodyMode ?? 'none') !== 'none') {
+        @if ((data.bodyMode ?? 'none') === 'multipart') {
+          @defer (on immediate) {
+            <app-delivery-config [node]="selected" [scope]="scope()" />
+          }
+        } @else if ((data.bodyMode ?? 'none') !== 'none') {
           <textarea
             pTextarea
             pSize="small"
@@ -3004,6 +3008,14 @@
       </section>
     }
 
+    <!-- Document delivery: render-document, state-list and the email extras of notify.
+         Deferred so it stays out of the initial bundle. -->
+    @if (usesDeliveryConfig()) {
+      @defer (on immediate) {
+        <app-delivery-config [node]="selected" [scope]="scope()" />
+      }
+    }
+
     <!-- Data node: fixture mode (http-request / sql-query) -->
     @if (fixtureMode(); as mode) {
       <section class="phorma-props__section">
@@ -3223,6 +3235,11 @@
         Fails the run if it takes longer than this end-to-end. Paused time doesn't count.
         Leave empty for no limit. Applies to local and deployed runs.
       </p>
+    </section>
+    <section class="phorma-props__section">
+      @defer (on immediate) {
+        <app-workflow-variables [scope]="scope()" />
+      }
     </section>
     <div class="phorma-props__placeholder phorma-props__placeholder--inline">
       <i class="ti ti-adjustments" aria-hidden="true"></i>

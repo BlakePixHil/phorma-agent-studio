@@ -48,6 +48,9 @@ export type WorkflowNodeKind =
   | 'state-get' // P1-8
   | 'state-set' // P1-8
   | 'notify' // P1-10
+  // ── Document delivery ─────────────────────────────────────────────────────
+  | 'render-document'
+  | 'state-list'
   // ── System One (TypeSafe Jev) ─────────────────────────────────────────────
   | 'decide';
 
@@ -68,6 +71,8 @@ export const DATA_NODE_KINDS: readonly WorkflowNodeKind[] = [
   'state-set',
   'notify',
   'decide',
+  'render-document',
+  'state-list',
 ] as const;
 
 /** Data nodes that reach outside the run (fixtures + egress declaration). */
@@ -343,6 +348,11 @@ export interface AgentNodeData {
   verify?: AgentVerifyConfig;
   /** System One tool/skill preselection (see {@link AgentPreselectConfig}). */
   preselect?: AgentPreselectConfig;
+  /**
+   * When set, the reply is MERGED into the incoming payload under this key
+   * (parsed as JSON when it parses) instead of replacing the payload.
+   */
+  resultKey?: string;
 }
 
 export interface ScheduleTriggerData {
@@ -517,15 +527,20 @@ export interface DecisionQuestionSpec {
 }
 
 export interface RouterNodeData extends DecisionTuning {
-  /** `keyword` (default) substring match, or `decide` (System One picks). */
-  mode?: 'keyword' | 'decide';
+  /**
+   * `keyword` (default) substring match, `decide` (System One picks), or
+   * `expression` (the route whose name equals the evaluated `expression`).
+   */
+  mode?: 'keyword' | 'decide' | 'expression';
+  /** Expression mode: evaluated against the payload; the result names a route. */
+  expression?: string;
   /** Decide mode: the routing question. Markdown. */
   instructions?: string;
   /** Decide mode: port base id -> what belongs on that route. */
   routeCriteria?: Record<string, string>;
   /** Decide mode: below this confidence the unsure port is taken (default 0.5). */
   minConfidence?: number;
-  /** Decide mode: port base id taken on low confidence. */
+  /** Decide mode: port base id taken on low confidence. Expression mode: taken on no match. */
   unsurePortId?: string;
   retry?: NodeRetryPolicy;
   fixtures?: FixtureMode;
@@ -694,6 +709,13 @@ export interface RedactionRule {
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
 
+/** A `multipart/form-data` body (RFC 7578). Twin of the engine type. */
+export interface MultipartBodyConfig {
+  fields?: { name: string; value: PayloadTemplate }[];
+  /** `artifact` is a dotted payload path to an artifact reference. */
+  files?: { name: string; artifact: string; fileName?: PayloadTemplate }[];
+}
+
 export interface HttpRequestNodeData {
   connectionId?: string;
   method: HttpMethod;
@@ -702,9 +724,11 @@ export interface HttpRequestNodeData {
   query?: { key: string; value: PayloadTemplate }[];
   /** Non-secret headers only. Auth comes from the connection, never from here. */
   headers?: { key: string; value: PayloadTemplate }[];
-  bodyMode?: 'none' | 'json' | 'text' | 'form';
+  bodyMode?: 'none' | 'json' | 'text' | 'form' | 'multipart';
   /** Template rendered then (for `json`) parsed to validate before sending. */
   body?: PayloadTemplate;
+  /** `bodyMode: 'multipart'` only: text fields and file parts read from run artifacts. */
+  multipart?: MultipartBodyConfig;
   /** Extra codes treated as success. Default: 2xx. */
   successCodes?: number[];
   /** Dotted path selecting what lands in the outgoing payload. */
@@ -912,6 +936,55 @@ export interface NotifyNodeData {
   body?: PayloadTemplate;
   retry?: NodeRetryPolicy;
   errorPortId?: string;
+  // ── Email extensions (channel `email` only) ──
+  /** Sender. Falls back to the connection's `defaultFrom`. */
+  from?: PayloadTemplate;
+  replyTo?: PayloadTemplate;
+  /** Comma-separated copy recipients. */
+  cc?: PayloadTemplate;
+  /** How `body` is delivered. Absent = provider default (markdown). */
+  bodyFormat?: 'markdown' | 'html' | 'text';
+  /** Dotted payload paths, each resolving to an artifact reference or an array of them. */
+  attachments?: string[];
+  /** Over the attachment size cap: `fail` (default) or drop trailing attachments. */
+  attachmentLimit?: 'fail' | 'truncate';
+  /** Rendered key: claimed once under `idem:` and sent as `Idempotency-Key`. */
+  idempotencyKey?: PayloadTemplate;
+}
+
+// ── Document delivery ────────────────────────────────────────────────────────
+
+/** Page layout for `render-document`. Twin of `DocumentLayout` in the engine. */
+export interface DocumentLayout {
+  pageSize?: 'a4' | 'letter';
+  /** Margin on every side, millimetres (5-50, default 18). */
+  marginMm?: number;
+  /** Body text size in points (7-16, default 10.5). */
+  fontSize?: number;
+  /** Heading and link colour, `#rrggbb`. */
+  accentColor?: string;
+}
+
+export interface RenderDocumentNodeData {
+  /** Markdown template. `{{path}}` alone reads a payload path. */
+  markdown: PayloadTemplate;
+  /** File name template; sanitised and given the format's extension. */
+  fileName: PayloadTemplate;
+  title?: PayloadTemplate;
+  format?: 'pdf';
+  layout?: DocumentLayout;
+  /** Payload key the artifact reference merges under (default `document`). */
+  resultKey?: string;
+  errorPortId?: string;
+}
+
+export interface StateListNodeData {
+  /** Key prefix template, interpolated against the payload. */
+  prefix: PayloadTemplate;
+  /** Maximum entries (default 100, capped at 1000). */
+  limit?: number;
+  /** Payload key the list merges under (default `entries`). */
+  resultKey?: string;
 }
 
 /**
@@ -940,6 +1013,8 @@ export type WorkflowNodeData =
   | StateGetNodeData
   | StateSetNodeData
   | NotifyNodeData
+  | RenderDocumentNodeData
+  | StateListNodeData
   | DecideNodeData
   | Record<string, never>;
 
@@ -992,6 +1067,16 @@ export const WORKFLOW_SPEC_VERSION = 1;
 /** File extension for exported workflow documents. */
 export const WORKFLOW_FILE_EXTENSION = 'phorma.json';
 
+export type WorkflowVariableType = 'text' | 'markdown' | 'number' | 'boolean' | 'list';
+
+/** One named workflow value. A `list` holds strings. Twin of the engine type. */
+export interface WorkflowVariable {
+  name: string;
+  type: WorkflowVariableType;
+  value: string | number | boolean | string[];
+  description?: string;
+}
+
 /** Workflow-level execution settings, persisted in the spec. */
 export interface WorkflowSettings {
   /**
@@ -999,6 +1084,11 @@ export interface WorkflowSettings {
    * timeout. Paused time doesn't count. 0/absent = no limit.
    */
   timeoutMinutes?: number;
+  /**
+   * Named workflow values, read as `{{vars.name}}` in templates and prompts and
+   * `vars.name` in expressions. Never secrets: those belong in Connections.
+   */
+  variables?: WorkflowVariable[];
   /** P1-10: run-outcome notification policy. */
   notifications?: {
     /** 0 to 3 unique triggers. Absent trigger = no notification for it. */

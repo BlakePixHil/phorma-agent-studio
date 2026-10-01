@@ -22,6 +22,8 @@ import { RunTriage } from '../run-triage/run-triage';
 import { PhormaCloudService } from '../../../core/phorma-cloud.service';
 import { RunControllerService, TraceEntry } from '../../../core/run-controller.service';
 import { RunHistoryService } from '../../../core/run-history.service';
+import { RunArtifactsService, saveBytesAsFile } from '../../../core/run-artifacts.service';
+import { ToastService } from '../../../shared/toast/toast.service';
 import { traceFromRunLog } from '../../../core/run-trace';
 import { TerminalOutputService } from '../../../core/terminal-output.service';
 import { WorkflowService } from '../../../core/workflow.service';
@@ -114,6 +116,8 @@ export class RunsPanel {
   protected readonly cloud = inject(CloudService);
   private readonly phormaCloud = inject(PhormaCloudService);
   private readonly runHistory = inject(RunHistoryService);
+  private readonly runArtifacts = inject(RunArtifactsService);
+  private readonly toast = inject(ToastService);
   private readonly workflow = inject(WorkflowService);
   private readonly decisions = inject(DecisionTransportService);
 
@@ -502,5 +506,29 @@ export class RunsPanel {
     this.copiedId.set(entry.id);
     clearTimeout(this.copyTimer);
     this.copyTimer = setTimeout(() => this.copiedId.set(null), 1500);
+  }
+
+  /**
+   * Downloads a run file: from this machine's store for a local run, otherwise
+   * from the deployment the run belongs to. Nothing is fetched until the user
+   * asks, so a trace full of files costs nothing to render.
+   */
+  protected async downloadArtifact(file: NonNullable<TraceEntry['artifact']>, event: Event): Promise<void> {
+    event.stopPropagation();
+    const local = await this.runArtifacts.get(file.runId, file.id);
+    if (local) {
+      saveBytesAsFile(local.bytes, local.ref.name, local.ref.mimeType);
+      return;
+    }
+    const workflowId = this.selectedRun()?.summary.workflowId ?? this.workflow.activeDoc()?.workflowId;
+    const remote =
+      workflowId && this.cloud.configured()
+        ? await this.cloud.fetchRunArtifact(workflowId, file.runId, file.id)
+        : null;
+    if (remote) {
+      saveBytesAsFile(remote.bytes, remote.artifact.name, remote.artifact.mimeType);
+      return;
+    }
+    this.toast.warning('File unavailable', `${file.name} is no longer stored for this run.`);
   }
 }

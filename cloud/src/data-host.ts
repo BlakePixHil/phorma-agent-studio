@@ -40,6 +40,7 @@ import {
   MAX_REQUEST_TIMEOUT_SEC,
   MIN_REQUEST_TIMEOUT_SEC,
   DataTransportError,
+  decodeBase64,
   maskSqlText,
   utf8ByteLength,
   type DataFetcher,
@@ -177,7 +178,10 @@ export function createWorkerDataFetcher(options: WorkerDataFetcherOptions = {}):
       };
       // `fetch` rejects a GET/HEAD carrying a body; dropping it here keeps that
       // author mistake out of the transport-failure taxonomy.
-      if (request.body !== undefined && !BODYLESS_METHODS.has(method)) init.body = request.body;
+      if (request.body !== undefined && !BODYLESS_METHODS.has(method)) {
+        // A `base64` body is binary (multipart uploads): send the bytes.
+        init.body = request.bodyEncoding === 'base64' ? decodeBase64(request.body) : request.body;
+      }
 
       let response: Response;
       try {

@@ -33,6 +33,9 @@ import type {
   SqlHost,
   SqlRequest,
   SqlResult,
+  ArtifactRef,
+  ArtifactStore,
+  StoredArtifact,
 } from '../data-host.js';
 import type { ResolvedConnection, SqlDriver } from '../connections.js';
 import type {
@@ -318,3 +321,40 @@ export const score = (value: number, confidence = 0.9): DecisionAnswer => ({
   probabilities: {},
   confidence,
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Run artifacts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A plain in-memory `ArtifactStore` keyed by `runId` then artifact id, keeping
+ * creation order for `list`. `puts` counts writes so a replay test can prove a
+ * journaled producer wrote nothing.
+ */
+export class MemoryArtifactStore implements ArtifactStore {
+  readonly runs = new Map<string, Map<string, StoredArtifact>>();
+  puts = 0;
+
+  async put(runId: string, artifact: StoredArtifact): Promise<void> {
+    this.puts += 1;
+    let run = this.runs.get(runId);
+    if (!run) {
+      run = new Map();
+      this.runs.set(runId, run);
+    }
+    run.set(artifact.ref.id, { ...artifact, ref: { ...artifact.ref }, bytes: artifact.bytes.slice() });
+  }
+
+  async get(runId: string, id: string): Promise<StoredArtifact | undefined> {
+    return this.runs.get(runId)?.get(id);
+  }
+
+  async list(runId: string): Promise<ArtifactRef[]> {
+    return [...(this.runs.get(runId)?.values() ?? [])].map(artifact => ({ ...artifact.ref }));
+  }
+
+  /** Every artifact of every run. */
+  all(): StoredArtifact[] {
+    return [...this.runs.values()].flatMap(run => [...run.values()]);
+  }
+}

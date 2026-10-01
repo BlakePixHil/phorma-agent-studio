@@ -188,6 +188,7 @@ const ACTIVE_WORKFLOW_ID = 'wf-active';
 /** A workflow addressed by id rather than by being open. */
 const TARGET_WORKFLOW_ID = 'wf-alpha';
 const RUN_ID = 'run-7';
+const ARTIFACT_ID = 'art-0000abcd-0000ef01';
 const CONNECTION_ID = 'conn-1';
 const SECRET_KEY = 'API_KEY';
 /** The bearer both Cloudflare targets must carry, from the Clerk session. */
@@ -343,6 +344,8 @@ function contextFor(op: CloudOperation): CloudEndpointContext {
       return { workflowId: TARGET_WORKFLOW_ID };
     case 'run-detail':
       return { workflowId: TARGET_WORKFLOW_ID, runId: RUN_ID };
+    case 'run-artifact':
+      return { workflowId: TARGET_WORKFLOW_ID, runId: RUN_ID, artifactId: ARTIFACT_ID };
     // `since` is left undefined for an unbounded window, so each target
     // supplies its own epoch form.
     case 'usage':
@@ -462,6 +465,10 @@ const DRIVERS: Readonly<Record<DispatchedOperation, OperationDriver>> = {
   'run-detail': {
     dispatches: ['run-detail'],
     run: (harness, workflowId) => harness.cloud.fetchRunRecord(workflowId, RUN_ID),
+  },
+  'run-artifact': {
+    dispatches: ['run-artifact'],
+    run: (harness, workflowId) => harness.cloud.fetchRunArtifact(workflowId, RUN_ID, ARTIFACT_ID),
   },
   usage: {
     dispatches: ['usage'],
@@ -872,7 +879,7 @@ describe('Property 21: Transport seam selects by target only', () => {
     // exhaustive: a target with no coverage, and an operation with no driver.
     expect(TARGET_IDS.length).toBe(3);
     // Twelve: the eleven aws-byo-deploy operations plus `list-deployments`.
-    expect(OPERATIONS.length).toBe(12);
+    expect(OPERATIONS.length).toBe(13);
     expect(OPERATIONS.every(op => DRIVERS[op] !== undefined)).toBeTrue();
     // The operations the AWS host deliberately declares no route for, plus the
     // one it folds into `push-spec`.
@@ -1212,8 +1219,8 @@ describe('Property 22: Deployed URLs come from the registry', () => {
     // Guards the ways this enumeration could quietly stop being exhaustive.
     expect(TARGET_IDS.length).toBe(3);
     expect(WORKFLOW_ID_CASES.length).toBe(6);
-    expect(OPERATIONS.length).toBe(12);
-    expect(TARGET_IDS.length * WORKFLOW_ID_CASES.length * OPERATIONS.length).toBe(216);
+    expect(OPERATIONS.length).toBe(13);
+    expect(TARGET_IDS.length * WORKFLOW_ID_CASES.length * OPERATIONS.length).toBe(234);
     expect(new Set(WORKFLOW_ID_CASES.map(each => each.id)).size).toBe(WORKFLOW_ID_CASES.length);
     // The empty id has to be in the set: it is the only one that exercises the
     // `workflowId || 'default'` rule.
@@ -1222,7 +1229,7 @@ describe('Property 22: Deployed URLs come from the registry', () => {
     // Three root-scoped: the two connection-vault routes plus `list-deployments`,
     // which addresses the account rather than one instance.
     expect(ROOT_SCOPED_OPERATIONS.size).toBe(3);
-    expect(OPERATIONS.length - ROOT_SCOPED_OPERATIONS.size).toBe(9);
+    expect(OPERATIONS.length - ROOT_SCOPED_OPERATIONS.size).toBe(10);
     // No sentinel can be mistaken for a route the registry owns.
     expect(registryOwnedFragmentsIn(`/${REGISTRY_INSTANCE_MARK}(wf/nested)`, '')).toEqual([]);
     expect(
@@ -1975,6 +1982,14 @@ const RUN_EVENT_FRAMES: Readonly<Record<RunEventType, RunEvent>> = {
     target: 'ops@example.test',
     at: MONITOR_AT,
   },
+  'artifact-created': {
+    type: 'artifact-created',
+    runId: MONITOR_RUN_ID,
+    nodeId: MONITOR_NODE_ID,
+    nodeName: 'Render',
+    artifact: { id: 'art-0000abcd-0000ef01', name: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 1024 },
+    at: MONITOR_AT,
+  },
   decision: {
     type: 'decision',
     runId: MONITOR_RUN_ID,
@@ -2561,18 +2576,18 @@ describe('Property 28: RunEvents reach the run controller untransformed', () => 
     // total `Record<RunEventType, RunEvent>` already makes a new member of the
     // union a compile error; these cover the rest.
     const types = Object.keys(RUN_EVENT_FRAMES) as RunEventType[];
-    expect(types.length).toBe(43);
+    expect(types.length).toBe(44);
     for (const type of types) {
       expect(RUN_EVENT_FRAMES[type].type).withContext(`corpus entry "${type}"`).toBe(type);
     }
     expect(WIRE_ODDITY_CASES.length).toBe(6);
-    expect(EVENT_FRAME_CASES.length).toBe(49);
-    expect(new Set(EVENT_FRAME_CASES.map(each => each.label)).size).toBe(49);
-    expect(new Set(EVENT_FRAME_CASES.map(each => each.frame)).size).toBe(49);
+    expect(EVENT_FRAME_CASES.length).toBe(50);
+    expect(new Set(EVENT_FRAME_CASES.map(each => each.label)).size).toBe(50);
+    expect(new Set(EVENT_FRAME_CASES.map(each => each.frame)).size).toBe(50);
     expect(TARGET_IDS.length).toBe(3);
-    expect(EVENT_FRAME_CASES.length * TARGET_IDS.length).toBe(147);
+    expect(EVENT_FRAME_CASES.length * TARGET_IDS.length).toBe(150);
     expect(MALFORMED_FRAMES.length * TARGET_IDS.length).toBe(21);
-    expect(147 + 21 + TARGET_IDS.length).toBe(171);
+    expect(150 + 21 + TARGET_IDS.length).toBe(174);
 
     // Both malformed groups are populated, or one of the two branches above is
     // asserted against nothing.

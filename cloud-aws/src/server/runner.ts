@@ -124,6 +124,11 @@ export interface DataHosts {
    * (Router) or fails naming the capability (every other System One step).
    */
   decisions?: import('@phorma/engine').DecisionClient;
+  /**
+   * Run files (Render Document PDFs, for example). `RunTableAdapter.createArtifactStore`
+   * keeps them under `artifact#{runId}#` beside the run record; purge removes them.
+   */
+  artifacts?: import('@phorma/engine').ArtifactStore;
 }
 
 /**
@@ -221,6 +226,8 @@ export interface TriggerInput {
   subWorkflows?: Record<string, import('@phorma/engine').EmbeddedWorkflow>;
   maxSubWorkflowDepth?: number;
   runTimeoutMs?: number;
+  /** The stored spec's resolved workflow variables (`resolveWorkflowVariables(spec.settings)`). */
+  variables?: Readonly<Record<string, import('@phorma/engine').Json>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +433,8 @@ export async function executeRun(
     fixtures: dataHosts.fixtures,
     redact: dataHosts.redact,
     decisions: dataHosts.decisions,
+    artifacts: dataHosts.artifacts,
+    variables: trigger.variables,
 
     // Suspension handlers
     requestApproval: (nodeId, message, payload, requestId) => {

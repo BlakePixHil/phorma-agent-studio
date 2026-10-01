@@ -12,7 +12,38 @@
  * than trusted or fatal (Requirements 15.12, 15.13).
  */
 
-import type { RedactionRule, ResolvedConnection, RunEvent, WorkflowSpec } from '@phorma/engine';
+import type {
+  JournalEntry,
+  RedactionRule,
+  ResolvedConnection,
+  RunEvent,
+  WorkflowSpec,
+} from '@phorma/engine';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Journal rows
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Largest serialised journal entry the Durable Object persists, in UTF-8 bytes.
+ * Durable Object SQLite refuses a string over 2 MB (`SQLITE_TOOBIG`), and one
+ * large API response (a public feed several MB long) used to fail the whole
+ * run on the INSERT. An entry over this size is kept in the in-memory journal
+ * only, so the run continues and, after an eviction, that one node re-executes.
+ * The entries this hits are large READS, which re-execute safely; a write
+ * step's output is its payload, and its idempotency claim still guards it.
+ */
+export const JOURNAL_ROW_MAX_BYTES = 1_900_000;
+
+/** The row text for a journal entry, or `null` when it is too large to persist. */
+export function persistableJournalRow(entry: JournalEntry): string | null {
+  const text = JSON.stringify(entry);
+  // A UTF-16 unit encodes to at most 3 UTF-8 bytes and at least 1, so most
+  // entries are decided without encoding the string.
+  if (text.length * 3 <= JOURNAL_ROW_MAX_BYTES) return text;
+  if (text.length > JOURNAL_ROW_MAX_BYTES) return null;
+  return new TextEncoder().encode(text).length <= JOURNAL_ROW_MAX_BYTES ? text : null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings the worker reads but never writes

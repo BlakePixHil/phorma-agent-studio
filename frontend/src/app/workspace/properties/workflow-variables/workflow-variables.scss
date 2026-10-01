@@ -1,0 +1,89 @@
+// Sizing mirrors `.phorma-props__*` in the host form; chrome comes from PrimeNG.
+.phorma-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.phorma-vars__head {
+  display: flex;
+  align-items: center;
+}
+
+.phorma-vars__label {
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+}
+
+.phorma-vars__add {
+  margin-left: auto;
+}
+
+.phorma-vars__hint {
+  margin: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+
+  code {
+    font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  }
+}
+
+.phorma-vars__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem;
+  border: 1px solid var(--phorma-card-border);
+  border-radius: 0.5rem;
+  flex-shrink: 0;
+}
+
+.phorma-vars__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.phorma-vars__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.928rem;
+}
+
+.phorma-vars__type {
+  flex: 0 0 7.5rem;
+}
+
+.phorma-vars__remove:hover:not(:disabled) {
+  color: var(--phorma-accent-red, #ef4444);
+}
+
+.phorma-vars__value {
+  width: 100%;
+  font-size: 0.928rem;
+
+  &--area {
+    resize: vertical;
+    line-height: 1.5;
+  }
+}
+
+.phorma-vars__check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.928rem;
+  color: var(--p-text-color);
+  cursor: pointer;
+}
+
+.phorma-vars__issue {
+  margin: 0;
+  font-size: 0.857rem;
+  color: var(--phorma-accent-red, #ef4444);
+}

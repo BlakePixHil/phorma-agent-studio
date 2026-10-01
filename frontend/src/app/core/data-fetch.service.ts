@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 
 import {
   DataTransportError,
+  decodeBase64,
   DEFAULT_MAX_RESPONSE_BYTES,
   DEFAULT_REQUEST_TIMEOUT_SEC,
   MAX_REQUEST_TIMEOUT_SEC,
@@ -122,6 +123,7 @@ export class DataFetchService {
           method: request.method,
           headers: request.headers,
           body: request.body ?? null,
+          bodyEncoding: request.bodyEncoding ?? null,
           timeoutMs: request.timeoutMs ?? null,
           maxResponseBytes: request.maxResponseBytes ?? null,
         },
@@ -169,7 +171,11 @@ export class DataFetchService {
         signal: controller.signal,
         redirect: 'follow',
       };
-      if (request.body !== undefined && !BODYLESS_METHODS.has(method)) init.body = request.body;
+      if (request.body !== undefined && !BODYLESS_METHODS.has(method)) {
+        // A `base64` body is binary (multipart uploads): send the bytes, not the text.
+        init.body =
+          request.bodyEncoding === 'base64' ? toArrayBuffer(decodeBase64(request.body)) : request.body;
+      }
 
       let response: Response;
       try {
@@ -344,4 +350,11 @@ function asDataError(error: unknown): DataErrorDto | undefined {
   const { kind, message } = error as { kind?: unknown; message?: unknown };
   if (typeof kind !== 'string' || typeof message !== 'string') return undefined;
   return { kind, message };
+}
+
+/** A standalone `ArrayBuffer` holding exactly these bytes, for `fetch` bodies. */
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return copy.buffer;
 }

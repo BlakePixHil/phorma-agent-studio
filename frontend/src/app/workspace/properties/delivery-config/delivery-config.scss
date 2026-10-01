@@ -1,0 +1,70 @@
+// Sizing mirrors `.phorma-props__*` in the host form; chrome comes from PrimeNG.
+:host {
+  display: contents;
+}
+
+.phorma-dlv__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.phorma-dlv__label {
+  font-size: 0.857rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+
+  &--gap {
+    margin-top: 0.45rem;
+  }
+}
+
+.phorma-dlv__input {
+  width: 100%;
+  font-size: 0.928rem;
+
+  &--mono {
+    font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  }
+}
+
+.phorma-dlv__textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.phorma-dlv__full {
+  width: 100%;
+}
+
+.phorma-dlv__number {
+  width: 100%;
+
+  ::ng-deep .p-inputnumber,
+  ::ng-deep .p-inputnumber-input {
+    width: 100%;
+    font-size: 0.928rem;
+  }
+}
+
+.phorma-dlv__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+}
+
+.phorma-dlv__hint {
+  margin: 0;
+  font-size: 0.928rem;
+  color: var(--p-text-muted-color);
+}

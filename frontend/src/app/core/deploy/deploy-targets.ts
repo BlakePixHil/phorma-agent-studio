@@ -61,6 +61,8 @@ export type CloudOperation =
   | 'status'
   | 'run-history'
   | 'run-detail'
+  // Document delivery: one run file (artifact) as `{ artifact, base64 }`.
+  | 'run-artifact'
   | 'usage'
   | 'put-secret'
   | 'list-secret-names'
@@ -100,6 +102,8 @@ export type CloudOperation =
 export interface CloudEndpointContext {
   workflowId: string;
   runId?: string;
+  /** The run file a `run-artifact` read addresses. */
+  artifactId?: string;
   connectionId?: string;
   secretKey?: string;
   since?: string;
@@ -322,6 +326,12 @@ const CLOUDFLARE_ENDPOINTS: CloudEndpoints = {
     method: 'GET',
     scope: 'instance',
     path: (ctx) => `/runs/${encodeURIComponent(ctx.runId ?? '')}`,
+  },
+  'run-artifact': {
+    method: 'GET',
+    scope: 'instance',
+    path: (ctx) =>
+      `/runs/${encodeURIComponent(ctx.runId ?? '')}/artifacts/${encodeURIComponent(ctx.artifactId ?? '')}`,
   },
   usage: {
     method: 'GET',

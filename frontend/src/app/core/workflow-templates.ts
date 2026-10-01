@@ -31,13 +31,17 @@ export interface WorkflowTemplate {
   description: string;
   /** Tabler icon class (`ti ti-*`). */
   icon: string;
-  /** Builds a fresh spec (safe to open multiple times — tabs are separate docs). */
-  build(): WorkflowSpec;
+  /**
+   * Builds a fresh spec (safe to open multiple times — tabs are separate docs).
+   * A large template may build asynchronously so its content loads on demand
+   * rather than in the initial bundle.
+   */
+  build(): WorkflowSpec | Promise<WorkflowSpec>;
 }
 
 // ── Spec-building helpers (stable, template-scoped ids) ──────────────────────
 
-interface TemplateNodeInit {
+export interface TemplateNodeInit {
   id: string;
   name: string;
   kind: WorkflowNodeKind;
@@ -50,7 +54,7 @@ interface TemplateNodeInit {
   description?: string;
 }
 
-function node(init: TemplateNodeInit): WorkflowNode {
+export function node(init: TemplateNodeInit): WorkflowNode {
   return {
     id: init.id,
     name: init.name,
@@ -65,7 +69,11 @@ function node(init: TemplateNodeInit): WorkflowNode {
 }
 
 let connectionCounter = 0;
-function connect(
+/** Restarts connection numbering, so a template's edge ids are stable per build. */
+export function resetTemplateConnections(): void {
+  connectionCounter = 0;
+}
+export function connect(
   fromNodeId: string,
   fromPortKey: string,
   toNodeId: string,
@@ -87,7 +95,7 @@ const AGENT_PORTS: TemplateNodeInit['ports'] = [
   { key: 'tools', name: 'Tools', role: 'tools' },
 ];
 
-function agent(
+export function agent(
   id: string,
   name: string,
   x: number,
@@ -1048,6 +1056,21 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       'model when not, then scores the risk.',
     icon: 'ti ti-file-check',
     build: buildVerifiedExtractionWorkflow,
+  },
+  {
+    id: 'tpl-weekly-job-applications',
+    label: 'Weekly Job Applications (Melbourne and remote)',
+    description:
+      'Every Monday at 08:00 Melbourne time (deployed): pulls Melbourne and Australia-open remote ' +
+      'roles from public job boards, screens them against your profile, writes an honest tailored ' +
+      'resume (PDF) and cover letter, applies, and keeps a 30-day ledger. Ships in DRY RUN - nothing ' +
+      'is sent to employers until you set dryRun to false. Sending needs a Resend Connection ' +
+      '(emailProvider: resend) on the two email steps; the schedule needs a deployment.',
+    icon: 'ti ti-briefcase',
+    // Loaded on demand: the template carries a full sample profile and four
+    // prompts, which have no business in the initial bundle.
+    build: async () =>
+      (await import('./templates/weekly-job-applications.template')).buildWeeklyJobApplicationsWorkflow(),
   },
 ];
 

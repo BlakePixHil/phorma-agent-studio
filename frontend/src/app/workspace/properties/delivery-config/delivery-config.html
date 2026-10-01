@@ -1,0 +1,145 @@
+<!-- ── Notify: email extras ───────────────────────────────────────────── -->
+@if (email(); as data) {
+  <section class="phorma-dlv__section" data-section="notify-delivery">
+    @if (data.channel === 'email') {
+      <label class="phorma-dlv__label" [for]="id('from')">From</label>
+      <input pInputText pSize="small" [id]="id('from')" type="text"
+        class="phorma-dlv__input phorma-dlv__input--mono"
+        [value]="data.from ?? ''" (input)="patchOptional('from', $event)"
+        placeholder="Connection default sender" />
+      <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('reply-to')">Reply to</label>
+      <input pInputText pSize="small" [id]="id('reply-to')" type="text"
+        class="phorma-dlv__input phorma-dlv__input--mono"
+        [value]="data.replyTo ?? ''" (input)="patchOptional('replyTo', $event)" placeholder="Optional" />
+      <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('cc')">Cc</label>
+      <input pInputText pSize="small" [id]="id('cc')" type="text"
+        class="phorma-dlv__input phorma-dlv__input--mono"
+        [value]="data.cc ?? ''" (input)="patchOptional('cc', $event)" placeholder="Comma-separated, optional" />
+      <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('format')">Body format</label>
+      <p-select [inputId]="id('format')" class="phorma-dlv__full" [options]="notifyBodyFormats"
+        optionLabel="label" optionValue="id" [ngModel]="data.bodyFormat ?? 'markdown'"
+        (ngModelChange)="patch({ bodyFormat: $event })" appendTo="body" size="small">
+        <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+      </p-select>
+      <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('attachments')">Attachments</label>
+      <input pInputText pSize="small" [id]="id('attachments')" type="text"
+        class="phorma-dlv__input phorma-dlv__input--mono"
+        [value]="(data.attachments ?? []).join(', ')" (input)="onAttachmentsInput($event)"
+        placeholder="document, files" />
+      <p class="phorma-dlv__hint">Payload paths holding a file from an earlier step, such as Render Document.</p>
+      <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('attach-limit')">Over the size limit</label>
+      <p-select [inputId]="id('attach-limit')" class="phorma-dlv__full" [options]="attachmentLimits"
+        optionLabel="label" optionValue="id" [ngModel]="data.attachmentLimit ?? 'fail'"
+        (ngModelChange)="patch({ attachmentLimit: $event })" appendTo="body" size="small">
+        <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+      </p-select>
+    }
+    <label class="phorma-dlv__label" [class.phorma-dlv__label--gap]="data.channel === 'email'" [for]="id('idem')">Idempotency key</label>
+    <input pInputText pSize="small" [id]="id('idem')" type="text"
+      class="phorma-dlv__input phorma-dlv__input--mono"
+      [value]="data.idempotencyKey ?? ''" (input)="patchOptional('idempotencyKey', $event)"
+      placeholder="send:{{ '{' }}{{ '{' }}id{{ '}' }}{{ '}' }}" />
+    <p class="phorma-dlv__hint">
+      A message whose key this workflow already sent is skipped, so a retry or a re-run never sends it twice.
+    </p>
+  </section>
+}
+
+<!-- ── Render Document ─────────────────────────────────────────────────── -->
+@if (document(); as data) {
+  <section class="phorma-dlv__section" data-section="render-document">
+    <label class="phorma-dlv__label" [for]="id('markdown')">Markdown</label>
+    <textarea pTextarea pSize="small" [id]="id('markdown')" rows="5"
+      class="phorma-dlv__input phorma-dlv__textarea phorma-dlv__input--mono"
+      [value]="data.markdown" (input)="patch({ markdown: value($event) })"
+      placeholder="{{ '{' }}{{ '{' }}report{{ '}' }}{{ '}' }}"></textarea>
+    <p class="phorma-dlv__hint">A template; a single {{ '{' }}{{ '{' }}field{{ '}' }}{{ '}' }} reads markdown from the payload.</p>
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('file')">File name</label>
+    <input pInputText pSize="small" [id]="id('file')" type="text" class="phorma-dlv__input"
+      [value]="data.fileName" (input)="patch({ fileName: value($event) })"
+      placeholder="Report {{ '{' }}{{ '{' }}month{{ '}' }}{{ '}' }}" />
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('title')">Title</label>
+    <input pInputText pSize="small" [id]="id('title')" type="text" class="phorma-dlv__input"
+      [value]="data.title ?? ''" (input)="patchOptional('title', $event)" placeholder="Optional document title" />
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('page')">Page size</label>
+    <p-select [inputId]="id('page')" class="phorma-dlv__full" [options]="pageSizes"
+      optionLabel="label" optionValue="id" [ngModel]="data.layout?.pageSize ?? 'a4'"
+      (ngModelChange)="patchLayout({ pageSize: $event })" appendTo="body" size="small">
+      <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+    </p-select>
+    <div class="phorma-dlv__pair">
+      <div>
+        <label class="phorma-dlv__label" [for]="id('margin')">Margin (mm)</label>
+        <p-inputnumber [inputId]="id('margin')" class="phorma-dlv__number" size="small"
+          [min]="5" [max]="50" [showButtons]="false" [useGrouping]="false" placeholder="18"
+          [ngModel]="data.layout?.marginMm ?? null"
+          (ngModelChange)="patchLayout({ marginMm: numberOrUndefined($event) })" />
+      </div>
+      <div>
+        <label class="phorma-dlv__label" [for]="id('size')">Font size (pt)</label>
+        <p-inputnumber [inputId]="id('size')" class="phorma-dlv__number" size="small"
+          [min]="7" [max]="16" [minFractionDigits]="0" [maxFractionDigits]="1"
+          [showButtons]="false" [useGrouping]="false" placeholder="10.5"
+          [ngModel]="data.layout?.fontSize ?? null"
+          (ngModelChange)="patchLayout({ fontSize: numberOrUndefined($event) })" />
+      </div>
+    </div>
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('accent')">Accent colour</label>
+    <input pInputText pSize="small" [id]="id('accent')" type="text"
+      class="phorma-dlv__input phorma-dlv__input--mono"
+      [value]="data.layout?.accentColor ?? ''"
+      (input)="patchLayout({ accentColor: value($event).trim() || undefined })" placeholder="#1f4e79" />
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('doc-key')">Result key</label>
+    <input pInputText pSize="small" [id]="id('doc-key')" type="text"
+      class="phorma-dlv__input phorma-dlv__input--mono"
+      [value]="data.resultKey ?? ''" (input)="patchOptional('resultKey', $event)" placeholder="document" />
+    <p class="phorma-dlv__hint">
+      The PDF is stored with the run and can be downloaded from the Runs panel. The payload
+      carries only a reference to it.
+    </p>
+  </section>
+}
+
+<!-- ── State List ──────────────────────────────────────────────────────── -->
+@if (stateList(); as data) {
+  <section class="phorma-dlv__section" data-section="state-list">
+    <label class="phorma-dlv__label" [for]="id('prefix')">Key prefix</label>
+    <input pInputText pSize="small" [id]="id('prefix')" type="text"
+      class="phorma-dlv__input phorma-dlv__input--mono"
+      [value]="data.prefix" (input)="patch({ prefix: value($event) })" placeholder="open:" />
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('limit')">Limit</label>
+    <p-inputnumber [inputId]="id('limit')" class="phorma-dlv__number" size="small"
+      [min]="1" [max]="1000" [showButtons]="false" [useGrouping]="false" placeholder="100"
+      [ngModel]="data.limit ?? null" (ngModelChange)="patch({ limit: numberOrUndefined($event) })" />
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('list-key')">Result key</label>
+    <input pInputText pSize="small" [id]="id('list-key')" type="text"
+      class="phorma-dlv__input phorma-dlv__input--mono"
+      [value]="data.resultKey ?? ''" (input)="patchOptional('resultKey', $event)" placeholder="entries" />
+    <p class="phorma-dlv__hint">
+      Each entry carries its key, value, last update and expiry. Internal keys (claims,
+      watermarks, fixtures) are never listed.
+    </p>
+  </section>
+}
+
+<!-- ── HTTP Request: multipart parts (hosted inside the host form's Body section) ── -->
+@if (multipart(); as data) {
+  <div class="phorma-dlv__section" data-section="http-multipart">
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('mp-fields')">Text fields</label>
+    <textarea pTextarea pSize="small" [id]="id('mp-fields')" rows="3"
+      class="phorma-dlv__input phorma-dlv__textarea phorma-dlv__input--mono"
+      [value]="multipartLines(data.multipart?.fields, 'value')"
+      (input)="onMultipartInput('fields', $event)"
+      placeholder="title = {{ '{' }}{{ '{' }}name{{ '}' }}{{ '}' }}"></textarea>
+    <label class="phorma-dlv__label phorma-dlv__label--gap" [for]="id('mp-files')">File parts</label>
+    <textarea pTextarea pSize="small" [id]="id('mp-files')" rows="2"
+      class="phorma-dlv__input phorma-dlv__textarea phorma-dlv__input--mono"
+      [value]="multipartLines(data.multipart?.files, 'artifact')"
+      (input)="onMultipartInput('files', $event)"
+      placeholder="file = document"></textarea>
+    <p class="phorma-dlv__hint">
+      One part per line as name = value. A file part names the payload path of a file an
+      earlier step produced, such as Render Document.
+    </p>
+  </div>
+}

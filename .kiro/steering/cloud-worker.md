@@ -154,7 +154,18 @@ user's own Cloudflare account and keys).
   failure only ever reproduces locally.
 - Wrangler/esbuild honours tsconfig `paths`, so `@phorma/engine` resolves exactly as in the frontend.
 - Durable Object state uses the Agents SDK `this.sql` tagged template (embedded SQLite):
-  `run_journal`, `usage_ledger`, workflow state, portal registry.
+  `run_journal`, `usage_ledger`, workflow state, portal registry, and `run_artifacts`.
+- Run artifacts (`cloud/src/run-artifacts.ts`, `DurableArtifactStore`) are files a run produced
+  (PDFs from Render Document, for example), stored as base64 TEXT in `run_artifacts` beside `runs`.
+  No R2: the engine caps an artifact at 1 MiB, inside the 2 MB row limit, so a BYO worker that binds
+  nothing still runs every delivery step. `pruneRunHistory()` deletes a pruned run's artifacts and
+  `purgeSelf()` clears the table. `GET /runs/{runId}/artifacts/{id}` answers `{artifact, base64}`
+  as JSON, open to every level like the run record that references it.
+- Durable Object SQLite refuses a string over 2 MB (`SQLITE_TOOBIG`; measured in workerd: 3.4 MB
+  refused). The run journal goes through `persistableJournalRow` (`run-wiring.ts`,
+  `JOURNAL_ROW_MAX_BYTES` 1,900,000): an entry over it stays in the in-memory journal only and any
+  older row for the key is deleted, so one large API response does not fail a deployed run and, after
+  an eviction, only that node re-executes. Any NEW table that stores a payload needs the same guard.
 - `onStart()` fires on every DO wake and re-triggers an interrupted run via
   `trigger(input, resumeRunId)`. A resumed hosted run must pass `countsAsRun: false` to `recordRun`
   so it adds ledger cost without incrementing the monthly run count.

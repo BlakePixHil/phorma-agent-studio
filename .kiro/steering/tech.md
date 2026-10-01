@@ -6,7 +6,7 @@ inclusion: always
 
 Versions are pinned in the `package.json` files of `frontend`, `backend`, `cloud`, `cloud-aws`,
 `engine` and `admin`, plus `backend/src-tauri/Cargo.toml`. All six packages share ONE version number
-(currently `1.0.0-beta.3`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
+(currently `1.0.0-beta.6`), which `cloud-aws/scripts/check-versions.mjs` enforces - see
 `release.md` steering.
 
 ## Stack
@@ -51,16 +51,16 @@ or start them as a background process.
 
 ```powershell
 cd frontend; npm run build                       # production build: the ONLY thing that checks Angular budgets
-cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1529 specs, ~25s
+cd frontend; npx ng test --watch=false --browsers=ChromeHeadless   # karma + jasmine, 1631 specs, ~25s
 cd engine;   npm test                            # vitest --run (unit + fast-check property tests)
-cd engine;   npm run test:e2e                    # all 12 test/*.e2e.mts scenario scripts
+cd engine;   npm run test:e2e                    # all 13 test/*.e2e.mts scenario scripts
 cd cloud;    npm run test:unit                   # 39 worker suites (`test` is the same; the portal e2e is manual)
 cd cloud;    npm run check                       # tsc --noEmit + wrangler deploy --dry-run
 cd cloud-aws; npm run check                      # pre-deploy gate: 12 steps, no credentials, no Docker
 cd cloud-aws; npm test                           # vitest --run (unit + property tests)
 cd cloud-aws; npm run test:e2e                   # all 8 test/*.e2e.mts scenario scripts
 cd backend/src-tauri; cargo check                # or scripts/build-rust-debug.cmd
-cd backend/src-tauri; cargo test                 # 30 unit tests (sql, llm, data, deploy_assets)
+cd backend/src-tauri; cargo test                 # 42 unit tests (sql, llm, data, deploy_assets)
 cd admin; npm run build                          # dashboard production build: 875 kB initial, 1.5MB warning / 2MB error
 cd admin; npx ng test --watch=false --browsers=ChromeHeadless       # karma + jasmine, 77 specs, ~26s
 node scripts/check-deploy-bundle.mjs             # the installer still carries both BYO deploy runtimes
@@ -84,8 +84,9 @@ manually started `wrangler dev` and a local model.
 - `ng serve` and `tsc` do NOT check budgets. CI has failed on budget errors that dev serve never
   surfaced, so run the production frontend build before pushing.
 - Budgets in `frontend/angular.json`: `initial` 2MB warning / 3MB error, `anyComponentStyle` 22kB
-  warning / 26kB error. `initial` currently sits at 2.87MB, so the warning is expected and only the
-  3MB error gates. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
+  warning / 26kB error. Budget units are DECIMAL (`3MB` = 3,000,000 bytes). `initial` currently sits
+  at ~2,999,300 bytes, so the warning is expected, the 3MB error gates, and new initial-bundle code
+  needs an offsetting `@defer` or dynamic `import()`. `admin/angular.json` runs tighter: `initial` 1.5MB warning / 2MB error, at
   875kB today. Consolidate duplicated SCSS rules before raising a budget. Keep heavy deps
   (chart.js in `frontend`) behind `@defer (on immediate)`.
 - `cloud/test/*.test.mjs` suites that use `node:module` `registerHooks` need Node 22+. On a Node 20

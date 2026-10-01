@@ -872,6 +872,15 @@ const CREDENTIAL_PATTERNS: readonly { label: string; pattern: RegExp }[] = [
 ];
 
 /**
+ * The label of the first known credential shape found in `value`, or
+ * undefined. Shared with workflow-variable validation so one list decides
+ * what "looks like a key" everywhere a spec is checked.
+ */
+export function credentialShapeOf(value: string): string | undefined {
+  return CREDENTIAL_PATTERNS.find(({ pattern }) => pattern.test(value))?.label;
+}
+
+/**
  * Words that make a property name a credential name, matched as substrings of
  * the name with separators removed. `auth` is absent on purpose: it is a
  * substring of `author`, which is a legitimate bundle field.

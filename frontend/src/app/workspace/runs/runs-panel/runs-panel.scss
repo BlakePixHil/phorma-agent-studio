@@ -550,6 +550,18 @@
   }
 }
 
+/* A file entry: the row plus a download action beside it (never nested). */
+.phorma-runs__entry-line {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+
+  .phorma-runs__entry-row {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .phorma-runs__entry-label {
   flex: 1;
   min-width: 0;

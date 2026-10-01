@@ -122,6 +122,12 @@ export class AgentConfig {
     return `${this.scope()}-${suffix}`;
   }
 
+  /** `resultKey`: keep the input and add the reply under this key. */
+  protected onResultKeyInput(event: Event): void {
+    const value = ((event.target as HTMLInputElement | null)?.value ?? '').trim();
+    this.workflow.updateNodeData(this.agent().id, { resultKey: value.length > 0 ? value : undefined });
+  }
+
   // ── Model ───────────────────────────────────────────────────────────────
 
   /**

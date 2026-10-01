@@ -431,3 +431,52 @@ export async function claimIdempotent(
     ttlSec: options.ttlSec ?? IDEMPOTENCY_TTL_SEC,
   });
 }
+
+/**
+ * Releases a claim this caller owns so a later run may retry the write.
+ *
+ * Only for a failure that PROVES the write never landed (see
+ * `isProvableNonDelivery`): a claim on a write that may have been delivered
+ * must stay held, or the next run sends it twice. Delete is unconditional
+ * because the caller just won the claim with an atomic `compareAndSet` and has
+ * not let go of it; no other owner can hold the same key meanwhile.
+ */
+export async function releaseIdempotent(
+  key: string,
+  state: Pick<StateStoreLikeWithDelete, 'delete'>,
+  options: StateScopeOptions = {},
+): Promise<void> {
+  await state.delete(scopeIfNeeded(idempotencyStateKey(key), options.workflowId));
+}
+
+/** A store that can also delete, for {@link releaseIdempotent}. */
+export type StateStoreLikeWithDelete = StateStoreLike & { delete(key: string): Promise<void> };
+
+/**
+ * True when a final failure proves the target never accepted the write: a
+ * transport failure raised before any byte was sent, or a 4xx refusal other
+ * than 408 (timeout), 409 (conflict, often a duplicate) and 425 (too early).
+ * Everything else (5xx, timeouts after sending, unknown errors) may have been
+ * delivered, so a claim on it is kept.
+ */
+export function isProvableNonDelivery(error: unknown): boolean {
+  const shape = error as { name?: unknown; status?: unknown; requestNeverSent?: unknown } | null;
+  if (!shape || typeof shape !== 'object') return false;
+  if (shape.name === 'DataTransportError') return shape.requestNeverSent === true;
+  if (shape.name === 'HttpStatusError' && typeof shape.status === 'number') {
+    const status = shape.status;
+    return status >= 400 && status <= 499 && status !== 408 && status !== 409 && status !== 425;
+  }
+  return false;
+}
+
+/**
+ * The reserved namespace a USER-supplied key or prefix starts with, or
+ * undefined. Used by `state-list`, which never returns reserved entries.
+ */
+export function reservedStateNamespaceOf(keyOrPrefix: string): string | undefined {
+  for (const ns of Object.values(STATE_NS)) {
+    if (keyOrPrefix.startsWith(ns)) return ns;
+  }
+  return undefined;
+}

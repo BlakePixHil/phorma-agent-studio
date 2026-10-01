@@ -68,6 +68,9 @@ pub struct DataRequestDto {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// `base64` when `body` carries binary content the host must decode first.
+    #[serde(default)]
+    pub body_encoding: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
@@ -271,7 +274,16 @@ async fn perform(
         .headers(headers)
         .timeout(timeout);
     if let Some(body) = request.body {
-        builder = builder.body(body);
+        if request.body_encoding.as_deref() == Some("base64") {
+            // Binary bodies (multipart uploads) cross IPC as base64 and leave as bytes.
+            let bytes = base64_decode(&body).map_err(|message| DataErrorDto {
+                kind: KIND_CONFIG.into(),
+                message,
+            })?;
+            builder = builder.body(bytes);
+        } else {
+            builder = builder.body(body);
+        }
     }
 
     let started = Instant::now();
@@ -688,9 +700,43 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     out
 }
 
+/// Decodes standard base64 (padding optional, whitespace ignored). The inverse
+/// of [`base64_encode`], for `bodyEncoding: "base64"` request bodies.
+pub(crate) fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(input.len() / 4 * 3);
+    let mut buffer: u32 = 0;
+    let mut bits: u32 = 0;
+    for byte in input.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' | b' ' | b'\n' | b'\r' | b'\t' => continue,
+            _ => return Err("Request body is not valid base64.".into()),
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buffer >> bits) & 0xFF) as u8);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_round_trips_binary_bodies() {
+        let bytes: Vec<u8> = (0u8..=255).collect();
+        assert_eq!(base64_decode(&base64_encode(&bytes)).unwrap(), bytes);
+        assert_eq!(base64_decode("JVBERg==").unwrap(), b"%PDF");
+        assert!(base64_decode("ab$d").is_err());
+    }
 
     fn secrets(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries

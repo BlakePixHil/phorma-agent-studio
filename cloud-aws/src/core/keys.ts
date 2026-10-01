@@ -55,6 +55,20 @@ export function stateSk(scopedKey: string): string {
   return `state#${scopedKey}`;
 }
 
+/**
+ * Run artifact header sort key: `artifact#{runId}#{artifactId}`. The bytes live
+ * in part items under the same prefix (`artifactPartSk`), so one `Query` on
+ * `artifact#{runId}#` reads a run's artifacts and one purge prefix removes them.
+ */
+export function artifactSk(runId: string, artifactId: string): string {
+  return `artifact#${runId}#${artifactId}`;
+}
+
+/** Run artifact byte part sort key, 4-digit zero-padded so parts read in order. */
+export function artifactPartSk(runId: string, artifactId: string, part: number): string {
+  return `${artifactSk(runId, artifactId)}#part#${String(part).padStart(4, '0')}`;
+}
+
 /** Inbound ControlFrame sort key. */
 export function frameSk(arrivedAtMs: number, connectionId: string, n: number): string {
   return `frame#${String(arrivedAtMs).padStart(13, '0')}#${connectionId}#${String(n).padStart(4, '0')}`;

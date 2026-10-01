@@ -856,6 +856,19 @@ export const runEventArb: fc.Arbitrary<RunEvent> = fc
         at: atArb,
       }),
       fc.record({
+        type: fc.constant('artifact-created'),
+        runId: idArb,
+        nodeId: idArb,
+        nodeName: textArb,
+        artifact: fc.record({
+          id: idArb,
+          name: textArb,
+          mimeType: fc.constantFrom('application/pdf', 'text/csv'),
+          sizeBytes: fc.nat({ max: 1_048_576 }),
+        }),
+        at: atArb,
+      }),
+      fc.record({
         type: fc.constant('sync-summary'),
         runId: idArb,
         summary: syncSummaryArb,

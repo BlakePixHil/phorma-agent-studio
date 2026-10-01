@@ -193,7 +193,17 @@ guardrails), agent config in `workspace/prompt/agent-decisions/`, palette assist
 `workspace/palette/palette-assist/`, run triage in `workspace/runs/run-triage/`. Each is mounted
 with `@defer` and gated on `DecisionTransportService.available()`. Studio-side question builders
 live in `core/studio-assist.ts` and are loaded with a dynamic `import()`. A new System One node
-setting goes in `decision-config`, not in the properties form.
+setting goes in `decision-config`, not in the properties form. The router's deterministic
+Expression mode and its "When nothing matches" choice also live there, because `decision-config`
+owns the router's mode select; they need no System One.
+
+Document delivery UI is deferred the same way (`workspace/properties/delivery-config/`): Render
+Document, State List, the email extras of Notify, and the multipart part list of an HTTP Request.
+The workflow-variables editor (`workspace/properties/workflow-variables/`) is deferred in the
+no-selection state. Engine delivery code (`pdf.ts`, `markdown-blocks.ts`, `email-providers.ts`,
+`multipart.ts`, `delivery-steps.ts`) is reached only through dynamic `import()` and is NOT in the
+`index.ts` barrel; `delivery-limits.ts` holds the constants the static path needs. Re-exporting
+any of them from the barrel puts them in the initial bundle, which has no room for them.
 
 ## Connector packaging (P1-14)
 
@@ -285,15 +295,16 @@ path is "update the app, set up runtime files again, deploy". Mechanism and guar
 
 ## Persistence
 
-- Local: IndexedDB, currently at v11. Stores include runs, `usage`, `chat-threads`,
+- Local: IndexedDB, currently at v13. Stores include runs, `usage`, `chat-threads`,
   `workflow-versions`, `skills`, `prompts`, `connections`, `connectors`, `workflow-state`,
-  `workflow-backup-state`. Every
+  `workflow-backup-state`, `run-artifacts` (files a run produced, keyed `[runId, id]` and deleted
+  with their run record by `removeRun` / `pruneRuns`). Every
   workflow-scoped store keys workflows by `workflowKey: workflowId ?? 'draft'`.
   Bumping the schema means bumping the version and adding a migration.
 - Layout and small settings: `localStorage` via `core/layout-storage.ts`
   (`phorma.layout.*` keys, `loadLayout`/`saveLayout`).
-- Cloud: Durable Object embedded SQLite (`run_journal`, `usage_ledger`, workflow state) via the
-  Agents SDK `this.sql` tagged template.
+- Cloud: Durable Object embedded SQLite (`run_journal`, `usage_ledger`, `run_artifacts`, workflow
+  state) via the Agents SDK `this.sql` tagged template.
 - Secrets: OS keychain through `llm.rs`. Keychain scopes for MCP are
   `mcp:{nodeId}:{envKey}` (node override) and `mcp:preset:{presetId}:{envKey}` (app default).
 

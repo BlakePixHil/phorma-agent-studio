@@ -1,0 +1,40 @@
+[
+  {
+    "last_updated": 1790792682,
+    "legal": "API Terms of Service: Please link back to the URL on Remote OK and mention Remote OK as a source. Recorded shape of GET https://remoteok.com/api (2026-10-01). Synthetic content."
+  },
+  {
+    "slug": "remote-machine-learning-engineer-deep-thought-labs-1200001",
+    "id": "1200001",
+    "epoch": 1790438426,
+    "date": "__POSTED_2D__",
+    "company": "Deep Thought Labs ",
+    "company_logo": "",
+    "position": "Machine Learning Engineer",
+    "tags": ["machine learning", "python", "research"],
+    "location": "Worldwide",
+    "apply_url": "https://remoteOK.com/remote-jobs/remote-machine-learning-engineer-deep-thought-labs-1200001",
+    "salary_min": 0,
+    "salary_max": 0,
+    "logo": "",
+    "description": "<p>Research role: PhD in machine learning and 5 published papers required.</p>",
+    "url": "https://remoteOK.com/remote-jobs/remote-machine-learning-engineer-deep-thought-labs-1200001"
+  },
+  {
+    "slug": "remote-senior-backend-engineer-acme-widgets-ltd-1200002",
+    "id": "1200002",
+    "epoch": 1790438000,
+    "date": "__POSTED_1D__",
+    "company": "Acme Widgets Ltd",
+    "company_logo": "",
+    "position": "Senior Backend Engineer",
+    "tags": ["typescript"],
+    "location": "Worldwide",
+    "apply_url": "https://remoteOK.com/remote-jobs/remote-senior-backend-engineer-acme-widgets-ltd-1200002",
+    "salary_min": 0,
+    "salary_max": 0,
+    "logo": "",
+    "description": "<p>The same role as on Remotive, listed twice.</p>",
+    "url": "https://remoteOK.com/remote-jobs/remote-senior-backend-engineer-acme-widgets-ltd-1200002"
+  }
+]

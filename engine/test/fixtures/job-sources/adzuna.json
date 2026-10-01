@@ -1,0 +1,24 @@
+{
+  "__CLASS__": "Adzuna::API::Response::JobSearchResults",
+  "count": 1,
+  "mean": 0,
+  "results": [
+    {
+      "__CLASS__": "Adzuna::API::Response::Job",
+      "id": "4900000001",
+      "title": "Automation Developer",
+      "description": "Build workflow automation for our Melbourne operations team. Hybrid, two days in the office. Synthetic content (recorded shape of GET https://api.adzuna.com/v1/api/jobs/au/search/1, 2026-10-01).",
+      "created": "__POSTED_2D__",
+      "redirect_url": "https://www.adzuna.com.au/details/4900000001",
+      "company": { "__CLASS__": "Adzuna::API::Response::Company", "display_name": "Southbank Software" },
+      "location": {
+        "__CLASS__": "Adzuna::API::Response::Location",
+        "area": ["Australia", "Victoria", "Melbourne"],
+        "display_name": "Melbourne, Victoria"
+      },
+      "category": { "__CLASS__": "Adzuna::API::Response::Category", "label": "IT Jobs", "tag": "it-jobs" },
+      "contract_type": "permanent",
+      "salary_is_predicted": "1"
+    }
+  ]
+}

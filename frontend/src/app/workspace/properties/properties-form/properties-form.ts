@@ -36,6 +36,8 @@ import {
 } from '../../../core/schedule-cron';
 import { InfoPopover } from '../../../shared/info-popover/info-popover';
 import { DecisionConfig } from '../decision-config/decision-config';
+import { DeliveryConfig } from '../delivery-config/delivery-config';
+import { WorkflowVariables } from '../workflow-variables/workflow-variables';
 import {
   MCP_LOCAL_ICON,
   MCP_OAUTH_ICON,
@@ -114,11 +116,12 @@ interface Choice<T extends string> {
   label: string;
 }
 
-const BODY_MODES: Choice<'none' | 'json' | 'text' | 'form'>[] = [
+const BODY_MODES: Choice<'none' | 'json' | 'text' | 'form' | 'multipart'>[] = [
   { id: 'none', label: 'No body' },
   { id: 'json', label: 'JSON' },
   { id: 'text', label: 'Text' },
   { id: 'form', label: 'Form encoded' },
+  { id: 'multipart', label: 'Multipart (files)' },
 ];
 
 const RESPONSE_MODES: Choice<'json' | 'text'>[] = [
@@ -217,7 +220,7 @@ const RETRY_KINDS = new Set(['http-request', 'sql-query', 'notify', 'decide']);
 /** Kinds carrying a `fixtures` mode — the ones that perform real I/O. */
 const FIXTURE_KINDS = new Set(['http-request', 'sql-query', 'decide']);
 /** Kinds carrying an `errorPortId`. `assert` uses `failedPortId` instead. */
-const ERROR_PORT_KINDS = new Set(['http-request', 'sql-query', 'notify', 'decide']);
+const ERROR_PORT_KINDS = new Set(['http-request', 'sql-query', 'notify', 'decide', 'render-document']);
 /** Kinds carrying a `connectionId`. */
 const CONNECTION_KINDS = new Set(['http-request', 'sql-query', 'notify', 'http-tool']);
 
@@ -345,6 +348,8 @@ const SCHEDULE_FREQUENCIES: { id: ScheduleFrequency; label: string }[] = [
     PhormaCloudIcon,
     InfoPopover,
     DecisionConfig,
+    DeliveryConfig,
+    WorkflowVariables,
   ],
   templateUrl: './properties-form.html',
   styleUrl: './properties-form.scss',
@@ -711,6 +716,12 @@ export class PropertiesForm {
   protected readonly notifyData = computed<NotifyNodeData | null>(() => {
     const node = this.node();
     return node?.kind === 'notify' ? (node.data as NotifyNodeData) : null;
+  });
+
+  /** Kinds whose document-delivery configuration renders in `DeliveryConfig`. */
+  protected readonly usesDeliveryConfig = computed(() => {
+    const kind = this.node()?.kind;
+    return kind === 'render-document' || kind === 'state-list' || kind === 'notify';
   });
 
   // ── Portal trigger (EPIC 9) ─────────────────────────────────────────────────
@@ -1497,12 +1508,13 @@ export class PropertiesForm {
   protected readonly nodeCapabilityFindings = computed<CapabilityFinding[]>(() => {
     const node = this.node();
     if (!node) return [];
-    const graph = this.workflow.graph();
     const capabilities = this.activeHostCapabilities();
     const connections = this.connectionSummaries();
-    const local = validateAgainstCapabilities({ graph }, capabilities, connections).filter(
-      finding => finding.nodeId === node.id,
-    );
+    const local = validateAgainstCapabilities(
+      this.capabilityFindings.validationTarget(),
+      capabilities,
+      connections,
+    ).filter(finding => finding.nodeId === node.id);
     // Deploy-target findings ride along so an undeployable node says so while
     // it is being authored, not first at push time.
     return [

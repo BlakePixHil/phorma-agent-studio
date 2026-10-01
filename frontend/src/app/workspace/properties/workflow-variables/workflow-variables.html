@@ -1,0 +1,123 @@
+<section class="phorma-vars" data-section="workflow-variables">
+  <div class="phorma-vars__head">
+    <span class="phorma-vars__label">Variables</span>
+    <button
+      type="button"
+      class="phorma-panel-icon-btn phorma-vars__add"
+      title="Add variable"
+      aria-label="Add variable"
+      (click)="add()">
+      <i class="ti ti-plus" aria-hidden="true"></i>
+    </button>
+  </div>
+  @if (variables().length === 0) {
+    <p class="phorma-vars__hint">
+      Name a value once and use it anywhere: <code>{{ '{' }}{{ '{' }}vars.name{{ '}' }}{{ '}' }}</code> in prompts and
+      templates, <code>vars.name</code> in expressions. Keep secrets in Connections.
+    </p>
+  }
+  @for (variable of variables(); track $index) {
+    <div class="phorma-vars__item">
+      <div class="phorma-vars__row">
+        <input
+          pInputText
+          pSize="small"
+          type="text"
+          class="phorma-vars__name"
+          [id]="id($index, 'name')"
+          [attr.aria-label]="'Variable name'"
+          [value]="variable.name"
+          (change)="onName($index, $event)"
+        />
+        <p-select
+          class="phorma-vars__type"
+          [inputId]="id($index, 'type')"
+          [options]="types"
+          optionLabel="label"
+          optionValue="id"
+          [ngModel]="variable.type"
+          (ngModelChange)="setType($index, $event)"
+          [attr.aria-label]="'Variable type'"
+          appendTo="body"
+          size="small">
+          <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+        </p-select>
+        <button
+          type="button"
+          class="phorma-panel-icon-btn phorma-vars__remove"
+          [title]="'Remove ' + variable.name"
+          [attr.aria-label]="'Remove ' + variable.name"
+          (click)="remove($index)">
+          <i class="ti ti-trash" aria-hidden="true"></i>
+        </button>
+      </div>
+      @switch (variable.type) {
+        @case ('boolean') {
+          <label class="phorma-vars__check">
+            <p-checkbox
+              [binary]="true"
+              size="small"
+              [inputId]="id($index, 'value')"
+              [ngModel]="variable.value === true"
+              (ngModelChange)="patch($index, { value: $event })"
+            />
+            {{ variable.value === true ? 'Yes' : 'No' }}
+          </label>
+        }
+        @case ('number') {
+          <input
+            pInputText
+            pSize="small"
+            type="text"
+            inputmode="decimal"
+            class="phorma-vars__value"
+            [id]="id($index, 'value')"
+            [attr.aria-label]="variable.name + ' value'"
+            [value]="stringValue(variable.value)"
+            (input)="onNumber($index, $event)"
+          />
+        }
+        @case ('list') {
+          <textarea
+            pTextarea
+            pSize="small"
+            rows="3"
+            class="phorma-vars__value phorma-vars__value--area"
+            [id]="id($index, 'value')"
+            [attr.aria-label]="variable.name + ' items, one per line'"
+            [value]="listText(variable.value)"
+            (input)="onList($index, $event)"
+            placeholder="One item per line"
+          ></textarea>
+        }
+        @case ('markdown') {
+          <textarea
+            pTextarea
+            pSize="small"
+            rows="5"
+            class="phorma-vars__value phorma-vars__value--area"
+            [id]="id($index, 'value')"
+            [attr.aria-label]="variable.name + ' value'"
+            [value]="stringValue(variable.value)"
+            (input)="patch($index, { value: text($event) })"
+          ></textarea>
+        }
+        @default {
+          <input
+            pInputText
+            pSize="small"
+            type="text"
+            class="phorma-vars__value"
+            [id]="id($index, 'value')"
+            [attr.aria-label]="variable.name + ' value'"
+            [value]="stringValue(variable.value)"
+            (input)="patch($index, { value: text($event) })"
+          />
+        }
+      }
+      @for (message of issuesFor(variable); track message) {
+        <p class="phorma-vars__issue" role="alert">{{ message }}</p>
+      }
+    </div>
+  }
+</section>

@@ -10,11 +10,13 @@ import {
   isPrunableStateKey,
   resolveStateTtlSec,
   utf8ByteLength,
+  type ArtifactRef,
   type Connection,
   type EvalRunSummary,
   type EvalSuite,
   type RunRecord,
   type StateEntry,
+  type StoredArtifact,
   type UsageLedgerEntry,
 } from '@phorma/engine';
 
@@ -38,8 +40,10 @@ const DB_NAME = 'phorma-agent-studio-db';
  * migration is deliberately the smallest thing that can be correct - it adds a
  * field, it deletes nothing, and it rewrites no value that already exists. See
  * {@link OWNER_SCOPED_STORES}.
+ *
+ * v13 adds the `run-artifacts` store (document delivery): a new store only.
  */
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 /** Object store holding saved {@link WorkflowSpec} documents (keyPath `id`). */
 const WORKFLOWS_STORE = 'workflows';
@@ -149,6 +153,30 @@ const WORKFLOW_STATE_BY_WORKFLOW = 'by-workflow';
  * makes NO cloud call - a local delete never propagates.
  */
 const WORKFLOW_BACKUP_STATE_STORE = 'workflow-backup-state';
+/** Run artifacts, keyed `[runId, id]`, deleted with their run record. */
+const RUN_ARTIFACTS_STORE = 'run-artifacts';
+const RUN_ARTIFACTS_BY_RUN = 'by-run';
+
+/** One stored artifact row. Bytes are kept as a `Uint8Array` (structured clone). */
+interface StoredArtifactRow {
+  runId: string;
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  nodeId: string;
+  createdAt: number;
+  bytes: Uint8Array;
+}
+
+function artifactOfRow(row: StoredArtifactRow): StoredArtifact {
+  return {
+    ref: { id: row.id, name: row.name, mimeType: row.mimeType, sizeBytes: row.sizeBytes },
+    nodeId: row.nodeId,
+    createdAt: row.createdAt,
+    bytes: row.bytes instanceof Uint8Array ? row.bytes : new Uint8Array(row.bytes as ArrayBufferLike),
+  };
+}
 
 /**
  * The owner a locally stored row belongs to (multi-organisation-phorma,
@@ -395,6 +423,8 @@ export class IndexedDbStorageService {
     await this.request(
       db.transaction(RUNS_STORE, 'readwrite').objectStore(RUNS_STORE).delete(id),
     );
+    // A run's files never outlive its record.
+    await this.deleteRunArtifacts([id]);
   }
 
   /**
@@ -416,6 +446,62 @@ export class IndexedDbStorageService {
     const db = await this.open();
     const store = db.transaction(RUNS_STORE, 'readwrite').objectStore(RUNS_STORE);
     await Promise.all([...doomed].map(id => this.request(store.delete(id))));
+    await this.deleteRunArtifacts([...doomed]);
+  }
+
+  // ── Run artifacts (document delivery G2) ─────────────────────────────────
+
+  /** Stores (or replaces) one artifact of a run. */
+  async putRunArtifact(runId: string, artifact: StoredArtifact): Promise<void> {
+    const db = await this.open();
+    const row: StoredArtifactRow = {
+      runId,
+      id: artifact.ref.id,
+      name: artifact.ref.name,
+      mimeType: artifact.ref.mimeType,
+      sizeBytes: artifact.ref.sizeBytes,
+      nodeId: artifact.nodeId,
+      createdAt: artifact.createdAt,
+      bytes: artifact.bytes.slice(),
+    };
+    await this.request(
+      db.transaction(RUN_ARTIFACTS_STORE, 'readwrite').objectStore(RUN_ARTIFACTS_STORE).put(row),
+    );
+  }
+
+  async getRunArtifact(runId: string, id: string): Promise<StoredArtifact | undefined> {
+    const db = await this.open();
+    const row = (await this.request(
+      db.transaction(RUN_ARTIFACTS_STORE, 'readonly').objectStore(RUN_ARTIFACTS_STORE).get([runId, id]),
+    )) as StoredArtifactRow | undefined;
+    return row ? artifactOfRow(row) : undefined;
+  }
+
+  /** Every artifact reference of a run, oldest first. */
+  async listRunArtifacts(runId: string): Promise<ArtifactRef[]> {
+    const db = await this.open();
+    const rows = (await this.request(
+      db
+        .transaction(RUN_ARTIFACTS_STORE, 'readonly')
+        .objectStore(RUN_ARTIFACTS_STORE)
+        .index(RUN_ARTIFACTS_BY_RUN)
+        .getAll(runId),
+    )) as StoredArtifactRow[];
+    return rows
+      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
+      .map(row => artifactOfRow(row).ref);
+  }
+
+  /** Deletes every artifact of the given runs. */
+  async deleteRunArtifacts(runIds: readonly string[]): Promise<void> {
+    if (runIds.length === 0) return;
+    const db = await this.open();
+    const store = db.transaction(RUN_ARTIFACTS_STORE, 'readwrite').objectStore(RUN_ARTIFACTS_STORE);
+    const index = store.index(RUN_ARTIFACTS_BY_RUN);
+    for (const runId of runIds) {
+      const keys = (await this.request(index.getAllKeys(runId))) as IDBValidKey[];
+      await Promise.all(keys.map(key => this.request(store.delete(key))));
+    }
   }
 
   // ── Usage ledger (EPIC 2) ─────────────────────────────────────
@@ -1238,6 +1324,11 @@ export class IndexedDbStorageService {
         // rows, and running a cursor over six empty stores on first launch would
         // be pure ceremony.
         migrateOwnerStamp(request.transaction, db, event.oldVersion);
+        // v13: run artifacts (document delivery). A new store only; no rows move.
+        if (!db.objectStoreNames.contains(RUN_ARTIFACTS_STORE)) {
+          const artifacts = db.createObjectStore(RUN_ARTIFACTS_STORE, { keyPath: ['runId', 'id'] });
+          artifacts.createIndex(RUN_ARTIFACTS_BY_RUN, 'runId');
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => {

@@ -1,0 +1,19 @@
+{
+  "jobs": [
+    {
+      "id": 7700001,
+      "internal_job_id": 7600001,
+      "title": "AI Automation Engineer",
+      "updated_at": "__POSTED_1D__",
+      "first_published": "__POSTED_3D__",
+      "requisition_id": "1001",
+      "absolute_url": "https://job-boards.greenhouse.io/acme-api/jobs/7700001",
+      "location": { "name": "Melbourne, Victoria, Australia" },
+      "company_name": "Robo Builders",
+      "metadata": null,
+      "data_compliance": [],
+      "content": "&lt;p&gt;Build LLM automations with LangChain and TypeScript.&lt;/p&gt;&lt;p&gt;Applications are accepted through our applicant endpoint.&lt;/p&gt;"
+    }
+  ],
+  "meta": { "total": 1 }
+}

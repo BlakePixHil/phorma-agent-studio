@@ -77,6 +77,8 @@ export const COUNTED_NODE_KINDS = [
   'state-set',
   'notify',
   'decide',
+  'render-document',
+  'state-list',
 ] as const satisfies readonly WorkflowNodeKind[];
 
 /**

@@ -376,5 +376,21 @@
     } @else {
       <p class="phorma-prompt__hint">No handoffs. Wire the Result port onward.</p>
     }
+
+    <label class="phorma-prompt__label phorma-prompt__label--gap" [for]="id('result-key')">Add reply to the input as</label>
+    <input
+      pInputText
+      pSize="small"
+      [id]="id('result-key')"
+      type="text"
+      class="w-full"
+      [value]="agent().data.resultKey ?? ''"
+      (input)="onResultKeyInput($event)"
+      placeholder="Empty replaces the input with the reply"
+    />
+    <p class="phorma-prompt__hint">
+      Keeps the incoming record and adds the reply under this key (read as JSON when it is
+      JSON), so later steps still see what the agent worked on.
+    </p>
   </section>
 }

@@ -78,6 +78,8 @@ export const COUNTED_NODE_KINDS = [
   'state-set',
   'notify',
   'decide',
+  'render-document',
+  'state-list',
 ] as const;
 
 /** Every default panel id that gets a `panel.opened:{id}` counter. */

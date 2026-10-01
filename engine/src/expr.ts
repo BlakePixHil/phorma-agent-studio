@@ -16,6 +16,7 @@
  */
 
 import { canonicalJson, contentHash } from './state.js';
+import { htmlToReadableText } from './web-fetch.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain and limits
@@ -61,6 +62,12 @@ export const EXPR_FUNCTIONS = {
   lookup: 2,
   hash: 1,
   jsonPath: 2,
+  parseJson: 1,
+  // text and collection helpers
+  containsAny: 2,
+  distinctBy: 2,
+  extractNumbers: 1,
+  htmlToText: 1,
 } as const;
 
 /** Name of a function in `EXPR_FUNCTIONS`. */
@@ -81,6 +88,8 @@ export interface EvalContext {
   readonly index?: number;
   /** Named lookup tables from `TransformNodeData.lookups`. */
   readonly lookups?: Readonly<Record<string, Readonly<Record<string, Json>>>>;
+  /** Workflow-variable scope addressed as `vars`. Absent reads as `{}`. */
+  readonly vars?: Readonly<Record<string, Json>>;
   /** Deterministic run clock. `now()` returns THIS value, never `Date.now()`. */
   readonly nowMs: number;
 }
@@ -137,6 +146,8 @@ export type ExprNode =
   | { readonly type: 'literal'; readonly value: Json }
   /** `$` — the parsed payload. */
   | { readonly type: 'root' }
+  /** `vars` — the run frame's workflow-variable scope. Never the payload. */
+  | { readonly type: 'vars' }
   /** `$text` — the raw payload text. */
   | { readonly type: 'text' }
   /** `item` — current element of an enclosing per-item evaluation. */
@@ -202,6 +213,7 @@ const RESERVED_PRIMARY_NODES: ReadonlyMap<string, () => ExprNode> = new Map([
   ['index', (): ExprNode => ({ type: 'index' })],
   ['$', (): ExprNode => ({ type: 'root' })],
   ['$text', (): ExprNode => ({ type: 'text' })],
+  ['vars', (): ExprNode => ({ type: 'vars' })],
 ]);
 
 /**
@@ -732,6 +744,7 @@ export function collectReferences(node: ExprNode): string[] {
     switch (current.type) {
       case 'literal':
       case 'root':
+      case 'vars':
       case 'text':
       case 'item':
       case 'index':
@@ -1190,7 +1203,7 @@ function compileSubExpression(source: Json): ExprNode | undefined {
  * `MAX_EXPRESSION_STEPS` exactly like everything else.
  */
 function callIterating(
-  name: 'map' | 'filter' | 'sort' | 'sum' | 'avg' | 'distinct' | 'countIf',
+  name: 'map' | 'filter' | 'sort' | 'sum' | 'avg' | 'distinct' | 'distinctBy' | 'countIf',
   source: Json,
   subExpression: Json,
   context: EvalContext,
@@ -1252,6 +1265,20 @@ function callIterating(
         distinct.push(value);
       }
       return distinct;
+    }
+
+    case 'distinctBy': {
+      // The first ELEMENT per distinct evaluated key, in input order: unlike
+      // `distinct`, which returns the keys themselves.
+      const seen = new Set<string>();
+      const kept: Json[] = [];
+      items.forEach((item, index) => {
+        const fingerprint = canonicalText(evaluated[index]!);
+        if (seen.has(fingerprint)) return;
+        seen.add(fingerprint);
+        kept.push(item);
+      });
+      return kept;
     }
 
     case 'sort': {
@@ -1565,6 +1592,7 @@ function callFunction(
     case 'sum':
     case 'avg':
     case 'distinct':
+    case 'distinctBy':
     case 'countIf':
       return callIterating(name, first, second, context, depth, state);
 
@@ -1664,7 +1692,68 @@ function callFunction(
       }
       return current ?? null;
     }
+
+    case 'parseJson': {
+      const text = asString(first);
+      if (text === undefined || text.length > MAX_TEXT_HELPER_CHARS) return null;
+      try {
+        return toJsonValue(JSON.parse(text));
+      } catch {
+        return null;
+      }
+    }
+
+    // ── text and collection helpers ──────────────────────────────────────────
+
+    case 'containsAny': {
+      const text = asString(first);
+      const needles = asArray(second);
+      if (text === undefined || needles === undefined) return null;
+      // Non-string and empty entries never match: an empty needle would make
+      // every text "contain" the list.
+      return needles.some(needle => typeof needle === 'string' && needle.length > 0 && text.includes(needle));
+    }
+    case 'extractNumbers': {
+      const text = asString(first);
+      if (text === undefined || text.length > MAX_TEXT_HELPER_CHARS) return null;
+      const found: Json[] = [];
+      for (const match of text.matchAll(NUMBER_RUN_PATTERN)) {
+        if (found.length >= MAX_EXTRACTED_NUMBERS) break;
+        found.push(match[0]);
+      }
+      return found;
+    }
+    case 'htmlToText': {
+      const text = asString(first);
+      if (text === undefined) return null;
+      return htmlToReadableText(text.length > MAX_TEXT_HELPER_CHARS ? text.slice(0, MAX_TEXT_HELPER_CHARS) : text);
+    }
   }
+}
+
+/** Input cap for `parseJson`, `extractNumbers` and `htmlToText`, in characters. */
+const MAX_TEXT_HELPER_CHARS = 1_048_576;
+
+/** Most figures `extractNumbers` returns. */
+const MAX_EXTRACTED_NUMBERS = 10_000;
+
+/** A digit run with optional `.` or `,` separated digit groups: `40`, `3.5`, `1,200`. */
+const NUMBER_RUN_PATTERN = /\d+(?:[.,]\d+)*/g;
+
+/**
+ * `JSON.parse` output narrowed to the evaluator's closed domain. Parsed JSON is
+ * already in the domain, except that a huge integer literal can parse to a
+ * non-finite number, which becomes `null` like every other non-finite result.
+ */
+function toJsonValue(value: unknown): Json {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.map(toJsonValue);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, Json> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) out[key] = toJsonValue(item);
+    return out;
+  }
+  return value as Json;
 }
 
 /** Explicit conversion for `toNumber`/`toInt`. Strict: no partial parses. */
@@ -1721,6 +1810,8 @@ function evaluateNode(
       return node.value;
     case 'root':
       return context.$ ?? null;
+    case 'vars':
+      return (context.vars as Json | undefined) ?? {};
     case 'text':
       return typeof context.$text === 'string' ? context.$text : '';
     case 'item':
@@ -1925,6 +2016,8 @@ function printNode(node: ExprNode, options: PrintOptions): string {
       return printLiteral(node.value, options);
     case 'root':
       return '$';
+    case 'vars':
+      return 'vars';
     case 'text':
       return '$text';
     case 'item':

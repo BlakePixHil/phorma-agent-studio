@@ -300,6 +300,8 @@ All keys derive from the workflow id. `pk` is always `wf#{workflowId}`.
 | `event#{runId}#{seq:012d}` | RunEvent (zero-padded 12-digit sequence) |
 | `usage#{runId}#{nodeId}` | UsageLedgerEntry |
 | `state#{scopedKey}` | StateEntry (per-entry TTL) |
+| `artifact#{runId}#{artifactId}` | Run artifact header: reference, provenance, part count |
+| `artifact#{runId}#{artifactId}#part#{nnnn}` | Run artifact bytes, base64, 300,000 characters per part (DynamoDB caps an item at 400 KB) |
 | `frame#{arrivedAtMs}#{connectionId}#{n}` | Inbound ControlFrame (1 hour TTL) |
 | `conn#{connectionId}` | Monitor connection record (2 hour TTL) |
 | `skip#{triggeredAtMs}#{runnerId}` | Skipped-run record (unfenced) |

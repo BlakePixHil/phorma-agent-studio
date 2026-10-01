@@ -1,0 +1,20 @@
+[
+  {
+    "id": "6ed76ce8-0000-4b60-b120-000000000001",
+    "text": "Backend Engineer (Onsite)",
+    "createdAt": "__POSTED_1D_MS__",
+    "hostedUrl": "https://jobs.lever.co/example-lever/6ed76ce8-0000-4b60-b120-000000000001",
+    "applyUrl": "https://jobs.lever.co/example-lever/6ed76ce8-0000-4b60-b120-000000000001/apply",
+    "workplaceType": "onsite",
+    "country": "DE",
+    "categories": {
+      "commitment": "Full-time",
+      "location": "Berlin, Germany",
+      "team": "Engineering",
+      "allLocations": ["Berlin, Germany"]
+    },
+    "descriptionPlain": "An onsite role the remote filter drops.",
+    "lists": [{ "text": "Requirements", "content": "<li>Go</li><li>Kubernetes</li>" }],
+    "additionalPlain": ""
+  }
+]

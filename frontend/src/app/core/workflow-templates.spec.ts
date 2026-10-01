@@ -5,7 +5,7 @@ import {
   validateAgainstCapabilities,
 } from '@phorma/engine';
 import { WORKFLOW_TEMPLATES, findWorkflowTemplate } from './workflow-templates';
-import type { WorkflowGraph } from './workflow.model';
+import type { StateSetNodeData, WorkflowGraph, WorkflowSpec } from './workflow.model';
 
 /**
  * Structural integrity for every template. A template is a hand-authored
@@ -22,18 +22,18 @@ describe('workflow templates', () => {
     return ids;
   }
 
-  it('builds every template without throwing, with unique node ids', () => {
+  it('builds every template without throwing, with unique node ids', async () => {
     for (const template of WORKFLOW_TEMPLATES) {
-      const spec = template.build();
+      const spec = (await template.build());
       expect(spec.id).withContext(`${template.id} spec id`).toBe(template.id);
       const ids = spec.graph.nodes.map(node => node.id);
       expect(new Set(ids).size).withContext(`${template.id} unique node ids`).toBe(ids.length);
     }
   });
 
-  it('resolves every connection to real ports on real nodes', () => {
+  it('resolves every connection to real ports on real nodes', async () => {
     for (const template of WORKFLOW_TEMPLATES) {
-      const graph = template.build().graph;
+      const graph = (await template.build()).graph;
       const ids = portIds(graph);
       for (const connection of graph.connections) {
         expect(ids.has(portBaseId(connection.outputId)))
@@ -46,7 +46,7 @@ describe('workflow templates', () => {
     }
   });
 
-  it('finds every template by id', () => {
+  it('finds every template by id', async () => {
     for (const template of WORKFLOW_TEMPLATES) {
       expect(findWorkflowTemplate(template.id)).toBe(template);
     }
@@ -56,21 +56,21 @@ describe('workflow templates', () => {
 describe('Jira Time-Log Safety Net template', () => {
   const template = findWorkflowTemplate('tpl-jira-safety-net')!;
 
-  it('is registered', () => {
+  it('is registered', async () => {
     expect(template).toBeTruthy();
   });
 
-  it('passes Cloudflare Worker capability validation with zero findings - genuinely deployable', () => {
+  it('passes Cloudflare Worker capability validation with zero findings - genuinely deployable', async () => {
     // The whole point of this template: no stdio MCP, no OAuth MCP, and every
     // connection reference is left blank for the user to fill in, so it must
     // clear the SAME validator the push path runs with nothing to report.
-    const spec = template.build();
+    const spec = (await template.build());
     const findings = validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, []);
     expect(findings).toEqual([]);
   });
 
-  it('wires both schedule triggers and every tool to the agent', () => {
-    const graph = template.build().graph;
+  it('wires both schedule triggers and every tool to the agent', async () => {
+    const graph = (await template.build()).graph;
     expect(graph.nodes.some(node => node.kind === 'agent')).toBeTrue();
 
     const toolLinks = graph.connections.filter(connection => connection.kind === 'tool-link');
@@ -93,8 +93,8 @@ describe('Jira Time-Log Safety Net template', () => {
     }
   });
 
-  it('gives Add Worklog two named params; the other Jira calls keep the single-input default', () => {
-    const graph = template.build().graph;
+  it('gives Add Worklog two named params; the other Jira calls keep the single-input default', async () => {
+    const graph = (await template.build()).graph;
     const addWorklog = graph.nodes.find(node => node.id === 'tpl-jira-add-worklog')!;
     const params = (addWorklog.data as { params?: { name: string }[] }).params ?? [];
     expect(params.map(param => param.name).sort()).toEqual(['body', 'issueKey']);
@@ -106,22 +106,22 @@ describe('Jira Time-Log Safety Net template', () => {
     expect((worklogs.data as { params?: unknown[] }).params ?? []).toEqual([]);
   });
 
-  it('uses the non-deprecated /search/jql endpoint (Atlassian removed /search)', () => {
-    const graph = template.build().graph;
+  it('uses the non-deprecated /search/jql endpoint (Atlassian removed /search)', async () => {
+    const graph = (await template.build()).graph;
     const search = graph.nodes.find(node => node.id === 'tpl-jira-search')!;
     expect((search.data as { url: string }).url).toBe('{{baseUrl}}/rest/api/3/search/jql');
   });
 
-  it('raises the tool-result cap and tool-round budget on the Jira agent so worklog tails are not truncated and the email step is reached', () => {
-    const graph = template.build().graph;
+  it('raises the tool-result cap and tool-round budget on the Jira agent so worklog tails are not truncated and the email step is reached', async () => {
+    const graph = (await template.build()).graph;
     const agent = graph.nodes.find(node => node.id === 'tpl-jira-agent')!;
     const data = agent.data as { toolResultCapChars?: number; maxToolRounds?: number };
     expect(data.toolResultCapChars).toBeGreaterThan(8000);
     expect(data.maxToolRounds).toBeGreaterThan(8);
   });
 
-  it('uses a bearer (not OAuth) email preset, so it stays deployable', () => {
-    const graph = template.build().graph;
+  it('uses a bearer (not OAuth) email preset, so it stays deployable', async () => {
+    const graph = (await template.build()).graph;
     const email = graph.nodes.find(node => node.id === 'tpl-jira-email')!;
     const data = email.data as { authMode?: string; authKey?: string };
     expect(data.authMode).not.toBe('oauth');
@@ -131,20 +131,112 @@ describe('Jira Time-Log Safety Net template', () => {
 
 describe('System One templates', () => {
   for (const id of ['tpl-support-triage', 'tpl-verified-extraction']) {
-    it(`${id} is deployable to Cloudflare and uses System One`, () => {
-      const spec = findWorkflowTemplate(id)!.build();
+    it(`${id} is deployable to Cloudflare and uses System One`, async () => {
+      const spec = await findWorkflowTemplate(id)!.build();
       expect(validateAgainstCapabilities(spec, CLOUDFLARE_CAPABILITIES, [])).toEqual([]);
       expect(usesDecisions(spec.graph)).toBeTrue();
     });
   }
 
-  it('points every support-triage route criterion and the unsure port at real ports', () => {
-    const router = findWorkflowTemplate('tpl-support-triage')!
-      .build()
-      .graph.nodes.find(node => node.kind === 'router')!;
+  it('points every support-triage route criterion and the unsure port at real ports', async () => {
+    const router = (await findWorkflowTemplate('tpl-support-triage')!.build()).graph.nodes.find(
+      node => node.kind === 'router',
+    )!;
     const ids = new Set(router.ports.map(port => port.id));
     const data = router.data as { routeCriteria: Record<string, string>; unsurePortId: string };
     for (const portId of Object.keys(data.routeCriteria)) expect(ids.has(portId)).withContext(portId).toBeTrue();
     expect(ids.has(data.unsurePortId)).toBeTrue();
+  });
+});
+
+describe('Weekly Job Applications template', () => {
+  const template = findWorkflowTemplate('tpl-weekly-job-applications')!;
+  const build = () => template.build() as Promise<WorkflowSpec>;
+
+  it('is registered with the briefcase icon', () => {
+    expect(template).toBeTruthy();
+    expect(template.icon).toBe('ti ti-briefcase');
+    expect(template.description).toMatch(/Resend/);
+    expect(template.description).toMatch(/deploy/i);
+  });
+
+  it('builds with unique ids and every connection resolving', async () => {
+    const spec = await build();
+    const ids = spec.graph.nodes.map(node => node.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const ports = new Set(spec.graph.nodes.flatMap(node => node.ports.map(port => port.id)));
+    for (const connection of spec.graph.connections) {
+      expect(ports.has(portBaseId(connection.outputId))).withContext(connection.outputId).toBeTrue();
+      expect(ports.has(portBaseId(connection.inputId))).withContext(connection.inputId).toBeTrue();
+    }
+  });
+
+  it('validates against Cloudflare with zero findings', async () => {
+    expect(validateAgainstCapabilities(await build(), CLOUDFLARE_CAPABILITIES, [])).toEqual([]);
+  });
+
+  it('writes every applied: and screened: entry for 30 days under keys its reads use', async () => {
+    const spec = await build();
+    const ledgerKey = (key: unknown) => typeof key === 'string' && /^(applied|screened):/.test(key);
+    const writes = spec.graph.nodes.filter(
+      node => node.kind === 'state-set' && ledgerKey((node.data as StateSetNodeData).key),
+    );
+    const reads = spec.graph.nodes.filter(
+      node => node.kind === 'state-get' && ledgerKey((node.data as { key: string }).key),
+    );
+    expect(writes.length).toBe(3);
+    expect(reads.length).toBe(2);
+    const readKeys = new Set(reads.map(node => (node.data as { key: string }).key));
+    for (const write of writes) {
+      const data = write.data as StateSetNodeData;
+      expect(data.ttlSec).withContext(write.id).toBe(2_592_000);
+      expect(readKeys.has(data.key)).withContext(`${write.id} key ${data.key}`).toBeTrue();
+    }
+  });
+
+  it('ships in dry run', async () => {
+    const dryRun = (await build()).settings?.variables?.find(variable => variable.name === 'dryRun');
+    expect(dryRun?.type).toBe('boolean');
+    expect(dryRun?.value).toBeTrue();
+  });
+
+  it('contains no stdio or OAuth MCP node and no local-only step', async () => {
+    const spec = await build();
+    for (const node of spec.graph.nodes) {
+      if (node.kind !== 'mcp-tool') continue;
+      const data = node.data as { transport?: string; authMode?: string };
+      expect(data.transport).not.toBe('stdio');
+      expect(data.authMode).not.toBe('oauth');
+    }
+    expect(spec.graph.nodes.some(node => node.kind === 'sql-query')).toBeFalse();
+  });
+
+  it('claims every outbound application under one idempotency key per posting', async () => {
+    const spec = await build();
+    const sends = spec.graph.nodes.filter(
+      node => node.name === 'Email application' || node.name === 'Submit by API',
+    );
+    expect(sends.length).toBe(2);
+    for (const send of sends) {
+      expect((send.data as { idempotencyKey?: string }).idempotencyKey).toBe('apply:{{posting.key}}');
+    }
+  });
+
+  it('forces every send to the no-send branch while dryRun is on', async () => {
+    const route = (await build()).graph.nodes.find(node => node.name === 'Apply by')!;
+    expect((route.data as { expression: string }).expression.startsWith('vars.dryRun ?')).toBeTrue();
+  });
+
+  it('targets Melbourne: schedule zone, home location and Australia-open remote regions', async () => {
+    const spec = await build();
+    const schedule = spec.graph.nodes.find(node => node.kind === 'schedule-trigger')!;
+    expect((schedule.data as { timezone?: string }).timezone).toBe('Australia/Melbourne');
+    const value = (name: string) =>
+      spec.settings?.variables?.find(variable => variable.name === name)?.value as unknown;
+    expect(value('homeLocations')).toEqual(['melbourne']);
+    expect(value('remoteRegions') as string[]).toContain('australia');
+    expect(value('remoteRegions') as string[]).not.toContain('usa');
+    // Adzuna ships off: it needs the user's own free app id and key.
+    expect(value('adzunaAppId')).toBe('');
   });
 });

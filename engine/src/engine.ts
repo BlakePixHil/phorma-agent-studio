@@ -35,7 +35,23 @@ import type {
   SqlResult,
   TransportFailureKind,
   WorkflowStateStore,
+  ArtifactStore,
+  ArtifactRef,
+  StoredArtifact,
 } from './data-host.js';
+import { resolveWorkflowVariables } from './variables.js';
+import {
+  ARTIFACT_MAX_BYTES,
+  RUN_ARTIFACTS_MAX_BYTES,
+  RUN_ARTIFACTS_MAX_COUNT,
+  artifactId,
+  collectArtifactRefs,
+} from './artifacts.js';
+// Loaded on first use with a dynamic `import()`: a host that never renders,
+// attaches or uploads a file never parses the PDF writer, the markdown
+// renderer, the email adapters or the multipart encoder.
+import type { DeliveryHost } from './delivery-steps.js';
+import type { EncodedMultipart } from './multipart.js';
 import {
   DataTransportError,
   HttpStatusError,
@@ -49,6 +65,7 @@ import {
   DEFAULT_MAX_RESPONSE_BYTES,
   isPaginated,
   joinUrl,
+  MAX_IDEMPOTENCY_KEY_CHARS,
   registerConnectionSecrets,
   selectResult,
 } from './data-http.js';
@@ -57,7 +74,11 @@ import {
   compareWatermark,
   contentHash,
   idempotencyStateKey,
+  isProvableNonDelivery,
+  releaseIdempotent,
+  reservedStateNamespaceOf,
   scopedStateKey,
+  STATE_LIST_MAX_LIMIT,
   STATE_TTL_MAX_SEC,
   STATE_TTL_MIN_SEC,
 } from './state.js';
@@ -151,9 +172,11 @@ import {
   type ModelProviderId,
   type NodeRetryPolicy,
   type NotifyNodeData,
+  type RenderDocumentNodeData,
   type SqlDriver,
   type SqlQueryNodeData,
   type StateGetNodeData,
+  type StateListNodeData,
   type StateSetNodeData,
   type WaitEventNodeData,
   type WorkflowConnection,
@@ -196,6 +219,10 @@ const SQL_DRIVERS: ReadonlySet<string> = new Set<SqlDriver>([
   'mssql',
   'sqlite',
 ]);
+/** Variable scope of a frame whose host passed none. */
+const EMPTY_VARIABLES: Readonly<Record<string, Json>> = Object.freeze({});
+/** Largest JSON a `state-list` step merges into the payload, in characters. */
+const STATE_LIST_MAX_OUTPUT_CHARS = 1_048_576;
 
 /**
  * One `http-request` attempt's result: the node's outgoing payload, or the
@@ -430,6 +457,17 @@ export interface RunOptions {
   redact?: (value: string) => string;
   /** Declared host capability set, used for run-time guardrails. */
   capabilities?: HostCapabilities;
+  /**
+   * Run-scoped binary store (design G2). Payloads carry only an
+   * `ArtifactRef`; the bytes live here. Required by `render-document`, email
+   * attachments and multipart uploads.
+   */
+  artifacts?: ArtifactStore;
+  /**
+   * The top-level workflow's resolved variables (`resolveWorkflowVariables`),
+   * read as `vars` in templates and expressions. Child frames resolve their own.
+   */
+  variables?: Readonly<Record<string, Json>>;
 
   // ── System One (TypeSafe Jev) ─────────────────────────────────────────────────
 
@@ -501,6 +539,11 @@ const TOOL_KINDS = new Set(['http-tool', 'web-search-tool', 'mcp-tool']);
 interface SharedExecutionState {
   executions: number;
   maxExecutions: number;
+  /**
+   * Artifact totals for the run, seeded once from `ArtifactStore.list` so the
+   * per-run caps hold across a host restart. Shared with nested frames.
+   */
+  artifacts?: { count: number; bytes: number; sizes: Map<string, number> };
 }
 
 interface WorkflowFrame {
@@ -1052,11 +1095,18 @@ class WorkflowRun {
     }
 
     if (isAgentNode(node)) {
-      const output = await this.runAgent(
+      const reply = await this.runAgent(
         node,
         payload,
         executionKey ?? this.nextExecutionKey(node, payload),
       );
+      // `resultKey` keeps the incoming payload and adds the reply to it, so a
+      // step after the agent still sees the record the agent worked on.
+      const resultKey = ((node.data as AgentNodeData).resultKey ?? '').trim();
+      const output =
+        resultKey.length > 0
+          ? mergePayloads(payload, JSON.stringify({ [resultKey]: parseReplyJson(reply) }))
+          : reply;
       // Success never flows through the "On error" branch: restrict routing
       // to the regular out-ports when an error port is declared.
       const errorPortId = (node.data as AgentNodeData).errorPortId;
@@ -1105,11 +1155,18 @@ class WorkflowRun {
         );
       case 'http-request': {
         const key = executionKey ?? this.nextExecutionKey(node, payload);
-        const outcome = await this.withNodeRetry(node, attempt =>
-          this.runHttpRequest(node, payload, attempt, key),
-        );
+        const claim: { key?: string } = {};
+        let outcome: HttpAttemptOutcome;
+        try {
+          outcome = await this.withNodeRetry(node, attempt =>
+            this.runHttpRequest(node, payload, attempt, key, claim),
+          );
+        } catch (error) {
+          await this.releaseClaimOnNonDelivery(claim.key, error);
+          throw error;
+        }
         // `executeNode` short-circuits a journal-replayed node before it ever
-        // reaches here, so a resumed run never re-claims a completed write
+        // reaches here, so a replayed run never re-claims a completed write
         // (design §8.3).
         if (outcome.skipped === true) return this.skipLostClaim(payload);
         return this.routeAwayFromErrorPort(node, outcome.output);
@@ -1141,10 +1198,28 @@ class WorkflowRun {
         return { output: await this.runStateSet(node, payload) };
       case 'notify': {
         // Delivery is a network call, so it shares the retry loop of §6; the
-        // payload leaves unchanged either way (Requirement 13.1).
-        const output = await this.withNodeRetry(node, () => this.runNotify(node, payload));
+        // payload leaves unchanged either way (Requirement 13.1). A rendered
+        // idempotency key is claimed once, before the first attempt, and every
+        // attempt reuses it.
+        const claimKey = this.notifyIdempotencyKey(node, payload);
+        if (claimKey !== undefined && !(await this.claimWrite(node, claimKey))) {
+          return this.skipLostClaim(payload);
+        }
+        let output: string;
+        try {
+          output = await this.withNodeRetry(node, () => this.runNotify(node, payload, claimKey));
+        } catch (error) {
+          await this.releaseClaimOnNonDelivery(claimKey, error);
+          throw error;
+        }
         return this.routeAwayFromErrorPort(node, output);
       }
+      case 'render-document': {
+        const key = executionKey ?? this.nextExecutionKey(node, payload);
+        return this.routeAwayFromErrorPort(node, await this.runRenderDocument(node, payload, key));
+      }
+      case 'state-list':
+        return { output: await this.runStateList(node, payload) };
       case 'execute-workflow': {
         const output = await this.runSubWorkflow(
           node,
@@ -1278,7 +1353,20 @@ class WorkflowRun {
    * across the three hosts (Requirement 1.5).
    */
   private exprContext(payload: string): EvalContext {
-    return { $: parseJsonPayload(payload), $text: payload, nowMs: Date.now() };
+    return { $: parseJsonPayload(payload), $text: payload, nowMs: Date.now(), vars: this.vars };
+  }
+
+  /**
+   * The frame's workflow-variable scope. `vars.` in a template or expression
+   * resolves here and never against the payload (Requirement 1.6).
+   */
+  private get vars(): Readonly<Record<string, Json>> {
+    return this.options.variables ?? EMPTY_VARIABLES;
+  }
+
+  /** Interpolates a template against the payload and this frame's variables. */
+  private render(template: string, payload: string): string {
+    return interpolatePayload(template, payload, { vars: this.vars });
   }
 
   /**
@@ -1341,11 +1429,19 @@ class WorkflowRun {
    * rather than risk a duplicate write.
    */
   private async claimHttpWrite(node: WorkflowNode, request: DataRequest): Promise<boolean> {
-    const state = this.options.state;
-    if (!state) return true;
-
     const key = this.idempotencyKeyOf(request);
     if (key === undefined) return true;
+    return this.claimWrite(node, key);
+  }
+
+  /**
+   * Claims one rendered idempotency key for this node execution. Shared by
+   * `http-request` and `notify`, so both sending primitives honour one `idem:`
+   * namespace and one ownership rule.
+   */
+  private async claimWrite(node: WorkflowNode, key: string): Promise<boolean> {
+    const state = this.options.state;
+    if (!state) return true;
 
     const workflowId = this.options.workflowId ?? '';
     const owned = await claimIdempotent(key, state, { workflowId });
@@ -1359,6 +1455,23 @@ class WorkflowRun {
       at: Date.now(),
     });
     return owned;
+  }
+
+  /**
+   * After a claimed write finally failed: releases the claim when the failure
+   * proves the target never accepted it, so a later run may retry; keeps it
+   * otherwise, because a write that may have landed must not be sent twice
+   * (Requirement 5.6). A release that fails is swallowed: the claim then simply
+   * expires with its TTL, which is the safe direction.
+   */
+  private async releaseClaimOnNonDelivery(key: string | undefined, error: unknown): Promise<void> {
+    const state = this.options.state;
+    if (key === undefined || !state || !isProvableNonDelivery(error)) return;
+    try {
+      await releaseIdempotent(key, state, { workflowId: this.options.workflowId ?? '' });
+    } catch {
+      // Held until its TTL: never a duplicate, at worst a delayed retry.
+    }
   }
 
   /**
@@ -1395,6 +1508,7 @@ class WorkflowRun {
     payload: string,
     attempt: number,
     executionKey: string,
+    claim: { key?: string } = {},
   ): Promise<HttpAttemptOutcome> {
     const data = node.data as HttpRequestNodeData;
 
@@ -1404,6 +1518,10 @@ class WorkflowRun {
     if (!fetcher) throw this.missingCapability(node, 'dataFetch', 'run HTTP Request steps');
 
     const conn = await this.resolveNodeConnection(node, data.connectionId);
+    // A multipart body reads artifact bytes from the host store, so it is
+    // encoded once per attempt here and handed to the pure request builder.
+    const multipart =
+      data.bodyMode === 'multipart' ? await this.encodeMultipartBody(node, payload) : undefined;
     const occurrence = this.occurrenceOf(executionKey);
     const paginated = isPaginated(data.pagination);
     const loop = createPaginationLoop(data.pagination);
@@ -1415,13 +1533,14 @@ class WorkflowRun {
     while (loop.canRequest()) {
       // Every detectable authoring error (empty url, non-http scheme, a `json`
       // body template that does not render JSON) throws here, before any I/O.
-      const request = buildDataRequest(node, payload, conn, loop.cursor);
+      const request = buildDataRequest(node, payload, conn, loop.cursor, { vars: this.vars, multipart });
 
       if (claimPending) {
         // After construction, so a malformed step burns no idempotency key, and
         // before the first outbound call, so the loser never writes (§8.3).
         claimPending = false;
         if (!(await this.claimHttpWrite(node, request))) return { skipped: true };
+        if (this.options.state) claim.key = this.idempotencyKeyOf(request);
       }
 
       const { response, replayed, session } = await this.fetchHttpPage(
@@ -1514,7 +1633,12 @@ class WorkflowRun {
       url: this.scrub(request.url),
       attempt,
       ...(data.persistRequestBody && request.body !== undefined
-        ? { body: this.scrub(request.body) }
+        ? {
+            body:
+              request.bodyEncoding === 'base64'
+                ? `[binary body, ${Math.floor((request.body.length * 3) / 4)} bytes]`
+                : this.scrub(request.body),
+          }
         : {}),
       at: Date.now(),
     });
@@ -2137,7 +2261,7 @@ class WorkflowRun {
     if (!state) {
       throw this.missingCapability(node, 'state', `read the baseline "${template}"`);
     }
-    const key = interpolatePayload(template, payload);
+    const key = this.render(template, payload);
     const entry = await state.get(scopedStateKey(this.options.workflowId ?? '', key));
     if (!entry || typeof entry.value !== 'string') return null;
     return parseJsonPayload(entry.value) ?? null;
@@ -2343,7 +2467,7 @@ class WorkflowRun {
     payload: string,
   ): string {
     const source = typeof template === 'string' ? template : '';
-    const key = interpolatePayload(source, payload).trim();
+    const key = this.render(source, payload).trim();
     if (key.length === 0) {
       throw new Error(
         `Step "${node.name}" has no state key. Set a key such as "wm:jobs", ` +
@@ -2430,7 +2554,11 @@ class WorkflowRun {
    * Called through {@link withNodeRetry}, so a rejection is classified by
    * `decideRetry` and a final failure routes out the node's "On error" port.
    */
-  private async runNotify(node: WorkflowNode, payload: string): Promise<string> {
+  private async runNotify(
+    node: WorkflowNode,
+    payload: string,
+    idempotencyKey?: string,
+  ): Promise<string> {
     const data = (node.data ?? {}) as NotifyNodeData;
 
     // Capability first: no connection is resolved and no secret is read on a
@@ -2451,7 +2579,7 @@ class WorkflowRun {
     // reported as the authoring error it is rather than a credential problem.
     // An unresolved `{{path}}` token is left verbatim by `interpolatePayload`
     // (Requirement 13.2).
-    const to = interpolatePayload(data.to ?? '', payload).trim();
+    const to = this.render(data.to ?? '', payload).trim();
     const connectionId = (data.connectionId ?? '').trim();
     if (channel === 'email') {
       if (connectionId.length === 0) {
@@ -2469,32 +2597,65 @@ class WorkflowRun {
     }
 
     const conn = await this.resolveNodeConnection(node, connectionId);
-    const message = {
-      ...(to.length > 0 ? { to } : {}),
-      ...(typeof data.subject === 'string' && data.subject.length > 0
-        ? { subject: interpolatePayload(data.subject, payload) }
-        : {}),
-      // An absent body resolves to the whole incoming payload (Requirement 13.2).
-      body: interpolatePayload(
-        typeof data.body === 'string' && data.body.length > 0 ? data.body : '{{input}}',
-        payload,
-      ),
-    };
+    const subject =
+      typeof data.subject === 'string' && data.subject.length > 0
+        ? this.render(data.subject, payload)
+        : undefined;
+    // An absent body resolves to the whole incoming payload (Requirement 13.2).
+    const body = this.render(
+      typeof data.body === 'string' && data.body.length > 0 ? data.body : '{{input}}',
+      payload,
+    );
 
-    const url = this.notifyEndpoint(node, channel, to, conn);
-    // Auth last, exactly as `buildDataRequest` orders it, so the connection wins
-    // over anything the message carries (Requirement 8.6).
-    const request = applyConnectionAuth(
-      {
-        url,
+    const attachmentPaths = (data.attachments ?? []).filter(
+      path => typeof path === 'string' && path.trim().length > 0,
+    );
+    if (attachmentPaths.length > 0 && channel !== 'email') {
+      throw new Error(`Step "${node.name}" declares attachments, which only the email channel can deliver.`);
+    }
+
+    let request: DataRequest;
+    let attachmentCount = 0;
+    let omittedAttachments = 0;
+    if (channel === 'email') {
+      const steps = await import('./delivery-steps.js');
+      const parts = await steps.buildEmailRequest(this.deliveryHost, node, payload, {
+        to,
+        subject,
+        body,
+        idempotencyKey,
+        attachmentPaths,
+        conn,
+      });
+      attachmentCount = parts.attachments;
+      omittedAttachments = parts.omitted;
+      request = {
+        url: parts.url,
+        method: 'POST',
+        headers: parts.headers,
+        body: parts.body,
+        timeoutMs: NOTIFY_TIMEOUT_MS,
+        maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+      };
+    } else {
+      const message = {
+        ...(to.length > 0 ? { to } : {}),
+        ...(subject !== undefined ? { subject } : {}),
+        body,
+      };
+      request = {
+        url: this.notifyEndpoint(node, channel, to, conn),
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(message),
         timeoutMs: NOTIFY_TIMEOUT_MS,
         maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
-      },
-      conn,
-    );
+      };
+    }
+    if (idempotencyKey !== undefined) request.headers['Idempotency-Key'] = idempotencyKey;
+    // Auth last, exactly as `buildDataRequest` orders it, so the connection wins
+    // over anything the message carries (Requirement 8.6).
+    request = applyConnectionAuth(request, conn);
 
     const response = await this.dispatchHttpRequest(request, fetcher);
     if (response.status < 200 || response.status > 299) {
@@ -2515,11 +2676,203 @@ class WorkflowRun {
       runId: this.options.runId,
       nodeId: node.id,
       channel,
-      target: this.scrub(maskNotifyTarget(to.length > 0 ? to : url)),
+      target: this.scrub(maskNotifyTarget(to.length > 0 ? to : request.url)),
+      ...(attachmentCount > 0 ? { attachments: attachmentCount } : {}),
+      ...(omittedAttachments > 0 ? { omittedAttachments } : {}),
       at: Date.now(),
     });
 
     return payload;
+  }
+
+  /**
+   * The step's rendered idempotency key, or undefined when it declares none.
+   * Rendered from the payload and variables only, so every attempt and every
+   * replay of the same execution renders the same key.
+   */
+  private notifyIdempotencyKey(node: WorkflowNode, payload: string): string | undefined {
+    const template = (node.data as NotifyNodeData | undefined)?.idempotencyKey;
+    if (typeof template !== 'string' || template.trim().length === 0) return undefined;
+    const key = this.render(template, payload).trim();
+    if (key.length === 0) return undefined;
+    if (key.length > MAX_IDEMPOTENCY_KEY_CHARS) {
+      throw new Error(
+        `Step "${node.name}" renders an idempotency key of ${key.length} characters; ` +
+          `the limit is ${MAX_IDEMPOTENCY_KEY_CHARS}.`,
+      );
+    }
+    return key;
+  }
+
+  // ── Run artifacts (G2) ─────────────────────────────────────────────────────
+
+  /** What the lazily loaded delivery step bodies need from this frame. */
+  private get deliveryHost(): DeliveryHost {
+    return {
+      render: (template, payload) => this.render(template, payload),
+      artifactRefsAt: (node, payload, paths) => this.artifactRefsAt(node, payload, paths),
+      readArtifact: (node, ref) => this.readArtifact(node, ref),
+    };
+  }
+
+  /** The host's artifact store, or a failure naming the node and capability. */
+  private requireArtifacts(node: WorkflowNode, what: string): ArtifactStore {
+    const store = this.options.artifacts;
+    if (!store) throw this.missingCapability(node, 'artifacts', what);
+    return store;
+  }
+
+  /** Artifact references at payload paths, with the node named in any error. */
+  private artifactRefsAt(node: WorkflowNode, payload: string, paths: readonly string[]): ArtifactRef[] {
+    try {
+      return collectArtifactRefs(payload, paths);
+    } catch (error) {
+      throw new Error(`Step "${node.name}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Reads one artifact of this run; a missing one is an error, never an empty file. */
+  private async readArtifact(node: WorkflowNode, ref: ArtifactRef): Promise<StoredArtifact> {
+    const store = this.requireArtifacts(node, 'read run files');
+    const stored = await store.get(this.options.runId, ref.id);
+    if (!stored) {
+      throw new Error(`Step "${node.name}" cannot find file "${ref.name}" (${ref.id}) in this run.`);
+    }
+    return stored;
+  }
+
+  /**
+   * Stores one artifact under the run caps and announces it. The id derives
+   * from the run and the producing execution, so a re-executed producer
+   * replaces its own file rather than adding a second one.
+   */
+  private async writeArtifact(
+    node: WorkflowNode,
+    executionKey: string,
+    name: string,
+    mimeType: string,
+    bytes: Uint8Array,
+  ): Promise<ArtifactRef> {
+    const store = this.requireArtifacts(node, 'store run files');
+    if (bytes.length > ARTIFACT_MAX_BYTES) {
+      throw new Error(
+        `Step "${node.name}" produced a ${bytes.length}-byte file; the limit is ${ARTIFACT_MAX_BYTES} bytes.`,
+      );
+    }
+    const runId = this.options.runId;
+    const id = artifactId(runId, executionKey, name);
+    const totals = await this.artifactTotals(store);
+    const previous = totals.sizes.get(id);
+    const count = totals.count + (previous === undefined ? 1 : 0);
+    const size = totals.bytes - (previous ?? 0) + bytes.length;
+    if (count > RUN_ARTIFACTS_MAX_COUNT) {
+      throw new Error(`Step "${node.name}" would exceed the ${RUN_ARTIFACTS_MAX_COUNT}-file limit for one run.`);
+    }
+    if (size > RUN_ARTIFACTS_MAX_BYTES) {
+      throw new Error(
+        `Step "${node.name}" would take this run's files past ${RUN_ARTIFACTS_MAX_BYTES} bytes.`,
+      );
+    }
+
+    const ref: ArtifactRef = { id, name, mimeType, sizeBytes: bytes.length };
+    await store.put(runId, { ref, nodeId: node.id, createdAt: Date.now(), bytes });
+    totals.count = count;
+    totals.bytes = size;
+    totals.sizes.set(id, bytes.length);
+    this.emit({
+      type: 'artifact-created',
+      runId,
+      nodeId: node.id,
+      nodeName: node.name,
+      artifact: { ...ref },
+      at: Date.now(),
+    });
+    return ref;
+  }
+
+  /** The run's artifact totals, seeded once from the store. */
+  private async artifactTotals(
+    store: ArtifactStore,
+  ): Promise<{ count: number; bytes: number; sizes: Map<string, number> }> {
+    if (this.executionState.artifacts) return this.executionState.artifacts;
+    const existing = await store.list(this.options.runId);
+    const sizes = new Map(existing.map(ref => [ref.id, ref.sizeBytes]));
+    const seeded = {
+      count: sizes.size,
+      bytes: [...sizes.values()].reduce((sum, value) => sum + value, 0),
+      sizes,
+    };
+    // Re-check after the await: a concurrent iteration may have seeded first.
+    this.executionState.artifacts ??= seeded;
+    return this.executionState.artifacts;
+  }
+
+  /** Builds a `multipart/form-data` body from text fields and artifact files. */
+  private async encodeMultipartBody(node: WorkflowNode, payload: string): Promise<EncodedMultipart> {
+    const steps = await import('./delivery-steps.js');
+    return steps.buildMultipartBody(this.deliveryHost, node, payload);
+  }
+
+  // ── render-document (G3) ───────────────────────────────────────────────────
+
+  /**
+   * Renders markdown to a PDF artifact and merges its reference under
+   * `resultKey`. The bytes never enter the payload.
+   */
+  private async runRenderDocument(
+    node: WorkflowNode,
+    payload: string,
+    executionKey: string,
+  ): Promise<string> {
+    const data = (node.data ?? {}) as RenderDocumentNodeData;
+    this.requireArtifacts(node, 'store rendered documents');
+    const steps = await import('./delivery-steps.js');
+    const file = steps.renderDocumentFile(this.deliveryHost, node, payload);
+    const ref = await this.writeArtifact(node, executionKey, file.name, 'application/pdf', file.bytes);
+    const resultKey = (data.resultKey ?? '').trim() || 'document';
+    return mergePayloads(payload, JSON.stringify({ [resultKey]: ref }));
+  }
+
+  // ── state-list (G6) ────────────────────────────────────────────────────────
+
+  /**
+   * Lists the workflow's state entries under a rendered prefix and merges them
+   * under `resultKey`. Reserved namespaces (claims, watermarks, fixtures, delta
+   * hashes, OAuth tokens) are never returned, whatever the prefix.
+   */
+  private async runStateList(node: WorkflowNode, payload: string): Promise<string> {
+    const data = (node.data ?? {}) as StateListNodeData;
+    const store = this.requireStateStore(node, 'list durable workflow state');
+    const prefix = this.render(typeof data.prefix === 'string' ? data.prefix : '', payload).trim();
+    if (prefix.length === 0) {
+      throw new Error(`Step "${node.name}" has no key prefix. Set one such as "open:".`);
+    }
+    const reserved = reservedStateNamespaceOf(prefix);
+    if (reserved) {
+      throw new Error(`Step "${node.name}" cannot list the reserved "${reserved}" namespace.`);
+    }
+    const requested = typeof data.limit === 'number' && Number.isFinite(data.limit) ? Math.floor(data.limit) : 100;
+    const limit = Math.max(1, Math.min(requested, STATE_LIST_MAX_LIMIT));
+    const workflowId = this.options.workflowId ?? '';
+    const scopedPrefix = scopedStateKey(workflowId, prefix);
+    const listed = await store.list(scopedPrefix, limit);
+    const steps = await import('./delivery-steps.js');
+    const { entries, truncated } = steps.shapeStateEntries(listed, scopedPrefix, STATE_LIST_MAX_OUTPUT_CHARS);
+
+    this.emit({
+      type: 'state-read',
+      runId: this.options.runId,
+      nodeId: node.id,
+      key: `${scopedPrefix}*`,
+      found: entries.length > 0,
+      at: Date.now(),
+    });
+
+    const resultKey = (data.resultKey ?? '').trim() || 'entries';
+    return mergePayloads(
+      payload,
+      JSON.stringify({ [resultKey]: entries, ...(truncated ? { [`${resultKey}Truncated`]: true } : {}) }),
+    );
   }
 
   /**
@@ -3125,7 +3478,7 @@ class WorkflowRun {
   ): string {
     // `{{input}}` interpolates the whole payload; `{{a.b.c}}` digs into it
     // when the payload parses as JSON (structured handoffs).
-    let prompt = interpolatePayload(template, payload);
+    let prompt = this.render(template, payload);
 
     // Attached skills render verbatim (no interpolation - skills are static
     // guidance, not task templates), in attachment order, before the
@@ -3294,6 +3647,7 @@ class WorkflowRun {
     if (routes.length === 0) return { output: payload, viaPortIds: new Set() };
 
     const data = (node.data ?? {}) as RouterNodeData;
+    if (data.mode === 'expression') return this.expressionRoute(node, routes, payload, data);
     if (data.mode !== 'decide') return this.keywordRoute(routes, payload);
 
     const unsure = routes.find(port => port.id === data.unsurePortId);
@@ -3346,6 +3700,39 @@ class WorkflowRun {
     }
     this.emitDecision(node, 'route', outcome, { selectedPortId: via.id, fallback });
     return { output: payload, viaPortIds: new Set([via.id]) };
+  }
+
+  /**
+   * Expression mode: evaluates `expression` and takes the route whose name
+   * equals the result (trimmed, case-insensitive). No match takes the declared
+   * unsure port, and with none declared fails the node naming the value, so a
+   * typo in a route name is loud rather than a silent wrong branch.
+   */
+  private expressionRoute(
+    node: WorkflowNode,
+    routes: readonly { id: string; name: string }[],
+    payload: string,
+    data: RouterNodeData,
+  ): { output: string; viaPortIds: Set<string> } {
+    let compiled: CompiledExpression;
+    try {
+      compiled = compileExpression(typeof data.expression === 'string' ? data.expression : '');
+    } catch (error) {
+      throw new Error(
+        `Router "${node.name}" has an invalid route expression: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const value = compiled.evaluate(this.exprContext(payload));
+    const wanted = (typeof value === 'string' ? value : JSON.stringify(value) ?? 'null').trim().toLowerCase();
+    const match = routes.find(route => route.name.trim().toLowerCase() === wanted);
+    if (match) return { output: payload, viaPortIds: new Set([match.id]) };
+    const unsure = routes.find(route => route.id === data.unsurePortId);
+    if (unsure) return { output: payload, viaPortIds: new Set([unsure.id]) };
+    throw new Error(
+      `Router "${node.name}" evaluated to ${JSON.stringify(value)}, which names none of its routes ` +
+        `(${routes.map(route => route.name).join(', ')}).`,
+    );
   }
 
   private keywordRoute(
@@ -3616,7 +4003,7 @@ class WorkflowRun {
   ): Promise<{ output: string }> {
     const data = node.data as WaitEventNodeData;
     const keyTemplate = data.correlationKey?.trim() || node.id;
-    const correlationKey = interpolatePayload(keyTemplate, payload);
+    const correlationKey = this.render(keyTemplate, payload);
     const timeoutMs =
       typeof data.timeoutHours === 'number' && data.timeoutHours > 0
         ? Math.round(data.timeoutHours * 3_600_000)
@@ -3680,7 +4067,7 @@ class WorkflowRun {
     const responseKey = data.responseKey?.trim() || 'userResponse';
     const questionTemplate = data.question?.trim() || '';
     const question = questionTemplate
-      ? interpolatePayload(questionTemplate, payload)
+      ? this.render(questionTemplate, payload)
       : payload;
     const requestId = `ask:${executionKey}`;
 
@@ -3766,7 +4153,10 @@ class WorkflowRun {
       { nodeId: node.id, workflowId: resolved.id, workflowName, frameId, depth },
     ];
     const child = new WorkflowRun(
-      { ...this.options, graph: resolved.graph, startNodeId: undefined },
+      { ...this.options, graph: resolved.graph, startNodeId: undefined,
+        // A child frame reads ITS OWN workflow's variables, never the parent's:
+        // a sub-workflow is a reusable unit whose settings travel with it.
+        variables: resolveWorkflowVariables(resolved.settings) },
       this.gate,
       {
         scope: childScope,
@@ -4059,4 +4449,43 @@ function tryParseJson(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+
+/**
+ * Strips one surrounding markdown code fence (```json ... ```) from a reply.
+ * Models often fence JSON even when told not to.
+ */
+function stripCodeFence(text: string): string {
+  const match = /^\s*```[A-Za-z0-9_-]*\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
+  return match ? match[1]! : text;
+}
+
+/**
+ * An agent reply read as JSON for `AgentNodeData.resultKey`: the whole reply
+ * (fence stripped), else the first balanced `{...}` or `[...]` that parses,
+ * else the raw text. Never throws.
+ */
+export function parseReplyJson(reply: string): unknown {
+  const stripped = stripCodeFence(reply).trim();
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    // Fall through to the embedded search.
+  }
+  for (const [open, close] of [
+    ['{', '}'],
+    ['[', ']'],
+  ] as const) {
+    const start = stripped.indexOf(open);
+    if (start < 0) continue;
+    for (let end = stripped.lastIndexOf(close); end > start; end = stripped.lastIndexOf(close, end - 1)) {
+      try {
+        return JSON.parse(stripped.slice(start, end + 1));
+      } catch {
+        // Keep shrinking.
+      }
+    }
+  }
+  return reply;
 }

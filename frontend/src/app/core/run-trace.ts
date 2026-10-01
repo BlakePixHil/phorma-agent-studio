@@ -15,6 +15,8 @@ export interface TraceDescription {
   detail?: string;
   tone: TraceEntry['tone'];
   kind: TraceEntry['kind'];
+  /** A run file this entry announces; the Runs panel offers a download. */
+  artifact?: TraceEntry['artifact'];
 }
 
 export interface TraceOptions {
@@ -230,6 +232,14 @@ export function describeRunEvent(
       return { icon: 'ti ti-flag-x', label: 'Run failed', detail: event.error, tone: 'error', kind: 'event' };
     case 'run-stopped':
       return { icon: 'ti ti-player-stop', label: 'Run stopped', tone: 'warning', kind: 'event' };
+    case 'artifact-created':
+      return {
+        icon: 'ti ti-file-download',
+        label: `${event.nodeName} produced ${event.artifact.name} (${formatFileSize(event.artifact.sizeBytes)})`,
+        tone: 'success',
+        kind: 'event',
+        artifact: { ...event.artifact, runId: event.runId },
+      };
     default:
       // run-paused, run-resumed, node-output-text, node-thinking-text —
       // no trace entry.
@@ -258,4 +268,11 @@ export function traceFromRunLog(
     });
   }
   return entries;
+}
+
+/** A byte count for display: `812 B`, `14.2 KB`, `1.1 MB`. */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${Math.max(0, Math.round(bytes || 0))} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

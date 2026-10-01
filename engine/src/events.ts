@@ -172,7 +172,13 @@ type RunEventPayload =
       assertion: string; message: string; severity: 'error' | 'warn';
       routed: boolean; at: number }
   | { type: 'notify-sent'; runId: string; nodeId: string; channel: string;
-      target: string; at: number }
+      target: string;
+      /** Email only: attachments delivered, and any dropped by a `truncate` limit. */
+      attachments?: number; omittedAttachments?: number; at: number }
+  // A step stored a run artifact. Carries the reference only, never the bytes.
+  | { type: 'artifact-created'; runId: string; nodeId: string; nodeName: string;
+      artifact: { id: string; name: string; mimeType: string; sizeBytes: number };
+      at: number }
   // System One (TypeSafe Jev): one event per decision call, carrying the typed
   // answers so the canvas can label edges with probabilities and the trace can
   // explain WHY a branch was taken. Never carries the state that was evaluated.

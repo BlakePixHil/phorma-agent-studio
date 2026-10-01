@@ -35,3 +35,10 @@ export * from './sql-statement.js';
 export * from './egress.js';
 export * from './decisions.js';
 export * from './decision-batteries.js';
+export * from './variables.js';
+export * from './artifacts.js';
+// The heavy delivery modules (`pdf.ts`, `markdown-blocks.ts`,
+// `email-providers.ts`, `multipart.ts`) are deliberately NOT re-exported: the
+// engine loads them lazily, and a barrel re-export would pull them into every
+// host's initial bundle. Import them by path where a caller needs them.
+export * from './delivery-limits.js';

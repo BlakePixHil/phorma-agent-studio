@@ -122,6 +122,7 @@ import {
   notificationEndpoint,
   notificationTriggerFor,
   notificationWanted,
+  persistableJournalRow,
   resolveRunRetention,
   type GateKind,
   type NotifyTrigger,
@@ -134,6 +135,7 @@ import {
   ensureWorkflowStateTable,
   type DurableSqlExecutor,
 } from './workflow-state';
+import { DurableArtifactStore, ensureRunArtifactsTable } from './run-artifacts';
 
 import {
   CLOUDFLARE_CAPABILITIES,
@@ -155,6 +157,8 @@ import {
   performWebSearch,
   sanitizeToolName,
   startRun,
+  resolveWorkflowVariables,
+  encodeBase64,
   webSearchToolDefinition,
   withConnectionBaseUrl,
   createRunRecorder,
@@ -510,6 +514,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     // Deliberately separate from `runs`/`run_events`, so run-history pruning
     // and the run-retention limits never touch a workflow's state or fixtures.
     ensureWorkflowStateTable(this.stateSql);
+    // Run artifacts (document delivery): deleted with their run record.
+    ensureRunArtifactsTable(this.stateSql);
     this.sql`
       CREATE TABLE IF NOT EXISTS usage_ledger (
         run_id TEXT PRIMARY KEY,
@@ -561,6 +567,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
    */
   private fixtureHost(workflowId: string): DurableFixtureStore {
     return new DurableFixtureStore(this.workflowStateHost(), workflowId);
+  }
+
+  private artifactStore: DurableArtifactStore | null = null;
+
+  /**
+   * `RunOptions.artifacts`: run files in the DO's `run_artifacts` table,
+   * deleted with their run record by `pruneRunHistory()` and `purgeSelf()`.
+   */
+  private artifactHost(): DurableArtifactStore {
+    this.ensureTables();
+    this.artifactStore ??= new DurableArtifactStore(this.stateSql);
+    return this.artifactStore;
   }
 
   /**
@@ -946,6 +964,22 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       this.rememberGateActor('question', body.requestId, caller.userId);
       pending.resolve(typeof body.response === 'string' ? body.response : '');
       return json({ ok: true, delivered: true });
+    }
+
+    {
+      // GET /runs/{runId}/artifacts/{id} - one run file, as JSON carrying base64
+      // so the studio's JSON transport needs no binary path. Reads are open to
+      // every level, exactly like the run record that references the file.
+      const match =
+        request.method === 'GET' ? /\/runs\/([^/]+)\/artifacts\/([^/]+)$/.exec(path) : null;
+      if (match) {
+        const stored = await this.artifactHost().get(
+          decodeURIComponent(match[1]),
+          decodeURIComponent(match[2]),
+        );
+        if (!stored) return json({ error: 'File not found.' }, 404);
+        return json({ artifact: stored.ref, base64: encodeBase64(stored.bytes) });
+      }
     }
 
     {
@@ -1640,6 +1674,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     clear('run_journal', () => this.sql`DELETE FROM run_journal`);
     clear('runs', () => this.sql`DELETE FROM runs`);
     clear('run_events', () => this.sql`DELETE FROM run_events`);
+    clear('run_artifacts', () => this.sql`DELETE FROM run_artifacts`);
     clear('usage_ledger', () => this.sql`DELETE FROM usage_ledger`);
     clear('workflow_state', () => this.sql`DELETE FROM workflow_state`);
     clear('cf_agents_schedules', () => this.sql`DELETE FROM cf_agents_schedules`);
@@ -1853,9 +1888,18 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       lookup: key => journalCache.get(key),
       record: (key, entry) => {
         journalCache.set(key, entry);
+        const row = persistableJournalRow(entry);
+        if (row === null) {
+          // Too large for one SQLite value: keep it in memory so this run goes
+          // on, and drop any older row so a replay re-executes the node rather
+          // than reading a stale result.
+          console.warn(`Journal entry ${key} of run ${runId} is too large to persist; kept in memory only.`);
+          this.sql`DELETE FROM run_journal WHERE run_id = ${runId} AND key = ${key}`;
+          return;
+        }
         this.sql`
           INSERT OR REPLACE INTO run_journal (run_id, key, entry)
-          VALUES (${runId}, ${key}, ${JSON.stringify(entry)})
+          VALUES (${runId}, ${key}, ${row})
         `;
       },
     };
@@ -1918,6 +1962,8 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
       sql: this.sqlQueryHost(),
       state: this.workflowStateHost(),
       fixtures: this.fixtureHost(workflowId),
+      artifacts: this.artifactHost(),
+      variables: resolveWorkflowVariables(spec.settings),
       redact: value => redactor.scrub(value),
       capabilities: CLOUDFLARE_CAPABILITIES,
       // Batch workflows (ForEach) legitimately execute far more nodes than
@@ -2352,6 +2398,7 @@ export class WorkflowAgent extends Agent<Env, WorkflowAgentState> {
     }
     for (const runId of new Set(doomed.map(row => row.run_id))) {
       this.sql`DELETE FROM run_events WHERE run_id = ${runId}`;
+      this.sql`DELETE FROM run_artifacts WHERE run_id = ${runId}`;
       this.sql`DELETE FROM runs WHERE run_id = ${runId}`;
     }
   }

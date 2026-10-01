@@ -63,10 +63,21 @@ export class CapabilityFindingsService {
     });
   });
 
+  /**
+   * What the canvas and the properties panel validate: the active top-level
+   * graph plus its workflow settings. The settings carry the declared workflow
+   * variables, without which every `vars.x` reference reads as undefined and a
+   * url built from one reads as undeterminable.
+   */
+  readonly validationTarget = computed(() => ({
+    graph: this.workflow.graph(),
+    settings: this.workflow.activeDoc()?.settings,
+  }));
+
   /** Every capability finding for the active document's top-level graph. */
   readonly localFindings = computed<CapabilityFinding[]>(() =>
     validateAgainstCapabilities(
-      { graph: this.workflow.graph() },
+      this.validationTarget(),
       this.activeHostCapabilities(),
       this.connectionSummaries(),
     ),
@@ -106,7 +117,7 @@ export class CapabilityFindingsService {
     // only the deploy-specific delta belongs here.
     const localMessages = new Set(this.localFindings().map(finding => finding.message));
     return validateAgainstCapabilities(
-      { graph: this.workflow.graph() },
+      this.validationTarget(),
       capabilities,
       this.connectionSummaries(),
     )

@@ -22,7 +22,9 @@
 
 import type { ResolvedConnection } from './connections.js';
 import type { DataRequest } from './data-host.js';
-import { interpolatePayload, mergePayloads, resolveJsonPath } from './payload.js';
+import { interpolatePayload, mergePayloads, resolveJsonPath, type TemplateScope } from './payload.js';
+import { encodeBase64 } from './artifacts.js';
+import type { EncodedMultipart } from './multipart.js';
 import type { Redactor } from './redact.js';
 import type { HttpMethod, HttpRequestNodeData, PaginationConfig, WorkflowNode } from './types.js';
 
@@ -104,12 +106,14 @@ export function buildDataRequest(
   payload: string,
   conn?: ResolvedConnection,
   cursor?: CursorState,
+  options: BuildRequestOptions = {},
 ): DataRequest {
   const data = node.data as HttpRequestNodeData;
   const method = resolveMethod(data.method);
+  const scope: TemplateScope = { vars: options.vars };
 
   const headers: Record<string, string> = {};
-  const body = renderBody(data, payload, headers);
+  const body = renderBody(data, payload, headers, scope, options.multipart);
 
   // User headers land second so a template can set Content-Type or Accept, but
   // never Authorization: that name belongs to the connection alone.
@@ -117,25 +121,38 @@ export function buildDataRequest(
     const key = (entry?.key ?? '').trim();
     if (key.length === 0) continue;
     if (key.toLowerCase() === AUTHORIZATION.toLowerCase()) continue;
-    setHeader(headers, key, interpolatePayload(entry.value ?? '', payload));
+    setHeader(headers, key, interpolatePayload(entry.value ?? '', payload, scope));
   }
 
-  const idempotencyKey = interpolatePayload(data.idempotencyKey ?? '', payload).trim();
+  const idempotencyKey = interpolatePayload(data.idempotencyKey ?? '', payload, scope).trim();
   if (idempotencyKey.length > 0 && idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_CHARS) {
     setHeader(headers, 'Idempotency-Key', idempotencyKey);
   }
 
   const request: DataRequest = {
-    url: resolveUrl(data, payload, conn, cursor),
+    url: resolveUrl(data, payload, conn, cursor, scope),
     method,
     headers,
     ...(body === undefined ? {} : { body }),
+    ...(data.bodyMode === 'multipart' ? { bodyEncoding: 'base64' as const } : {}),
     timeoutMs: resolveTimeoutSec(data.timeoutSec) * 1000,
     maxResponseBytes: resolveMaxResponseBytes(data),
   };
 
   // Auth last: it wins over every user header and every user query entry.
   return applyConnectionAuth(request, conn);
+}
+
+/** Extra inputs for {@link buildDataRequest}. */
+export interface BuildRequestOptions {
+  /** Workflow-variable scope for `{{vars.x}}` tokens. */
+  vars?: Readonly<Record<string, unknown>>;
+  /**
+   * The encoded body for `bodyMode: 'multipart'`. The engine resolves artifact
+   * bytes (an async host read) and encodes the parts before calling this pure
+   * builder, which then only base64-wraps it.
+   */
+  multipart?: EncodedMultipart;
 }
 
 /** Applies the connection's auth mode to an already-constructed request. */
@@ -649,12 +666,13 @@ function resolveUrl(
   payload: string,
   conn: ResolvedConnection | undefined,
   cursor: CursorState | undefined,
+  scope: TemplateScope = {},
 ): string {
   if (cursor?.mode === 'link-header') {
     return assertHttpUrl(cursor.url.trim(), 'pagination next link');
   }
 
-  const rendered = interpolatePayload(data.url ?? '', payload).trim();
+  const rendered = interpolatePayload(data.url ?? '', payload, scope).trim();
   if (rendered.length === 0) {
     throw new Error('HTTP Request url is empty after interpolation.');
   }
@@ -677,7 +695,7 @@ function resolveUrl(
     absolute = joinUrl(assertHttpUrl(baseUrl, 'connection base url'), rendered);
   }
 
-  const entries = [...configuredQuery(data, payload), ...cursorQuery(cursor)];
+  const entries = [...configuredQuery(data, payload, scope), ...cursorQuery(cursor)];
   return appendQuery(absolute, entries);
 }
 
@@ -715,12 +733,16 @@ export function joinUrl(baseUrl: string, path: string): string {
   return `${trimmedBase}/${trimmedPath}`;
 }
 
-function configuredQuery(data: HttpRequestNodeData, payload: string): QueryEntry[] {
+function configuredQuery(
+  data: HttpRequestNodeData,
+  payload: string,
+  scope: TemplateScope = {},
+): QueryEntry[] {
   const entries: QueryEntry[] = [];
   for (const entry of data.query ?? []) {
     const key = (entry?.key ?? '').trim();
     if (key.length === 0) continue;
-    entries.push({ key, value: interpolatePayload(entry.value ?? '', payload) });
+    entries.push({ key, value: interpolatePayload(entry.value ?? '', payload, scope) });
   }
   return entries;
 }
@@ -798,11 +820,22 @@ function renderBody(
   data: HttpRequestNodeData,
   payload: string,
   headers: Record<string, string>,
+  scope: TemplateScope = {},
+  multipart?: EncodedMultipart,
 ): string | undefined {
   const mode = data.bodyMode ?? 'none';
   if (mode === 'none') return undefined;
 
-  const rendered = interpolatePayload(data.body ?? '', payload);
+  if (mode === 'multipart') {
+    if (!multipart) {
+      throw new Error('HTTP Request multipart body was not encoded before the request was built.');
+    }
+    // Binary-safe transport: the host decodes `bodyEncoding: 'base64'` to bytes.
+    setHeader(headers, 'Content-Type', multipart.contentType);
+    return encodeBase64(multipart.bytes);
+  }
+
+  const rendered = interpolatePayload(data.body ?? '', payload, scope);
   switch (mode) {
     case 'json':
       try {

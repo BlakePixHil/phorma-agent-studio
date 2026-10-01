@@ -56,6 +56,9 @@ export type WorkflowNodeKind =
   | 'state-get' // P1-8
   | 'state-set' // P1-8
   | 'notify' // P1-10
+  // ── Document delivery ─────────────────────────────────────────────────────
+  | 'render-document'
+  | 'state-list'
   // ── System One (TypeSafe Jev) ─────────────────────────────────────────────
   | 'decide';
 
@@ -73,6 +76,8 @@ export const DATA_NODE_KINDS: readonly WorkflowNodeKind[] = [
   'state-set',
   'notify',
   'decide',
+  'render-document',
+  'state-list',
 ] as const;
 
 /** Data nodes that reach outside the run (fixtures + egress declaration). */
@@ -382,6 +387,12 @@ export interface AgentNodeData {
   verify?: AgentVerifyConfig;
   /** System One tool/skill preselection (see {@link AgentPreselectConfig}). */
   preselect?: AgentPreselectConfig;
+  /**
+   * When set, the reply is MERGED into the incoming payload under this key
+   * (parsed as JSON when it parses, after stripping one code fence) instead of
+   * replacing the payload. Absent = the reply replaces the payload.
+   */
+  resultKey?: string;
 }
 
 // ── Phase 1 data nodes: shared vocabulary ────────────────────────────────────
@@ -423,9 +434,11 @@ export interface HttpRequestNodeData {
   query?: { key: string; value: PayloadTemplate }[];
   /** Non-secret headers only. Auth comes from the connection, never from here. */
   headers?: { key: string; value: PayloadTemplate }[];
-  bodyMode?: 'none' | 'json' | 'text' | 'form';
+  bodyMode?: 'none' | 'json' | 'text' | 'form' | 'multipart';
   /** Template rendered then (for `json`) parsed to validate before sending. */
   body?: PayloadTemplate;
+  /** `bodyMode: 'multipart'` only: text fields and file parts read from run artifacts. */
+  multipart?: MultipartBodyConfig;
   /** Extra codes treated as success. Default: 2xx. */
   successCodes?: number[];
   /** Dotted path selecting what lands in the outgoing payload. */
@@ -443,6 +456,17 @@ export interface HttpRequestNodeData {
   persistResponseBody?: boolean;
   fixtures?: FixtureMode;
   errorPortId?: string;
+}
+
+/** A `multipart/form-data` body (RFC 7578). */
+export interface MultipartBodyConfig {
+  /** Text parts. `value` is a payload template. */
+  fields?: { name: string; value: PayloadTemplate }[];
+  /**
+   * File parts. `artifact` is a dotted payload path to an artifact reference;
+   * `fileName` (a template) overrides the artifact's own name.
+   */
+  files?: { name: string; artifact: string; fileName?: PayloadTemplate }[];
 }
 
 /** P1-7: paginated fetch. The node loops until exhausted or `maxPages`. */
@@ -633,6 +657,56 @@ export interface NotifyNodeData {
   body?: PayloadTemplate;
   retry?: NodeRetryPolicy;
   errorPortId?: string;
+  // ── Email extensions (channel `email` only) ──
+  /** Sender. Falls back to the connection's `defaultFrom`. */
+  from?: PayloadTemplate;
+  replyTo?: PayloadTemplate;
+  /** Comma-separated copy recipients. */
+  cc?: PayloadTemplate;
+  /** How `body` is delivered. Absent = provider default (markdown). */
+  bodyFormat?: 'markdown' | 'html' | 'text';
+  /** Dotted payload paths, each resolving to an artifact reference or an array of them. */
+  attachments?: string[];
+  /** Over the attachment size cap: `fail` (default) or drop trailing attachments. */
+  attachmentLimit?: 'fail' | 'truncate';
+  /** Rendered key: claimed once under `idem:` and sent as `Idempotency-Key`. */
+  idempotencyKey?: PayloadTemplate;
+}
+
+// ── Document delivery ────────────────────────────────────────────────────────
+
+/** Page layout for `render-document`. Every field is optional and validated. */
+export interface DocumentLayout {
+  pageSize?: 'a4' | 'letter';
+  /** Margin on every side, millimetres (5-50, default 18). */
+  marginMm?: number;
+  /** Body text size in points (7-16, default 10.5). */
+  fontSize?: number;
+  /** Heading and link colour, `#rrggbb` (default `#1f4e79`). */
+  accentColor?: string;
+}
+
+export interface RenderDocumentNodeData {
+  /** Markdown template. `{{path}}` alone reads a payload path. */
+  markdown: PayloadTemplate;
+  /** File name template; sanitised and given the format's extension. */
+  fileName: PayloadTemplate;
+  /** Document title metadata template. */
+  title?: PayloadTemplate;
+  format?: 'pdf';
+  layout?: DocumentLayout;
+  /** Payload key the artifact reference merges under (default `document`). */
+  resultKey?: string;
+  errorPortId?: string;
+}
+
+export interface StateListNodeData {
+  /** Key prefix template, interpolated against the payload. */
+  prefix: PayloadTemplate;
+  /** Maximum entries (default 100, capped at `STATE_LIST_MAX_LIMIT`). */
+  limit?: number;
+  /** Payload key the list merges under (default `entries`). */
+  resultKey?: string;
 }
 
 // ── System One (TypeSafe Jev) decisions ──────────────────────────────────────
@@ -670,8 +744,12 @@ export interface RouterNodeData extends DecisionTuning {
   /**
    * `keyword` (default): the first route whose name appears in the payload.
    * `decide`: System One picks the route with a calibrated Choice.
+   * `expression`: `expression` is evaluated and the route whose name equals
+   * the result (trimmed, case-insensitive) is taken.
    */
-  mode?: 'keyword' | 'decide';
+  mode?: 'keyword' | 'decide' | 'expression';
+  /** Expression mode: evaluated against the payload; the result names a route. */
+  expression?: string;
   /** Decide mode: the routing question. Markdown. */
   instructions?: string;
   /** Decide mode: port base id -> what belongs on that route. */
@@ -817,6 +895,21 @@ export interface WorkflowSettings {
    * timeout. Paused time doesn't count. 0/absent = no limit.
    */
   timeoutMinutes?: number;
+  /**
+   * Named workflow values, read as `{{vars.name}}` in templates and prompts and
+   * `vars.name` in expressions. Never secrets: those belong in Connections.
+   */
+  variables?: WorkflowVariable[];
+}
+
+export type WorkflowVariableType = 'text' | 'markdown' | 'number' | 'boolean' | 'list';
+
+/** One named workflow value. A `list` holds strings. */
+export interface WorkflowVariable {
+  name: string;
+  type: WorkflowVariableType;
+  value: string | number | boolean | string[];
+  description?: string;
 }
 
 /**

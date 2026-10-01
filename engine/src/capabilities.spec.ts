@@ -31,6 +31,7 @@ const FEATURE_FLAGS = [
   'stdioMcp',
   'mcpOAuth',
   'decisions',
+  'artifacts',
 ] as const;
 
 const RECORDS: ReadonlyArray<readonly [string, HostCapabilities]> = [
@@ -138,6 +139,7 @@ describe('host capability records', () => {
       stdioMcp: false,
       mcpOAuth: false,
       decisions: true,
+      artifacts: true,
     });
   });
 

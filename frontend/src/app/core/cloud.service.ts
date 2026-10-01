@@ -4,7 +4,9 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   CLOUDFLARE_CAPABILITIES,
+  decodeBase64,
   validateAgainstCapabilities,
+  type ArtifactRef,
   type CapabilityFinding,
   type ConnectionSummary,
   type RunEvent,
@@ -1176,6 +1178,31 @@ export class CloudService {
     try {
       const result = await this.call<RunRecord | null>('run-detail', { workflowId, runId });
       return result.ok === true ? result.value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * One file a deployed run produced, or null when the target serves no run
+   * files (AWS today) or the read fails.
+   */
+  async fetchRunArtifact(
+    workflowId: string,
+    runId: string,
+    artifactId: string,
+  ): Promise<{ artifact: ArtifactRef; bytes: Uint8Array } | null> {
+    const base = this.instanceUrl(workflowId);
+    if (!base) return null;
+    try {
+      const result = await this.call<{ artifact?: ArtifactRef; base64?: string } | null>(
+        'run-artifact',
+        { workflowId, runId, artifactId },
+      );
+      if (result.ok !== true || !result.value?.artifact || typeof result.value.base64 !== 'string') {
+        return null;
+      }
+      return { artifact: result.value.artifact, bytes: decodeBase64(result.value.base64) };
     } catch {
       return null;
     }

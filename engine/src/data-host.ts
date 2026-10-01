@@ -56,6 +56,12 @@ export interface DataRequest {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /**
+   * How `body` is encoded. `base64` means the body is binary and the host
+   * MUST decode it to bytes before sending (multipart uploads). Absent or
+   * `utf8` means `body` is sent as UTF-8 text, exactly as before.
+   */
+  bodyEncoding?: 'utf8' | 'base64';
   timeoutMs?: number;
   /** Response byte cap. The host truncates and sets `truncated`. */
   maxResponseBytes?: number;
@@ -212,6 +218,47 @@ export interface FixtureStore {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Run artifacts (document delivery G2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a payload carries for a file a step produced. The bytes never travel
+ * through a payload, a prompt or a trace event: they stay in the host's
+ * {@link ArtifactStore} and are addressed by `id` within the run.
+ */
+export interface ArtifactRef {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+/** One stored artifact: its reference plus the bytes and provenance. */
+export interface StoredArtifact {
+  ref: ArtifactRef;
+  /** Producing node id (display and audit only). */
+  nodeId: string;
+  /** Epoch milliseconds. */
+  createdAt: number;
+  bytes: Uint8Array;
+}
+
+/**
+ * Run-scoped binary storage. A host keeps artifacts with the run record and
+ * deletes them when the record is deleted or pruned, so an artifact never
+ * outlives the history entry that references it.
+ *
+ * `put` with an existing `(runId, id)` REPLACES the stored artifact: a
+ * re-executed producer derives the same id and overwrites rather than adds.
+ */
+export interface ArtifactStore {
+  put(runId: string, artifact: StoredArtifact): Promise<void>;
+  get(runId: string, id: string): Promise<StoredArtifact | undefined>;
+  /** Every artifact reference of the run, in creation order. */
+  list(runId: string): Promise<ArtifactRef[]>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // P2-10, shared with Phase 1: declared host capability set
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -256,5 +303,10 @@ export interface HostCapabilities {
      * validation can say a Decide node cannot run here before it fails.
      */
     decisions: boolean;
+    /**
+     * The host supplies a run-scoped `ArtifactStore`, so `render-document`,
+     * email attachments and multipart uploads can run here.
+     */
+    artifacts: boolean;
   };
 }

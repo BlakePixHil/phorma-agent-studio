@@ -18,6 +18,8 @@ import {
   notificationEndpoint,
   notificationTriggerFor,
   notificationWanted,
+  persistableJournalRow,
+  JOURNAL_ROW_MAX_BYTES,
   resolveRunRetention,
   resolvedGateKey,
 } from '../src/run-wiring.ts';
@@ -298,6 +300,29 @@ console.log('\nGate attribution');
         node,
     );
   }
+}
+
+console.log('\nJournal rows that Durable Object SQLite can hold');
+{
+  // Durable Object SQLite refuses a string over 2 MB (measured: SQLITE_TOOBIG at
+  // 3.4 MB in workerd). One large API response must not fail a deployed run.
+  const small = { output: '{"ok":true}', viaPortIds: ['p-out'] };
+  const smallRow = persistableJournalRow(small);
+  check('a normal entry persists, verbatim', smallRow === JSON.stringify(small), String(smallRow));
+
+  const atLimit = { output: 'x'.repeat(JOURNAL_ROW_MAX_BYTES - JSON.stringify({ output: '' }).length) };
+  check('an entry of exactly the limit still persists', persistableJournalRow(atLimit) !== null);
+
+  const overLimit = { output: 'x'.repeat(JOURNAL_ROW_MAX_BYTES) };
+  check('an entry over the limit is not persisted', persistableJournalRow(overLimit) === null);
+
+  const feed = { output: 'x'.repeat(3_400_000) };
+  check('a 3.4 MB feed response is not persisted', persistableJournalRow(feed) === null);
+
+  // Bytes, not characters: 700k three-byte characters are 2.1 MB of UTF-8.
+  const wide = { output: '\u20ac'.repeat(700_000) };
+  check('the limit is measured in UTF-8 bytes', persistableJournalRow(wide) === null);
+  check('and leaves room under the 2 MB platform cap', JOURNAL_ROW_MAX_BYTES < 2_000_000);
 }
 
 console.log(failures === 0 ? '\nAll run-wiring checks passed.\n' : `\n${failures} check(s) failed.\n`);

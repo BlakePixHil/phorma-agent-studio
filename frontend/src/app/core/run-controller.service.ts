@@ -8,6 +8,7 @@ import {
   describeDecisionOutcome,
   type DecisionEdgeLabel,
   DEFAULT_MAX_RESPONSE_BYTES,
+  resolveWorkflowVariables,
   startRun,
   TAURI_DESKTOP_CAPABILITIES,
   validateAgainstCapabilities,
@@ -58,6 +59,7 @@ import { TelemetryService } from './telemetry.service';
 import { TerminalOutputService } from './terminal-output.service';
 import { ToolHostService } from './tool-host.service';
 import { WorkflowStateService } from './workflow-state.service';
+import { RunArtifactsService } from './run-artifacts.service';
 import { WorkflowService } from './workflow.service';
 import { BillingCtaService } from '../shared/billing/billing-cta.service';
 import { ToastService } from '../shared/toast/toast.service';
@@ -105,6 +107,8 @@ export interface TraceEntry {
   kind: 'tool-call' | 'tool-result' | 'event';
   /** Root-to-leaf Execute Workflow scope for nested trace grouping. */
   scope?: RunEvent['scope'];
+  /** A run file this entry announces (`artifact-created`), with its run id. */
+  artifact?: { id: string; name: string; mimeType: string; sizeBytes: number; runId: string };
 }
 
 /**
@@ -211,6 +215,7 @@ export class RunControllerService {
   private readonly dataFetch = inject(DataFetchService);
   private readonly sqlHost = inject(SqlHostService);
   private readonly workflowState = inject(WorkflowStateService);
+  private readonly runArtifacts = inject(RunArtifactsService);
   private readonly fixtureStore = inject(FixtureStoreService);
   // Safe DI direction: `DecisionTransportService` injects only Tauri, Settings,
   // PhormaCloud and ActiveOwner - the same set `ModelTransportService` already
@@ -433,7 +438,7 @@ export class RunControllerService {
     }
 
     const findings = validateAgainstCapabilities(
-      { graph, subWorkflows: portableSpec?.subWorkflows },
+      { graph, subWorkflows: portableSpec?.subWorkflows, settings: portableSpec?.settings },
       capabilities,
       connections,
     );
@@ -539,6 +544,10 @@ export class RunControllerService {
       fixtures: this.fixtureStore,
       redact: value => redactor.scrub(value),
       capabilities,
+      // Workflow variables (`vars.x`), resolved once per run from the spec.
+      variables: resolveWorkflowVariables(settings),
+      // Run artifacts live in IndexedDB beside the run record.
+      artifacts: this.runArtifacts,
       // Batch workflows (ForEach) legitimately execute far more nodes than
       // the default anti-runaway budget allows.
       maxExecutions:
@@ -895,7 +904,7 @@ export class RunControllerService {
           ? { ...event, usage: withEstimatedCost(event.usage, event.provider, event.model ?? '', this.pricing.estimator()) }
           : event;
       const desc = describeRunEvent(traced, id => this.nodeName(id), { formatCost: this.formatTraceCost });
-      if (desc) this.pushTrace(desc.icon, desc.label, desc.detail, desc.tone, desc.kind, event.scope);
+      if (desc) this.pushTrace(desc.icon, desc.label, desc.detail, desc.tone, desc.kind, event.scope, desc.artifact);
     }
 
     // Interior child events still contribute usage above, but their node ids
@@ -1363,12 +1372,23 @@ export class RunControllerService {
     tone: TraceEntry['tone'],
     kind: TraceEntry['kind'] = 'event',
     scope?: RunEvent['scope'],
+    artifact?: TraceEntry['artifact'],
   ): void {
     this.traceCounter += 1;
     this.trace.update(entries => {
       const next = [
         ...entries,
-        { id: this.traceCounter, at: Date.now(), icon, label, detail, tone, kind, scope },
+        {
+          id: this.traceCounter,
+          at: Date.now(),
+          icon,
+          label,
+          detail,
+          tone,
+          kind,
+          scope,
+          ...(artifact ? { artifact } : {}),
+        },
       ];
       return next.length > MAX_TRACE_ENTRIES ? next.slice(next.length - MAX_TRACE_ENTRIES) : next;
     });

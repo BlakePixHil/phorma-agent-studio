@@ -1,0 +1,38 @@
+[
+  {
+    "id": "a1b2c3d4-0000-4b60-b120-0000000000a1",
+    "text": "Integration Developer",
+    "createdAt": "__POSTED_1D_MS__",
+    "hostedUrl": "https://jobs.lever.co/example-lever-au/a1b2c3d4-0000-4b60-b120-0000000000a1",
+    "applyUrl": "https://jobs.lever.co/example-lever-au/a1b2c3d4-0000-4b60-b120-0000000000a1/apply",
+    "workplaceType": "hybrid",
+    "country": "AU",
+    "categories": {
+      "commitment": "Full-time",
+      "location": "Sydney",
+      "team": "Engineering",
+      "allLocations": ["Sydney", "Melbourne"]
+    },
+    "descriptionPlain": "Hybrid role open in our Sydney and Melbourne offices. Synthetic content.",
+    "lists": [],
+    "additionalPlain": ""
+  },
+  {
+    "id": "a1b2c3d4-0000-4b60-b120-0000000000a2",
+    "text": "Support Engineer",
+    "createdAt": "__POSTED_1D_MS__",
+    "hostedUrl": "https://jobs.lever.co/example-lever-au/a1b2c3d4-0000-4b60-b120-0000000000a2",
+    "applyUrl": "https://jobs.lever.co/example-lever-au/a1b2c3d4-0000-4b60-b120-0000000000a2/apply",
+    "workplaceType": "hybrid",
+    "country": "AU",
+    "categories": {
+      "commitment": "Full-time",
+      "location": "Brisbane",
+      "team": "Engineering",
+      "allLocations": ["Brisbane"]
+    },
+    "descriptionPlain": "Hybrid in Brisbane only: neither local to Melbourne nor remote. Synthetic content.",
+    "lists": [],
+    "additionalPlain": ""
+  }
+]

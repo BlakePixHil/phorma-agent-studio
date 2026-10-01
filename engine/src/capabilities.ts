@@ -14,16 +14,27 @@
 import { workerSecretName, type ConnectionSummary, type ConnectionType } from './connections.js';
 import type { HostCapabilities } from './data-host.js';
 import { DECISION_API_HOST, nodeUsesDecisions } from './decisions.js';
+import { EMAIL_PROVIDER_IDS, describeLayoutIssues } from './delivery-limits.js';
 import { validateExpression } from './expr.js';
+import { interpolatePayload } from './payload.js';
+import { reservedStateNamespaceOf, STATE_LIST_MAX_LIMIT } from './state.js';
 import type {
   EmbeddedWorkflow,
   SqlDriver,
   WorkflowGraph,
   WorkflowNode,
   WorkflowNodeKind,
+  WorkflowSettings,
   WorkflowSpec,
 } from './types.js';
 import { DATA_IO_KINDS, portBaseId, rejectsToolLink } from './types.js';
+import {
+  expressionVariableReferences,
+  resolveWorkflowVariables,
+  templateVariableReferences,
+  validateWorkflowVariables,
+  type VariableScope,
+} from './variables.js';
 
 /**
  * Every node kind the engine understands, in `WorkflowNodeKind` declaration
@@ -58,6 +69,9 @@ export const ALL_NODE_KINDS = [
   'state-get',
   'state-set',
   'notify',
+  // ── Document delivery ──────────────────────────────────────────────────────────
+  'render-document',
+  'state-list',
   // ── System One ─────────────────────────────────────────────────────────────────
   'decide',
 ] as const satisfies readonly WorkflowNodeKind[];
@@ -102,6 +116,7 @@ export const TAURI_DESKTOP_CAPABILITIES: HostCapabilities = {
     stdioMcp: true,
     mcpOAuth: true,
     decisions: true,
+    artifacts: true,
   },
 };
 
@@ -125,6 +140,7 @@ export const BROWSER_CAPABILITIES: HostCapabilities = {
     stdioMcp: false,
     mcpOAuth: true,
     decisions: true,
+    artifacts: true,
   },
 };
 
@@ -154,6 +170,7 @@ export const CLOUDFLARE_CAPABILITIES: HostCapabilities = {
     stdioMcp: false,
     mcpOAuth: false,
     decisions: true,
+    artifacts: true,
   },
 };
 
@@ -178,6 +195,7 @@ export const AWS_CAPABILITIES: HostCapabilities = {
     // An OAuth session never leaves the device that signed in.
     mcpOAuth: false,
     decisions: true,
+    artifacts: true,
   },
 };
 
@@ -225,7 +243,10 @@ export interface CapabilityFinding {
  * graph plus the flat embedded registry. Structurally satisfied by
  * `WorkflowSpec`, so callers can pass one straight through.
  */
-export type CapabilityValidationTarget = Pick<WorkflowSpec, 'graph' | 'subWorkflows'>;
+export type CapabilityValidationTarget = Pick<WorkflowSpec, 'graph' | 'subWorkflows'> & {
+  /** Read for workflow variables only; optional so a bare graph still validates. */
+  settings?: Pick<WorkflowSettings, 'variables'>;
+};
 
 /**
  * The full result of one capability walk: the findings, plus the declared
@@ -308,6 +329,8 @@ interface GraphScope {
   graph: WorkflowGraph;
   subWorkflowId?: string;
   subWorkflowName?: string;
+  /** The scope's declared variables, unvalidated. */
+  variables?: unknown;
 }
 
 /**
@@ -320,7 +343,7 @@ function graphScopes(spec: CapabilityValidationTarget, findings: CapabilityFindi
   const topLevel = readRecord(spec)?.['graph'];
 
   if (isGraph(topLevel)) {
-    scopes.push({ graph: topLevel });
+    scopes.push({ graph: topLevel, variables: readRecord(readRecord(spec)?.['settings'])?.['variables'] });
   } else {
     findings.push({ severity: 'error', message: 'The workflow graph could not be read.' });
   }
@@ -330,7 +353,12 @@ function graphScopes(spec: CapabilityValidationTarget, findings: CapabilityFindi
     const embedded = readRecord(registry?.[key]) as Partial<EmbeddedWorkflow> | undefined;
     const name = typeof embedded?.name === 'string' ? embedded.name : undefined;
     if (isGraph(embedded?.graph)) {
-      scopes.push({ graph: embedded.graph, subWorkflowId: key, subWorkflowName: name });
+      scopes.push({
+        graph: embedded.graph,
+        subWorkflowId: key,
+        subWorkflowName: name,
+        variables: readRecord(embedded.settings)?.['variables'],
+      });
       continue;
     }
     findings.push({
@@ -353,6 +381,21 @@ function validateGraph(
   egress: Set<string>,
 ): void {
   const toolLinked = toolLinkedNodeIds(scope.graph);
+
+  // Workflow variables: every declaration problem is a scope-level finding, and
+  // the resolved scope lets the reference and egress rules see real values.
+  for (const issue of validateWorkflowVariables(scope.variables)) {
+    findings.push(finding(scope, undefined, issue.message));
+  }
+  const variables: VariableScope = resolveWorkflowVariables(
+    Array.isArray(scope.variables) ? { variables: scope.variables as WorkflowSettings['variables'] } : undefined,
+  );
+  const declaredVariables = new Set(
+    (Array.isArray(scope.variables) ? scope.variables : [])
+      .map((entry) => readRecord(entry)?.['name'])
+      .filter((name): name is string => typeof name === 'string')
+      .map((name) => name.trim()),
+  );
 
   for (const raw of scope.graph.nodes) {
     const node = readRecord(raw) as WorkflowNode | undefined;
@@ -447,9 +490,29 @@ function validateGraph(
       }
     }
 
+    // Rule 4b: every `vars.x` / `{{vars.x}}` reference names a declared variable.
+    if (data) {
+      const referenced = new Set<string>();
+      for (const text of stringsIn(data, 0)) {
+        for (const name of templateVariableReferences(text)) referenced.add(name);
+      }
+      for (const expression of expressionsOf(node.kind, data)) {
+        if (typeof expression.source !== 'string') continue;
+        for (const name of expressionVariableReferences(expression.source)) referenced.add(name);
+      }
+      for (const name of referenced) {
+        if (!declaredVariables.has(name)) {
+          report(`${label(node)} references workflow variable "${name}", which is not defined.`);
+        }
+      }
+    }
+
+    // Rule 4c: document delivery primitives.
+    if (data) validateDeliveryNode(node, data, summary, capabilities, report);
+
     // Rule 5: collect declared egress, warning about a url we cannot resolve.
     if (data && (DATA_IO_KINDS as readonly string[]).includes(node.kind)) {
-      collectNodeEgress(label(node), node.kind, data, summary, egress, report);
+      collectNodeEgress(label(node), node.kind, data, summary, egress, report, variables);
     }
     // Every System One step reaches the one fixed decision endpoint.
     if (data && nodeUsesDecisions(node)) egress.add(DECISION_API_HOST);
@@ -467,6 +530,148 @@ function validateGraph(
 
 /** Reporter bound to one node, so each rule reads as a single statement. */
 type Report = (message: string, severity?: 'error' | 'warning') => void;
+
+/** True for a string with visible content. */
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** Every string reachable in node data, depth-capped like the redaction walk. */
+function stringsIn(value: unknown, depth: number): string[] {
+  if (typeof value === 'string') return [value];
+  if (depth >= 32 || value === null || typeof value !== 'object') return [];
+  const values = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+  return values.flatMap((item) => stringsIn(item, depth + 1));
+}
+
+/**
+ * `{{vars.x}}` tokens rendered against the declared variables; every other
+ * token is left exactly as written.
+ */
+function renderVariablesOnly(text: string, variables: VariableScope): string {
+  return text.replace(/\{\{\s*vars\.[\w$.-]+\s*\}\}/g, (token) =>
+    interpolatePayload(token, '', { vars: variables }),
+  );
+}
+
+/** Body formats a notify step may declare. */
+const NOTIFY_BODY_FORMATS: readonly string[] = ['markdown', 'html', 'text'];
+
+/**
+ * Rule 4c: the document-delivery primitives (render-document, notify email
+ * extensions, multipart http-request, state-list). Each needs run artifact
+ * storage where it reads or writes a file, so a host without it is told at
+ * design time rather than when the step fails.
+ */
+function validateDeliveryNode(
+  node: WorkflowNode,
+  data: Readonly<Record<string, unknown>>,
+  summary: ConnectionSummary | undefined,
+  capabilities: HostCapabilities,
+  report: Report,
+): void {
+  const nodeLabel = `${label(node)} (${node.kind})`;
+  const needsArtifacts = (what: string): void => {
+    if (capabilities.features.artifacts) return;
+    report(`${nodeLabel} ${what}, which needs run artifact storage that ${capabilities.label} does not provide.`);
+  };
+
+  switch (node.kind) {
+    case 'render-document': {
+      needsArtifacts('produces a file');
+      if (!nonEmptyString(data['markdown'])) report(`${nodeLabel} has no markdown to render.`);
+      if (!nonEmptyString(data['fileName'])) report(`${nodeLabel} has no file name.`);
+      if (data['format'] !== undefined && data['format'] !== 'pdf') {
+        report(`${nodeLabel} declares format "${String(data['format'])}"; only pdf is supported.`);
+      }
+      for (const issue of describeLayoutIssues(data['layout'])) report(`${nodeLabel}: ${issue}`);
+      return;
+    }
+
+    case 'notify': {
+      const attachments = data['attachments'];
+      if (attachments !== undefined && !Array.isArray(attachments)) {
+        report(`${nodeLabel} declares attachments that are not a list of payload paths.`);
+      }
+      const attaching = Array.isArray(attachments) && attachments.some(nonEmptyString);
+      if (attaching) {
+        if (data['channel'] !== 'email') {
+          report(`${nodeLabel} declares attachments, which only the email channel can deliver.`);
+        }
+        needsArtifacts('attaches files');
+      }
+      const format = data['bodyFormat'];
+      if (format !== undefined && !NOTIFY_BODY_FORMATS.includes(format as string)) {
+        report(`${nodeLabel} declares body format "${String(format)}"; use markdown, html or text.`);
+      }
+      const limit = data['attachmentLimit'];
+      if (limit !== undefined && limit !== 'fail' && limit !== 'truncate') {
+        report(`${nodeLabel} declares attachment limit "${String(limit)}"; use fail or truncate.`);
+      }
+      const provider = readRecord(summary?.config)?.['emailProvider'];
+      if (
+        data['channel'] === 'email' &&
+        nonEmptyString(provider) &&
+        !(EMAIL_PROVIDER_IDS as readonly string[]).includes(provider.trim())
+      ) {
+        report(
+          `Connection "${summary?.name ?? ''}" names email provider "${provider.trim()}", ` +
+            `which is not one of ${EMAIL_PROVIDER_IDS.join(', ')}.`,
+        );
+      }
+      return;
+    }
+
+    case 'http-request': {
+      if (data['bodyMode'] !== 'multipart') return;
+      const config = readRecord(data['multipart']);
+      const files = Array.isArray(config?.['files']) ? (config['files'] as unknown[]) : [];
+      const fields = Array.isArray(config?.['fields']) ? (config['fields'] as unknown[]) : [];
+      if (files.length + fields.length === 0) report(`${nodeLabel} sends a multipart body with no parts.`);
+      const method = typeof data['method'] === 'string' ? data['method'].toUpperCase() : 'GET';
+      if (method === 'GET' || method === 'HEAD') {
+        report(`${nodeLabel} cannot send a multipart body with ${method}; use POST or PUT.`);
+      }
+      files.forEach((raw, index) => {
+        const file = readRecord(raw);
+        if (!nonEmptyString(file?.['name']) || !nonEmptyString(file?.['artifact'])) {
+          report(`${nodeLabel} file part #${index + 1} needs a part name and an artifact payload path.`);
+        }
+      });
+      fields.forEach((raw, index) => {
+        if (!nonEmptyString(readRecord(raw)?.['name'])) {
+          report(`${nodeLabel} field part #${index + 1} has no name.`);
+        }
+      });
+      if (files.length > 0) needsArtifacts('uploads files');
+      return;
+    }
+
+    case 'state-list': {
+      const prefix = data['prefix'];
+      if (!nonEmptyString(prefix)) {
+        report(`${nodeLabel} has no key prefix. Set one such as "open:".`);
+      } else {
+        const reserved = reservedStateNamespaceOf(prefix.trim());
+        if (reserved) {
+          report(`${nodeLabel} lists the reserved "${reserved}" namespace, which is never returned.`);
+        }
+      }
+      const limit = data['limit'];
+      if (
+        limit !== undefined &&
+        (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > STATE_LIST_MAX_LIMIT)
+      ) {
+        report(`${nodeLabel} limit must be a whole number from 1 to ${STATE_LIST_MAX_LIMIT}.`);
+      }
+      return;
+    }
+
+    default:
+      return;
+  }
+}
+
 
 /**
  * Rule 3: a referenced connection must exist in the inventory, be of a type the
@@ -639,6 +844,11 @@ function expressionsOf(kind: string, data: Readonly<Record<string, unknown>>): E
     case 'state-set':
       refs.push({ label: 'the value expression', source: data['valueExpression'] });
       break;
+    case 'router':
+      if (data['mode'] === 'expression') {
+        refs.push({ label: 'the route expression', source: data['expression'] });
+      }
+      break;
     case 'sql-query': {
       const params = Array.isArray(data['params']) ? data['params'] : [];
       params.forEach((raw, index) => {
@@ -683,6 +893,7 @@ function collectNodeEgress(
   summary: ConnectionSummary | undefined,
   egress: Set<string>,
   report: Report,
+  variables: VariableScope = {},
 ): void {
   if (kind === 'sql-query') {
     const config = readRecord(summary?.config);
@@ -694,7 +905,10 @@ function collectNodeEgress(
 
   if (kind !== 'http-request') return;
 
-  const url = typeof data['url'] === 'string' ? data['url'].trim() : '';
+  // Workflow variables are design-time constants, so a url built from them is
+  // as knowable as a literal one. Payload tokens stay unresolved.
+  const rawUrl = typeof data['url'] === 'string' ? data['url'].trim() : '';
+  const url = rawUrl.includes('{{') ? renderVariablesOnly(rawUrl, variables) : rawUrl;
   const baseUrl = firstString(readRecord(summary?.config)?.['baseUrl']) ?? '';
   const candidate = ABSOLUTE_URL.test(url) ? url : baseUrl;
   const host = staticHost(candidate);
@@ -722,13 +936,17 @@ const ABSOLUTE_URL = /^[a-z][a-z0-9+.\-]*:\/\//i;
 function staticHost(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.includes('{{')) return undefined;
+  if (trimmed.length === 0) return undefined;
 
   const match = ABSOLUTE_URL.test(trimmed)
     ? /^[a-z][a-z0-9+.\-]*:\/\/([^/?#]*)/i.exec(trimmed)
     : /^([^/?#\s]+)$/.exec(trimmed);
   const authority = match?.[1];
-  if (!authority) return undefined;
+  // A template anywhere in the scheme or authority makes the host unknowable;
+  // one in the path or query (`/boards/{{slug}}/items`) does not.
+  if (!authority || authority.includes('{{')) {
+    return undefined;
+  }
 
   const afterUserInfo = authority.slice(authority.lastIndexOf('@') + 1);
   const host = afterUserInfo.startsWith('[')

@@ -27,11 +27,14 @@
  */
 
 import type {
+  ArtifactRef,
+  ArtifactStore,
   JournalEntry,
   RunEvent,
   RunRecord,
   RunRecordSummary,
   StateEntry,
+  StoredArtifact,
   UsageLedgerEntry,
   WorkflowSpec,
   WorkflowStateStore,
@@ -59,6 +62,8 @@ import {
   eventSk,
   usageSk,
   stateSk,
+  artifactSk,
+  artifactPartSk,
   gsi1pk,
   gsi1sk,
   gsi2pk,
@@ -78,7 +83,7 @@ import {
 import { encodeJournalEntry, decodeJournalEntry } from '../core/journal-codec.js';
 import { utf8ByteLength } from '../core/events.js';
 
-import { resolveStateTtlSec } from '@phorma/engine';
+import { resolveStateTtlSec, decodeBase64, encodeBase64 } from '@phorma/engine';
 
 import type { Item, ItemKey, UpdateItemRequest } from '../core/table-ops.js';
 import type { DocumentTableClient } from './ports.js';
@@ -93,6 +98,13 @@ const HISTORY_PAGE_SIZE = 100;
 
 /** Events and usage page size (1000 per page). */
 const LIST_PAGE_SIZE = 1000;
+
+/**
+ * Base64 characters per artifact part item. DynamoDB caps an item at 400 KB;
+ * 300,000 characters leaves room for the keys and the lease fence attributes.
+ * The engine caps one artifact at 1 MiB, so an artifact is at most 5 parts.
+ */
+const ARTIFACT_PART_CHARS = 300_000;
 
 /** State value byte cap (Req 5.5: 32,768 UTF-8 bytes). */
 const STATE_VALUE_BYTE_CAP = 32_768;
@@ -658,6 +670,18 @@ export class RunTableAdapter implements SpecStore, JournalStore, RunHistoryStore
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // 7. ArtifactStore (document delivery G2)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create the engine's run-scoped ArtifactStore for a workflow. Items live
+   * under `artifact#{runId}#` beside the run record and are removed by purge.
+   */
+  createArtifactStore(workflowId: string): ArtifactStore {
+    return new RunTableArtifactStore(this.gateway, workflowId);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Purge (Req 4.9, 4.10)
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -674,6 +698,7 @@ export class RunTableAdapter implements SpecStore, JournalStore, RunHistoryStore
       events: 0,
       usage: 0,
       state: 0,
+      artifacts: 0,
       lease: 0,
       failed: [],
     };
@@ -760,6 +785,7 @@ const PURGE_CATEGORIES = [
   { name: 'events', prefix: 'event#' },
   { name: 'usage', prefix: 'usage#' },
   { name: 'state', prefix: 'state#' },
+  { name: 'artifacts', prefix: 'artifact#' },
 ] as const satisfies readonly { name: keyof PurgeCounts; prefix: string }[];
 
 /** A continuation token is the reported `LastEvaluatedKey`, verbatim. */
@@ -912,6 +938,122 @@ class RunTableStateStore implements WorkflowStateStore {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ArtifactStore implementation (document delivery G2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Implements the engine's ArtifactStore against Run_Table.
+ *
+ * One artifact is a HEADER item (`artifact#{runId}#{id}`) carrying the
+ * reference, provenance and part count, plus 1-5 PART items holding the base64
+ * bytes in 300,000-character slices, because DynamoDB caps an item at 400 KB.
+ * Parts are written BEFORE the header, so an interrupted write reads as absent
+ * rather than as a truncated file. Every write goes through the gateway, so it is
+ * fenced while the run holds the lease. Only `Query` on the partition is used.
+ */
+class RunTableArtifactStore implements ArtifactStore {
+  constructor(
+    private readonly gateway: RunTableGateway,
+    private readonly workflowId: string,
+  ) {}
+
+  async put(runId: string, artifact: StoredArtifact): Promise<void> {
+    const { ref } = artifact;
+    const headerKey = { pk: pk(this.workflowId), sk: artifactSk(runId, ref.id) };
+    const previous = await this.gateway.get(headerKey);
+    const previousParts = typeof previous?.['parts'] === 'number' ? previous['parts'] : 0;
+
+    const encoded = encodeBase64(artifact.bytes);
+    const parts = Math.max(1, Math.ceil(encoded.length / ARTIFACT_PART_CHARS));
+    for (let part = 0; part < parts; part += 1) {
+      await this.gateway.put(
+        this.workflowId,
+        { pk: pk(this.workflowId), sk: artifactPartSk(runId, ref.id, part) },
+        {
+          kind: 'artifact-part',
+          runId,
+          data: encoded.slice(part * ARTIFACT_PART_CHARS, (part + 1) * ARTIFACT_PART_CHARS),
+        },
+      );
+    }
+
+    await this.gateway.put(this.workflowId, headerKey, {
+      kind: 'artifact',
+      runId,
+      id: ref.id,
+      name: ref.name,
+      mimeType: ref.mimeType,
+      sizeBytes: ref.sizeBytes,
+      nodeId: artifact.nodeId,
+      createdAt: artifact.createdAt,
+      parts,
+    });
+
+    // A replacement with fewer parts leaves the old tail unreachable; remove it.
+    if (previousParts > parts) {
+      const stale = [];
+      for (let part = parts; part < previousParts; part += 1) {
+        stale.push({ pk: pk(this.workflowId), sk: artifactPartSk(runId, ref.id, part) });
+      }
+      await this.gateway.deleteKeys(this.workflowId, stale);
+    }
+  }
+
+  async get(runId: string, id: string): Promise<StoredArtifact | undefined> {
+    const header = await this.gateway.get({ pk: pk(this.workflowId), sk: artifactSk(runId, id) });
+    if (!header || header['kind'] !== 'artifact') return undefined;
+    const parts = Number(header['parts']);
+    let encoded = '';
+    for (let part = 0; part < parts; part += 1) {
+      const item = await this.gateway.get({
+        pk: pk(this.workflowId),
+        sk: artifactPartSk(runId, id, part),
+      });
+      // A missing part means the bytes are not whole: report absent, never truncated.
+      if (!item || typeof item['data'] !== 'string') return undefined;
+      encoded += item['data'];
+    }
+    return {
+      ref: refOfHeader(header),
+      nodeId: String(header['nodeId'] ?? ''),
+      createdAt: Number(header['createdAt'] ?? 0),
+      bytes: decodeBase64(encoded),
+    };
+  }
+
+  async list(runId: string): Promise<ArtifactRef[]> {
+    const headers: Item[] = [];
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const page = await this.gateway.queryPartition(pk(this.workflowId), {
+        skPrefix: `artifact#${runId}#`,
+        pageSize: LIST_PAGE_SIZE,
+        ...(startKey !== undefined ? { startKey } : {}),
+      });
+      for (const item of page.items) if (item['kind'] === 'artifact') headers.push(item);
+      startKey = page.lastKey;
+    } while (startKey);
+
+    return headers
+      .sort(
+        (a, b) =>
+          Number(a['createdAt'] ?? 0) - Number(b['createdAt'] ?? 0) ||
+          String(a['id']).localeCompare(String(b['id'])),
+      )
+      .map(refOfHeader);
+  }
+}
+
+function refOfHeader(item: Item): ArtifactRef {
+  return {
+    id: String(item['id']),
+    name: String(item['name']),
+    mimeType: String(item['mimeType']),
+    sizeBytes: Number(item['sizeBytes']),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -922,6 +1064,7 @@ export interface PurgeCounts {
   events: number;
   usage: number;
   state: number;
+  artifacts: number;
   lease: number;
   failed: string[];
 }

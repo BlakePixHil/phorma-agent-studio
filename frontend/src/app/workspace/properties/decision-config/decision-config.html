@@ -106,6 +106,35 @@
         Route names are the options System One picks from. Narrowing the input to the relevant
         field makes decisions more accurate. Probabilities appear on the canvas while it runs.
       </p>
+    } @else if (data.mode === 'expression') {
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('router-expression')">Route expression</label>
+      <input
+        pInputText
+        pSize="small"
+        [id]="id('router-expression')"
+        type="text"
+        class="phorma-dc__input phorma-dc__input--mono"
+        [value]="data.expression ?? ''"
+        (input)="patch({ expression: value($event) })"
+        placeholder="$.priority == 'high' ? 'Escalate' : 'Queue'"
+      />
+      <label class="phorma-dc__label phorma-dc__label--gap" [for]="id('router-otherwise')">When nothing matches</label>
+      <p-select
+        [inputId]="id('router-otherwise')"
+        class="phorma-dc__full"
+        [options]="otherwiseOptions()"
+        optionLabel="label"
+        optionValue="id"
+        [ngModel]="data.unsurePortId ?? ''"
+        (ngModelChange)="patch({ unsurePortId: $event || undefined })"
+        appendTo="body"
+        size="small">
+        <ng-template #dropdownicon><i class="ti ti-chevron-down"></i></ng-template>
+      </p-select>
+      <p class="phorma-dc__hint">
+        The expression's result names a route (matched without regard to case). Deterministic:
+        the same input always takes the same route.
+      </p>
     } @else {
       <p class="phorma-dc__hint">
         Takes the first route whose name appears in the input. Switch to System One to route on

@@ -181,6 +181,14 @@ function nodeData(entry: NodePlan, inventory: number): Record<string, unknown> {
       data['key'] = 'items/{{id}}';
       if (source !== 'none') data['valueExpression'] = source;
       break;
+    case 'render-document':
+      // Well-formed by construction: the document rules have their own specs.
+      data['markdown'] = '# {{title}}';
+      data['fileName'] = 'report';
+      break;
+    case 'state-list':
+      data['prefix'] = 'items/';
+      break;
     default:
       break;
   }

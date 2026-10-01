@@ -159,6 +159,8 @@ export interface PurgeCounts {
   events: number;
   usage: number;
   state: number;
+  /** Run artifact items (headers plus byte parts). Optional: older adapters report none. */
+  artifacts?: number;
   lease: number;
   schedules?: number;
   failedCategories?: string[];
@@ -199,6 +201,7 @@ export async function handleSpecPush(
   const target: CapabilityValidationTarget = {
     graph: spec.graph,
     subWorkflows: spec.subWorkflows,
+    settings: spec.settings,
   };
 
   const findings = validateAgainstCapabilities(target, AWS_CAPABILITIES, inventory);

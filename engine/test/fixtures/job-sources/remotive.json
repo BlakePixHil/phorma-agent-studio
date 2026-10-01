@@ -1,0 +1,36 @@
+{
+  "00-warning": "Remotive main domain moved to remotive.com ! Please make your API calls on remotive.com/api/remote-jobs instead of remotive.io now ;)",
+  "0-legal-notice": "Recorded shape of GET https://remotive.com/api/remote-jobs?category=software-dev (2026-10-01). Synthetic content. Link back to Remotive and name it as the source.",
+  "job-count": 2,
+  "total-job-count": 2,
+  "jobs": [
+    {
+      "id": 3100001,
+      "url": "https://remotive.com/remote-jobs/software-dev/senior-backend-engineer-3100001",
+      "title": "Senior Backend Engineer",
+      "company_name": "Acme Widgets Ltd",
+      "company_logo": "https://remotive.com/job/3100001/logo",
+      "category": "Software Development",
+      "tags": ["typescript", "postgresql", "node.js"],
+      "job_type": "full_time",
+      "publication_date": "__POSTED_1D__",
+      "candidate_required_location": "Worldwide",
+      "salary": "",
+      "description": "<p>Acme Widgets builds order tooling for small shops.</p><ul><li>TypeScript and Node.js services</li><li>PostgreSQL</li></ul><p>To apply, send your resume and a short note to <a href=\"mailto:careers@acme-widgets.example\">careers@acme-widgets.example</a>.</p>"
+    },
+    {
+      "id": 3100002,
+      "url": "https://remotive.com/remote-jobs/software-dev/frontend-engineer-3100002",
+      "title": "Frontend Engineer",
+      "company_name": "Stale Postings Inc",
+      "company_logo": "https://remotive.com/job/3100002/logo",
+      "category": "Software Development",
+      "tags": ["react"],
+      "job_type": "full_time",
+      "publication_date": "__POSTED_20D__",
+      "candidate_required_location": "Worldwide",
+      "salary": "",
+      "description": "<p>An old posting that the age filter drops.</p>"
+    }
+  ]
+}

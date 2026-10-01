@@ -31,8 +31,9 @@ const QUESTION_TYPES: { id: QuestionType; label: string }[] = [
   { id: 'score', label: 'Score' },
 ];
 
-const ROUTER_MODES: { id: 'keyword' | 'decide'; label: string }[] = [
+const ROUTER_MODES: { id: 'keyword' | 'decide' | 'expression'; label: string }[] = [
   { id: 'keyword', label: 'Keyword match' },
+  { id: 'expression', label: 'Expression' },
   { id: 'decide', label: 'System One decides' },
 ];
 
@@ -107,7 +108,15 @@ export class DecisionConfig {
     return unsure ? (this.node().ports.find(port => port.id === unsure) ?? null) : null;
   });
 
-  protected setRouterMode(mode: 'keyword' | 'decide'): void {
+  /** Expression mode: the fallback choices, every route plus "fail the step". */
+  protected readonly otherwiseOptions = computed(() => [
+    { id: '', label: 'Fail the step' },
+    ...this.node()
+      .ports.filter(port => port.role === 'message-out')
+      .map(port => ({ id: port.id, label: `Take "${port.name || 'Unnamed route'}"` })),
+  ]);
+
+  protected setRouterMode(mode: 'keyword' | 'decide' | 'expression'): void {
     this.patch({ mode });
   }
 

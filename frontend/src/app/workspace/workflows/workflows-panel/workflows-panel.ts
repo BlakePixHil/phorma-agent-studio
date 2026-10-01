@@ -168,8 +168,8 @@ export class WorkflowsPanel {
   }
 
   /** Opens a template as a fresh unsaved workflow tab. */
-  protected openTemplate(template: WorkflowTemplate): void {
-    this.workflow.importSpec(template.build());
+  protected async openTemplate(template: WorkflowTemplate): Promise<void> {
+    this.workflow.importSpec(await template.build());
   }
 
   protected async rename(event: Event, spec: WorkflowSpec): Promise<void> {

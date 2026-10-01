@@ -19,7 +19,24 @@ prevent, so host-specific behaviour belongs in the injected transports, never in
 - Everything the host provides arrives through `RunOptions`: `ModelClient`, `ToolHost`,
   `connections`, `dataFetch`, `sql`, `state`, `fixtures`, `redact`, `capabilities`, `journal`,
   `requestApproval`, `waitForEvent`, `defaultModel`, `maxToolRounds`, `maxExecutions`,
-  `decisions` (System One `DecisionClient`), `decisionModel`.
+  `decisions` (System One `DecisionClient`), `decisionModel`, `artifacts` (`ArtifactStore`, run
+  files), `variables` (the top-level workflow's resolved `vars` scope).
+- Workflow variables (`variables.ts`): `WorkflowSettings.variables` is resolved once per frame by
+  `resolveWorkflowVariables`; a child frame resolves its own sub-workflow's settings. `vars.x` in an
+  expression and `{{vars.x}}` in a template read the VARIABLES, never the payload, so no record can
+  shadow a flag like `dryRun`. Variables are configuration, not credentials: a credential-shaped name
+  or value is refused, and the author is pointed at Connections. The capability validator needs the
+  spec's `settings` to see them - validating `{ graph }` alone reports every reference as undefined.
+- Document delivery: a step writes a file through `RunOptions.artifacts` and the payload carries only
+  an `ArtifactRef` (`{id, name, mimeType, sizeBytes}`); bytes never travel through a payload, prompt
+  or trace event. Caps 1 MiB per artifact, 16 MiB and 200 per run; the id is derived from the run and
+  the execution key, so a replayed producer overwrites rather than adds. `render-document` (PDF),
+  notify email attachments, multipart `http-request` bodies and `state-list` consume it. A host
+  stores artifacts with the run record and deletes them with it.
+- Idempotent writes (`notify.idempotencyKey`, `http-request.idempotencyKey`) go through
+  `claimWrite`; a claim is RELEASED (`releaseIdempotent`) only on provable non-delivery - a
+  transport error with `requestNeverSent`, or a 4xx other than 408/409/425 - so a refused send can
+  be retried next run while an ambiguous one is never sent twice.
 - System One: every call goes through `Engine.evaluateDecision` (validation, purpose-scoped
   fixtures, the shared retry loop, one `node-usage` with provider `typesafe`). Emit exactly one
   `decision` event per logical decision via `emitDecision`. Question builders and answer readers
@@ -71,6 +88,8 @@ Pure, framework-free, individually unit and property tested. Reuse them rather t
 | `pricing.ts` | `ModelPriceTable` keyed by OpenRouter slugs, `toPricingSlug` normalisation, `estimateCostUsd`, `withEstimatedCost` (reported cost always wins), `priceTableFromOpenRouter`. |
 | `decisions.ts`, `decision-batteries.ts` | System One request validation and parsing, `FetchDecisionClient`, answer projection (`compactDecisionAnswers`), edge labels, `describeDecisionOutcome`, and the verify / preselect / judge / guardrail batteries with their verdict readers. |
 | `data-http.ts`, `data-nodes.ts`, `sql-statement.ts`, `connections.ts`, `data-host.ts`, `fixtures.ts`, `capabilities.ts` | HTTP/pagination, transform/aggregate/batch, SQL statement safety, connection identity and secret naming, host capability contracts, fixture record/replay. |
+| `variables.ts`, `artifacts.ts`, `delivery-limits.ts` | Workflow variable validation and resolution; artifact ids, name sanitising, caps and base64; delivery size limits. Static, in the barrel. |
+| `markdown-blocks.ts`, `pdf.ts`, `email-providers.ts`, `multipart.ts`, `delivery-steps.ts` | Markdown to blocks, a dependency-free PDF writer (WinAnsi, Helvetica and Courier), provider-shaped email requests (`generic-json`, `resend`), RFC 7578 bodies, and the step builders. LAZY: loaded by dynamic `import()`, never re-exported from `index.ts`. |
 
 Design intent and requirement numbering for all of the above live in
 `.kiro/specs/deterministic-data-path/`.
@@ -87,7 +106,7 @@ Design intent and requirement numbering for all of the above live in
   case that pins CONTENTS.
 - Never mirror a production constant table into a spec as an "oracle". A copy shares the bug you are
   hunting: an `egress.spec.ts` copy of `PROVIDER_HOSTS` passed with a hostile hostname in both.
-- `npm run test:e2e` runs all 12 scenario scripts (`test/run-all.mjs`). Do not add a scenario script
+- `npm run test:e2e` runs all 13 scenario scripts (`test/run-all.mjs`). Do not add a scenario script
   without it being picked up there - `vitest.config.ts` excludes `test/**`, so `npm test` will not
   run it and a crash before the first assertion looks like silence.
 - Scenario tests are `test/*.e2e.mts`, run individually with `npx -y tsx engine/test/<name>.e2e.mts`
@@ -98,4 +117,7 @@ Design intent and requirement numbering for all of the above live in
 - `tsx` hazard: awaiting a run whose `waitForEvent` never resolves hangs the process on an
   unsettled top-level await. To simulate DO eviction, abandon the run and synchronize on a
   side-channel promise instead.
+- Never freeze `Date.now` in a scenario script: `RunGate.sleep` waits on a `Date.now()` deadline
+  during retry backoff, so a frozen clock hangs the first retried request forever. Let the patched
+  clock tick (`clock + (realNow() - wallStart)`) and jump it with `clock +=`.
 - Type-check with `../frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json`.
